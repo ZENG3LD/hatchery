@@ -28,7 +28,7 @@ use zengeld_hub_core::{CliEvent, CliTool, PipeProcess};
 // Reserved for v2 (AI coordinator session)
 #[allow(dead_code)]
 const COORDINATOR_PROMPT: &str = include_str!("prompts/coordinator.md");
-const WORKER_PROMPT: &str = include_str!("prompts/worker.md");
+pub const WORKER_PROMPT: &str = include_str!("prompts/worker.md");
 
 /// Worker state tracked by the orchestrator.
 struct WorkerState {
