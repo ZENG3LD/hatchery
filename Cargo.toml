@@ -28,3 +28,6 @@ chrono = { version = "0.4", features = ["serde"] }
 
 # Regex for PRD parsing
 regex = "1"
+
+# Efficient synchronization primitives
+parking_lot = "0.12"

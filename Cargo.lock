@@ -234,6 +234,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "clap",
+ "parking_lot",
  "regex",
  "serde",
  "serde_json",
