@@ -1,0 +1,30 @@
+[package]
+name = "hatchery"
+version = "0.1.0"
+edition = "2021"
+description = "Swarm orchestration system — spawn, coordinate, and manage agent teams with shared memory"
+
+[[bin]]
+name = "hatchery"
+path = "src/main.rs"
+
+[dependencies]
+# Hub core — PTY/Pipe process management, NDJSON parsing
+zengeld-hub-core = { path = "../zengeld-hub/crates/core" }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Regex for PRD parsing
+regex = "1"
