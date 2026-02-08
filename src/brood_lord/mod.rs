@@ -17,13 +17,14 @@ use crate::progress;
 use crate::safety;
 use crate::swarm_host;
 use crate::types::{HatcheryConfig, SwarmResult};
+use crate::v2::prompts;
 use anyhow::Result;
 use global_memory::GlobalMemory;
 use types::*;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use zengeld_hub_core::{CliEvent, CliTool, PipeProcess};
+use zengeld_hub_core::{CliEvent, CliTool, PipeProcess, PipeProcessOptions};
 
 /// Embedded prompts.
 const OPUS_MANAGER_PROMPT: &str = include_str!("prompts/opus_manager.md");
@@ -184,7 +185,13 @@ pub fn run(config: &HatcheryConfig) -> Result<SwarmResult> {
                 sub_prd.id, w
             );
 
-            match PipeProcess::new(CliTool::ClaudeCode, &worker_dir, &init) {
+            let options = PipeProcessOptions {
+                append_system_prompt: Some(prompts::orchestration_discipline_block().to_string()),
+                resume_session_id: None,
+                model: None,
+            };
+
+            match PipeProcess::new_with_options(CliTool::ClaudeCode, &worker_dir, &init, options) {
                 Ok(process) => {
                     let parser = zengeld_hub_core::create_ndjson_parser(CliTool::ClaudeCode);
                     workers.insert(w, WorkerProcess {
@@ -511,7 +518,13 @@ fn get_decomposition(
 
     println!("[BROOD LORD] Sending master PRD to Opus Manager for decomposition...");
 
-    let mut process = PipeProcess::new(CliTool::ClaudeCode, &config.working_dir, &prompt)?;
+    let options = PipeProcessOptions {
+        append_system_prompt: Some(prompts::brood_lord_discipline_block().to_string()),
+        resume_session_id: None,
+        model: None,
+    };
+
+    let mut process = PipeProcess::new_with_options(CliTool::ClaudeCode, &config.working_dir, &prompt, options)?;
     let mut parser = zengeld_hub_core::create_ndjson_parser(CliTool::ClaudeCode);
     let mut output = String::new();
 

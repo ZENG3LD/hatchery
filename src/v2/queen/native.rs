@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use anyhow::{Result, Context as AnyhowContext};
 use parking_lot::Mutex;
-use zengeld_hub_core::{CliTool, PipeProcess};
+use zengeld_hub_core::{CliTool, PipeProcess, PipeProcessOptions};
 use crate::v2::types::*;
 use crate::v2::prompts;
 use super::Queen;
@@ -150,20 +150,20 @@ impl HatcheryProtocolParser {
 }
 
 impl NativeQueen {
-    /// Spawn a new NativeQueen with the given configuration
-    pub fn spawn(
-        id: QueenId,
-        working_dir: PathBuf,
-        config: NativeQueenConfig,
-    ) -> Result<Self> {
-        let prompt = config.prompt_template.as_ref()
-            .map(|s| s.clone())
-            .unwrap_or_else(|| config.default_prompt());
+    /// Build PipeProcessOptions with discipline rules in --append-system-prompt.
+    /// This ensures rules are in the system prompt — NEVER compressed, NEVER ignored.
+    fn build_options(config: &NativeQueenConfig, resume_session_id: Option<String>) -> PipeProcessOptions {
+        let discipline = prompts::orchestration_discipline_block().to_string();
+        PipeProcessOptions {
+            append_system_prompt: Some(discipline),
+            resume_session_id,
+            model: Some(config.model.clone()),
+        }
+    }
 
-        let process = PipeProcess::new(CliTool::ClaudeCode, &working_dir, &prompt)
-            .context("Failed to spawn PipeProcess")?;
-
-        // Inject orchestration discipline rules into worker directory
+    /// Inject CLAUDE.md as a backup layer (Layer 2: reinforcement).
+    /// CLAUDE.md is reloaded after compaction but CAN be ignored by Claude.
+    fn inject_claude_md(working_dir: &PathBuf) {
         let claude_dir = working_dir.join(".claude");
         if !claude_dir.exists() {
             let _ = std::fs::create_dir_all(&claude_dir);
@@ -177,6 +177,50 @@ impl NativeQueen {
             );
             let _ = std::fs::write(&claude_md_path, rules);
         }
+    }
+
+    /// Spawn a new NativeQueen with the given configuration.
+    ///
+    /// Anti-degradation: discipline rules are injected at TWO levels:
+    /// 1. `--append-system-prompt` — highest priority, never compressed, never ignored
+    /// 2. `.claude/CLAUDE.md` — backup reinforcement, reloaded after compaction
+    pub fn spawn(
+        id: QueenId,
+        working_dir: PathBuf,
+        config: NativeQueenConfig,
+    ) -> Result<Self> {
+        Self::spawn_internal(id, working_dir, config, None)
+    }
+
+    /// Spawn a NativeQueen that resumes an existing Claude Code session.
+    /// Used by RecoveryManager to restore crashed Queens with full context.
+    pub fn spawn_with_resume(
+        id: QueenId,
+        working_dir: PathBuf,
+        config: NativeQueenConfig,
+        session_id: String,
+    ) -> Result<Self> {
+        Self::spawn_internal(id, working_dir, config, Some(session_id))
+    }
+
+    fn spawn_internal(
+        id: QueenId,
+        working_dir: PathBuf,
+        config: NativeQueenConfig,
+        resume_session_id: Option<String>,
+    ) -> Result<Self> {
+        let prompt = config.prompt_template.as_ref()
+            .map(|s| s.clone())
+            .unwrap_or_else(|| config.default_prompt());
+
+        // Layer 1: --append-system-prompt (guaranteed, never compressed)
+        let options = Self::build_options(&config, resume_session_id);
+        let process = PipeProcess::new_with_options(
+            CliTool::ClaudeCode, &working_dir, &prompt, options,
+        ).context("Failed to spawn PipeProcess")?;
+
+        // Layer 2: CLAUDE.md (reinforcement, reloaded after compaction)
+        Self::inject_claude_md(&working_dir);
 
         let state = NativeQueenState {
             process: Some(process),

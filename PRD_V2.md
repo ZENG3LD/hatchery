@@ -327,12 +327,25 @@ V2 introduces:
 
 <!-- Auto-updated by workers via @hatchery:write-knowledge -->
 
-### Anti-Degradation: OrchestrationRules Scope (2026-02-08)
+### Anti-Degradation: Three-Layer Defense (2026-02-08)
 **Problem**: After context compression, agents lose "how to work" rules (update PRD, follow protocols) and degrade to "dumb iterators" that execute tasks without discipline.
-**Solution**: Three-layer fix:
-1. `CompactionScope::OrchestrationRules` — protected scope that survives all compaction levels including FreshStart
-2. `orchestration_discipline_block()` — centralized rules injected into Queen prompts and carry-over
-3. `.claude/CLAUDE.md` injection — NativeQueen::spawn writes discipline rules to worker directories
+
+**Critical Discovery**: CLAUDE.md is NOT system prompt — it's injected as `<system-reminder>` tags inside user messages and CAN be ignored ("may not be relevant"). Only `--append-system-prompt` content goes into the actual system prompt (highest priority, never compressed, never ignored).
+
+**Solution**: Three-layer defense:
+1. **Layer 1 (GUARANTEED)**: `--append-system-prompt` — discipline rules in system prompt via `PipeProcessOptions`. Never compressed, never ignored. Implemented in `NativeQueen::build_options()` and `PipeProcess::new_with_options()`.
+2. **Layer 2 (REINFORCEMENT)**: `.claude/CLAUDE.md` — detailed protocol instructions. Reloaded after compaction but can be considered "not relevant". Implemented in `NativeQueen::inject_claude_md()`.
+3. **Layer 3 (INTERNAL)**: `CompactionScope::OrchestrationRules` — Hatchery's own compaction strategy protects rules. `orchestration_discipline_block()` centralized in prompts.rs.
+
+**Research doc**: `research/claude-code-compression-for-hatchery.md`
+
+### Queen Recovery: Session-Based Resurrection (2026-02-08)
+**Problem**: Dead Queens lose all context. SwarmHost had no health checks or restart logic.
+**Solution**: `queen_recovery.rs` with SessionTracker + RecoveryManager.
+- NativeQueen: `--resume <session-id>` restores full context. `spawn_with_resume()` method added.
+- CustomQueen: recreate with recovery_prompt + SharedMemory knowledge injection.
+- SwarmHost: `check_queen_health()` in tick loop generates RecoveryPlans.
+- Session IDs captured from NDJSON `system` event in `poll_messages()`.
 
 ## Results
 

@@ -13,10 +13,11 @@ use crate::prd;
 use crate::progress::{self, ProgressTracker};
 use crate::safety;
 use crate::types::{HatcheryConfig, IterationResult, SwarmResult};
+use crate::v2::prompts;
 use anyhow::{Context, Result};
 use std::process::Command;
 use std::time::{Duration, Instant};
-use zengeld_hub_core::{CliEvent, CliTool, PipeProcess};
+use zengeld_hub_core::{CliEvent, CliTool, PipeProcess, PipeProcessOptions};
 
 /// Embedded prompts — compiled into the binary, zero runtime cost.
 const ITERATION_PROMPT: &str = include_str!("prompts/iteration.md");
@@ -477,7 +478,13 @@ fn build_iteration_prompt(
 
 /// Invoke Claude via PipeProcess and collect the result.
 fn invoke_claude(config: &HatcheryConfig, prompt: &str) -> Result<IterationResult> {
-    let mut process = PipeProcess::new(CliTool::ClaudeCode, &config.working_dir, prompt)
+    let options = PipeProcessOptions {
+        append_system_prompt: Some(prompts::orchestration_discipline_block().to_string()),
+        resume_session_id: None,
+        model: None,
+    };
+
+    let mut process = PipeProcess::new_with_options(CliTool::ClaudeCode, &config.working_dir, prompt, options)
         .context("Failed to spawn Claude process")?;
 
     let mut parser = zengeld_hub_core::create_ndjson_parser(CliTool::ClaudeCode);

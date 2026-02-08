@@ -19,11 +19,12 @@ use crate::prd;
 use crate::progress;
 use crate::safety;
 use crate::types::{HatcheryConfig, SwarmResult};
+use crate::v2::prompts;
 use anyhow::Result;
 use shared_memory::{SharedMemory, SwarmTask, Target, TaskResult, TaskStatus};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use zengeld_hub_core::{CliEvent, CliTool, PipeProcess};
+use zengeld_hub_core::{CliEvent, CliTool, PipeProcess, PipeProcessOptions};
 
 /// Embedded prompts.
 // Reserved for v2 (AI coordinator session)
@@ -398,7 +399,13 @@ fn spawn_workers(
             i
         );
 
-        match PipeProcess::new(CliTool::ClaudeCode, &worker_dir, &initial_prompt) {
+        let options = PipeProcessOptions {
+            append_system_prompt: Some(prompts::orchestration_discipline_block().to_string()),
+            resume_session_id: None,
+            model: None,
+        };
+
+        match PipeProcess::new_with_options(CliTool::ClaudeCode, &worker_dir, &initial_prompt, options) {
             Ok(process) => {
                 let parser = zengeld_hub_core::create_ndjson_parser(CliTool::ClaudeCode);
                 workers.insert(
