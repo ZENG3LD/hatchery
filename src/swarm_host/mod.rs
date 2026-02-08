@@ -482,8 +482,13 @@ impl SwarmHost {
                 }
             }
 
-            QueenEvent::StatusChanged { queen_id: _, status: _ } => {
+            QueenEvent::StatusChanged { queen_id, status } => {
                 self.tick_state.note_event();
+                // When a Queen becomes Idle, try to schedule the next ready task
+                // This fixes the race condition where TaskCompleted arrives before StatusChanged
+                if matches!(status, QueenStatus::Idle) {
+                    self.try_schedule_queen(&queen_id).await?;
+                }
             }
 
             QueenEvent::ContextCompressed { queen_id, pre_tokens, trigger } => {

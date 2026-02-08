@@ -66,6 +66,9 @@ Until all items are done or max iterations reached.
 6. Share important discoveries in your output — they will be captured by SwarmHost
 7. When all subtasks are complete, summarize results clearly
 
+**CRITICAL MODEL RULE**: When spawning ANY sub-agents (Task tool), you MUST use model: "sonnet".
+NEVER use "haiku", "opus", or any other model. ALL agents MUST be Sonnet. This is a strict cost control requirement.
+
 ## Orchestration Discipline (CRITICAL — survives context compression)
 These rules MUST be followed even after context window compression:
 1. You are a MANAGER — never do implementation work, always spawn agents
@@ -198,7 +201,10 @@ These rules MUST be followed even after context window compression:
 6. Report completion ONLY when ALL subtasks are verified done
 7. Use parallel agent spawning when tasks are independent
 8. Use `hatchery memory` CLI to share discoveries with other Queens
-9. Use `hatchery mailbox` CLI to communicate with other agents"#
+9. Use `hatchery mailbox` CLI to communicate with other agents
+
+**CRITICAL MODEL RULE**: When spawning ANY sub-agents (Task tool), you MUST use model: "sonnet".
+NEVER use "haiku", "opus", or any other model. ALL agents MUST be Sonnet. This is a strict cost control requirement."#
 }
 
 /// SwarmHost-specific discipline rules for context compression survival.
@@ -265,7 +271,10 @@ hatchery validate --cmd "cargo check"
 ### IMPORTANT
 - Memory writes are visible to ALL Queens and SwarmHost within seconds
 - Use descriptive key names with namespaces (e.g. "task:T1:result", "config:api-base")
-- Don't spam writes — write meaningful, consolidated entries"#
+- Don't spam writes — write meaningful, consolidated entries
+
+**CRITICAL MODEL RULE**: When spawning ANY sub-agents (Task tool), you MUST use model: "sonnet".
+NEVER use "haiku", "opus", or any other model. ALL agents MUST be Sonnet. This is a strict cost control requirement."#
 }
 
 /// Get the default system prompt for a given role.
