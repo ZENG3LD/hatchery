@@ -59,6 +59,18 @@ enum Commands {
         /// Enable safe-mode: restrict dangerous commands in worker prompts.
         #[arg(long)]
         safe_mode: bool,
+
+        /// Backend for Queen mode: claude-native (default) or api
+        #[arg(long, default_value = "claude-native")]
+        backend: String,
+
+        /// API endpoint URL (required when --backend api)
+        #[arg(long)]
+        api_url: Option<String>,
+
+        /// Model name for API backend (required when --backend api)
+        #[arg(long)]
+        api_model: Option<String>,
     },
 
     /// Show status of an ongoing or completed run.
@@ -84,6 +96,9 @@ fn main() -> Result<()> {
             verbose,
             worktree,
             safe_mode,
+            backend,
+            api_url,
+            api_model,
         } => {
             let working_dir = dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
@@ -99,10 +114,15 @@ fn main() -> Result<()> {
                 verbose,
                 worktree_isolation: worktree,
                 safe_mode,
+                backend,
+                api_url,
+                api_model,
             };
 
             match config.mode {
                 Mode::Queen => {
+                    // V2 TODO: when backend != "claude-native", use v2::queen::NativeQueen
+                    // For now, always use v1 Queen mode
                     let result = hatchery::queen::run(&config)?;
                     println!("\n[HATCHERY] Result: {}/{} tasks complete in {}s",
                         result.completed_tasks, result.total_tasks, result.duration_secs);

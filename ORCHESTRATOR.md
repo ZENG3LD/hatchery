@@ -297,10 +297,10 @@ grep -c '^\- \[ \]' hatchery/PRD_V2.md
 ### Current State
 
 ```
-Phase: 1 COMPLETE (core code), 1.5 NEXT (backward compat)
-Last completed: Phase 1 — types.rs, queen/mod.rs, native.rs, custom.rs (28/43 checkboxes)
+Phase: 2 COMPLETE, Phase 3 NEXT
+Last completed: Phase 2 — mailbox/mod.rs, event_log.rs, router.rs (55 tests pass)
 Blocking issues: none
-Next action: Phase 1.5 backward compat OR Phase 2 Mailbox
+Next action: Phase 3 (TaskDag + Compaction + Validator → SwarmHost)
 ```
 
 ### Phase Progress
@@ -308,8 +308,8 @@ Next action: Phase 1.5 backward compat OR Phase 2 Mailbox
 | Phase | Status | Pattern | Agents Used | Gate Result |
 |-------|--------|---------|-------------|-------------|
 | 1. Types + Queen | DONE (28/43 checkboxes) | Sequential Tasks | 3 rust-implementer + 1 implementer | cargo check PASS |
-| 1.5 Backward compat | NOT STARTED | Task | — | — |
-| 2. Mailbox | NOT STARTED | Carousel | — | — |
+| 1.5 Backward compat | DONE (--backend flag) | Task | 1 rust-implementer | cargo check PASS |
+| 2. Mailbox | DONE (26/26 checkboxes) | Carousel | 2 rust-implementer + 1 research | 55 tests PASS |
 | 3a. TaskDag | NOT STARTED | TeamCreate | — | — |
 | 3b. Compaction | NOT STARTED | TeamCreate | — | — |
 | 3c. Validator | NOT STARTED | TeamCreate | — | — |

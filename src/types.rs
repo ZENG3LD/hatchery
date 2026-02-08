@@ -52,6 +52,12 @@ pub struct HatcheryConfig {
     pub worktree_isolation: bool,
     /// Enable safe-mode prompt restrictions (Level 3 safety).
     pub safe_mode: bool,
+    /// Backend type: "claude-native" (default), "api"
+    pub backend: String,
+    /// API URL for custom backend
+    pub api_url: Option<String>,
+    /// API model for custom backend
+    pub api_model: Option<String>,
 }
 
 impl Default for HatcheryConfig {
@@ -68,6 +74,9 @@ impl Default for HatcheryConfig {
             verbose: false,
             worktree_isolation: false,
             safe_mode: false,
+            backend: "claude-native".to_string(),
+            api_url: None,
+            api_model: None,
         }
     }
 }

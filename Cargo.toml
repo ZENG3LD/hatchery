@@ -41,5 +41,8 @@ async-trait = "0.1"
 # Async runtime (needed for V2 Queen trait implementations)
 tokio = { version = "1", features = ["full"] }
 
+# SQLite for event logging
+rusqlite = { version = "0.31", features = ["bundled"] }
+
 [dev-dependencies]
 tempfile = "3"

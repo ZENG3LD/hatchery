@@ -8,3 +8,4 @@
 
 pub mod types;
 pub mod queen;
+pub mod mailbox;

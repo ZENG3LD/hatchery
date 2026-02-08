@@ -87,45 +87,45 @@ V2 introduces:
 - [ ] Refactor current Queen mode to use NativeQueen internally
 - [ ] Ensure `hatchery spawn prd.md --mode queen` still works as before
 - [ ] Ensure `hatchery spawn prd.md --mode queen --workers 3` still works
-- [ ] Add `--backend` flag: `--backend claude-native` (default), `--backend api --api-url ... --api-model ...`
+- [x] Add `--backend` flag: `--backend claude-native` (default), `--backend api --api-url ... --api-model ...`
 - [ ] Run existing tests, verify nothing breaks
 
 ## Phase 2: SwarmMailbox + Message Router (Week 2-3)
 
 ### 2.1 SwarmMailbox
 
-- [ ] Create `hatchery/src/v2/mailbox/mod.rs`
-- [ ] Implement `SwarmMailbox` struct with host_inbox, queen_inboxes, validator_inbox, outbox
-- [ ] Implement `send()` method — routes message to correct inbox based on `to` field
-- [ ] Implement `recv()` methods — per-agent inbox draining
-- [ ] Implement broadcast — sends to all queen inboxes
-- [ ] Implement message TTL expiration
-- [ ] Implement max message cap (configurable, default 1000)
-- [ ] Write unit tests: send, receive, broadcast, TTL, cap
+- [x] Create `hatchery/src/v2/mailbox/mod.rs`
+- [x] Implement `SwarmMailbox` struct with host_inbox, queen_inboxes, validator_inbox, outbox
+- [x] Implement `send()` method — routes message to correct inbox based on `to` field
+- [x] Implement `recv()` methods — per-agent inbox draining
+- [x] Implement broadcast — sends to all queen inboxes
+- [x] Implement message TTL expiration
+- [x] Implement max message cap (configurable, default 1000)
+- [x] Write unit tests: send, receive, broadcast, TTL, cap
 
 ### 2.2 SqliteEventLog
 
-- [ ] Create `hatchery/src/v2/mailbox/event_log.rs`
-- [ ] Implement SqliteEventLog with rusqlite
-- [ ] Design schema: events table with id, timestamp, from, to, msg_type, payload, correlation_id, visibility fields
-- [ ] Implement `log()` method — insert event
-- [ ] Implement `query()` method — filter by time range, agent, type
-- [ ] Implement `replay()` method — replay events from cursor
-- [ ] Implement `count()` and `stats()` methods
-- [ ] Auto-create database and tables on first use
-- [ ] Write unit tests with tempfile database
+- [x] Create `hatchery/src/v2/mailbox/event_log.rs`
+- [x] Implement SqliteEventLog with rusqlite
+- [x] Design schema: events table with id, timestamp, from, to, msg_type, payload, correlation_id, visibility fields
+- [x] Implement `log()` method — insert event
+- [x] Implement `query()` method — filter by time range, agent, type
+- [x] Implement `replay()` method — replay events from cursor
+- [x] Implement `count()` and `stats()` methods
+- [x] Auto-create database and tables on first use
+- [x] Write unit tests with tempfile database
 
 ### 2.3 Message Router
 
-- [ ] Create `hatchery/src/v2/mailbox/router.rs`
-- [ ] Implement MessageRouter with tokio::mpsc channels
-- [ ] Implement `register()` — add agent's channel to route table
-- [ ] Implement `unregister()` — remove agent
-- [ ] Implement `route()` — send message to correct channel, log to event log
-- [ ] Implement default route (escalate to parent if target unknown)
-- [ ] Implement correlation ID tracking for request-response pairs
-- [ ] Write unit tests: register, route, unregister, unknown target
-- [ ] Write integration test: spawn 3 agents, route messages between them
+- [x] Create `hatchery/src/v2/mailbox/router.rs`
+- [x] Implement MessageRouter with tokio::mpsc channels
+- [x] Implement `register()` — add agent's channel to route table
+- [x] Implement `unregister()` — remove agent
+- [x] Implement `route()` — send message to correct channel, log to event log
+- [x] Implement default route (escalate to parent if target unknown)
+- [x] Implement correlation ID tracking for request-response pairs
+- [x] Write unit tests: register, route, unregister, unknown target
+- [x] Write integration test: spawn 3 agents, route messages between them
 
 ## Phase 3: SwarmHost Refactor (Week 3-4)
 
