@@ -89,18 +89,22 @@ impl SharedMemory {
     }
 
     /// Create a new SharedMemory with JSON file persistence.
-    pub fn with_persistence(swarm_id: SwarmHostId, persist_path: PathBuf) -> Self {
+    /// Auto-creates the path based on swarm_id: `.hatchery/{swarm_id}_memory.json`
+    pub fn with_persistence(swarm_id: SwarmHostId, working_dir: &std::path::Path) -> Self {
+        let persist_path = working_dir.join(".hatchery").join(format!("{}_memory.json", swarm_id.0));
         let mut memory = Self::new(swarm_id);
         memory.persist_path = Some(persist_path);
         memory
     }
 
     /// Insert a knowledge entry with default visibility and no TTL.
-    pub fn insert(&self, key: String, value: serde_json::Value, author: AgentId) {
-        self.insert_with_options(key, value, author, Visibility::default_internal(), None);
+    /// Returns the key for referencing this entry.
+    pub fn insert(&self, key: String, value: serde_json::Value, author: AgentId) -> String {
+        self.insert_with_options(key, value, author, Visibility::default_internal(), None)
     }
 
     /// Insert a knowledge entry with custom visibility and TTL.
+    /// Returns the key for referencing this entry.
     pub fn insert_with_options(
         &self,
         key: String,
@@ -108,7 +112,7 @@ impl SharedMemory {
         author: AgentId,
         visibility: Visibility,
         ttl: Option<Duration>,
-    ) {
+    ) -> String {
         let entry = KnowledgeEntry {
             key: key.clone(),
             value,
@@ -118,10 +122,19 @@ impl SharedMemory {
             ttl,
         };
 
-        let mut state = self.state.write();
-        state.knowledge.insert(key, entry);
-        state.version += 1;
-        state.metadata.last_updated = Utc::now();
+        {
+            let mut state = self.state.write();
+            state.knowledge.insert(key.clone(), entry);
+            state.version += 1;
+            state.metadata.last_updated = Utc::now();
+        }
+
+        // Auto-persist after mutation
+        if let Err(e) = self.auto_persist() {
+            eprintln!("Warning: Failed to auto-persist SharedMemory: {}", e);
+        }
+
+        key
     }
 
     /// Get a knowledge entry's value by key.
@@ -150,26 +163,49 @@ impl SharedMemory {
     /// Remove expired entries (those past their TTL).
     /// Returns the count of removed entries.
     pub fn evict_expired(&self) -> usize {
-        let mut state = self.state.write();
-        let initial_count = state.knowledge.len();
+        let removed = {
+            let mut state = self.state.write();
+            let initial_count = state.knowledge.len();
 
-        state.knowledge.retain(|_, entry| !entry.is_expired());
+            state.knowledge.retain(|_, entry| !entry.is_expired());
 
-        let removed = initial_count - state.knowledge.len();
+            let removed = initial_count - state.knowledge.len();
+            if removed > 0 {
+                state.version += 1;
+                state.metadata.last_updated = Utc::now();
+            }
+
+            removed
+        };
+
+        // Auto-persist after mutation (if anything was evicted)
         if removed > 0 {
-            state.version += 1;
-            state.metadata.last_updated = Utc::now();
+            if let Err(e) = self.auto_persist() {
+                eprintln!("Warning: Failed to auto-persist SharedMemory: {}", e);
+            }
         }
 
         removed
     }
 
     /// Store a task result.
-    pub fn store_task_result(&self, task_id: &str, result: serde_json::Value) {
-        let mut state = self.state.write();
-        state.task_results.insert(task_id.to_string(), result);
-        state.version += 1;
-        state.metadata.last_updated = Utc::now();
+    /// Returns the task_id for referencing this result.
+    pub fn store_task_result(&self, task_id: &str, result: serde_json::Value) -> String {
+        let task_id_str = task_id.to_string();
+
+        {
+            let mut state = self.state.write();
+            state.task_results.insert(task_id_str.clone(), result);
+            state.version += 1;
+            state.metadata.last_updated = Utc::now();
+        }
+
+        // Auto-persist after mutation
+        if let Err(e) = self.auto_persist() {
+            eprintln!("Warning: Failed to auto-persist SharedMemory: {}", e);
+        }
+
+        task_id_str
     }
 
     /// Get a task result.
@@ -211,6 +247,15 @@ impl SharedMemory {
     pub fn is_empty(&self) -> bool {
         let state = self.state.read();
         state.knowledge.is_empty()
+    }
+
+    /// Auto-persist if persistence is enabled (called after mutations).
+    fn auto_persist(&self) -> Result<()> {
+        if self.persist_path.is_some() {
+            self.save()
+        } else {
+            Ok(())
+        }
     }
 
     /// Save state to the persistence path (if configured).
@@ -381,10 +426,9 @@ mod tests {
     #[test]
     fn test_save_and_load_persistence() {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-        let persist_path = temp_dir.path().join("memory.json");
 
-        // Create memory with data
-        let mem1 = SharedMemory::with_persistence(test_swarm_id(), persist_path.clone());
+        // Create memory with data (with_persistence now auto-creates the path)
+        let mem1 = SharedMemory::with_persistence(test_swarm_id(), temp_dir.path());
         mem1.insert("key1".to_string(), serde_json::json!("value1"), test_agent());
         mem1.insert("key2".to_string(), serde_json::json!(42), test_agent());
         mem1.store_task_result("task-1", serde_json::json!({"status": "done"}));
@@ -392,7 +436,8 @@ mod tests {
         // Save to disk
         mem1.save().expect("Save should succeed");
 
-        // Load from disk
+        // Load from disk (path is .hatchery/test-swarm_memory.json)
+        let persist_path = temp_dir.path().join(".hatchery").join("test-swarm_memory.json");
         let mem2 = SharedMemory::load(persist_path).expect("Load should succeed");
 
         // Verify data is preserved
@@ -475,5 +520,38 @@ mod tests {
         assert!(mem.get("expired1").is_none());
         assert!(mem.get("expired2").is_none());
         assert_eq!(mem.version(), initial_version + 1, "Version should increment");
+    }
+
+    #[test]
+    fn test_auto_persist_on_insert() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let mem = SharedMemory::with_persistence(
+            SwarmHostId("test-swarm".to_string()),
+            temp_dir.path(),
+        );
+
+        mem.insert("key1".to_string(), serde_json::json!("value1"), test_agent());
+
+        // File should exist after insert (auto-persist)
+        let persist_path = temp_dir.path().join(".hatchery").join("test-swarm_memory.json");
+        assert!(persist_path.exists());
+
+        // Load and verify
+        let mem2 = SharedMemory::load(persist_path).unwrap();
+        assert_eq!(mem2.get("key1"), Some(serde_json::json!("value1")));
+    }
+
+    #[test]
+    fn test_insert_returns_key() {
+        let mem = SharedMemory::new(test_swarm_id());
+        let key = mem.insert("test-key".to_string(), serde_json::json!("value"), test_agent());
+        assert_eq!(key, "test-key");
+    }
+
+    #[test]
+    fn test_store_task_result_returns_key() {
+        let mem = SharedMemory::new(test_swarm_id());
+        let task_id = mem.store_task_result("task-123", serde_json::json!({"status": "done"}));
+        assert_eq!(task_id, "task-123");
     }
 }

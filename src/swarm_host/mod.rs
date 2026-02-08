@@ -21,7 +21,6 @@ use crate::mailbox::event_bus::EventBus;
 use crate::core::task_dag::{TaskDag, DagTask, DagTaskStatus, Priority, Complexity};
 use crate::core::validator::{Validator, ValidationResult};
 use crate::core::shared_memory::SharedMemory;
-use crate::core::knowledge_file::KnowledgeFile;
 use crate::safety::worktree::{WorktreeManager, MergeResult};
 use crate::queen::recovery::{SessionTracker, RecoveryManager, RecoveryConfig};
 use crate::swarm_host::tick::HeuristicTick;
@@ -74,8 +73,6 @@ pub struct SwarmHost {
     mailbox: SwarmMailbox,
     /// Shared knowledge store
     memory: SharedMemory,
-    /// File-based knowledge store for inter-Queen communication
-    knowledge_file: KnowledgeFile,
     /// Git isolation manager (optional)
     worktree_mgr: Option<WorktreeManager>,
     /// Validator for completed work
@@ -134,7 +131,7 @@ impl SwarmHost {
     pub fn new(id: SwarmHostId, config: SwarmHostConfig) -> Result<Self> {
         let event_log = Arc::new(SqliteEventLog::in_memory()?);
         let mailbox = SwarmMailbox::new(event_log.clone());
-        let memory = SharedMemory::new(id.clone());
+        let memory = SharedMemory::with_persistence(id.clone(), &config.working_dir);
 
         let worktree_mgr = if config.git_isolation {
             match WorktreeManager::new(&config.working_dir, Some("main")) {
@@ -156,8 +153,6 @@ impl SwarmHost {
         // (audit can be enabled separately if needed)
         let event_bus = EventBus::new(128);
 
-        let knowledge_file = KnowledgeFile::in_working_dir(&config.working_dir);
-
         Ok(Self {
             id,
             handles: HashMap::new(),
@@ -166,7 +161,6 @@ impl SwarmHost {
             event_bus,
             mailbox,
             memory,
-            knowledge_file,
             worktree_mgr,
             validator,
             config,
@@ -371,17 +365,7 @@ impl SwarmHost {
                     "num_turns": num_turns,
                     "quality_passed": quality_passed,
                 });
-                self.memory.store_task_result(&task_id.0, result_json.clone());
-
-                // Write to knowledge file for inter-Queen sharing
-                let entry = crate::core::knowledge_file::KnowledgeEntry {
-                    queen_id: queen_id.0.clone(),
-                    task_id: task_id.0.clone(),
-                    key: format!("task_result_{}", task_id.0),
-                    value: result_json,
-                    timestamp: Utc::now(),
-                };
-                let _ = self.knowledge_file.write_entry(&entry);
+                self.memory.store_task_result(&task_id.0, result_json);
 
                 // Validate and merge if git isolation
                 if let Ok(merge_result) = self.validated_merge(&queen_id).await {
@@ -521,11 +505,22 @@ impl SwarmHost {
             .map(|entry| (entry.key, entry.value))
             .collect();
 
-        // Get recent knowledge entries from file for sharing between Queens
-        let knowledge_entries = self.knowledge_file.recent(10)
-            .unwrap_or_default()
+        // Get recent knowledge entries from SharedMemory for sharing between Queens
+        let all_entries = self.memory.query("");
+        let knowledge_entries: Vec<String> = all_entries
             .iter()
-            .map(|e| format!("[{}] {}: {}", e.queen_id, e.key, e.value))
+            .rev()
+            .take(10)
+            .map(|e| {
+                let author_str = match &e.author {
+                    AgentId::Queen(qid) => qid.0.clone(),
+                    AgentId::SwarmHost(sid) => sid.0.clone(),
+                    AgentId::Validator => "Validator".to_string(),
+                    AgentId::BroodLord => "BroodLord".to_string(),
+                    AgentId::Operator => "Operator".to_string(),
+                };
+                format!("[{}] {}: {}", author_str, e.key, e.value)
+            })
             .collect();
 
         let context = TaskContext {
@@ -613,11 +608,22 @@ impl SwarmHost {
                 .map(|entry| (entry.key, entry.value))
                 .collect();
 
-            // Get recent knowledge entries from file for sharing between Queens
-            let knowledge_entries = self.knowledge_file.recent(10)
-                .unwrap_or_default()
+            // Get recent knowledge entries from SharedMemory for sharing between Queens
+            let all_entries = self.memory.query("");
+            let knowledge_entries: Vec<String> = all_entries
                 .iter()
-                .map(|e| format!("[{}] {}: {}", e.queen_id, e.key, e.value))
+                .rev()
+                .take(10)
+                .map(|e| {
+                    let author_str = match &e.author {
+                        AgentId::Queen(qid) => qid.0.clone(),
+                        AgentId::SwarmHost(sid) => sid.0.clone(),
+                        AgentId::Validator => "Validator".to_string(),
+                        AgentId::BroodLord => "BroodLord".to_string(),
+                        AgentId::Operator => "Operator".to_string(),
+                    };
+                    format!("[{}] {}: {}", author_str, e.key, e.value)
+                })
                 .collect();
 
             let context = TaskContext {

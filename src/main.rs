@@ -175,6 +175,7 @@ fn format_msg_type(msg_type: &MessageType) -> String {
         MessageType::KnowledgeQuery => "KnowledgeQuery".to_string(),
         MessageType::Escalation => "Escalation".to_string(),
         MessageType::Shutdown => "Shutdown".to_string(),
+        MessageType::MemoryRef => "MemoryRef".to_string(),
         MessageType::Custom(s) => format!("Custom({})", s),
     }
 }

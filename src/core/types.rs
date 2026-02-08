@@ -133,6 +133,8 @@ pub enum MessageType {
     Escalation,
     /// Shutdown command
     Shutdown,
+    /// Reference to SharedMemory entry (payload: {"key": "..."})
+    MemoryRef,
     /// Custom message type
     Custom(String),
 }

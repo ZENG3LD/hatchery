@@ -494,7 +494,7 @@ fn format_task_prompt(task: &Task, context: &TaskContext, queued_messages: &[Swa
         ));
     }
 
-    // Shared knowledge from other Queens (via file)
+    // Shared knowledge from other Queens (via SharedMemory)
     if !context.knowledge_entries.is_empty() {
         prompt.push_str("\n## Shared Knowledge (from other Queens)\n");
         for entry in &context.knowledge_entries {
