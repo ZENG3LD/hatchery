@@ -9,3 +9,9 @@
 pub mod types;
 pub mod queen;
 pub mod mailbox;
+pub mod task_dag;
+pub mod compaction;
+pub mod validator;
+pub mod shared_memory;
+pub mod worktree;
+pub mod swarm_host;
