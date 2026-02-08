@@ -31,3 +31,6 @@ pub mod mailbox;
 
 /// Git safety: attribution, worktree isolation
 pub mod safety;
+
+/// IPC server for CLI ↔ SwarmHost communication
+pub mod ipc;

@@ -6,11 +6,10 @@
 use crate::core::types::{QueenId, QueenStatus, SwarmMessage, Task, TaskContext};
 use crate::queen::completion::{CompletionConfig, CompletionDetector, CompletionSignal, CompletionVerdict};
 use crate::queen::handle::{QueenCommand, QueenEvent, QueenHandle};
+use crate::queen::pipe_process::{PipeProcess, PipeProcessOptions};
 use crate::queen::spawn_mode::{ClaudeEvent, SpawnMode};
 use anyhow::Result;
 use std::path::PathBuf;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command as TokioCommand};
 use tokio::sync::{broadcast, mpsc, watch};
 
 /// Configuration for SpawnQueen.
@@ -24,6 +23,10 @@ pub struct SpawnQueenConfig {
     pub system_prompt: Option<String>,
     pub completion: CompletionConfig,
     pub allowed_tools: Option<String>,
+    /// Swarm ID for IPC identification.
+    pub swarm_id: Option<String>,
+    /// IPC port for CLI communication.
+    pub ipc_port: Option<u16>,
 }
 
 impl Default for SpawnQueenConfig {
@@ -37,6 +40,8 @@ impl Default for SpawnQueenConfig {
             system_prompt: None,
             completion: CompletionConfig::default(),
             allowed_tools: None,
+            swarm_id: None,
+            ipc_port: None,
         }
     }
 }
@@ -167,57 +172,36 @@ async fn run_task(
         },
     }).await;
 
-    // Build the command
-    let mut cmd = TokioCommand::new("claude");
-    cmd.arg("-p");
-    cmd.args(["--output-format", "stream-json"]);
-    cmd.args(["--verbose", "--dangerously-skip-permissions"]);
+    // Build options from config
+    let options = PipeProcessOptions {
+        append_system_prompt: config.system_prompt.clone(),
+        resume_session_id: session_id.clone(),
+        model: Some(config.model.clone()),
+        max_turns: config.max_turns,
+        max_budget_usd: config.max_budget_usd,
+        allowed_tools: config.allowed_tools.clone(),
+        ..Default::default()
+    };
 
-    // Resume session if available
-    if let Some(sid) = session_id {
-        cmd.args(["--resume", sid]);
+    // Build environment variables
+    let mut envs = Vec::new();
+    if let Some(ref swarm_id) = config.swarm_id {
+        envs.push(("HATCHERY_SWARM_ID".to_string(), swarm_id.clone()));
+    }
+    envs.push(("HATCHERY_QUEEN_ID".to_string(), config.id.0.clone()));
+    envs.push(("HATCHERY_WORKING_DIR".to_string(), config.working_dir.to_string_lossy().to_string()));
+    if let Some(port) = config.ipc_port {
+        envs.push(("HATCHERY_PORT".to_string(), port.to_string()));
     }
 
-    // Model
-    if !config.model.is_empty() {
-        cmd.args(["--model", &config.model]);
-    }
+    eprintln!("[SpawnQueen {}] Spawning process for task {} (prompt len: {} chars)", id.0, task.id.0, prompt.len());
 
-    // Max turns
-    if let Some(turns) = config.max_turns {
-        cmd.args(["--max-turns", &turns.to_string()]);
-    }
-
-    // Max budget
-    if let Some(budget) = config.max_budget_usd {
-        cmd.args(["--max-budget-usd", &budget.to_string()]);
-    }
-
-    // System prompt
-    if let Some(ref sys_prompt) = config.system_prompt {
-        cmd.args(["--append-system-prompt", sys_prompt]);
-    }
-
-    // Allowed tools
-    if let Some(ref tools) = config.allowed_tools {
-        cmd.args(["--allowedTools", tools]);
-    }
-
-    // Prompt as positional argument
-    cmd.arg(&prompt);
-
-    // Working directory
-    cmd.current_dir(&config.working_dir);
-
-    // Capture stdout and stderr
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
-
-    eprintln!("[SpawnQueen {}] Spawning process for task {}", id.0, task.id.0);
-
-    // Spawn the process
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
+    // Spawn via PipeProcess
+    let mut proc = match PipeProcess::new_with_options(&config.working_dir, &prompt, options, envs) {
+        Ok(p) => {
+            eprintln!("[SpawnQueen {}] Process spawned OK, is_running={}", id.0, "yes");
+            p
+        }
         Err(e) => {
             eprintln!("[SpawnQueen {}] Failed to spawn process: {}", id.0, e);
             let _ = event_tx.send(QueenEvent::TaskFailed {
@@ -232,114 +216,96 @@ async fn run_task(
         }
     };
 
-    // Spawn stderr logger
-    if let Some(stderr) = child.stderr.take() {
-        tokio::spawn(async move {
-            let mut lines = BufReader::new(stderr).lines();
-            while let Ok(Some(line)) = lines.next_line().await {
-                eprintln!("[Claude stderr] {}", line);
-            }
-        });
-    }
-
-    // Read stdout and process events
-    if let Some(stdout) = child.stdout.take() {
-        process_stdout(
-            stdout,
-            &mut child,
-            task,
-            id,
-            event_tx,
-            session_id,
-            completion_detector,
-            queued_messages,
-            cmd_rx,
-            shutdown_rx,
-        ).await;
-    }
-
-    // Wait for the process to exit
-    let exit_status = match child.wait().await {
-        Ok(status) => status,
-        Err(e) => {
-            eprintln!("[SpawnQueen {}] Error waiting for process: {}", id.0, e);
-            let _ = event_tx.send(QueenEvent::ProcessDied {
-                queen_id: id.clone(),
-                exit_code: None,
-                session_id: session_id.clone(),
-            }).await;
-            let _ = status_tx.send(QueenStatus::Idle);
-            return;
-        }
-    };
-
-    eprintln!("[SpawnQueen {}] Process exited with code {:?}", id.0, exit_status.code());
-
-    // If no result event was received during stdout processing, evaluate ProcessExit
-    // (This is a fallback; normally we get a result event)
-    let _ = event_tx.send(QueenEvent::ProcessDied {
-        queen_id: id.clone(),
-        exit_code: exit_status.code(),
-        session_id: session_id.clone(),
-    }).await;
-
-    // Return to Idle
-    let _ = status_tx.send(QueenStatus::Idle);
-    let _ = event_tx.send(QueenEvent::StatusChanged {
-        queen_id: id.clone(),
-        status: QueenStatus::Idle,
-    }).await;
-}
-
-/// Process stdout from the child process, reading NDJSON events.
-async fn process_stdout(
-    stdout: impl tokio::io::AsyncRead + Unpin,
-    child: &mut Child,
-    task: &Task,
-    id: &QueenId,
-    event_tx: &mpsc::Sender<QueenEvent>,
-    session_id: &mut Option<String>,
-    completion_detector: &CompletionDetector,
-    queued_messages: &mut Vec<SwarmMessage>,
-    cmd_rx: &mut mpsc::Receiver<QueenCommand>,
-    shutdown_rx: &mut broadcast::Receiver<()>,
-) {
-    let mut reader = BufReader::new(stdout).lines();
+    // Process output using try_recv in a polling loop
     let mut turn_count: u32 = 0;
     let mut accumulated_cost: f64 = 0.0;
 
     loop {
         tokio::select! {
-            line_result = reader.next_line() => {
-                match line_result {
-                    Ok(Some(line)) => {
-                        // Try to parse as ClaudeEvent
-                        match serde_json::from_str::<ClaudeEvent>(&line) {
+            _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {
+                // Drain all available lines
+                while let Some(line) = proc.try_recv() {
+                    let line = line.trim_end();
+                    eprintln!("[SpawnQueen {}] STDOUT: {}...", id.0, &line[..line.len().min(120)]);
+                    if line.is_empty() { continue; }
+
+                    // Try to parse as ClaudeEvent
+                    match serde_json::from_str::<ClaudeEvent>(line) {
+                        Ok(event) => {
+                            // Capture session_id from system init
+                            if event.is_system_init() {
+                                if let Some(sid) = &event.session_id {
+                                    *session_id = Some(sid.clone());
+                                    eprintln!("[SpawnQueen {}] Captured session ID: {}", id.0, sid);
+                                }
+                            }
+
+                            // Count turns and track cost
+                            if event.is_assistant() {
+                                turn_count += 1;
+                                if let Some(cost) = event.cost() {
+                                    accumulated_cost = cost;
+                                }
+                                // Emit progress
+                                let _ = event_tx.send(QueenEvent::Progress {
+                                    queen_id: id.clone(),
+                                    task_id: task.id.clone(),
+                                    turns_completed: turn_count,
+                                    cost_usd: accumulated_cost,
+                                }).await;
+                            }
+
+                            // Handle result event
+                            if event.is_result() {
+                                let subtype = event.subtype.clone().unwrap_or_else(|| "unknown".to_string());
+                                let cost_usd = event.cost().unwrap_or(accumulated_cost);
+                                let duration_ms = event.duration_ms.unwrap_or(0);
+                                let num_turns = event.num_turns.unwrap_or(turn_count);
+                                let result_text = event.result.clone().unwrap_or_default();
+                                let sess_id = event.session_id.clone();
+
+                                // Capture session ID if present
+                                if let Some(sid) = &sess_id {
+                                    *session_id = Some(sid.clone());
+                                }
+
+                                let signal = CompletionSignal::ResultEvent {
+                                    subtype: subtype.clone(),
+                                    result_text: Some(result_text.clone()),
+                                    cost_usd,
+                                    duration_ms,
+                                    num_turns,
+                                    session_id: sess_id.clone(),
+                                };
+
+                                let verdict = completion_detector.evaluate(&signal);
+                                emit_verdict(verdict, id, task, event_tx).await;
+
+                                // Return to Idle
+                                let _ = status_tx.send(QueenStatus::Idle);
+                                let _ = event_tx.send(QueenEvent::StatusChanged {
+                                    queen_id: id.clone(),
+                                    status: QueenStatus::Idle,
+                                }).await;
+                                return;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[SpawnQueen {}] Failed to parse event: {} | Line: {}", id.0, e, line);
+                        }
+                    }
+                }
+
+                // Check if process is still running
+                if !proc.is_running() {
+                    // Drain remaining output
+                    while let Some(line) = proc.try_recv() {
+                        let line = line.trim_end();
+                        if line.is_empty() { continue; }
+
+                        // Parse remaining events
+                        match serde_json::from_str::<ClaudeEvent>(line) {
                             Ok(event) => {
-                                // Capture session_id from system init
-                                if event.is_system_init() {
-                                    if let Some(sid) = &event.session_id {
-                                        *session_id = Some(sid.clone());
-                                        eprintln!("[SpawnQueen {}] Captured session ID: {}", id.0, sid);
-                                    }
-                                }
-
-                                // Count turns and track cost
-                                if event.is_assistant() {
-                                    turn_count += 1;
-                                    if let Some(cost) = event.cost() {
-                                        accumulated_cost = cost;
-                                    }
-                                    // Emit progress
-                                    let _ = event_tx.send(QueenEvent::Progress {
-                                        queen_id: id.clone(),
-                                        task_id: task.id.clone(),
-                                        turns_completed: turn_count,
-                                        cost_usd: accumulated_cost,
-                                    }).await;
-                                }
-
-                                // Handle result event
                                 if event.is_result() {
                                     let subtype = event.subtype.clone().unwrap_or_else(|| "unknown".to_string());
                                     let cost_usd = event.cost().unwrap_or(accumulated_cost);
@@ -348,7 +314,6 @@ async fn process_stdout(
                                     let result_text = event.result.clone().unwrap_or_default();
                                     let sess_id = event.session_id.clone();
 
-                                    // Capture session ID if present
                                     if let Some(sid) = &sess_id {
                                         *session_id = Some(sid.clone());
                                     }
@@ -364,23 +329,35 @@ async fn process_stdout(
 
                                     let verdict = completion_detector.evaluate(&signal);
                                     emit_verdict(verdict, id, task, event_tx).await;
-                                    return; // Task complete, stop reading
+
+                                    // Return to Idle
+                                    let _ = status_tx.send(QueenStatus::Idle);
+                                    let _ = event_tx.send(QueenEvent::StatusChanged {
+                                        queen_id: id.clone(),
+                                        status: QueenStatus::Idle,
+                                    }).await;
+                                    return;
                                 }
                             }
-                            Err(e) => {
-                                eprintln!("[SpawnQueen {}] Failed to parse event: {} | Line: {}", id.0, e, line);
-                            }
+                            Err(_) => {}
                         }
                     }
-                    Ok(None) => {
-                        // EOF reached
-                        eprintln!("[SpawnQueen {}] Stdout EOF", id.0);
-                        break;
-                    }
-                    Err(e) => {
-                        eprintln!("[SpawnQueen {}] Error reading stdout: {}", id.0, e);
-                        break;
-                    }
+
+                    // Process died without sending result event
+                    eprintln!("[SpawnQueen {}] Process died without result event", id.0);
+                    let _ = event_tx.send(QueenEvent::ProcessDied {
+                        queen_id: id.clone(),
+                        exit_code: None,
+                        session_id: session_id.clone(),
+                    }).await;
+
+                    // Return to Idle
+                    let _ = status_tx.send(QueenStatus::Idle);
+                    let _ = event_tx.send(QueenEvent::StatusChanged {
+                        queen_id: id.clone(),
+                        status: QueenStatus::Idle,
+                    }).await;
+                    return;
                 }
             }
 
@@ -394,7 +371,8 @@ async fn process_stdout(
                     }
                     QueenCommand::Shutdown => {
                         eprintln!("[SpawnQueen {}] Shutdown during task — killing process", id.0);
-                        let _ = child.kill().await;
+                        let _ = proc.kill();
+                        let _ = status_tx.send(QueenStatus::Idle);
                         return;
                     }
                     _ => {
@@ -405,7 +383,8 @@ async fn process_stdout(
 
             _ = shutdown_rx.recv() => {
                 eprintln!("[SpawnQueen {}] Shutdown broadcast during task — killing process", id.0);
-                let _ = child.kill().await;
+                let _ = proc.kill();
+                let _ = status_tx.send(QueenStatus::Idle);
                 return;
             }
         }
@@ -485,6 +464,9 @@ fn format_task_prompt(task: &Task, context: &TaskContext, queued_messages: &[Swa
 
     // Orchestration discipline (survives context compression)
     prompt.push_str(&format!("{}\n\n", crate::core::prompts::orchestration_discipline_block()));
+
+    // Hatchery CLI tools documentation
+    prompt.push_str(&format!("{}\n\n", crate::core::prompts::hatchery_cli_tools_block()));
 
     // Skill hint (if provided)
     if let Some(ref hint) = context.skill_hint {

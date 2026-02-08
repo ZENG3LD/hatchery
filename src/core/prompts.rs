@@ -196,7 +196,9 @@ These rules MUST be followed even after context window compression:
 4. Share discoveries in your output — they will be captured automatically by SwarmHost
 5. If context was compressed, re-read the task description before continuing
 6. Report completion ONLY when ALL subtasks are verified done
-7. Use parallel agent spawning when tasks are independent"#
+7. Use parallel agent spawning when tasks are independent
+8. Use `hatchery memory` CLI to share discoveries with other Queens
+9. Use `hatchery mailbox` CLI to communicate with other agents"#
 }
 
 /// SwarmHost-specific discipline rules for context compression survival.
@@ -223,6 +225,47 @@ These rules MUST be followed even after context window compression:
 5. Cross-SwarmHost knowledge goes into GlobalMemory — coordinate shared discoveries
 6. Handle escalations with priority: blocked SwarmHosts first, then failed, then questions
 7. Never lose the decomposition plan — if compressed, reconstruct from SwarmHost statuses"#
+}
+
+/// Hatchery CLI tools documentation for Queen prompts.
+///
+/// This block tells Queens they can interact with SharedMemory and Mailbox
+/// during execution via the `hatchery` CLI binary.
+pub fn hatchery_cli_tools_block() -> &'static str {
+    r#"## Hatchery CLI (available via bash)
+
+### Shared Memory — read/write knowledge visible to all Queens
+```bash
+hatchery memory read --key "api-endpoints"        # read specific key
+hatchery memory read --pattern "config:"          # search by pattern
+hatchery memory list                               # list all keys
+hatchery memory write --key "discovery:auth" --value '{"method":"HMAC"}'
+hatchery memory info                               # show metadata
+```
+
+### Messaging — communicate with other agents
+```bash
+hatchery mailbox send --to "queen:Q1" --message "need auth module first"
+hatchery mailbox send --to "swarmhost:SH0" --message "found critical bug"
+hatchery mailbox read --limit 10
+hatchery mailbox read --from "queen:Q0"
+```
+
+### Validation — check your work before reporting done
+```bash
+hatchery validate --cmd "cargo check"
+```
+
+### WHEN TO USE
+- Share discoveries so other Queens benefit
+- Coordinate if your task depends on another Queen's output
+- Check messages for updates from SwarmHost or other Queens
+- Validate before reporting completion
+
+### IMPORTANT
+- Memory writes are visible to ALL Queens and SwarmHost within seconds
+- Use descriptive key names with namespaces (e.g. "task:T1:result", "config:api-base")
+- Don't spam writes — write meaningful, consolidated entries"#
 }
 
 /// Get the default system prompt for a given role.

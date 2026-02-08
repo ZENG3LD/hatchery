@@ -9,6 +9,7 @@
 use crate::core::types::{QueenId, QueenStatus, Task, TaskContext, TaskId};
 use crate::queen::completion::{CompletionConfig, CompletionDetector, CompletionSignal, CompletionVerdict};
 use crate::queen::handle::{QueenCommand, QueenEvent, QueenHandle};
+use crate::queen::pipe_process::{PipeProcessOptions, build_stream_command};
 use crate::queen::spawn_mode::{ClaudeEvent, SpawnMode, StreamInput};
 use anyhow::{Context as _, Result};
 use std::path::PathBuf;
@@ -39,6 +40,10 @@ pub struct StreamQueenConfig {
     pub allowed_tools: Option<String>,
     /// Completion detection configuration.
     pub completion: CompletionConfig,
+    /// Swarm ID for IPC identification.
+    pub swarm_id: Option<String>,
+    /// IPC port for CLI communication.
+    pub ipc_port: Option<u16>,
 }
 
 impl StreamQueenConfig {
@@ -53,6 +58,8 @@ impl StreamQueenConfig {
             system_prompt: None,
             allowed_tools: None,
             completion: CompletionConfig::default(),
+            swarm_id: None,
+            ipc_port: None,
         }
     }
 }
@@ -80,42 +87,39 @@ pub fn spawn(
     event_tx: mpsc::Sender<QueenEvent>,
     shutdown_rx: broadcast::Receiver<()>,
 ) -> Result<(QueenHandle, tokio::task::JoinHandle<()>)> {
-    // Build the command
-    let mut cmd = Command::new("claude");
-    cmd.args([
-        "-p",
-        "--input-format",
-        "stream-json",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--dangerously-skip-permissions",
-    ]);
+    // Build PipeProcessOptions
+    let options = PipeProcessOptions {
+        append_system_prompt: config.system_prompt.clone(),
+        model: if config.model.is_empty() {
+            None
+        } else {
+            Some(config.model.clone())
+        },
+        max_turns: config.max_turns,
+        max_budget_usd: config.max_budget_usd,
+        allowed_tools: config.allowed_tools.clone(),
+        ..Default::default()
+    };
 
-    // Add model flag
-    if !config.model.is_empty() {
-        cmd.args(["--model", &config.model]);
+    // Build environment variables
+    let mut envs = Vec::new();
+    if let Some(ref swarm_id) = config.swarm_id {
+        envs.push(("HATCHERY_SWARM_ID".to_string(), swarm_id.clone()));
     }
-
-    // Add optional flags
-    if let Some(max_turns) = config.max_turns {
-        cmd.args(["--max-turns", &max_turns.to_string()]);
-    }
-    if let Some(max_budget) = config.max_budget_usd {
-        cmd.args(["--max-budget-usd", &max_budget.to_string()]);
-    }
-    if let Some(ref prompt) = config.system_prompt {
-        cmd.args(["--append-system-prompt", prompt]);
-    }
-    if let Some(ref tools) = config.allowed_tools {
-        cmd.args(["--allowedTools", tools]);
+    envs.push(("HATCHERY_QUEEN_ID".to_string(), config.id.0.clone()));
+    envs.push((
+        "HATCHERY_WORKING_DIR".to_string(),
+        config.working_dir.to_string_lossy().to_string(),
+    ));
+    if let Some(port) = config.ipc_port {
+        envs.push(("HATCHERY_PORT".to_string(), port.to_string()));
     }
 
-    // Set working directory and pipes
-    cmd.current_dir(&config.working_dir);
-    cmd.stdin(std::process::Stdio::piped());
-    cmd.stdout(std::process::Stdio::piped());
-    cmd.stderr(std::process::Stdio::piped());
+    // Build command using shared helper
+    let std_cmd = build_stream_command(&config.working_dir, &options, &envs);
+
+    // Convert std::process::Command to tokio::process::Command
+    let mut cmd = Command::from(std_cmd);
 
     // Spawn the child process
     let mut child = cmd.spawn().context("Failed to spawn Claude Code subprocess")?;
@@ -478,6 +482,9 @@ fn format_task_prompt(task: &Task, context: &TaskContext) -> String {
 
     // Orchestration discipline (survives context compression)
     prompt.push_str(&format!("{}\n\n", crate::core::prompts::orchestration_discipline_block()));
+
+    // Hatchery CLI tools documentation
+    prompt.push_str(&format!("{}\n\n", crate::core::prompts::hatchery_cli_tools_block()));
 
     // Skill hint (if provided)
     if let Some(ref hint) = context.skill_hint {

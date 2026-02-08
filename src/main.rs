@@ -4,6 +4,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use std::io::{BufRead, Write as IoWrite};
 
 use hatchery::cli::{HatcheryConfig, Mode};
 use hatchery::mailbox::event_log::SqliteEventLog;
@@ -14,6 +15,7 @@ use hatchery::swarm_host::{SwarmHost, SwarmHostConfig};
 use hatchery::brood_lord::{BroodLord, BroodLordConfig};
 use hatchery::core::operator::NullChannel;
 use hatchery::core::task_dag::{Priority, Complexity};
+use hatchery::ipc::protocol::{IpcRequest, IpcResponse};
 use hatchery::prd;
 
 #[derive(Parser)]
@@ -135,6 +137,92 @@ enum Commands {
         #[arg(long)]
         log_path: PathBuf,
     },
+
+    /// Interact with shared memory.
+    Memory {
+        #[command(subcommand)]
+        action: MemoryAction,
+    },
+
+    /// Send or read messages.
+    Mailbox {
+        #[command(subcommand)]
+        action: MailboxAction,
+    },
+
+    /// Run validation on current changes.
+    Validate {
+        /// Validation command override.
+        #[arg(long)]
+        cmd: Option<String>,
+    },
+
+    /// Health check — ping the running SwarmHost.
+    Ping,
+}
+
+#[derive(Subcommand)]
+enum MemoryAction {
+    /// Read entries from shared memory.
+    Read {
+        /// Key to read (exact match).
+        #[arg(long)]
+        key: Option<String>,
+
+        /// Pattern to filter keys (substring match).
+        #[arg(long)]
+        pattern: Option<String>,
+
+        /// Output format: "json" (default) or "text".
+        #[arg(long, default_value = "json")]
+        format: String,
+    },
+
+    /// Write a key-value entry to shared memory.
+    Write {
+        /// Key name.
+        #[arg(long)]
+        key: String,
+
+        /// Value (interpreted as JSON; plain strings auto-quoted).
+        #[arg(long)]
+        value: String,
+
+        /// TTL in seconds (0 = no expiration).
+        #[arg(long)]
+        ttl: Option<u64>,
+    },
+
+    /// List all keys in shared memory.
+    List,
+
+    /// Show memory metadata.
+    Info,
+}
+
+#[derive(Subcommand)]
+enum MailboxAction {
+    /// Send a message to another agent.
+    Send {
+        /// Target agent (e.g. "queen:Q0", "swarmhost:SH0").
+        #[arg(long)]
+        to: String,
+
+        /// Message text.
+        #[arg(long)]
+        message: String,
+    },
+
+    /// Read messages.
+    Read {
+        /// Filter by sender.
+        #[arg(long)]
+        from: Option<String>,
+
+        /// Maximum messages to show.
+        #[arg(short = 'n', long, default_value = "20")]
+        limit: usize,
+    },
 }
 
 /// Parse a target string into an AgentId.
@@ -188,6 +276,68 @@ fn format_payload(payload: &serde_json::Value) -> String {
     } else {
         s
     }
+}
+
+/// Resolve IPC port from env var or port file.
+fn resolve_ipc_port() -> Result<u16> {
+    // Try HATCHERY_PORT env var first
+    if let Ok(port_str) = std::env::var("HATCHERY_PORT") {
+        return port_str.parse::<u16>().map_err(|e| anyhow::anyhow!("Invalid HATCHERY_PORT: {}", e));
+    }
+
+    // Try reading from .hatchery/*.port file
+    let working_dir = std::env::var("HATCHERY_WORKING_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
+
+    let hatchery_dir = working_dir.join(".hatchery");
+    if hatchery_dir.exists() {
+        // Find any .port file
+        if let Ok(entries) = std::fs::read_dir(&hatchery_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("port") {
+                    if let Ok(contents) = std::fs::read_to_string(&path) {
+                        if let Ok(port) = contents.trim().parse::<u16>() {
+                            return Ok(port);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "Cannot find IPC port. Set HATCHERY_PORT env var or ensure SwarmHost is running."
+    ))
+}
+
+/// Send an IPC request and get response (synchronous TCP).
+fn ipc_call(request: IpcRequest) -> Result<IpcResponse> {
+    let port = resolve_ipc_port()?;
+    let addr = format!("127.0.0.1:{}", port);
+
+    let mut stream = std::net::TcpStream::connect(&addr)
+        .map_err(|e| anyhow::anyhow!("Cannot connect to SwarmHost at {}: {}", addr, e))?;
+
+    // Send request
+    let json = serde_json::to_string(&request)?;
+    stream.write_all(json.as_bytes())?;
+    stream.write_all(b"\n")?;
+    stream.flush()?;
+
+    // Shutdown write half to signal we're done sending
+    stream.shutdown(std::net::Shutdown::Write)?;
+
+    // Read response
+    let mut reader = std::io::BufReader::new(&stream);
+    let mut line = String::new();
+    reader.read_line(&mut line)?;
+
+    let response: IpcResponse = serde_json::from_str(line.trim())
+        .map_err(|e| anyhow::anyhow!("Invalid response: {}", e))?;
+
+    Ok(response)
 }
 
 #[tokio::main]
@@ -495,6 +645,163 @@ async fn main() -> Result<()> {
             println!("Message sent to {} at {}",
                 format_agent_id(&msg.to),
                 msg.timestamp.format("%Y-%m-%d %H:%M:%S"));
+        }
+
+        Commands::Ping => {
+            match ipc_call(IpcRequest::Ping) {
+                Ok(IpcResponse::Ok { data }) => println!("{}", data),
+                Ok(IpcResponse::Error { message }) => {
+                    eprintln!("Error: {}", message);
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Connection failed: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Memory { action } => {
+            match action {
+                MemoryAction::Read { key, pattern, format: fmt } => {
+                    let req = IpcRequest::MemoryRead { key, pattern };
+                    match ipc_call(req)? {
+                        IpcResponse::Ok { data } => {
+                            if fmt == "text" {
+                                if let Some(arr) = data.as_array() {
+                                    for entry in arr {
+                                        println!("{}: {}",
+                                            entry["key"].as_str().unwrap_or("?"),
+                                            entry["value"]);
+                                    }
+                                }
+                            } else {
+                                println!("{}", serde_json::to_string_pretty(&data)?);
+                            }
+                        }
+                        IpcResponse::Error { message } => {
+                            eprintln!("Error: {}", message);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                MemoryAction::Write { key, value, ttl } => {
+                    // Parse value as JSON, or wrap as string
+                    let json_value: serde_json::Value = serde_json::from_str(&value)
+                        .unwrap_or_else(|_| serde_json::Value::String(value));
+                    let req = IpcRequest::MemoryWrite {
+                        key,
+                        value: json_value,
+                        ttl_secs: ttl,
+                        queen_id: None,
+                    };
+                    match ipc_call(req)? {
+                        IpcResponse::Ok { data } => println!("{}", data),
+                        IpcResponse::Error { message } => {
+                            eprintln!("Error: {}", message);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                MemoryAction::List => {
+                    match ipc_call(IpcRequest::MemoryList)? {
+                        IpcResponse::Ok { data } => {
+                            if let Some(entries) = data["entries"].as_array() {
+                                for entry in entries {
+                                    println!("  {} (by {}, {})",
+                                        entry["key"].as_str().unwrap_or("?"),
+                                        entry["author"].as_str().unwrap_or("?"),
+                                        entry["timestamp"].as_str().unwrap_or("?"));
+                                }
+                                println!("\n{} entries, version {}",
+                                    data["count"], data["version"]);
+                            }
+                        }
+                        IpcResponse::Error { message } => {
+                            eprintln!("Error: {}", message);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                MemoryAction::Info => {
+                    match ipc_call(IpcRequest::MemoryInfo)? {
+                        IpcResponse::Ok { data } => {
+                            println!("{}", serde_json::to_string_pretty(&data)?);
+                        }
+                        IpcResponse::Error { message } => {
+                            eprintln!("Error: {}", message);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+        }
+
+        Commands::Mailbox { action } => {
+            match action {
+                MailboxAction::Send { to, message } => {
+                    let req = IpcRequest::MailboxSend {
+                        to,
+                        message,
+                        msg_type: None,
+                        queen_id: None,
+                    };
+                    match ipc_call(req)? {
+                        IpcResponse::Ok { data } => println!("{}", data),
+                        IpcResponse::Error { message } => {
+                            eprintln!("Error: {}", message);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                MailboxAction::Read { from, limit } => {
+                    let req = IpcRequest::MailboxRead {
+                        from,
+                        limit: Some(limit),
+                    };
+                    match ipc_call(req)? {
+                        IpcResponse::Ok { data } => {
+                            if let Some(arr) = data.as_array() {
+                                for msg in arr {
+                                    println!("[{}] {} -> {}",
+                                        msg["timestamp"].as_str().unwrap_or("?"),
+                                        msg["author"].as_str().unwrap_or("?"),
+                                        msg["value"]);
+                                }
+                                if arr.is_empty() {
+                                    println!("No messages.");
+                                }
+                            }
+                        }
+                        IpcResponse::Error { message } => {
+                            eprintln!("Error: {}", message);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+            }
+        }
+
+        Commands::Validate { cmd } => {
+            let req = IpcRequest::Validate { command: cmd };
+            match ipc_call(req)? {
+                IpcResponse::Ok { data } => {
+                    let passed = data["passed"].as_bool().unwrap_or(false);
+                    if passed {
+                        println!("PASSED");
+                    } else {
+                        println!("FAILED");
+                        if let Some(feedback) = data["feedback"].as_str() {
+                            eprintln!("{}", feedback);
+                        }
+                        std::process::exit(1);
+                    }
+                }
+                IpcResponse::Error { message } => {
+                    eprintln!("Error: {}", message);
+                    std::process::exit(1);
+                }
+            }
         }
     }
 

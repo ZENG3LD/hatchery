@@ -24,6 +24,7 @@ use crate::core::shared_memory::SharedMemory;
 use crate::safety::worktree::{WorktreeManager, MergeResult};
 use crate::queen::recovery::{SessionTracker, RecoveryManager, RecoveryConfig};
 use crate::swarm_host::tick::HeuristicTick;
+use crate::ipc;
 
 /// Configuration for SwarmHost.
 #[derive(Debug, Clone)]
@@ -87,6 +88,8 @@ pub struct SwarmHost {
     session_tracker: SessionTracker,
     /// Manages Queen health checks and recovery planning
     recovery_manager: RecoveryManager,
+    /// IPC listener port (for CLI communication)
+    ipc_port: Option<u16>,
 }
 
 /// Result of a single tick (schedule + poll cycle).
@@ -168,6 +171,7 @@ impl SwarmHost {
             iteration: 0,
             session_tracker: SessionTracker::new(),
             recovery_manager: RecoveryManager::new(RecoveryConfig::default()),
+            ipc_port: None,
         })
     }
 
@@ -216,6 +220,8 @@ impl SwarmHost {
                     system_prompt,
                     allowed_tools: None,
                     completion: completion_config,
+                    swarm_id: Some(self.id.0.clone()),
+                    ipc_port: self.ipc_port,
                 };
                 stream_queen::spawn(config, event_tx, shutdown_rx)?
             }
@@ -229,6 +235,8 @@ impl SwarmHost {
                     system_prompt,
                     allowed_tools: None,
                     completion: completion_config,
+                    swarm_id: Some(self.id.0.clone()),
+                    ipc_port: self.ipc_port,
                 };
                 spawn_queen::spawn(config, event_tx, shutdown_rx)?
             }
@@ -308,6 +316,22 @@ impl SwarmHost {
     /// This replaces the old `loop { tick(); sleep(2s); }` pattern.
     /// Uses tokio::select! to wait on events from the EventBus.
     pub async fn run(&mut self) -> Result<()> {
+        // Start IPC listener for CLI commands
+        let ipc_config = ipc::IpcConfig {
+            working_dir: self.config.working_dir.clone(),
+            verify_cmd: self.config.verify_cmd.clone(),
+        };
+        let memory_state = self.memory.shared_state();
+        let port = ipc::start_ipc_listener(memory_state, ipc_config).await?;
+        self.ipc_port = Some(port);
+
+        // Write port file
+        let port_dir = self.config.working_dir.join(".hatchery");
+        std::fs::create_dir_all(&port_dir)?;
+        let port_path = port_dir.join(format!("{}.port", self.id.0));
+        std::fs::write(&port_path, port.to_string())?;
+        eprintln!("[SwarmHost] IPC listener started on port {}", port);
+
         loop {
             self.try_schedule().await?;
 
@@ -850,6 +874,12 @@ impl SwarmHost {
             ).await {
                 eprintln!("Actor task for {} did not finish in time: {}", queen_id.0, e);
             }
+        }
+
+        // Remove port file
+        if let Some(_port) = self.ipc_port {
+            let port_path = self.config.working_dir.join(".hatchery").join(format!("{}.port", self.id.0));
+            let _ = std::fs::remove_file(&port_path);
         }
 
         // Save memory

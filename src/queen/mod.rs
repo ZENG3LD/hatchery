@@ -16,6 +16,7 @@ pub mod handle;
 pub mod completion;
 pub mod stream_queen;
 pub mod spawn_queen;
+pub mod pipe_process;
 
 // Re-export key types
 #[allow(deprecated)]
