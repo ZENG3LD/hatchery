@@ -11,7 +11,7 @@ use crate::v2::mailbox::SwarmMailbox;
 use crate::v2::mailbox::event_log::SqliteEventLog;
 use crate::v2::task_dag::{TaskDag, DagTask, DagTaskStatus, Priority, Complexity};
 use crate::v2::compaction::CompactionStrategy;
-use crate::v2::validator::Validator;
+use crate::v2::validator::{Validator, ValidationResult};
 use crate::v2::shared_memory::SharedMemory;
 use crate::v2::worktree::{WorktreeManager, MergeResult};
 
@@ -94,6 +94,21 @@ pub struct SwarmProgress {
     pub failed: usize,
     pub queens_active: usize,
     pub queens_idle: usize,
+}
+
+/// Result of validated merge operation.
+#[derive(Debug, Clone)]
+pub enum ValidatedMergeResult {
+    /// Validation passed and merge succeeded
+    Merged { commit_sha: String },
+    /// Validation passed but merge had conflicts
+    MergeConflict { files: Vec<PathBuf> },
+    /// Validation failed — don't merge
+    ValidationFailed { feedback: String },
+    /// No worktree manager configured (git isolation disabled)
+    NoGitIsolation,
+    /// No changes to merge
+    NoChanges,
 }
 
 impl SwarmHost {
@@ -336,27 +351,25 @@ impl SwarmHost {
                                     });
                                     self.memory.store_task_result(task_id_str, result_json);
 
-                                    // Validation would happen here
-                                    if self.validator.is_some() {
-                                        // TODO: async validation is complex, just log for now
-                                        println!("Would validate task {} results", task_id_str);
-                                    }
-
-                                    // Merge worktree if git isolation enabled
-                                    if let Some(ref mut worktree_mgr) = self.worktree_mgr {
-                                        match worktree_mgr.merge(&queen_id) {
-                                            Ok(MergeResult::Success { commit_sha }) => {
-                                                println!("Merged worktree for {}: {}", queen_id.0, commit_sha);
-                                            }
-                                            Ok(MergeResult::Conflict { files }) => {
-                                                eprintln!("Merge conflict for {}: {:?}", queen_id.0, files);
-                                            }
-                                            Ok(MergeResult::NoChanges) => {
-                                                println!("No changes to merge for {}", queen_id.0);
-                                            }
-                                            Err(e) => {
-                                                eprintln!("Merge failed for {}: {}", queen_id.0, e);
-                                            }
+                                    // Validate and merge worktree if git isolation enabled
+                                    match self.validated_merge(&queen_id).await {
+                                        Ok(ValidatedMergeResult::Merged { commit_sha }) => {
+                                            println!("Validated and merged worktree for {}: {}", queen_id.0, commit_sha);
+                                        }
+                                        Ok(ValidatedMergeResult::MergeConflict { files }) => {
+                                            eprintln!("Merge conflict for {}: {:?}", queen_id.0, files);
+                                        }
+                                        Ok(ValidatedMergeResult::ValidationFailed { feedback }) => {
+                                            eprintln!("Validation failed for {}: {}", queen_id.0, feedback);
+                                        }
+                                        Ok(ValidatedMergeResult::NoGitIsolation) => {
+                                            // Git isolation disabled, nothing to do
+                                        }
+                                        Ok(ValidatedMergeResult::NoChanges) => {
+                                            println!("No changes to merge for {}", queen_id.0);
+                                        }
+                                        Err(e) => {
+                                            eprintln!("Validated merge failed for {}: {}", queen_id.0, e);
                                         }
                                     }
                                 } else {
@@ -482,6 +495,47 @@ impl SwarmHost {
         self.mailbox.drain_outbox()
     }
 
+    /// Merge a Queen's worktree after validation passes.
+    /// Returns ValidatedMergeResult or validation failure.
+    pub async fn validated_merge(&mut self, queen_id: &QueenId) -> Result<ValidatedMergeResult> {
+        // Check if git isolation enabled
+        let worktree_mgr = match self.worktree_mgr.as_mut() {
+            Some(mgr) => mgr,
+            None => return Ok(ValidatedMergeResult::NoGitIsolation),
+        };
+
+        // If validator exists, run validation on the queen's worktree
+        if let Some(ref validator) = self.validator {
+            let worktree_path = worktree_mgr.worktree_path(queen_id);
+
+            // Validate files in the worktree
+            // For now we just pass empty files list - in real implementation,
+            // you'd collect modified files from git status
+            let validation_result = validator.validate(&[worktree_path]).await?;
+
+            if !validation_result.passed {
+                let feedback = format_validation_feedback(&validation_result);
+                return Ok(ValidatedMergeResult::ValidationFailed { feedback });
+            }
+        }
+
+        // Validation passed (or no validator), proceed with merge
+        let merge_result = worktree_mgr.merge(queen_id)?;
+
+        // Map MergeResult to ValidatedMergeResult
+        Ok(match merge_result {
+            MergeResult::Success { commit_sha } => {
+                ValidatedMergeResult::Merged { commit_sha }
+            }
+            MergeResult::Conflict { files } => {
+                ValidatedMergeResult::MergeConflict { files }
+            }
+            MergeResult::NoChanges => {
+                ValidatedMergeResult::NoChanges
+            }
+        })
+    }
+
     /// Graceful shutdown: shutdown all queens, save memory, cleanup worktrees.
     pub async fn shutdown(&mut self) -> Result<()> {
         // Shutdown all queens
@@ -505,6 +559,32 @@ impl SwarmHost {
 
         Ok(())
     }
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+/// Format validation feedback into human-readable string.
+fn format_validation_feedback(validation_result: &ValidationResult) -> String {
+    let mut feedback = String::new();
+
+    for stage in &validation_result.stage_results {
+        if !stage.passed {
+            feedback.push_str(&format!(
+                "Stage '{}' failed ({:.2}s):\n{}\n",
+                stage.stage_name,
+                stage.duration.as_secs_f64(),
+                stage.output
+            ));
+        }
+    }
+
+    if feedback.is_empty() {
+        feedback = "Validation failed but no specific feedback available".to_string();
+    }
+
+    feedback
 }
 
 #[cfg(test)]
@@ -718,5 +798,203 @@ mod tests {
 
         // Shutdown should succeed
         assert!(host.shutdown().await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_validated_merge_no_git_isolation() {
+        let config = SwarmHostConfig {
+            git_isolation: false,
+            ..Default::default()
+        };
+        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+
+        let queen_id = QueenId("Q0".to_string());
+
+        // Should return NoGitIsolation when git isolation is disabled
+        let result = host.validated_merge(&queen_id).await.unwrap();
+        assert!(matches!(result, ValidatedMergeResult::NoGitIsolation));
+    }
+
+    #[tokio::test]
+    async fn test_validated_merge_with_validation_success() {
+        // Create a temp directory for test
+        let temp_dir = tempfile::tempdir().unwrap();
+        let repo_path = temp_dir.path().to_path_buf();
+
+        // Init git repo
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+
+        // Create initial commit
+        std::fs::write(repo_path.join("README.md"), "# Test").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+
+        let config = SwarmHostConfig {
+            git_isolation: true,
+            working_dir: repo_path.clone(),
+            verify_cmd: Some("echo ok".to_string()),
+            ..Default::default()
+        };
+
+        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+
+        let queen_id = QueenId("Q0".to_string());
+        let queen = Box::new(MockQueen::new("Q0"));
+        host.register_queen(queen).unwrap();
+
+        // Get worktree info to check if it was created
+        let wt_created = host.worktree_mgr.as_ref()
+            .and_then(|mgr| mgr.get_info(&queen_id))
+            .is_some();
+
+        if !wt_created {
+            // If worktree creation failed, skip this test
+            eprintln!("Worktree creation failed, skipping test");
+            return;
+        }
+
+        // Make a change in the worktree
+        if let Some(ref mgr) = host.worktree_mgr {
+            let wt_path = mgr.worktree_path(&queen_id);
+            if !wt_path.exists() {
+                eprintln!("Worktree path doesn't exist, skipping test");
+                return;
+            }
+            std::fs::write(wt_path.join("test.txt"), "content").unwrap();
+            std::process::Command::new("git")
+                .args(["add", "."])
+                .current_dir(&wt_path)
+                .output()
+                .unwrap();
+            std::process::Command::new("git")
+                .args(["commit", "-m", "test commit"])
+                .current_dir(&wt_path)
+                .output()
+                .unwrap();
+        }
+
+        // Validated merge should succeed (validator will pass with "echo ok")
+        let result = host.validated_merge(&queen_id).await.unwrap();
+        match result {
+            ValidatedMergeResult::Merged { commit_sha } => {
+                assert!(!commit_sha.is_empty());
+            }
+            _ => panic!("Expected Merged result, got {:?}", result),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_validated_merge_validation_fails() {
+        // Create a temp directory for test
+        let temp_dir = tempfile::tempdir().unwrap();
+        let repo_path = temp_dir.path().to_path_buf();
+
+        // Init git repo
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+
+        // Create initial commit
+        std::fs::write(repo_path.join("README.md"), "# Test").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "."])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "-m", "initial"])
+            .current_dir(&repo_path)
+            .output()
+            .unwrap();
+
+        // Use failing command for validation
+        let fail_cmd = if cfg!(windows) { "cmd /c exit 1" } else { "false" };
+
+        let config = SwarmHostConfig {
+            git_isolation: true,
+            working_dir: repo_path.clone(),
+            verify_cmd: Some(fail_cmd.to_string()),
+            ..Default::default()
+        };
+
+        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+
+        let queen_id = QueenId("Q0".to_string());
+        let queen = Box::new(MockQueen::new("Q0"));
+        host.register_queen(queen).unwrap();
+
+        // Get worktree info to check if it was created
+        let wt_created = host.worktree_mgr.as_ref()
+            .and_then(|mgr| mgr.get_info(&queen_id))
+            .is_some();
+
+        if !wt_created {
+            // If worktree creation failed, skip this test
+            eprintln!("Worktree creation failed, skipping test");
+            return;
+        }
+
+        // Make a change in the worktree
+        if let Some(ref mgr) = host.worktree_mgr {
+            let wt_path = mgr.worktree_path(&queen_id);
+            if !wt_path.exists() {
+                eprintln!("Worktree path doesn't exist, skipping test");
+                return;
+            }
+            std::fs::write(wt_path.join("test.txt"), "content").unwrap();
+            std::process::Command::new("git")
+                .args(["add", "."])
+                .current_dir(&wt_path)
+                .output()
+                .unwrap();
+            std::process::Command::new("git")
+                .args(["commit", "-m", "test commit"])
+                .current_dir(&wt_path)
+                .output()
+                .unwrap();
+        }
+
+        // Validated merge should fail validation
+        let result = host.validated_merge(&queen_id).await.unwrap();
+        match result {
+            ValidatedMergeResult::ValidationFailed { feedback } => {
+                assert!(!feedback.is_empty());
+            }
+            _ => panic!("Expected ValidationFailed result, got {:?}", result),
+        }
     }
 }

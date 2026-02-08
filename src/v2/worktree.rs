@@ -165,6 +165,12 @@ impl WorktreeManager {
     /// - Success: Merge succeeded, returns commit SHA
     /// - Conflict: Merge conflict detected, returns list of conflicted files
     pub fn merge(&mut self, queen_id: &QueenId) -> Result<MergeResult> {
+        self.merge_with_attribution(queen_id, None)
+    }
+
+    /// Merge a Queen's branch with custom commit message attribution.
+    /// The merge commit message includes Co-Authored-By for the Queen.
+    pub fn merge_with_attribution(&mut self, queen_id: &QueenId, attribution: Option<&str>) -> Result<MergeResult> {
         let info = self.worktrees.get(queen_id)
             .ok_or_else(|| anyhow!("Worktree not found for Queen {}", queen_id.0))?;
 
@@ -193,6 +199,13 @@ impl WorktreeManager {
                 .context("Failed to checkout base branch for merge")?;
         }
 
+        // Build commit message with attribution if provided
+        let commit_msg = if let Some(attr) = attribution {
+            format!("merge(hatchery): {}\n\nCo-Authored-By: {}", queen_id.0, attr)
+        } else {
+            format!("merge(hatchery): {}", queen_id.0)
+        };
+
         // Attempt merge with --no-ff
         let output = Command::new("git")
             .args([
@@ -200,7 +213,7 @@ impl WorktreeManager {
                 "--no-ff",
                 branch_name,
                 "-m",
-                &format!("merge(hatchery): {}", queen_id.0),
+                &commit_msg,
             ])
             .current_dir(&self.repo_dir)
             .output()
@@ -309,6 +322,16 @@ impl WorktreeManager {
     /// Number of active worktrees.
     pub fn count(&self) -> usize {
         self.worktrees.len()
+    }
+
+    /// Get the branch name for a Queen with optional swarm context.
+    /// Default: "hatchery/{queen_id}"
+    /// With swarm: "hatchery/{swarm_id}/{queen_id}"
+    pub fn branch_name_with_swarm(queen_id: &QueenId, swarm_id: Option<&str>) -> String {
+        match swarm_id {
+            Some(sid) => format!("hatchery/{}/{}", sid, queen_id.0),
+            None => format!("hatchery/{}", queen_id.0),
+        }
     }
 
     /// Internal: remove a worktree directory.
@@ -657,5 +680,100 @@ mod tests {
         let result = mgr.resolve_conflict(&ConflictStrategy::Escalate);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("manual resolution"));
+    }
+
+    #[test]
+    fn test_merge_with_attribution() {
+        let (_dir, repo) = temp_repo();
+        let mut mgr = WorktreeManager::new(&repo, None).unwrap();
+
+        let queen_id = QueenId("Q6".to_string());
+
+        // Create worktree
+        let wt_path = mgr.create(&queen_id).unwrap();
+
+        // Make a change and commit
+        fs::write(wt_path.join("attributed.txt"), "with attribution").unwrap();
+        git_cmd(&wt_path, &["add", "."]).unwrap();
+        git_cmd(&wt_path, &["commit", "-m", "Q6: add file"]).unwrap();
+
+        // Merge with attribution
+        let attribution = "Queen Agent Q6 <queen6@hatchery.ai>";
+        let result = mgr.merge_with_attribution(&queen_id, Some(attribution)).unwrap();
+
+        match result {
+            MergeResult::Success { commit_sha } => {
+                assert!(!commit_sha.is_empty());
+
+                // Verify commit message includes attribution
+                let output = Command::new("git")
+                    .args(["log", "-1", "--pretty=%B"])
+                    .current_dir(&repo)
+                    .output()
+                    .unwrap();
+
+                let commit_msg = String::from_utf8_lossy(&output.stdout);
+                assert!(commit_msg.contains("merge(hatchery): Q6"));
+                assert!(commit_msg.contains("Co-Authored-By:"));
+                assert!(commit_msg.contains(attribution));
+            }
+            _ => panic!("Expected merge success, got {:?}", result),
+        }
+
+        // Cleanup
+        mgr.cleanup(&queen_id).unwrap();
+    }
+
+    #[test]
+    fn test_branch_name_with_swarm() {
+        let queen_id = QueenId("Q7".to_string());
+
+        // Without swarm context
+        let branch = WorktreeManager::branch_name_with_swarm(&queen_id, None);
+        assert_eq!(branch, "hatchery/Q7");
+
+        // With swarm context
+        let branch = WorktreeManager::branch_name_with_swarm(&queen_id, Some("swarm-alpha"));
+        assert_eq!(branch, "hatchery/swarm-alpha/Q7");
+    }
+
+    #[test]
+    fn test_merge_without_attribution() {
+        let (_dir, repo) = temp_repo();
+        let mut mgr = WorktreeManager::new(&repo, None).unwrap();
+
+        let queen_id = QueenId("Q8".to_string());
+
+        // Create worktree
+        let wt_path = mgr.create(&queen_id).unwrap();
+
+        // Make a change and commit
+        fs::write(wt_path.join("no_attr.txt"), "no attribution").unwrap();
+        git_cmd(&wt_path, &["add", "."]).unwrap();
+        git_cmd(&wt_path, &["commit", "-m", "Q8: add file"]).unwrap();
+
+        // Merge without attribution (using original merge method)
+        let result = mgr.merge(&queen_id).unwrap();
+
+        match result {
+            MergeResult::Success { commit_sha } => {
+                assert!(!commit_sha.is_empty());
+
+                // Verify commit message does NOT include Co-Authored-By
+                let output = Command::new("git")
+                    .args(["log", "-1", "--pretty=%B"])
+                    .current_dir(&repo)
+                    .output()
+                    .unwrap();
+
+                let commit_msg = String::from_utf8_lossy(&output.stdout);
+                assert!(commit_msg.contains("merge(hatchery): Q8"));
+                assert!(!commit_msg.contains("Co-Authored-By:"));
+            }
+            _ => panic!("Expected merge success, got {:?}", result),
+        }
+
+        // Cleanup
+        mgr.cleanup(&queen_id).unwrap();
     }
 }
