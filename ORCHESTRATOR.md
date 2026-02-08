@@ -297,17 +297,17 @@ grep -c '^\- \[ \]' hatchery/PRD_V2.md
 ### Current State
 
 ```
-Phase: NOT STARTED
-Last completed: — (research + architecture + PRD done)
+Phase: 1 COMPLETE (core code), 1.5 NEXT (backward compat)
+Last completed: Phase 1 — types.rs, queen/mod.rs, native.rs, custom.rs (28/43 checkboxes)
 Blocking issues: none
-Next action: Start Phase 1 (TeamCreate with 4 agents)
+Next action: Phase 1.5 backward compat OR Phase 2 Mailbox
 ```
 
 ### Phase Progress
 
 | Phase | Status | Pattern | Agents Used | Gate Result |
 |-------|--------|---------|-------------|-------------|
-| 1. Types + Queen | NOT STARTED | TeamCreate | — | — |
+| 1. Types + Queen | DONE (28/43 checkboxes) | Sequential Tasks | 3 rust-implementer + 1 implementer | cargo check PASS |
 | 1.5 Backward compat | NOT STARTED | Task | — | — |
 | 2. Mailbox | NOT STARTED | Carousel | — | — |
 | 3a. TaskDag | NOT STARTED | TeamCreate | — | — |

@@ -1,0 +1,340 @@
+//! V2 Core types for Hatchery swarm orchestration.
+//!
+//! This module contains the type definitions for the V2 architecture which introduces
+//! the Queen trait, SwarmHost coordination, and hierarchical task management.
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::time::Duration;
+
+// ============================================================================
+// ID Newtypes
+// ============================================================================
+
+/// Unique identifier for a task in the V2 system.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TaskId(pub String);
+
+impl Default for TaskId {
+    fn default() -> Self {
+        TaskId(String::new())
+    }
+}
+
+/// Unique identifier for a Queen agent.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct QueenId(pub String); // e.g., "Q0", "Q1", "L2.0.Q0"
+
+/// Unique identifier for a SwarmHost coordinator.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct SwarmHostId(pub String);
+
+impl Default for SwarmHostId {
+    fn default() -> Self {
+        SwarmHostId(String::new())
+    }
+}
+
+/// Unique identifier for a worker sub-agent.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct WorkerId(pub String);
+
+// ============================================================================
+// Enums
+// ============================================================================
+
+/// Backend type for a Queen agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum QueenBackend {
+    /// Wrapped Claude Code CLI with native Teams/mailbox
+    ClaudeNative,
+    /// Wrapped Claude Code CLI without Teams (raw pipe)
+    ClaudeRaw,
+    /// OpenAI Codex sandbox
+    Codex,
+    /// Generic HTTP API (any LLM provider)
+    ApiGeneric { base_url: String, model: String },
+}
+
+/// Current status of a Queen agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum QueenStatus {
+    /// Queen is idle and ready to accept tasks
+    Idle,
+    /// Queen is actively working on a task
+    Working {
+        task_id: TaskId,
+        progress: f32,
+        sub_tasks: Vec<SubTaskStatus>,
+    },
+    /// Queen is blocked waiting for dependencies or external input
+    Blocked { task_id: TaskId, reason: String },
+    /// Queen encountered an error while working on a task
+    Failed { task_id: TaskId, error: String },
+    /// Queen successfully completed a task
+    Completed { task_id: TaskId },
+    /// Queen is unresponsive or crashed
+    Dead,
+}
+
+/// State of a sub-task within a Queen's work breakdown.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SubTaskState {
+    /// Sub-task is waiting to be started
+    Pending,
+    /// Sub-task has been assigned to a worker
+    Assigned,
+    /// Sub-task is currently being worked on
+    InProgress,
+    /// Sub-task was completed successfully
+    Completed,
+    /// Sub-task failed with an error
+    Failed { error: String },
+}
+
+/// Overall status of a task in the system.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TaskStatus {
+    /// Task is blocked by dependencies
+    Blocked,
+    /// Task is ready to be assigned
+    Ready,
+    /// Task has been assigned to a Queen
+    Assigned,
+    /// Task is currently being worked on
+    InProgress,
+    /// Task implementation is complete, awaiting validation
+    Validating,
+    /// Task completed successfully
+    Completed,
+    /// Task failed
+    Failed,
+}
+
+/// Type of message being sent between agents.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum MessageType {
+    /// Assigning a task to a Queen
+    TaskAssignment,
+    /// Returning the result of a completed task
+    TaskResult,
+    /// Progress update on an in-progress task
+    TaskProgress,
+    /// Request for status information
+    StatusRequest,
+    /// Status report response
+    StatusReport,
+    /// Sharing knowledge/context
+    Knowledge,
+    /// Querying for knowledge
+    KnowledgeQuery,
+    /// Escalating an issue up the hierarchy
+    Escalation,
+    /// Shutdown command
+    Shutdown,
+    /// Custom message type
+    Custom(String),
+}
+
+/// Severity level for escalations.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Severity {
+    /// Low priority issue
+    Low,
+    /// Medium priority issue
+    Medium,
+    /// High priority issue
+    High,
+    /// Critical issue requiring immediate attention
+    Critical,
+}
+
+/// Agent identifier for message routing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum AgentId {
+    /// A SwarmHost coordinator
+    SwarmHost(SwarmHostId),
+    /// A Queen worker agent
+    Queen(QueenId),
+    /// The validator agent
+    Validator,
+    /// The BroodLord top-level orchestrator
+    BroodLord,
+    /// The human operator
+    Operator,
+}
+
+// ============================================================================
+// Structs
+// ============================================================================
+
+/// Status of a sub-task within a Queen's work breakdown.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubTaskStatus {
+    pub id: String,
+    pub description: String,
+    pub worker_id: Option<WorkerId>,
+    pub status: SubTaskState,
+    pub started_at: Option<DateTime<Utc>>,
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+/// Controls visibility of a message to different agent types.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Visibility {
+    /// Whether the message is visible to agent-level code
+    pub agent_visible: bool,
+    /// Whether the message is visible to coordinators (SwarmHost/BroodLord)
+    pub coordinator_visible: bool,
+    /// Whether the message is visible to the user/operator
+    pub user_visible: bool,
+}
+
+impl Visibility {
+    /// Default visibility for internal agent communication.
+    /// Visible to agents and coordinators, but not to the user.
+    pub fn default_internal() -> Self {
+        Visibility {
+            agent_visible: true,
+            coordinator_visible: true,
+            user_visible: false,
+        }
+    }
+}
+
+/// Context provided to a Queen when assigning a task.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskContext {
+    /// Shared knowledge base accessible to the Queen
+    pub knowledge: HashMap<String, serde_json::Value>,
+    /// Recent relevant messages from the swarm
+    pub recent_messages: Vec<SwarmMessage>,
+    /// Shared state that can be updated during execution
+    pub shared_state: HashMap<String, String>,
+}
+
+/// Result of a completed task.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskResult {
+    /// Final status of the task
+    pub status: TaskStatus,
+    /// Output/result description
+    pub output: String,
+    /// List of artifacts produced (file paths, URLs, etc.)
+    pub artifacts: Vec<String>,
+    /// How long the task took to complete
+    pub duration: Duration,
+    /// Git commit SHA if changes were committed
+    pub git_sha: Option<String>,
+}
+
+/// A task in the V2 system (separate from V1 Task).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Task {
+    /// Unique identifier for this task
+    pub id: TaskId,
+    /// Human-readable description of the task
+    pub description: String,
+    /// Current status of the task
+    pub status: TaskStatus,
+    /// Which Queen is assigned to this task (if any)
+    pub assigned_to: Option<QueenId>,
+    /// Priority level (0-255, higher = more important)
+    pub priority: u8,
+    /// List of task IDs that must complete before this task can start
+    pub blocked_by: Vec<TaskId>,
+    /// When this task was created
+    pub created_at: DateTime<Utc>,
+}
+
+/// A message passed between agents in the swarm.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwarmMessage {
+    /// Unique message ID
+    pub id: String,
+    /// Sender agent ID
+    pub from: AgentId,
+    /// Recipient agent ID
+    pub to: AgentId,
+    /// Type of message
+    pub msg_type: MessageType,
+    /// Message payload (flexible JSON structure)
+    pub payload: serde_json::Value,
+    /// When the message was created
+    pub timestamp: DateTime<Utc>,
+    /// Optional correlation ID for request/response tracking
+    pub correlation_id: Option<String>,
+    /// Visibility settings for this message
+    pub visibility: Visibility,
+}
+
+impl SwarmMessage {
+    /// Create a status report message.
+    pub fn status_report(from: AgentId, to: AgentId, status: QueenStatus) -> Self {
+        SwarmMessage {
+            id: uuid::Uuid::new_v4().to_string(),
+            from,
+            to,
+            msg_type: MessageType::StatusReport,
+            payload: serde_json::to_value(&status).unwrap_or(serde_json::Value::Null),
+            timestamp: Utc::now(),
+            correlation_id: None,
+            visibility: Visibility::default_internal(),
+        }
+    }
+
+    /// Create a task result message.
+    pub fn task_result(from: AgentId, to: AgentId, task_id: TaskId, result: TaskResult) -> Self {
+        let mut payload = serde_json::Map::new();
+        payload.insert("task_id".to_string(), serde_json::to_value(&task_id).unwrap());
+        payload.insert("result".to_string(), serde_json::to_value(&result).unwrap());
+
+        SwarmMessage {
+            id: uuid::Uuid::new_v4().to_string(),
+            from,
+            to,
+            msg_type: MessageType::TaskResult,
+            payload: serde_json::Value::Object(payload),
+            timestamp: Utc::now(),
+            correlation_id: None,
+            visibility: Visibility::default_internal(),
+        }
+    }
+
+    /// Create an escalation message.
+    pub fn escalation(from: AgentId, to: AgentId, issue: String, severity: Severity) -> Self {
+        let mut payload = serde_json::Map::new();
+        payload.insert("issue".to_string(), serde_json::Value::String(issue));
+        payload.insert("severity".to_string(), serde_json::to_value(&severity).unwrap());
+
+        SwarmMessage {
+            id: uuid::Uuid::new_v4().to_string(),
+            from,
+            to,
+            msg_type: MessageType::Escalation,
+            payload: serde_json::Value::Object(payload),
+            timestamp: Utc::now(),
+            correlation_id: None,
+            visibility: Visibility::default_internal(),
+        }
+    }
+
+    /// Create a knowledge-sharing message.
+    pub fn knowledge(from: AgentId, to: AgentId, key: String, value: serde_json::Value) -> Self {
+        let mut payload = serde_json::Map::new();
+        payload.insert("key".to_string(), serde_json::Value::String(key));
+        payload.insert("value".to_string(), value);
+
+        SwarmMessage {
+            id: uuid::Uuid::new_v4().to_string(),
+            from,
+            to,
+            msg_type: MessageType::Knowledge,
+            payload: serde_json::Value::Object(payload),
+            timestamp: Utc::now(),
+            correlation_id: None,
+            visibility: Visibility::default_internal(),
+        }
+    }
+}

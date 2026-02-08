@@ -32,5 +32,14 @@ regex = "1"
 # Efficient synchronization primitives
 parking_lot = "0.12"
 
+# UUID generation for message IDs
+uuid = { version = "1", features = ["v4"] }
+
+# Async trait support for V2 Queen trait
+async-trait = "0.1"
+
+# Async runtime (needed for V2 Queen trait implementations)
+tokio = { version = "1", features = ["full"] }
+
 [dev-dependencies]
 tempfile = "3"

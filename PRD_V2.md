@@ -29,56 +29,56 @@ V2 introduces:
 
 ### 1.1 Core Types & Messages
 
-- [ ] Define `SwarmMessage` struct with id, from, to, msg_type, payload, timestamp, correlation_id, visibility
-- [ ] Define `MessageType` enum: TaskAssignment, TaskResult, TaskProgress, StatusRequest, StatusReport, Knowledge, KnowledgeQuery, Escalation, Shutdown, Custom
-- [ ] Define `Visibility` struct with agent_visible, coordinator_visible, user_visible flags
-- [ ] Define `AgentId` enum: SwarmHost, Queen, Validator, BroodLord, Operator
-- [ ] Define `TaskId`, `QueenId`, `SwarmHostId` newtypes
-- [ ] Define `TaskStatus` enum: Blocked, Ready, Assigned, InProgress, Validating, Completed, Failed
-- [ ] Define `QueenStatus` enum: Idle, Working, Blocked, Failed, Completed, Dead
-- [ ] Define `TaskContext` struct (knowledge snapshot, recent messages, shared state)
-- [ ] Define `TaskResult` struct (status, output, artifacts, duration, git_sha)
-- [ ] Create `hatchery/src/v2/types.rs` with all types
-- [ ] Add serde Serialize/Deserialize for all types
+- [x] Define `SwarmMessage` struct with id, from, to, msg_type, payload, timestamp, correlation_id, visibility
+- [x] Define `MessageType` enum: TaskAssignment, TaskResult, TaskProgress, StatusRequest, StatusReport, Knowledge, KnowledgeQuery, Escalation, Shutdown, Custom
+- [x] Define `Visibility` struct with agent_visible, coordinator_visible, user_visible flags
+- [x] Define `AgentId` enum: SwarmHost, Queen, Validator, BroodLord, Operator
+- [x] Define `TaskId`, `QueenId`, `SwarmHostId` newtypes
+- [x] Define `TaskStatus` enum: Blocked, Ready, Assigned, InProgress, Validating, Completed, Failed
+- [x] Define `QueenStatus` enum: Idle, Working, Blocked, Failed, Completed, Dead
+- [x] Define `TaskContext` struct (knowledge snapshot, recent messages, shared state)
+- [x] Define `TaskResult` struct (status, output, artifacts, duration, git_sha)
+- [x] Create `hatchery/src/v2/types.rs` with all types
+- [x] Add serde Serialize/Deserialize for all types
 - [ ] Add unit tests for serialization roundtrip
 
 ### 1.2 Queen Trait
 
-- [ ] Define `trait Queen` with async methods: assign, status, result, send_message, drain_outbox, is_alive, shutdown
-- [ ] Define `QueenBackend` enum: ClaudeNative, ClaudeRaw, Codex, ApiGeneric
-- [ ] Define `QueenConfig` struct with common config (timeout, max_workers, model)
-- [ ] Create `hatchery/src/v2/queen/mod.rs` with trait definition
+- [x] Define `trait Queen` with async methods: assign, status, result, send_message, drain_outbox, is_alive, shutdown
+- [x] Define `QueenBackend` enum: ClaudeNative, ClaudeRaw, Codex, ApiGeneric
+- [x] Define `QueenConfig` struct with common config (timeout, max_workers, model)
+- [x] Create `hatchery/src/v2/queen/mod.rs` with trait definition
 - [ ] Add documentation with usage examples
 
 ### 1.3 NativeQueen Implementation
 
-- [ ] Create `hatchery/src/v2/queen/native.rs`
-- [ ] Implement NativeQueen struct wrapping PipeProcess
-- [ ] Implement `trait Queen` for NativeQueen
-- [ ] Design NativeQueen prompt template (AI sergeant, not dumb iterator)
+- [x] Create `hatchery/src/v2/queen/native.rs`
+- [x] Implement NativeQueen struct wrapping PipeProcess
+- [x] Implement `trait Queen` for NativeQueen
+- [x] Design NativeQueen prompt template (AI sergeant, not dumb iterator)
   - Must instruct Claude to decompose task into sub-tasks
   - Must instruct Claude to use Task tool for sub-workers (if teams enabled)
   - Must instruct Claude to report progress via @hatchery: protocol
   - Must instruct Claude to report completion with result summary
-- [ ] Implement @hatchery: command parsing from NativeQueen stdout
-- [ ] Implement status detection from Claude output (working, blocked, completed)
-- [ ] Implement timeout and stall detection
-- [ ] Implement graceful shutdown (send /exit or kill process)
+- [x] Implement @hatchery: command parsing from NativeQueen stdout
+- [x] Implement status detection from Claude output (working, blocked, completed)
+- [x] Implement timeout and stall detection
+- [x] Implement graceful shutdown (send /exit or kill process)
 - [ ] Write unit tests with mock PipeProcess
 - [ ] Write integration test: spawn NativeQueen, assign simple task, verify completion
 
 ### 1.4 CustomQueen Implementation (Basic)
 
-- [ ] Create `hatchery/src/v2/queen/custom.rs`
-- [ ] Implement CustomQueen struct with configurable backend
+- [x] Create `hatchery/src/v2/queen/custom.rs`
+- [x] Implement CustomQueen struct with configurable backend
 - [ ] Implement HTTP API backend (WorkerBackend::HttpApi)
   - Build prompt from task + context
   - Send to API endpoint
   - Parse response
   - Track worker state
-- [ ] Implement basic QueenMailbox (in-memory VecDeque per worker)
-- [ ] Implement basic TaskScheduler (round-robin assignment, no DAG yet)
-- [ ] Implement `trait Queen` for CustomQueen
+- [x] Implement basic QueenMailbox (in-memory VecDeque per worker)
+- [x] Implement basic TaskScheduler (round-robin assignment, no DAG yet)
+- [x] Implement `trait Queen` for CustomQueen
 - [ ] Write unit tests with mock HTTP server
 - [ ] Write integration test with real API key (skip in CI)
 

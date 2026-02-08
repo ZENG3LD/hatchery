@@ -12,3 +12,6 @@ pub mod safety;
 pub mod queen;
 pub mod swarm_host;
 pub mod brood_lord;
+
+/// V2 architecture with Queen trait and message-based coordination
+pub mod v2;
