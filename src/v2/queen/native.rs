@@ -79,6 +79,7 @@ struct NativeQueenState {
     last_activity: Instant,
     cached_status: QueenStatus,
     completed_result: Option<TaskResult>,
+    session_id: Option<String>,
 }
 
 /// NativeQueen wraps Claude Code CLI with PipeProcess
@@ -184,6 +185,7 @@ impl NativeQueen {
             last_activity: Instant::now(),
             cached_status: QueenStatus::Idle,
             completed_result: None,
+            session_id: None,
         };
 
         Ok(Self {
@@ -193,6 +195,12 @@ impl NativeQueen {
             alive: Arc::new(AtomicBool::new(true)),
             state: Arc::new(Mutex::new(state)),
         })
+    }
+
+    /// Get the Claude Code session ID (captured from NDJSON system event).
+    pub fn session_id(&self) -> Option<String> {
+        let state = self.state.lock();
+        state.session_id.clone()
     }
 
     /// Poll messages from the process and update state
@@ -225,6 +233,17 @@ impl NativeQueen {
         // Now process the lines (no longer holding a borrow of process)
         let parser = HatcheryProtocolParser;
         for line in &lines {
+            // Try to capture session_id from NDJSON system event
+            if state.session_id.is_none() {
+                if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(line) {
+                    if json_val.get("type").and_then(|v| v.as_str()) == Some("system") {
+                        if let Some(sid) = json_val.get("session_id").and_then(|v| v.as_str()) {
+                            state.session_id = Some(sid.to_string());
+                        }
+                    }
+                }
+            }
+
             // Look for @hatchery: protocol messages
             if let Some(hatchery_msg) = line.strip_prefix("@hatchery:") {
                 match parser.parse(hatchery_msg) {

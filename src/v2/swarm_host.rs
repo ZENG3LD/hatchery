@@ -14,6 +14,7 @@ use crate::v2::compaction::CompactionStrategy;
 use crate::v2::validator::{Validator, ValidationResult};
 use crate::v2::shared_memory::SharedMemory;
 use crate::v2::worktree::{WorktreeManager, MergeResult};
+use crate::v2::queen_recovery::{SessionTracker, RecoveryManager, RecoveryConfig, RecoveryPlan};
 
 /// Configuration for SwarmHost.
 #[derive(Debug, Clone)]
@@ -72,6 +73,10 @@ pub struct SwarmHost {
     created_at: DateTime<Utc>,
     /// Current iteration count
     iteration: usize,
+    /// Tracks Claude Code session IDs for each Queen
+    session_tracker: SessionTracker,
+    /// Manages Queen health checks and recovery planning
+    recovery_manager: RecoveryManager,
 }
 
 /// Result of a single tick (schedule + poll cycle).
@@ -156,6 +161,8 @@ impl SwarmHost {
             config,
             created_at: Utc::now(),
             iteration: 0,
+            session_tracker: SessionTracker::new(),
+            recovery_manager: RecoveryManager::new(RecoveryConfig::default()),
         })
     }
 
@@ -434,6 +441,16 @@ impl SwarmHost {
         let tasks_assigned = self.schedule().await?;
         let messages_processed = self.poll().await?;
 
+        // Check Queen health and log recovery plans
+        let recovery_plans = self.check_queen_health().await;
+        for plan in &recovery_plans {
+            eprintln!(
+                "[SwarmHost] Recovery needed for Queen {}: {:?} (attempt #{})",
+                plan.queen_id.0, plan.reason, plan.attempt
+            );
+            self.recovery_manager.mark_recovery_attempted(&plan.queen_id);
+        }
+
         // Evict expired from memory
         self.memory.evict_expired();
 
@@ -534,6 +551,54 @@ impl SwarmHost {
                 ValidatedMergeResult::NoChanges
             }
         })
+    }
+
+    /// Check all Queens for health issues and return recovery plans.
+    /// Called during each tick to detect dead/stalled Queens.
+    pub async fn check_queen_health(&mut self) -> Vec<RecoveryPlan> {
+        let mut plans = Vec::new();
+
+        let queen_ids: Vec<QueenId> = self.queens.keys().cloned().collect();
+
+        for queen_id in &queen_ids {
+            if let Some(queen) = self.queens.get(queen_id) {
+                let alive = queen.is_alive().await;
+
+                if let Some(plan) = self.recovery_manager.check_health(
+                    queen_id,
+                    alive,
+                    &self.session_tracker,
+                ) {
+                    plans.push(plan);
+                }
+            }
+        }
+
+        plans
+    }
+
+    /// Get mutable access to the session tracker (for registering sessions).
+    pub fn session_tracker_mut(&mut self) -> &mut SessionTracker {
+        &mut self.session_tracker
+    }
+
+    /// Get read access to the session tracker.
+    pub fn session_tracker(&self) -> &SessionTracker {
+        &self.session_tracker
+    }
+
+    /// Get mutable access to the recovery manager.
+    pub fn recovery_manager_mut(&mut self) -> &mut RecoveryManager {
+        &mut self.recovery_manager
+    }
+
+    /// Remove a dead Queen from the registry (before respawning).
+    pub async fn unregister_queen(&mut self, queen_id: &QueenId) -> Option<Box<dyn Queen>> {
+        // Unregister from mailbox
+        self.mailbox.unregister_queen(queen_id);
+
+        // Remove from queens map
+        self.queens.remove(queen_id)
     }
 
     /// Graceful shutdown: shutdown all queens, save memory, cleanup worktrees.
