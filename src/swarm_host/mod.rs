@@ -17,6 +17,7 @@ pub mod shared_memory;
 
 use crate::prd;
 use crate::progress;
+use crate::safety;
 use crate::types::{HatcheryConfig, SwarmResult};
 use anyhow::Result;
 use shared_memory::{SharedMemory, SwarmTask, Target, TaskResult, TaskStatus};
@@ -38,6 +39,8 @@ struct WorkerState {
     current_task: Option<usize>,
     last_activity: Instant,
     output_buffer: String,
+    /// Working directory for this worker (may be a worktree path).
+    working_dir: std::path::PathBuf,
 }
 
 /// Run Swarm Host mode.
@@ -86,8 +89,17 @@ pub fn run(config: &HatcheryConfig) -> Result<SwarmResult> {
         memory.get_ready_tasks().len()
     );
 
-    // Spawn workers
-    let mut workers = spawn_workers(config)?;
+    // L2: Worktree isolation
+    let worktree_mgr = if config.worktree_isolation {
+        let mgr = safety::worktree::WorktreeManager::new(&config.working_dir, None)?;
+        mgr.prune()?;
+        Some(mgr)
+    } else {
+        None
+    };
+
+    // Spawn workers (with optional worktree paths)
+    let mut workers = spawn_workers(config, &worktree_mgr)?;
     println!("[SWARM HOST] Spawned {} workers", workers.len());
 
     // Main orchestration loop — no separate Coordinator process in v1,
@@ -144,13 +156,20 @@ pub fn run(config: &HatcheryConfig) -> Result<SwarmResult> {
                 let msg_text = format_messages(&messages);
                 let verify_cmd = config.verify_cmd.as_deref().unwrap_or("cargo check");
 
-                let prompt = WORKER_PROMPT
+                let mut prompt = WORKER_PROMPT
                     .replace("{WORKER_ID}", &worker.id.to_string())
                     .replace("{TASK_ID}", &task_id.to_string())
                     .replace("{TASK}", &task_text)
                     .replace("{KNOWLEDGE}", &knowledge)
                     .replace("{MESSAGES}", &msg_text)
                     .replace("{VERIFY_CMD}", verify_cmd);
+
+                // L3: Safe-mode restrictions
+                let suffix = safety::safe_mode_suffix(config.safe_mode);
+                if !suffix.is_empty() {
+                    prompt.push_str("\n\n");
+                    prompt.push_str(suffix);
+                }
 
                 // Send task to worker
                 if worker.process.write(&prompt).is_ok() {
@@ -215,6 +234,14 @@ pub fn run(config: &HatcheryConfig) -> Result<SwarmResult> {
                                                     let _ = prd::mark_complete(&config.prd_path, t);
                                                 }
                                             }
+                                            // L1: git commit with attribution
+                                            let task_text = memory.get_task_text(task_id).unwrap_or_default();
+                                            let wtag = format!("W{}", worker.id);
+                                            let _ = safety::git_commit_task(&worker.working_dir, "swarm", &wtag, &task_text);
+                                            // L2: Merge worktree back
+                                            if let Some(ref mgr) = worktree_mgr {
+                                                let _ = mgr.merge(&wtag);
+                                            }
                                             println!("[SWARM HOST] Worker {} completed task {} (verified)", worker.id, task_id);
                                         } else {
                                             memory.update_task_status(task_id, TaskStatus::Failed);
@@ -228,6 +255,14 @@ pub fn run(config: &HatcheryConfig) -> Result<SwarmResult> {
                                             if let Some(t) = tasks.iter().find(|t| t.id == task_id && !t.done) {
                                                 let _ = prd::mark_complete(&config.prd_path, t);
                                             }
+                                        }
+                                        // L1: git commit with attribution
+                                        let task_text = memory.get_task_text(task_id).unwrap_or_default();
+                                        let wtag = format!("W{}", worker.id);
+                                        let _ = safety::git_commit_task(&worker.working_dir, "swarm", &wtag, &task_text);
+                                        // L2: Merge worktree back
+                                        if let Some(ref mgr) = worktree_mgr {
+                                            let _ = mgr.merge(&wtag);
                                         }
                                         println!("[SWARM HOST] Worker {} completed task {}", worker.id, task_id);
                                     }
@@ -281,6 +316,14 @@ pub fn run(config: &HatcheryConfig) -> Result<SwarmResult> {
         let _ = worker.process.kill();
     }
 
+    // L2: Cleanup worktrees
+    if let Some(ref mgr) = worktree_mgr {
+        for i in 0..config.workers {
+            let wtag = format!("W{}", i);
+            let _ = mgr.cleanup(&wtag);
+        }
+    }
+
     let (done, total) = memory.progress();
     println!(
         "\n[SWARM HOST] Finished: {} | {} workers, {}s",
@@ -321,8 +364,11 @@ fn build_swarm_tasks(prd_tasks: &[crate::types::Task]) -> Vec<SwarmTask> {
         .collect()
 }
 
-/// Spawn N worker PipeProcesses.
-fn spawn_workers(config: &HatcheryConfig) -> Result<HashMap<usize, WorkerState>> {
+/// Spawn N worker PipeProcesses, optionally in isolated worktrees.
+fn spawn_workers(
+    config: &HatcheryConfig,
+    worktree_mgr: &Option<safety::worktree::WorktreeManager>,
+) -> Result<HashMap<usize, WorkerState>> {
     let mut workers = HashMap::new();
 
     for i in 0..config.workers {
@@ -331,6 +377,20 @@ fn spawn_workers(config: &HatcheryConfig) -> Result<HashMap<usize, WorkerState>>
             std::thread::sleep(Duration::from_secs(1));
         }
 
+        // L2: Create worktree for this worker
+        let wtag = format!("W{}", i);
+        let worker_dir = if let Some(ref mgr) = worktree_mgr {
+            match mgr.create(&wtag) {
+                Ok(path) => path,
+                Err(e) => {
+                    eprintln!("[SWARM HOST] Failed to create worktree for W{}: {}", i, e);
+                    config.working_dir.clone()
+                }
+            }
+        } else {
+            config.working_dir.clone()
+        };
+
         let initial_prompt = format!(
             "You are Worker {}. You will receive tasks from the Hatchery swarm coordinator. \
              Wait for task assignment. When you receive a task, implement it and report results \
@@ -338,7 +398,7 @@ fn spawn_workers(config: &HatcheryConfig) -> Result<HashMap<usize, WorkerState>>
             i
         );
 
-        match PipeProcess::new(CliTool::ClaudeCode, &config.working_dir, &initial_prompt) {
+        match PipeProcess::new(CliTool::ClaudeCode, &worker_dir, &initial_prompt) {
             Ok(process) => {
                 let parser = zengeld_hub_core::create_ndjson_parser(CliTool::ClaudeCode);
                 workers.insert(
@@ -350,6 +410,7 @@ fn spawn_workers(config: &HatcheryConfig) -> Result<HashMap<usize, WorkerState>>
                         current_task: None,
                         last_activity: Instant::now(),
                         output_buffer: String::new(),
+                        working_dir: worker_dir,
                     },
                 );
                 println!("[SWARM HOST] Worker {} spawned", i);

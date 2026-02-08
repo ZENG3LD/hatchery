@@ -14,6 +14,7 @@ pub mod types;
 
 use crate::prd;
 use crate::progress;
+use crate::safety;
 use crate::swarm_host;
 use crate::types::{HatcheryConfig, SwarmResult};
 use anyhow::Result;
@@ -52,6 +53,8 @@ struct WorkerProcess {
     id: usize,
     current_task: Option<usize>,
     last_activity: Instant,
+    /// Working directory (may be a worktree path).
+    working_dir: std::path::PathBuf,
 }
 
 /// Run Brood Lord mode.
@@ -104,6 +107,15 @@ pub fn run(config: &HatcheryConfig) -> Result<SwarmResult> {
     }
     global.set_l2_count(sub_prd_count);
 
+    // L2: Worktree isolation
+    let worktree_mgr = if config.worktree_isolation {
+        let mgr = safety::worktree::WorktreeManager::new(&config.working_dir, None)?;
+        mgr.prune()?;
+        Some(mgr)
+    } else {
+        None
+    };
+
     // Phase 2: Write sub-PRDs to disk and spawn L2 sub-swarms
     let work_dir = config
         .prd_path
@@ -153,12 +165,26 @@ pub fn run(config: &HatcheryConfig) -> Result<SwarmResult> {
                 std::thread::sleep(Duration::from_secs(1));
             }
 
+            // L2: Create worktree for this worker
+            let wtag = format!("L2.{}.W{}", sub_prd.id, w);
+            let worker_dir = if let Some(ref mgr) = worktree_mgr {
+                match mgr.create(&wtag) {
+                    Ok(path) => path,
+                    Err(e) => {
+                        eprintln!("[BROOD LORD] Failed to create worktree for {}: {}", wtag, e);
+                        config.working_dir.clone()
+                    }
+                }
+            } else {
+                config.working_dir.clone()
+            };
+
             let init = format!(
                 "You are Worker L2.{}.W{}. Wait for task assignment.",
                 sub_prd.id, w
             );
 
-            match PipeProcess::new(CliTool::ClaudeCode, &config.working_dir, &init) {
+            match PipeProcess::new(CliTool::ClaudeCode, &worker_dir, &init) {
                 Ok(process) => {
                     let parser = zengeld_hub_core::create_ndjson_parser(CliTool::ClaudeCode);
                     workers.insert(w, WorkerProcess {
@@ -167,6 +193,7 @@ pub fn run(config: &HatcheryConfig) -> Result<SwarmResult> {
                         id: w,
                         current_task: None,
                         last_activity: Instant::now(),
+                        working_dir: worker_dir,
                     });
                     total_workers += 1;
                 }
@@ -274,13 +301,20 @@ pub fn run(config: &HatcheryConfig) -> Result<SwarmResult> {
                 };
                 let verify_cmd = config.verify_cmd.as_deref().unwrap_or("cargo check");
 
-                let prompt = worker_prompt
+                let mut prompt = worker_prompt
                     .replace("{WORKER_ID}", &format!("L2.{}.W{}", swarm.id, worker.id))
                     .replace("{TASK_ID}", &task_id.to_string())
                     .replace("{TASK}", &task_text)
                     .replace("{KNOWLEDGE}", &format!("Local:\n{}\n\nGlobal:\n{}", local_knowledge, global_knowledge))
                     .replace("{MESSAGES}", &msg_text)
                     .replace("{VERIFY_CMD}", verify_cmd);
+
+                // L3: Safe-mode restrictions
+                let suffix = safety::safe_mode_suffix(config.safe_mode);
+                if !suffix.is_empty() {
+                    prompt.push_str("\n\n");
+                    prompt.push_str(suffix);
+                }
 
                 if worker.process.write(&prompt).is_ok() {
                     worker.current_task = Some(task_id);
@@ -310,6 +344,7 @@ pub fn run(config: &HatcheryConfig) -> Result<SwarmResult> {
                                 for cmd in cmds {
                                     handle_worker_command(
                                         cmd, swarm.id, worker.id, mem, &global, config,
+                                        &worker.working_dir, &worktree_mgr,
                                     );
                                 }
                                 if config.verbose {
@@ -326,9 +361,17 @@ pub fn run(config: &HatcheryConfig) -> Result<SwarmResult> {
                                     if status == Some(swarm_host::shared_memory::TaskStatus::InProgress) {
                                         // Not explicitly reported — verify and mark
                                         if let Some(ref verify) = config.verify_cmd {
-                                            if run_verify(verify, &config.working_dir) {
+                                            if run_verify(verify, &worker.working_dir) {
                                                 mem.update_task_status(task_id, swarm_host::shared_memory::TaskStatus::Completed);
                                                 mark_sub_prd_checkbox(&swarm.sub_prd_path, task_id);
+                                                // L1: Git attribution
+                                                let task_text = mem.get_task_text(task_id).unwrap_or_default();
+                                                let wtag = format!("L2.{}.W{}", swarm.id, worker.id);
+                                                let _ = safety::git_commit_task(&worker.working_dir, "brood", &wtag, &task_text);
+                                                // L2: Merge worktree back
+                                                if let Some(ref mgr) = worktree_mgr {
+                                                    let _ = mgr.merge(&wtag);
+                                                }
                                                 println!("[L2.{}.W{}] Completed task {} (verified)", swarm.id, worker.id, task_id);
                                             } else {
                                                 mem.update_task_status(task_id, swarm_host::shared_memory::TaskStatus::Failed);
@@ -336,6 +379,14 @@ pub fn run(config: &HatcheryConfig) -> Result<SwarmResult> {
                                         } else {
                                             mem.update_task_status(task_id, swarm_host::shared_memory::TaskStatus::Completed);
                                             mark_sub_prd_checkbox(&swarm.sub_prd_path, task_id);
+                                            // L1: Git attribution
+                                            let task_text = mem.get_task_text(task_id).unwrap_or_default();
+                                            let wtag = format!("L2.{}.W{}", swarm.id, worker.id);
+                                            let _ = safety::git_commit_task(&worker.working_dir, "brood", &wtag, &task_text);
+                                            // L2: Merge worktree back
+                                            if let Some(ref mgr) = worktree_mgr {
+                                                let _ = mgr.merge(&wtag);
+                                            }
                                         }
                                     }
                                 }
@@ -414,6 +465,16 @@ pub fn run(config: &HatcheryConfig) -> Result<SwarmResult> {
     for swarm in l2_swarms.values_mut() {
         for worker in swarm.workers.values_mut() {
             let _ = worker.process.kill();
+        }
+    }
+
+    // L2: Cleanup worktrees
+    if let Some(ref mgr) = worktree_mgr {
+        for swarm in l2_swarms.values() {
+            for (w, _) in &swarm.workers {
+                let wtag = format!("L2.{}.W{}", swarm.id, w);
+                let _ = mgr.cleanup(&wtag);
+            }
         }
     }
 
@@ -578,6 +639,8 @@ fn handle_worker_command(
     local: &swarm_host::shared_memory::SharedMemory,
     global: &GlobalMemory,
     config: &HatcheryConfig,
+    worker_dir: &std::path::Path,
+    worktree_mgr: &Option<safety::worktree::WorktreeManager>,
 ) {
     match cmd {
         swarm_host::commands::HatcheryCommand::Knowledge { key, value } => {
@@ -594,6 +657,19 @@ fn handle_worker_command(
                 "success" => swarm_host::shared_memory::TaskStatus::Completed,
                 _ => swarm_host::shared_memory::TaskStatus::Failed,
             };
+            // L1: Git attribution on success
+            let git_sha = if status == "success" {
+                let task_text = local.get_task_text(task_id).unwrap_or_default();
+                let wtag = format!("L2.{}.W{}", l2_id, worker_id);
+                let _ = safety::git_commit_task(worker_dir, "brood", &wtag, &task_text);
+                // L2: Merge worktree back
+                if let Some(ref mgr) = worktree_mgr {
+                    let _ = mgr.merge(&wtag);
+                }
+                safety::get_head_sha(worker_dir)
+            } else {
+                None
+            };
             local.set_result(swarm_host::shared_memory::TaskResult {
                 task_id,
                 worker_id,
@@ -601,7 +677,7 @@ fn handle_worker_command(
                 verification_output: String::new(),
                 error_message: message,
                 duration_secs: 0,
-                git_commit_sha: None,
+                git_commit_sha: git_sha,
             });
             println!("[L2.{}.W{}] Result: task {} = {}", l2_id, worker_id, task_id, status);
         }
@@ -625,7 +701,7 @@ fn handle_worker_command(
             // Results injected in next prompt
         }
     }
-    let _ = (l2_id, config); // Will be used for escalation in v2
+    let _ = config; // Will be used for escalation in v2
 }
 
 fn mark_sub_prd_checkbox(sub_prd_path: &std::path::Path, task_id: usize) {

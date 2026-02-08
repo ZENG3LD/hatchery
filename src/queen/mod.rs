@@ -11,6 +11,7 @@
 
 use crate::prd;
 use crate::progress::{self, ProgressTracker};
+use crate::safety;
 use crate::types::{HatcheryConfig, IterationResult, SwarmResult};
 use anyhow::{Context, Result};
 use std::process::Command;
@@ -74,6 +75,24 @@ fn run_single_worker(config: &HatcheryConfig, start: Instant) -> Result<SwarmRes
     let mut tracker = ProgressTracker::new(&config.prd_path, config.progress_path.clone());
     let mut total_iterations = 0;
 
+    // L2: Worktree isolation
+    let worktree_mgr = if config.worktree_isolation {
+        let mgr = safety::worktree::WorktreeManager::new(&config.working_dir, None)?;
+        mgr.prune()?;
+        Some(mgr)
+    } else {
+        None
+    };
+    let worker_dir = if let Some(ref mgr) = worktree_mgr {
+        mgr.create("W0")?
+    } else {
+        config.working_dir.clone()
+    };
+
+    // Use worktree path for worker if isolation is enabled
+    let mut worker_config = config.clone();
+    worker_config.working_dir = worker_dir.clone();
+
     for iteration in 1..=config.max_iterations {
         // Re-read PRD each iteration (it changes as checkboxes are marked)
         let tasks = prd::parse_prd(&config.prd_path)?;
@@ -124,10 +143,11 @@ fn run_single_worker(config: &HatcheryConfig, start: Instant) -> Result<SwarmRes
             &progress_context,
             iteration,
             tracker.path(),
+            config.safe_mode,
         );
 
-        // Invoke Claude via PipeProcess
-        let result = invoke_claude(config, &prompt)?;
+        // Invoke Claude via PipeProcess (uses worker_config with worktree dir)
+        let result = invoke_claude(&worker_config, &prompt)?;
         total_iterations = iteration;
 
         match result {
@@ -155,8 +175,18 @@ fn run_single_worker(config: &HatcheryConfig, start: Instant) -> Result<SwarmRes
                     println!("[HATCHERY]   ✓ Marked task {} complete", next_task.id);
                 }
 
-                // Git commit
-                git_commit(config, &next_task.description)?;
+                // L1: Git commit with attribution
+                let _ = safety::git_commit_task(
+                    &worker_dir, "queen", "W0", &next_task.description,
+                );
+                // L2: Merge worktree back to base
+                if let Some(ref mgr) = worktree_mgr {
+                    if let Ok(merged) = mgr.merge("W0") {
+                        if !merged {
+                            eprintln!("[HATCHERY] Merge conflict for W0, changes remain on branch");
+                        }
+                    }
+                }
                 tracker.record_success(&next_task.description)?;
             }
             IterationResult::NoProgress { ref reason } => {
@@ -171,6 +201,11 @@ fn run_single_worker(config: &HatcheryConfig, start: Instant) -> Result<SwarmRes
                 break;
             }
         }
+    }
+
+    // L2: Cleanup worktree
+    if let Some(ref mgr) = worktree_mgr {
+        let _ = mgr.cleanup("W0");
     }
 
     let tasks = prd::parse_prd(&config.prd_path)?;
@@ -200,6 +235,15 @@ fn run_multi_worker(config: &HatcheryConfig, start: Instant) -> Result<SwarmResu
 
     let buckets = prd::distribute_tasks(&tasks, config.workers);
 
+    // L2: Worktree isolation
+    let worktree_mgr = if config.worktree_isolation {
+        let mgr = safety::worktree::WorktreeManager::new(&config.working_dir, None)?;
+        mgr.prune()?;
+        Some(std::sync::Arc::new(mgr))
+    } else {
+        None
+    };
+
     println!(
         "[HATCHERY] Distributing {} uncompleted tasks among {} workers",
         total - initial_done,
@@ -221,8 +265,18 @@ fn run_multi_worker(config: &HatcheryConfig, start: Instant) -> Result<SwarmResu
         .map(|(worker_id, bucket)| {
             let config = config.clone();
             let worker_name = format!("worker-{}", worker_id + 1);
+            let wt_mgr = worktree_mgr.clone();
 
             std::thread::spawn(move || -> Result<usize> {
+                // L2: Create worktree for this worker
+                let wtag = format!("W{}", worker_id);
+                let worker_dir = if let Some(ref mgr) = wt_mgr {
+                    mgr.create(&wtag)?
+                } else {
+                    config.working_dir.clone()
+                };
+                let mut worker_config = config.clone();
+                worker_config.working_dir = worker_dir.clone();
                 let progress_path = config
                     .prd_path
                     .parent()
@@ -280,14 +334,15 @@ fn run_multi_worker(config: &HatcheryConfig, start: Instant) -> Result<SwarmResu
                             &progress_context,
                             attempt,
                             tracker.path(),
+                            config.safe_mode,
                         );
 
-                        let result = invoke_claude(&config, &prompt)?;
+                        let result = invoke_claude(&worker_config, &prompt)?;
 
                         match result {
                             IterationResult::Progress { .. } => {
                                 if let Some(ref verify) = config.verify_cmd {
-                                    if !run_verify(verify, &config.working_dir)? {
+                                    if !run_verify(verify, &worker_dir)? {
                                         tracker.record_failure(&format!(
                                             "Verification failed for: {}",
                                             task.description
@@ -303,7 +358,18 @@ fn run_multi_worker(config: &HatcheryConfig, start: Instant) -> Result<SwarmResu
                                     prd::mark_complete(&config.prd_path, t)?;
                                 }
 
-                                git_commit(&config, &task.description)?;
+                                // L1: Git commit with attribution
+                                let _ = safety::git_commit_task(
+                                    &worker_dir, "queen", &wtag, &task.description,
+                                );
+                                // L2: Merge worktree back to base
+                                if let Some(ref mgr) = wt_mgr {
+                                    if let Ok(merged) = mgr.merge(&wtag) {
+                                        if !merged {
+                                            eprintln!("[{}] Merge conflict, changes remain on branch", worker_name);
+                                        }
+                                    }
+                                }
                                 tracker.record_success(&task.description)?;
                                 completed += 1;
                                 break;
@@ -317,6 +383,11 @@ fn run_multi_worker(config: &HatcheryConfig, start: Instant) -> Result<SwarmResu
                             IterationResult::AllDone => break,
                         }
                     }
+                }
+
+                // L2: Cleanup worktree
+                if let Some(ref mgr) = wt_mgr {
+                    let _ = mgr.cleanup(&wtag);
                 }
 
                 Ok(completed)
@@ -359,6 +430,7 @@ fn build_iteration_prompt(
     progress: &str,
     iteration: usize,
     progress_path: &std::path::Path,
+    safe_mode: bool,
 ) -> String {
     let mut prompt = String::with_capacity(prd_content.len() + progress.len() + ITERATION_PROMPT.len() + 500);
 
@@ -392,6 +464,13 @@ fn build_iteration_prompt(
         iteration,
         task_description,
     ));
+
+    // L3: Safe-mode restrictions
+    let suffix = safety::safe_mode_suffix(safe_mode);
+    if !suffix.is_empty() {
+        prompt.push_str("\n\n");
+        prompt.push_str(suffix);
+    }
 
     prompt
 }
@@ -514,39 +593,6 @@ fn run_verify(cmd: &str, working_dir: &std::path::Path) -> Result<bool> {
             Ok(false)
         }
     }
-}
-
-/// Git commit with a descriptive message.
-fn git_commit(config: &HatcheryConfig, task_desc: &str) -> Result<()> {
-    let msg = format!("feat(hatchery): {}", truncate(task_desc, 72));
-
-    let output = Command::new("git")
-        .args(["add", "-A"])
-        .current_dir(&config.working_dir)
-        .output();
-
-    if let Err(e) = output {
-        eprintln!("[HATCHERY] git add failed: {}", e);
-        return Ok(());
-    }
-
-    let output = Command::new("git")
-        .args(["commit", "-m", &msg])
-        .current_dir(&config.working_dir)
-        .output();
-
-    match output {
-        Ok(out) => {
-            if out.status.success() {
-                println!("[HATCHERY]   ✓ Committed: {}", truncate(&msg, 60));
-            }
-        }
-        Err(e) => {
-            eprintln!("[HATCHERY] git commit failed: {}", e);
-        }
-    }
-
-    Ok(())
 }
 
 /// Truncate string to max length.

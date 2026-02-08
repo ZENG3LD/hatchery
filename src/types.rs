@@ -48,6 +48,10 @@ pub struct HatcheryConfig {
     pub progress_path: Option<PathBuf>,
     /// Show verbose output from worker sessions.
     pub verbose: bool,
+    /// Enable git worktree isolation per worker (Level 2 safety).
+    pub worktree_isolation: bool,
+    /// Enable safe-mode prompt restrictions (Level 3 safety).
+    pub safe_mode: bool,
 }
 
 impl Default for HatcheryConfig {
@@ -62,6 +66,8 @@ impl Default for HatcheryConfig {
             stall_threshold: 3,
             progress_path: None,
             verbose: false,
+            worktree_isolation: false,
+            safe_mode: false,
         }
     }
 }

@@ -51,6 +51,14 @@ enum Commands {
         /// Show verbose output from worker sessions.
         #[arg(short, long)]
         verbose: bool,
+
+        /// Enable git worktree isolation per worker (each worker gets its own branch).
+        #[arg(long)]
+        worktree: bool,
+
+        /// Enable safe-mode: restrict dangerous commands in worker prompts.
+        #[arg(long)]
+        safe_mode: bool,
     },
 
     /// Show status of an ongoing or completed run.
@@ -74,6 +82,8 @@ fn main() -> Result<()> {
             stall_threshold,
             progress,
             verbose,
+            worktree,
+            safe_mode,
         } => {
             let working_dir = dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
@@ -87,6 +97,8 @@ fn main() -> Result<()> {
                 stall_threshold,
                 progress_path: progress,
                 verbose,
+                worktree_isolation: worktree,
+                safe_mode,
             };
 
             match config.mode {

@@ -8,6 +8,7 @@
 pub mod types;
 pub mod prd;
 pub mod progress;
+pub mod safety;
 pub mod queen;
 pub mod swarm_host;
 pub mod brood_lord;

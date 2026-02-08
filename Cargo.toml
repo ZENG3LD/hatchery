@@ -31,3 +31,6 @@ regex = "1"
 
 # Efficient synchronization primitives
 parking_lot = "0.12"
+
+[dev-dependencies]
+tempfile = "3"
