@@ -286,6 +286,7 @@ async fn main() -> Result<()> {
                                 vec![],  // no dependencies for now
                                 Priority::Normal,
                                 Complexity::Medium,
+                                None,
                             );
                         }
                     }
@@ -353,6 +354,7 @@ async fn main() -> Result<()> {
                                 vec![],
                                 Priority::Normal,
                                 Complexity::Medium,
+                                None,
                             );
                         }
                     }

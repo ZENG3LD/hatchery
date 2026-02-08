@@ -105,6 +105,14 @@ async fn run_actor(
                             &mut cmd_rx,
                             &mut shutdown_rx,
                         ).await;
+
+                        // Forum-style: report queued messages after task completion
+                        if !queued_messages.is_empty() {
+                            let _ = event_tx.send(QueenEvent::MessagesReceived {
+                                queen_id: id.clone(),
+                                count: queued_messages.len(),
+                            }).await;
+                        }
                     }
                     QueenCommand::Message(msg) => {
                         eprintln!("[SpawnQueen {}] Queued message from {:?}", id.0, msg.from);
@@ -475,8 +483,27 @@ fn format_task_prompt(task: &Task, context: &TaskContext, queued_messages: &[Swa
     prompt.push_str("Available agent types: rust-implementer, implementer, research-agent, rust-expert, Explore.\n");
     prompt.push_str("Launch independent agents in PARALLEL. Only serialize when there are dependencies.\n\n");
 
+    // Orchestration discipline (survives context compression)
+    prompt.push_str(&format!("{}\n\n", crate::core::prompts::orchestration_discipline_block()));
+
+    // Skill hint (if provided)
+    if let Some(ref hint) = context.skill_hint {
+        prompt.push_str(&format!(
+            "\n## Recommended Execution Pattern\nUse /{} pattern for this task. Read the skill docs and follow its phases.\n",
+            hint
+        ));
+    }
+
+    // Shared knowledge from other Queens (via file)
+    if !context.knowledge_entries.is_empty() {
+        prompt.push_str("\n## Shared Knowledge (from other Queens)\n");
+        for entry in &context.knowledge_entries {
+            prompt.push_str(&format!("- {}\n", entry));
+        }
+    }
+
     // Task details
-    prompt.push_str(&format!("## Task: {}\n\n{}", task.id.0, task.description));
+    prompt.push_str(&format!("\n## Task: {}\n\n{}", task.id.0, task.description));
 
     if !context.knowledge.is_empty() {
         prompt.push_str("\n\n## Context Knowledge\n");
@@ -533,6 +560,8 @@ mod tests {
             knowledge: HashMap::new(),
             recent_messages: vec![],
             shared_state: HashMap::new(),
+            skill_hint: None,
+            knowledge_entries: vec![],
         };
         context.knowledge.insert("key1".to_string(), serde_json::json!("value1"));
         context.shared_state.insert("state1".to_string(), "state_value".to_string());
@@ -566,5 +595,61 @@ mod tests {
         // Clean shutdown
         let _ = handle.shutdown().await;
         let _ = join_handle.await;
+    }
+
+    #[test]
+    fn test_queued_messages_included_in_next_task() {
+        use crate::core::types::{AgentId, MessageType, Visibility};
+
+        let task = Task {
+            id: TaskId("T1".to_string()),
+            description: "Test task".to_string(),
+            status: TaskStatus::Ready,
+            assigned_to: None,
+            priority: 100,
+            blocked_by: vec![],
+            created_at: Utc::now(),
+        };
+
+        let context = TaskContext {
+            knowledge: HashMap::new(),
+            recent_messages: vec![],
+            shared_state: HashMap::new(),
+            skill_hint: None,
+            knowledge_entries: vec![],
+        };
+
+        let msg1 = SwarmMessage {
+            id: "msg-1".to_string(),
+            from: AgentId::Queen(QueenId("Q0".to_string())),
+            to: AgentId::Queen(QueenId("Q1".to_string())),
+            msg_type: MessageType::TaskResult,
+            payload: serde_json::json!({"result": "done"}),
+            timestamp: Utc::now(),
+            correlation_id: None,
+            visibility: Visibility::default_internal(),
+        };
+
+        let msg2 = SwarmMessage {
+            id: "msg-2".to_string(),
+            from: AgentId::Queen(QueenId("Q2".to_string())),
+            to: AgentId::Queen(QueenId("Q1".to_string())),
+            msg_type: MessageType::StatusRequest,
+            payload: serde_json::json!({"status": "checking"}),
+            timestamp: Utc::now(),
+            correlation_id: None,
+            visibility: Visibility::default_internal(),
+        };
+
+        let queued_messages = vec![msg1.clone(), msg2.clone()];
+
+        let prompt = format_task_prompt(&task, &context, &queued_messages);
+
+        // Verify the prompt includes the messages section
+        assert!(prompt.contains("## Messages from Other Agents"));
+        assert!(prompt.contains(&format!("From {:?}:", msg1.from)));
+        assert!(prompt.contains(&format!("From {:?}:", msg2.from)));
+        assert!(prompt.contains("\"result\":\"done\""));
+        assert!(prompt.contains("\"status\":\"checking\""));
     }
 }

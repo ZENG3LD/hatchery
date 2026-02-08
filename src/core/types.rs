@@ -212,6 +212,10 @@ pub struct TaskContext {
     pub recent_messages: Vec<SwarmMessage>,
     /// Shared state that can be updated during execution
     pub shared_state: HashMap<String, String>,
+    /// Optional hint for which skill/pattern to use (e.g., "carousel", "ralph")
+    pub skill_hint: Option<String>,
+    /// Formatted knowledge entries for prompt (from other Queens)
+    pub knowledge_entries: Vec<String>,
 }
 
 /// Result of a completed task.

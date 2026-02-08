@@ -21,6 +21,7 @@ use crate::mailbox::event_bus::EventBus;
 use crate::core::task_dag::{TaskDag, DagTask, DagTaskStatus, Priority, Complexity};
 use crate::core::validator::{Validator, ValidationResult};
 use crate::core::shared_memory::SharedMemory;
+use crate::core::knowledge_file::KnowledgeFile;
 use crate::safety::worktree::{WorktreeManager, MergeResult};
 use crate::queen::recovery::{SessionTracker, RecoveryManager, RecoveryConfig};
 use crate::swarm_host::tick::HeuristicTick;
@@ -73,6 +74,8 @@ pub struct SwarmHost {
     mailbox: SwarmMailbox,
     /// Shared knowledge store
     memory: SharedMemory,
+    /// File-based knowledge store for inter-Queen communication
+    knowledge_file: KnowledgeFile,
     /// Git isolation manager (optional)
     worktree_mgr: Option<WorktreeManager>,
     /// Validator for completed work
@@ -153,6 +156,8 @@ impl SwarmHost {
         // (audit can be enabled separately if needed)
         let event_bus = EventBus::new(128);
 
+        let knowledge_file = KnowledgeFile::in_working_dir(&config.working_dir);
+
         Ok(Self {
             id,
             handles: HashMap::new(),
@@ -161,6 +166,7 @@ impl SwarmHost {
             event_bus,
             mailbox,
             memory,
+            knowledge_file,
             worktree_mgr,
             validator,
             config,
@@ -278,6 +284,7 @@ impl SwarmHost {
         blocked_by: Vec<String>,
         priority: Priority,
         complexity: Complexity,
+        skill_hint: Option<String>,
     ) {
         let task = DagTask {
             id: id.to_string(),
@@ -296,6 +303,7 @@ impl SwarmHost {
             created_at: Utc::now(),
             started_at: None,
             completed_at: None,
+            skill_hint,
         };
 
         self.task_dag.add_task(task);
@@ -363,7 +371,17 @@ impl SwarmHost {
                     "num_turns": num_turns,
                     "quality_passed": quality_passed,
                 });
-                self.memory.store_task_result(&task_id.0, result_json);
+                self.memory.store_task_result(&task_id.0, result_json.clone());
+
+                // Write to knowledge file for inter-Queen sharing
+                let entry = crate::core::knowledge_file::KnowledgeEntry {
+                    queen_id: queen_id.0.clone(),
+                    task_id: task_id.0.clone(),
+                    key: format!("task_result_{}", task_id.0),
+                    value: result_json,
+                    timestamp: Utc::now(),
+                };
+                let _ = self.knowledge_file.write_entry(&entry);
 
                 // Validate and merge if git isolation
                 if let Ok(merge_result) = self.validated_merge(&queen_id).await {
@@ -459,6 +477,22 @@ impl SwarmHost {
             QueenEvent::StatusChanged { queen_id: _, status: _ } => {
                 self.tick_state.note_event();
             }
+
+            QueenEvent::ContextCompressed { queen_id, pre_tokens, trigger } => {
+                self.tick_state.note_event();
+                eprintln!(
+                    "[SwarmHost] Context compressed for {} (pre_tokens: {}, trigger: {})",
+                    queen_id.0, pre_tokens, trigger
+                );
+            }
+
+            QueenEvent::MessagesReceived { queen_id, count } => {
+                self.tick_state.note_event();
+                eprintln!(
+                    "[SwarmHost] {} received {} queued messages after task completion",
+                    queen_id.0, count
+                );
+            }
         }
 
         Ok(())
@@ -487,16 +521,25 @@ impl SwarmHost {
             .map(|entry| (entry.key, entry.value))
             .collect();
 
+        // Get recent knowledge entries from file for sharing between Queens
+        let knowledge_entries = self.knowledge_file.recent(10)
+            .unwrap_or_default()
+            .iter()
+            .map(|e| format!("[{}] {}: {}", e.queen_id, e.key, e.value))
+            .collect();
+
         let context = TaskContext {
             knowledge,
             recent_messages: Vec::new(),
             shared_state: HashMap::new(),
+            skill_hint: None,  // Will be set per-task below
+            knowledge_entries,
         };
 
         let mut assigned = 0;
 
-        // Collect (task_id, description, priority, blocked_by, created_at, queen_id) tuples
-        let assignments: Vec<(String, String, u8, Vec<TaskId>, chrono::DateTime<Utc>, QueenId)> = ready_tasks.iter()
+        // Collect (task_id, description, priority, blocked_by, created_at, skill_hint, queen_id) tuples
+        let assignments: Vec<(String, String, u8, Vec<TaskId>, chrono::DateTime<Utc>, Option<String>, QueenId)> = ready_tasks.iter()
             .zip(idle_queens.iter())
             .map(|(dag_task, queen_id)| {
                 (
@@ -505,13 +548,14 @@ impl SwarmHost {
                     dag_task.priority as u8,
                     dag_task.blocked_by.iter().map(|id| TaskId(id.clone())).collect(),
                     dag_task.created_at,
+                    dag_task.skill_hint.clone(),
                     queen_id.clone(),
                 )
             })
             .collect();
 
         // Now assign tasks (no borrow conflict)
-        for (task_id, description, priority, blocked_by, created_at, queen_id) in assignments {
+        for (task_id, description, priority, blocked_by, created_at, skill_hint, queen_id) in assignments {
             let task = Task {
                 id: TaskId(task_id.clone()),
                 description,
@@ -522,8 +566,12 @@ impl SwarmHost {
                 created_at,
             };
 
+            // Set skill_hint in context for this task
+            let mut task_context = context.clone();
+            task_context.skill_hint = skill_hint;
+
             if let Some(handle) = self.handles.get(&queen_id) {
-                if let Err(e) = handle.assign(task, context.clone()).await {
+                if let Err(e) = handle.assign(task, task_context).await {
                     eprintln!("[SwarmHost] Failed to assign task {} to {}: {}", task_id, queen_id.0, e);
                     continue;
                 }
@@ -555,19 +603,29 @@ impl SwarmHost {
                 dt.priority as u8,
                 dt.blocked_by.iter().map(|id| TaskId(id.clone())).collect::<Vec<TaskId>>(),
                 dt.created_at,
+                dt.skill_hint.clone(),
             )
         });
 
-        if let Some((task_id, description, priority, blocked_by, created_at)) = dag_task_info {
+        if let Some((task_id, description, priority, blocked_by, created_at, skill_hint)) = dag_task_info {
             let knowledge = self.memory.query("*")
                 .into_iter()
                 .map(|entry| (entry.key, entry.value))
+                .collect();
+
+            // Get recent knowledge entries from file for sharing between Queens
+            let knowledge_entries = self.knowledge_file.recent(10)
+                .unwrap_or_default()
+                .iter()
+                .map(|e| format!("[{}] {}: {}", e.queen_id, e.key, e.value))
                 .collect();
 
             let context = TaskContext {
                 knowledge,
                 recent_messages: Vec::new(),
                 shared_state: HashMap::new(),
+                skill_hint,
+                knowledge_entries,
             };
 
             let task = Task {
@@ -851,8 +909,8 @@ mod tests {
     fn test_add_tasks_to_dag() {
         let config = SwarmHostConfig::default();
         let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
-        host.add_task("task1", "First task", vec![], Priority::High, Complexity::Medium);
-        host.add_task("task2", "Second task", vec!["task1".to_string()], Priority::Normal, Complexity::Simple);
+        host.add_task("task1", "First task", vec![], Priority::High, Complexity::Medium, None);
+        host.add_task("task2", "Second task", vec!["task1".to_string()], Priority::Normal, Complexity::Simple, None);
         let progress = host.progress();
         assert_eq!(progress.total_tasks, 2);
         assert_eq!(progress.blocked, 1);
@@ -862,7 +920,7 @@ mod tests {
     fn test_is_complete_returns_false_when_tasks_pending() {
         let config = SwarmHostConfig::default();
         let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
-        host.add_task("task1", "Test task", vec![], Priority::High, Complexity::Trivial);
+        host.add_task("task1", "Test task", vec![], Priority::High, Complexity::Trivial, None);
         assert!(!host.is_complete());
     }
 
@@ -877,9 +935,9 @@ mod tests {
     fn test_progress_returns_correct_counts() {
         let config = SwarmHostConfig::default();
         let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
-        host.add_task("task1", "T1", vec![], Priority::High, Complexity::Trivial);
-        host.add_task("task2", "T2", vec!["task1".to_string()], Priority::Normal, Complexity::Medium);
-        host.add_task("task3", "T3", vec![], Priority::Low, Complexity::VeryComplex);
+        host.add_task("task1", "T1", vec![], Priority::High, Complexity::Trivial, None);
+        host.add_task("task2", "T2", vec!["task1".to_string()], Priority::Normal, Complexity::Medium, None);
+        host.add_task("task3", "T3", vec![], Priority::Low, Complexity::VeryComplex, None);
         let progress = host.progress();
         assert_eq!(progress.total_tasks, 3);
         assert_eq!(progress.completed, 0);
@@ -912,7 +970,7 @@ mod tests {
         host.handles.insert(QueenId("Q0".to_string()), handle);
 
         // Add a task
-        host.add_task("task1", "Test task", vec![], Priority::High, Complexity::Trivial);
+        host.add_task("task1", "Test task", vec![], Priority::High, Complexity::Trivial, None);
 
         // Schedule
         let assigned = host.try_schedule().await.unwrap();
@@ -929,7 +987,7 @@ mod tests {
         let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
 
         // Add and assign a task
-        host.add_task("T1", "Test task", vec![], Priority::High, Complexity::Trivial);
+        host.add_task("T1", "Test task", vec![], Priority::High, Complexity::Trivial, None);
         host.task_dag.assign("T1", QueenId("Q0".to_string()));
 
         // Handle completion event
@@ -956,7 +1014,7 @@ mod tests {
         let config = SwarmHostConfig::default();
         let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
 
-        host.add_task("T1", "Test task", vec![], Priority::High, Complexity::Trivial);
+        host.add_task("T1", "Test task", vec![], Priority::High, Complexity::Trivial, None);
         host.task_dag.assign("T1", QueenId("Q0".to_string()));
 
         let event = QueenEvent::TaskFailed {
@@ -1015,10 +1073,53 @@ mod tests {
         let config = SwarmHostConfig::default();
         let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
 
-        host.add_task("T1", "Test", vec![], Priority::Normal, Complexity::Trivial);
+        host.add_task("T1", "Test", vec![], Priority::Normal, Complexity::Trivial, None);
 
         let result = host.tick().await.unwrap();
         assert_eq!(result.iteration, 1);
         assert_eq!(result.tasks_assigned, 0); // No queens registered
+    }
+
+    #[tokio::test]
+    async fn test_skill_hint_in_task_context() {
+        let config = SwarmHostConfig::default();
+        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+
+        // Add task with skill_hint
+        host.add_task(
+            "carousel-task",
+            "Create exchange connector using carousel pattern",
+            vec![],
+            Priority::High,
+            Complexity::VeryComplex,
+            Some("carousel".to_string()),
+        );
+
+        // Verify the DagTask has the skill_hint
+        let dag_task = host.task_dag.get("carousel-task").unwrap();
+        assert_eq!(dag_task.skill_hint, Some("carousel".to_string()));
+
+        // Create a mock queen handle to test context propagation
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(64);
+        let (_status_tx, status_rx) = watch::channel(QueenStatus::Idle);
+        let handle = QueenHandle::new(
+            QueenId("Q0".to_string()),
+            SpawnMode::PerTask,
+            cmd_tx,
+            status_rx,
+        );
+
+        host.handles.insert(QueenId("Q0".to_string()), handle);
+
+        // Schedule the task
+        let assigned = host.try_schedule().await.unwrap();
+        assert_eq!(assigned, 1);
+
+        // Verify the TaskContext contains the skill_hint
+        if let Some(QueenCommand::Assign { task: _, context }) = cmd_rx.recv().await {
+            assert_eq!(context.skill_hint, Some("carousel".to_string()));
+        } else {
+            panic!("Expected Assign command");
+        }
     }
 }

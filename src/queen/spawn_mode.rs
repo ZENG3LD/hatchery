@@ -131,6 +131,10 @@ pub struct ClaudeEvent {
     /// Structured output (when --json-schema is used)
     #[serde(default)]
     pub structured_output: Option<serde_json::Value>,
+
+    /// Compact metadata (present on compact_boundary system events)
+    #[serde(default)]
+    pub compact_metadata: Option<serde_json::Value>,
 }
 
 impl ClaudeEvent {
@@ -172,6 +176,19 @@ impl ClaudeEvent {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Check if this is a compact_boundary system event.
+    pub fn is_compact_boundary(&self) -> bool {
+        self.event_type == "system" && self.subtype.as_deref() == Some("compact_boundary")
+    }
+
+    /// Extract pre_tokens from compact_metadata.
+    pub fn pre_tokens(&self) -> Option<u64> {
+        self.compact_metadata
+            .as_ref()
+            .and_then(|m| m.get("preTokens"))
+            .and_then(|v| v.as_u64())
     }
 }
 
@@ -258,5 +275,21 @@ mod tests {
         assert!(event.is_result());
         assert!(!event.is_success());
         assert_eq!(event.is_error, Some(true));
+    }
+
+    #[test]
+    fn test_compact_boundary_detection() {
+        let json = r#"{"type":"system","subtype":"compact_boundary","compact_metadata":{"preTokens":150000,"postTokens":50000,"compressionRatio":0.33}}"#;
+        let event: ClaudeEvent = serde_json::from_str(json).unwrap();
+        assert!(event.is_compact_boundary());
+        assert_eq!(event.pre_tokens(), Some(150000));
+    }
+
+    #[test]
+    fn test_compact_boundary_detection_missing_metadata() {
+        let json = r#"{"type":"system","subtype":"compact_boundary"}"#;
+        let event: ClaudeEvent = serde_json::from_str(json).unwrap();
+        assert!(event.is_compact_boundary());
+        assert_eq!(event.pre_tokens(), None);
     }
 }

@@ -81,6 +81,8 @@ pub struct DagTask {
     pub started_at: Option<DateTime<Utc>>,
     /// When this task completed
     pub completed_at: Option<DateTime<Utc>>,
+    /// Optional hint for which skill/pattern to use (e.g., "carousel", "ralph")
+    pub skill_hint: Option<String>,
 }
 
 /// Result of a completed task.
@@ -362,6 +364,7 @@ mod tests {
             created_at: Utc::now(),
             started_at: None,
             completed_at: None,
+            skill_hint: None,
         }
     }
 

@@ -8,3 +8,4 @@ pub mod shared_memory;
 pub mod compaction;
 pub mod validator;
 pub mod operator;
+pub mod knowledge_file;

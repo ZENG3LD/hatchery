@@ -527,15 +527,15 @@ mod tests {
             SwarmHostId("swarm1".to_string()),
             SwarmHostConfig::default(),
         ).unwrap();
-        swarm1.add_task("t1", "Task 1", vec![], Priority::High, Complexity::Trivial);
-        swarm1.add_task("t2", "Task 2", vec![], Priority::High, Complexity::Trivial);
+        swarm1.add_task("t1", "Task 1", vec![], Priority::High, Complexity::Trivial, None);
+        swarm1.add_task("t2", "Task 2", vec![], Priority::High, Complexity::Trivial, None);
         lord.add_swarm("swarm1", swarm1, 100).unwrap();
 
         let mut swarm2 = SwarmHost::new(
             SwarmHostId("swarm2".to_string()),
             SwarmHostConfig::default(),
         ).unwrap();
-        swarm2.add_task("t3", "Task 3", vec![], Priority::Normal, Complexity::Medium);
+        swarm2.add_task("t3", "Task 3", vec![], Priority::Normal, Complexity::Medium, None);
         lord.add_swarm("swarm2", swarm2, 100).unwrap();
 
         let progress = lord.global_progress();

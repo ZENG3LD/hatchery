@@ -49,6 +49,8 @@ impl AuditEntry {
             "Knowledge" => MessageType::Knowledge,
             "ProcessDied" => MessageType::Custom("ProcessDied".to_string()),
             "StatusChanged" => MessageType::StatusReport,
+            "ContextCompressed" => MessageType::Custom("ContextCompressed".to_string()),
+            "MessagesReceived" => MessageType::Custom("MessagesReceived".to_string()),
             _ => MessageType::Custom(self.event_type.clone()),
         };
 
@@ -282,6 +284,34 @@ impl EventBus {
                     to: "SwarmHost".to_string(),
                     event_type: "StatusChanged".to_string(),
                     payload: serde_json::to_value(status).unwrap_or(serde_json::Value::Null),
+                }
+            }
+            QueenEvent::ContextCompressed {
+                queen_id,
+                pre_tokens,
+                trigger,
+            } => {
+                AuditEntry {
+                    timestamp,
+                    from: format!("Queen({})", queen_id.0),
+                    to: "SwarmHost".to_string(),
+                    event_type: "ContextCompressed".to_string(),
+                    payload: serde_json::json!({
+                        "pre_tokens": pre_tokens,
+                        "trigger": trigger,
+                    }),
+                }
+            }
+
+            QueenEvent::MessagesReceived { queen_id, count } => {
+                AuditEntry {
+                    timestamp,
+                    from: format!("Queen({})", queen_id.0),
+                    to: "SwarmHost".to_string(),
+                    event_type: "MessagesReceived".to_string(),
+                    payload: serde_json::json!({
+                        "count": count,
+                    }),
                 }
             }
         }

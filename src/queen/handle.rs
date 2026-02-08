@@ -76,6 +76,17 @@ pub enum QueenEvent {
         queen_id: QueenId,
         status: QueenStatus,
     },
+    /// Context was compressed by Claude Code.
+    ContextCompressed {
+        queen_id: QueenId,
+        pre_tokens: u64,
+        trigger: String,
+    },
+    /// Messages received from mailbox (informational).
+    MessagesReceived {
+        queen_id: QueenId,
+        count: usize,
+    },
 }
 
 // ============================================================================
@@ -246,6 +257,8 @@ mod tests {
             knowledge: HashMap::new(),
             recent_messages: vec![],
             shared_state: HashMap::new(),
+            skill_hint: None,
+            knowledge_entries: vec![],
         };
 
         // Send assign command
@@ -431,5 +444,45 @@ mod tests {
         assert!(matches!(cmd_rx.recv().await.unwrap(), QueenCommand::Shutdown));
         assert!(matches!(cmd_rx.recv().await.unwrap(), QueenCommand::Shutdown));
         assert!(matches!(cmd_rx.recv().await.unwrap(), QueenCommand::Shutdown));
+    }
+
+    #[test]
+    fn test_context_compressed_event() {
+        let event = QueenEvent::ContextCompressed {
+            queen_id: QueenId("Q0".to_string()),
+            pre_tokens: 150000,
+            trigger: "automatic".to_string(),
+        };
+
+        // Verify event can be matched
+        match event {
+            QueenEvent::ContextCompressed {
+                queen_id,
+                pre_tokens,
+                trigger,
+            } => {
+                assert_eq!(queen_id.0, "Q0");
+                assert_eq!(pre_tokens, 150000);
+                assert_eq!(trigger, "automatic");
+            }
+            _ => panic!("Expected ContextCompressed event"),
+        }
+    }
+
+    #[test]
+    fn test_messages_received_event() {
+        let event = QueenEvent::MessagesReceived {
+            queen_id: QueenId("Q0".to_string()),
+            count: 3,
+        };
+
+        // Verify event can be constructed and matched
+        match event {
+            QueenEvent::MessagesReceived { queen_id, count } => {
+                assert_eq!(queen_id.0, "Q0");
+                assert_eq!(count, 3);
+            }
+            _ => panic!("Expected MessagesReceived event"),
+        }
     }
 }

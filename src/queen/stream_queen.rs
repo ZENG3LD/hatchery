@@ -196,6 +196,7 @@ async fn run_actor(
     let mut current_task: Option<(TaskId, String)> = None;
     let mut turn_count: u32 = 0;
     let mut accumulated_cost: f64 = 0.0;
+    let mut pending_messages: Vec<String> = Vec::new();
 
     // Channel for receiving parsed events from stdout
     let (stdout_event_tx, mut stdout_event_rx) = mpsc::channel::<ClaudeEvent>(256);
@@ -241,11 +242,16 @@ async fn run_actor(
                         }
                     }
                     QueenCommand::Message(msg) => {
-                        // Queen-to-Queen message: send as user message
-                        let content = serde_json::to_string(&msg.payload).unwrap_or_default();
-                        let input = StreamInput::user_message(&content, session_id.as_deref());
-                        if let Ok(json) = serde_json::to_string(&input) {
-                            let _ = stdin_tx.send(json).await;
+                        let content = format!("Message from {:?}: {}", msg.from, serde_json::to_string(&msg.payload).unwrap_or_default());
+
+                        // Forum-style: Queue messages if task is active, otherwise send immediately
+                        if current_task.is_some() {
+                            pending_messages.push(content);
+                        } else {
+                            let input = StreamInput::user_message(&content, session_id.as_deref());
+                            if let Ok(json) = serde_json::to_string(&input) {
+                                let _ = stdin_tx.send(json).await;
+                            }
                         }
                     }
                     QueenCommand::Shutdown => {
@@ -262,6 +268,32 @@ async fn run_actor(
                 if event.is_system_init() {
                     if let Some(sid) = &event.session_id {
                         session_id = Some(sid.clone());
+                    }
+                }
+
+                // Detect context compression
+                if event.is_compact_boundary() {
+                    let pre_tokens = event.pre_tokens().unwrap_or(0);
+                    let _ = event_tx.send(QueenEvent::ContextCompressed {
+                        queen_id: id.clone(),
+                        pre_tokens,
+                        trigger: "automatic".to_string(),
+                    }).await;
+
+                    // Re-inject discipline + task context as recovery message
+                    if let Some((ref tid, ref desc)) = current_task {
+                        let recovery = format!(
+                            "{}\n\n## CONTEXT RECOVERY — Your context was just compressed\n\
+                            Your current task: {} — {}\n\
+                            Re-read your task description above and continue working.\n\
+                            Remember: You are a MANAGER. Spawn worker agents via Task tool. Never implement yourself.",
+                            crate::core::prompts::orchestration_discipline_block(),
+                            tid.0, desc
+                        );
+                        let input = StreamInput::user_message(&recovery, session_id.as_deref());
+                        if let Ok(json) = serde_json::to_string(&input) {
+                            let _ = stdin_tx.send(json).await;
+                        }
                     }
                 }
 
@@ -325,6 +357,23 @@ async fn run_actor(
                             current_task = None;
                             turn_count = 0;
                             accumulated_cost = 0.0;
+
+                            // After task completes, send pending messages
+                            if !pending_messages.is_empty() {
+                                let msg_text = format!(
+                                    "## Messages received while you were working\n{}\n\nProcess these messages and take action if needed.",
+                                    pending_messages.join("\n")
+                                );
+                                let input = StreamInput::user_message(&msg_text, session_id.as_deref());
+                                if let Ok(json) = serde_json::to_string(&input) {
+                                    let _ = stdin_tx.send(json).await;
+                                }
+                                let _ = event_tx.send(QueenEvent::MessagesReceived {
+                                    queen_id: id.clone(),
+                                    count: pending_messages.len(),
+                                }).await;
+                                pending_messages.clear();
+                            }
                         }
                         CompletionVerdict::Failed { error, cost_usd, num_turns } => {
                             if let Some((ref tid, _)) = current_task {
@@ -340,6 +389,7 @@ async fn run_actor(
                             current_task = None;
                             turn_count = 0;
                             accumulated_cost = 0.0;
+                            pending_messages.clear();
                         }
                         CompletionVerdict::TimedOut { reason } => {
                             if let Some((ref tid, _)) = current_task {
@@ -352,6 +402,7 @@ async fn run_actor(
                                 }).await;
                             }
                             current_task = None;
+                            pending_messages.clear();
                         }
                     }
                 }
@@ -425,8 +476,27 @@ fn format_task_prompt(task: &Task, context: &TaskContext) -> String {
     prompt.push_str("Available agent types: rust-implementer, implementer, research-agent, rust-expert, Explore.\n");
     prompt.push_str("Launch independent agents in PARALLEL. Only serialize when there are dependencies.\n\n");
 
+    // Orchestration discipline (survives context compression)
+    prompt.push_str(&format!("{}\n\n", crate::core::prompts::orchestration_discipline_block()));
+
+    // Skill hint (if provided)
+    if let Some(ref hint) = context.skill_hint {
+        prompt.push_str(&format!(
+            "\n## Recommended Execution Pattern\nUse /{} pattern for this task. Read the skill docs and follow its phases.\n",
+            hint
+        ));
+    }
+
+    // Shared knowledge from other Queens (via file)
+    if !context.knowledge_entries.is_empty() {
+        prompt.push_str("\n## Shared Knowledge (from other Queens)\n");
+        for entry in &context.knowledge_entries {
+            prompt.push_str(&format!("- {}\n", entry));
+        }
+    }
+
     // Task details
-    prompt.push_str(&format!("## Task: {}\n\n{}", task.id.0, task.description));
+    prompt.push_str(&format!("\n## Task: {}\n\n{}", task.id.0, task.description));
 
     if !context.knowledge.is_empty() {
         prompt.push_str("\n\n## Context Knowledge\n");
@@ -482,6 +552,8 @@ mod tests {
             knowledge: HashMap::new(),
             recent_messages: vec![],
             shared_state: HashMap::new(),
+            skill_hint: None,
+            knowledge_entries: vec![],
         };
 
         let prompt = format_task_prompt(&task, &context);
@@ -516,6 +588,8 @@ mod tests {
             knowledge,
             recent_messages: vec![],
             shared_state,
+            skill_hint: None,
+            knowledge_entries: vec![],
         };
 
         let prompt = format_task_prompt(&task, &context);
