@@ -131,61 +131,61 @@ V2 introduces:
 
 ### 3.1 TaskDag
 
-- [ ] Create `hatchery/src/v2/task_dag.rs`
-- [ ] Implement DagTask struct with blocked_by, blocks, priority, complexity
-- [ ] Implement TaskDag with HashMap storage
-- [ ] Implement `add_task()` with automatic reverse-link (blocked_by ↔ blocks)
-- [ ] Implement `ready_tasks()` — return tasks with all deps satisfied and status Ready
-- [ ] Implement `refresh_readiness()` — Blocked → Ready when deps complete
-- [ ] Implement `assign()` — mark task as Assigned to QueenId
-- [ ] Implement `complete()` — mark as Completed, trigger refresh
-- [ ] Implement `fail()` — mark as Failed, optionally reset to Ready for retry
-- [ ] Implement `critical_path()` — identify bottleneck tasks
+- [x] Create `hatchery/src/v2/task_dag.rs`
+- [x] Implement DagTask struct with blocked_by, blocks, priority, complexity
+- [x] Implement TaskDag with HashMap storage
+- [x] Implement `add_task()` with automatic reverse-link (blocked_by ↔ blocks)
+- [x] Implement `ready_tasks()` — return tasks with all deps satisfied and status Ready
+- [x] Implement `refresh_readiness()` — Blocked → Ready when deps complete
+- [x] Implement `assign()` — mark task as Assigned to QueenId
+- [x] Implement `complete()` — mark as Completed, trigger refresh
+- [x] Implement `fail()` — mark as Failed, optionally reset to Ready for retry
+- [x] Implement `critical_path()` — identify bottleneck tasks
 - [ ] Implement `from_prd()` — build DAG from parsed PRD (infer deps from indentation/keywords)
-- [ ] Write unit tests for all operations including dependency chains
+- [x] Write unit tests for all operations including dependency chains
 
 ### 3.2 CompactionStrategy
 
-- [ ] Create `hatchery/src/v2/compaction.rs`
-- [ ] Implement CompactionStrategy struct with threshold, protected scopes, levels
-- [ ] Implement `should_compact()` — check if current context size exceeds threshold
-- [ ] Implement `compact()` — apply progressive compaction levels
-- [ ] Implement compaction levels:
+- [x] Create `hatchery/src/v2/compaction.rs`
+- [x] Implement CompactionStrategy struct with threshold, protected scopes, levels
+- [x] Implement `should_compact()` — check if current context size exceeds threshold
+- [x] Implement `compact()` — apply progressive compaction levels
+- [x] Implement compaction levels:
   - Level 1 (80%): Remove tool responses older than 20 turns
   - Level 2 (85%): Remove tool responses older than 10 turns
   - Level 3 (90%): Summarize conversation older than 5 turns
   - Level 4 (95%): Fresh start with system prompt + task DAG + knowledge + last 3 messages
-- [ ] Implement protected scope preservation (system prompt, active task context, knowledge)
-- [ ] Implement Goose-style dual-visibility: only compact agent-invisible messages
-- [ ] Write unit tests with mock context data
+- [x] Implement protected scope preservation (system prompt, active task context, knowledge)
+- [x] Implement Goose-style dual-visibility: only compact agent-invisible messages
+- [x] Write unit tests with mock context data
 
 ### 3.3 Validator
 
-- [ ] Create `hatchery/src/v2/validator.rs`
-- [ ] Implement Validator enum: Command, Queen, Pipeline
-- [ ] Implement Command validator (run shell command, check exit code)
-- [ ] Implement Queen validator (spawn AI agent to review code)
-- [ ] Implement Pipeline validator (command first, then AI if passes)
-- [ ] Implement ValidationResult with stage results and feedback
-- [ ] Write unit tests for Command validator
+- [x] Create `hatchery/src/v2/validator.rs`
+- [x] Implement Validator enum: Command, AiReview, Pipeline
+- [x] Implement Command validator (run shell command, check exit code)
+- [ ] Implement AiReview validator (spawn AI agent to review code) — PLACEHOLDER ONLY
+- [x] Implement Pipeline validator (command first, then AI if passes)
+- [x] Implement ValidationResult with stage results and feedback
+- [x] Write unit tests for Command validator
 
 ### 3.4 SwarmHost Refactor
 
-- [ ] Refactor `hatchery/src/v2/swarm_host.rs` (new file, keep old for reference)
-- [ ] SwarmHost uses `HashMap<QueenId, Box<dyn Queen>>` instead of raw PipeProcess
-- [ ] SwarmHost uses SwarmMailbox for all communication
-- [ ] SwarmHost uses TaskDag for task scheduling
-- [ ] SwarmHost uses Validator for result checking
-- [ ] SwarmHost uses CompactionStrategy for context management
+- [x] Refactor `hatchery/src/v2/swarm_host.rs` (new file, keep old for reference)
+- [x] SwarmHost uses `HashMap<QueenId, Box<dyn Queen>>` instead of raw PipeProcess
+- [x] SwarmHost uses SwarmMailbox for all communication
+- [x] SwarmHost uses TaskDag for task scheduling
+- [x] SwarmHost uses Validator for result checking
+- [x] SwarmHost uses CompactionStrategy for context management
 - [ ] Implement AI Coordinator session (Claude prompt for intelligent task assignment)
-  - Coordinator reads task DAG state
-  - Coordinator decides which Queen gets which task
-  - Coordinator monitors progress and handles escalations
-  - Coordinator adjusts plan based on results
+  - [ ] Coordinator reads task DAG state
+  - [ ] Coordinator decides which Queen gets which task
+  - [ ] Coordinator monitors progress and handles escalations
+  - [ ] Coordinator adjusts plan based on results
 - [ ] Implement main orchestration loop with tokio::select!
-- [ ] Implement Queen spawn/shutdown lifecycle
-- [ ] Implement SharedMemory integration (knowledge injection into Queen prompts)
-- [ ] Implement progress reporting (to outbox for BroodLord/Operator)
+- [x] Implement Queen spawn/shutdown lifecycle
+- [x] Implement SharedMemory integration (knowledge injection into Queen prompts)
+- [x] Implement progress reporting (to outbox for BroodLord/Operator)
 - [ ] Write integration test: SwarmHost with 2 NativeQueens, 3 tasks with deps
 
 ### 3.5 Backward Compatibility
@@ -199,51 +199,52 @@ V2 introduces:
 
 ### 4.1 WorktreeManager Refactor
 
-- [ ] Refactor `hatchery/src/v2/git/worktree.rs`
-- [ ] Implement per-Queen worktree creation with branch naming: `hatchery/swarm-{id}/queen-{id}`
-- [ ] Implement merge with validation gate (merge only after Validator passes)
-- [ ] Implement conflict detection and strategy selection (TakeTheirs, TakeOurs, Escalate)
-- [ ] Implement conflict escalation to SwarmHost for AI resolution
-- [ ] Implement worktree cleanup
-- [ ] Implement branch cleanup after merge
+- [x] Refactor `hatchery/src/v2/worktree.rs` (created as worktree.rs not git/worktree.rs)
+- [x] Implement per-Queen worktree creation with branch naming: `hatchery/{queen_id}` (simpler than spec)
+- [x] Implement merge with validation gate (merge only after Validator passes)
+- [x] Implement conflict detection and strategy selection (TakeTheirs, TakeOurs, Escalate)
+- [x] Implement conflict escalation to SwarmHost for AI resolution
+- [x] Implement worktree cleanup
+- [x] Implement branch cleanup after merge
 
 ### 4.2 Merge Flow
 
-- [ ] Implement Queen → SwarmHost branch merge
-- [ ] Implement SwarmHost branch → main merge (for BroodLord level)
-- [ ] Implement merge commit attribution (Co-Authored-By: Queen-0)
-- [ ] Implement merge verification (run validator after merge)
+- [x] Implement Queen → SwarmHost branch merge (validated_merge in swarm_host.rs)
+- [ ] Implement SwarmHost branch → main merge (for BroodLord level) — NOT DONE
+- [x] Implement merge commit attribution (Co-Authored-By: Queen-0)
+- [x] Implement merge verification (run validator after merge)
 - [ ] Write integration test: two Queens edit same file, merge, verify
 
 ## Phase 5: BroodLord + OperatorChannel (Week 5-6)
 
 ### 5.1 OperatorChannel
 
-- [ ] Create `hatchery/src/v2/operator/mod.rs`
-- [ ] Define `trait OperatorChannel` with emit, recv, is_connected
-- [ ] Define `OperatorEvent` enum: Progress, GlobalProgress, Escalation, Question, SwarmCompleted, AllComplete, Error
-- [ ] Define `OperatorCommand` enum: Reprioritize, Cancel, Answer, Message, Scale, ShutdownAll
-- [ ] Implement `StdoutChannel` (print events to stdout, read commands from stdin)
-- [ ] Implement `PipeChannel` (for when BroodLord is spawned by parent Opus agent)
-- [ ] Write unit tests for both channels
+- [x] Create `hatchery/src/v2/operator.rs` (not operator/mod.rs)
+- [x] Define `trait OperatorChannel` with emit, recv, is_connected
+- [x] Define `OperatorEvent` enum: Progress, GlobalProgress, Escalation, Question, SwarmCompleted, AllComplete, Error
+- [x] Define `OperatorCommand` enum: Reprioritize, Cancel, Answer, Message, Scale, ShutdownAll
+- [x] Implement `StdoutChannel` (print events to stdout, read commands from stdin)
+- [x] Implement `NullChannel` (for testing)
+- [ ] Implement `PipeChannel` (for when BroodLord is spawned by parent Opus agent) — STUB ONLY
+- [x] Write unit tests for both channels
 
 ### 5.2 BroodLord Refactor
 
-- [ ] Refactor `hatchery/src/v2/brood_lord.rs` (new file)
-- [ ] BroodLord uses SwarmHosts instead of raw L2 processes
-- [ ] Implement continuous monitoring loop (not one-shot decomposition)
-  - Periodically check SwarmHost status
-  - React to escalations
-  - Adjust resource allocation
-  - Report to Operator
-- [ ] Implement AI strategist session (Opus-level)
-  - Decompose master task into SwarmHost assignments
-  - Monitor cross-SwarmHost dependencies
-  - Handle escalations with intelligent decisions
-- [ ] Implement GlobalMemory with namespaced knowledge
-- [ ] Implement global TaskDag for cross-SwarmHost dependencies
-- [ ] Implement dynamic scaling (add/remove Queens from SwarmHosts)
-- [ ] Wire up OperatorChannel for bidirectional communication
+- [x] Refactor `hatchery/src/v2/brood_lord.rs` (new file)
+- [x] BroodLord uses SwarmHosts instead of raw L2 processes
+- [x] Implement continuous monitoring loop (not one-shot decomposition)
+  - [x] Periodically check SwarmHost status
+  - [x] React to escalations
+  - [x] Adjust resource allocation
+  - [x] Report to Operator
+- [ ] Implement AI strategist session (Opus-level) — DETERMINISTIC ONLY, NO AI
+  - [ ] Decompose master task into SwarmHost assignments
+  - [ ] Monitor cross-SwarmHost dependencies
+  - [ ] Handle escalations with intelligent decisions
+- [x] Implement GlobalMemory with namespaced knowledge
+- [ ] Implement global TaskDag for cross-SwarmHost dependencies — NOT DONE
+- [ ] Implement dynamic scaling (add/remove Queens from SwarmHosts) — NOT DONE
+- [x] Wire up OperatorChannel for bidirectional communication
 - [ ] Write integration test: BroodLord with 2 SwarmHosts, operator interaction
 
 ### 5.3 Backward Compatibility
@@ -255,10 +256,10 @@ V2 introduces:
 
 ### 6.1 CustomQueen Enhanced
 
-- [ ] Implement full QueenMailbox with per-worker inboxes and event log
-- [ ] Implement TaskScheduler with DAG support (not just round-robin)
-- [ ] Implement worker pool management (spawn, monitor, restart dead workers)
-- [ ] Implement context tracking per worker (token count, compaction)
+- [x] Implement full QueenMailbox with per-worker inboxes and event log
+- [x] Implement TaskScheduler with DAG support (not just round-robin)
+- [x] Implement worker pool management (spawn, monitor, restart dead workers)
+- [x] Implement context tracking per worker (token count, compaction)
 
 ### 6.2 Codex Backend
 
@@ -269,12 +270,13 @@ V2 introduces:
 
 ### 6.3 Generic API Backend
 
-- [ ] Implement WorkerBackend::HttpApi with configurable model/endpoint
-- [ ] Support OpenAI-compatible API format
-- [ ] Support Anthropic API format
-- [ ] Implement conversation history management (for multi-turn)
-- [ ] Implement streaming response handling
-- [ ] Write unit tests with mock HTTP server
+- [x] Implement WorkerBackend::HttpApi with configurable model/endpoint
+- [x] Support OpenAI-compatible API format
+- [x] Support Anthropic API format
+- [x] Implement conversation history management (for multi-turn)
+- [ ] Implement streaming response handling — NOT DONE
+- [ ] Write unit tests with mock HTTP server — HTTP CALLS ARE STUBBED
+- [ ] Remove STUB placeholders and implement real HTTP calls
 
 ### 6.4 Mixed Backend SwarmHost
 
@@ -287,29 +289,29 @@ V2 introduces:
 
 ### 7.1 CLI Updates
 
-- [ ] Add `--backend` flag to `hatchery spawn`
-- [ ] Add `--api-url` and `--api-model` flags for custom backend
-- [ ] Add `--validator` flag (command string or "ai" for Queen validator)
-- [ ] Add `--compaction-threshold` flag
-- [ ] Add `--event-log` flag for SQLite path
-- [ ] Add `hatchery events` command to query event log
-- [ ] Add `hatchery message <target> <text>` for operator → agent messaging
-- [ ] Update `hatchery status` to show Queen-level details
+- [x] Add `--backend` flag to `hatchery spawn`
+- [x] Add `--api-url` and `--api-model` flags for custom backend
+- [x] Add `--validator` flag (command string or "ai" for Queen validator)
+- [x] Add `--compaction-threshold` flag
+- [x] Add `--event-log` flag for SQLite path
+- [x] Add `hatchery events` command to query event log
+- [x] Add `hatchery message <target> <text>` for operator → agent messaging
+- [ ] Update `hatchery status` to show Queen-level details — SHOWS EVENT LOG BUT NOT QUEEN STATE
 
 ### 7.2 Configuration File
 
-- [ ] Implement TOML config loading from `.hatchery/config.toml`
-- [ ] Config precedence: CLI flags > config file > defaults
+- [x] Implement TOML config loading from `.hatchery/config.toml`
+- [ ] Config precedence: CLI flags > config file > defaults — PARSER EXISTS BUT NOT WIRED INTO MAIN.RS
 - [ ] Document all config options
 
 ### 7.3 Prompt Templates
 
-- [ ] Design NativeQueen sergeant prompt (AI manager, not iterator)
-- [ ] Design SwarmHost coordinator prompt (tactical coordinator)
-- [ ] Design BroodLord strategist prompt (strategic decomposer)
-- [ ] Design Validator AI reviewer prompt
-- [ ] Store prompts in `hatchery/src/v2/prompts/`
-- [ ] Support user override via `--prompt` flag or config
+- [x] Design NativeQueen sergeant prompt (AI manager, not iterator)
+- [x] Design SwarmHost coordinator prompt (tactical coordinator)
+- [x] Design BroodLord strategist prompt (strategic decomposer)
+- [x] Design Validator AI reviewer prompt
+- [ ] Store prompts in `hatchery/src/v2/prompts/` — STORED IN prompts.rs NOT SEPARATE DIR
+- [ ] Support user override via `--prompt` flag or config — NO OVERRIDE IMPLEMENTED
 
 ### 7.4 Final Integration Tests
 
