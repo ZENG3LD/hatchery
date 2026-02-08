@@ -3,7 +3,7 @@ pub mod router;
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use crate::v2::types::*;
+use crate::core::types::*;
 use event_log::SqliteEventLog;
 
 /// SwarmMailbox — communication hub for the swarm.

@@ -13,10 +13,10 @@ use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 
-use crate::v2::types::*;
-use crate::v2::swarm_host::{SwarmHost, SwarmHostConfig, SwarmProgress, TickResult};
-use crate::v2::operator::{OperatorChannel, OperatorEvent, OperatorCommand, LogLevel};
-use crate::v2::shared_memory::SharedMemory;
+use crate::core::types::*;
+use crate::swarm_host::{SwarmHost, SwarmHostConfig, SwarmProgress, TickResult};
+use crate::core::operator::{OperatorChannel, OperatorEvent, OperatorCommand, LogLevel};
+use crate::core::shared_memory::SharedMemory;
 
 // ============================================================================
 // Types
@@ -368,9 +368,9 @@ impl BroodLord {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::operator::NullChannel;
-    use crate::v2::task_dag::{Priority, Complexity};
-    use crate::v2::queen::Queen;
+    use crate::core::operator::NullChannel;
+    use crate::core::task_dag::{Priority, Complexity};
+    use crate::queen::Queen;
     use async_trait::async_trait;
 
     // MockQueen for testing

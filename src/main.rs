@@ -5,14 +5,14 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use hatchery::types::{HatcheryConfig, Mode};
-use hatchery::v2::mailbox::event_log::SqliteEventLog;
-use hatchery::v2::types::{SwarmMessage, AgentId, MessageType, Visibility, SwarmHostId, QueenId};
-use hatchery::v2::queen::native::{NativeQueen, NativeQueenConfig};
-use hatchery::v2::swarm_host::{SwarmHost, SwarmHostConfig};
-use hatchery::v2::brood_lord::{BroodLord, BroodLordConfig};
-use hatchery::v2::operator::NullChannel;
-use hatchery::v2::task_dag::{Priority, Complexity};
+use hatchery::cli::{HatcheryConfig, Mode};
+use hatchery::mailbox::event_log::SqliteEventLog;
+use hatchery::core::types::{SwarmMessage, AgentId, MessageType, Visibility, SwarmHostId, QueenId};
+use hatchery::queen::native::{NativeQueen, NativeQueenConfig};
+use hatchery::swarm_host::{SwarmHost, SwarmHostConfig};
+use hatchery::brood_lord::{BroodLord, BroodLordConfig};
+use hatchery::core::operator::NullChannel;
+use hatchery::core::task_dag::{Priority, Complexity};
 use hatchery::prd;
 
 #[derive(Parser)]

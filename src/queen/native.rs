@@ -10,8 +10,8 @@ use async_trait::async_trait;
 use anyhow::{Result, Context as AnyhowContext};
 use parking_lot::Mutex;
 use zengeld_hub_core::{CliTool, PipeProcess, PipeProcessOptions};
-use crate::v2::types::*;
-use crate::v2::prompts;
+use crate::core::types::*;
+use crate::core::prompts;
 use super::Queen;
 
 /// Configuration for NativeQueen
@@ -66,7 +66,7 @@ You have access to {} workers.
 {}"#,
             self.max_workers,
             self.max_workers,
-            crate::v2::prompts::orchestration_discipline_block()
+            crate::core::prompts::orchestration_discipline_block()
         )
     }
 }

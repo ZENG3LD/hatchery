@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use crate::v2::types::{AgentId, Severity, SwarmHostId};
+use crate::core::types::{AgentId, Severity, SwarmHostId};
 
 // ============================================================================
 // Events (Up: BroodLord → Operator)
@@ -396,7 +396,7 @@ mod tests {
     #[tokio::test]
     async fn test_operator_event_serialization_roundtrip() {
         let event = OperatorEvent::Escalation {
-            source: AgentId::Queen(crate::v2::types::QueenId("Q0".to_string())),
+            source: AgentId::Queen(crate::core::types::QueenId("Q0".to_string())),
             issue: "Task blocked".to_string(),
             severity: Severity::High,
         };

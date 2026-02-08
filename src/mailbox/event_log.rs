@@ -3,7 +3,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use rusqlite::{Connection, params};
 use anyhow::Result;
-use crate::v2::types::*;
+use crate::core::types::*;
 
 /// SqliteEventLog — Durable storage for all swarm messages.
 ///

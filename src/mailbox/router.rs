@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use anyhow::Result;
-use crate::v2::types::*;
+use crate::core::types::*;
 use super::event_log::SqliteEventLog;
 
 /// MessageRouter — async channel-based message routing.

@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
 use anyhow::{Result, anyhow, Context};
-use crate::v2::types::*;
+use crate::core::types::*;
 
 // ============================================================================
 // Session Tracker
@@ -353,7 +353,7 @@ fn build_recovery_prompt(
         queen_id = queen_id.0,
         attempt = record.recovery_count + 1,
         started = record.started_at.format("%Y-%m-%d %H:%M:%S UTC"),
-        discipline = crate::v2::prompts::orchestration_discipline_block(),
+        discipline = crate::core::prompts::orchestration_discipline_block(),
     )
 }
 

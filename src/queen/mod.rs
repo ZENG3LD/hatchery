@@ -10,6 +10,7 @@
 pub mod native;
 pub mod custom;
 pub mod api_backend;
+pub mod recovery;
 
 // Re-export Queen trait and key types
 pub use native::NativeQueen;
@@ -17,7 +18,7 @@ pub use custom::CustomQueen;
 
 use async_trait::async_trait;
 use anyhow::Result;
-use crate::v2::types::*;
+use crate::core::types::*;
 
 /// QueenConfig — common configuration for all Queen implementations.
 #[derive(Debug, Clone)]

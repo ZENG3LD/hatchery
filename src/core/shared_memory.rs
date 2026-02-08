@@ -7,7 +7,7 @@
 //! - JSON file persistence for crash recovery
 //! - Automatic expiration with evict_expired()
 
-use crate::v2::types::{AgentId, SwarmHostId, Visibility};
+use crate::core::types::{AgentId, SwarmHostId, Visibility};
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
@@ -253,7 +253,7 @@ impl SharedMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::types::QueenId;
+    use crate::core::types::QueenId;
     use std::thread;
     use std::time::Duration as StdDuration;
 

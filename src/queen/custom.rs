@@ -9,10 +9,10 @@ use std::time::Duration;
 use async_trait::async_trait;
 use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
-use crate::v2::types::*;
-use crate::v2::queen::Queen;
-use crate::v2::task_dag::{TaskDag, DagTask, DagTaskStatus, Priority, Complexity, DagTaskResult};
-use crate::v2::prompts;
+use crate::core::types::*;
+use crate::queen::Queen;
+use crate::core::task_dag::{TaskDag, DagTask, DagTaskStatus, Priority, Complexity, DagTaskResult};
+use crate::core::prompts;
 
 // ============================================================================
 // Worker

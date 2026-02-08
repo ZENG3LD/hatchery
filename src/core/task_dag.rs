@@ -10,7 +10,7 @@
 use std::collections::{HashMap, VecDeque};
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
-use crate::v2::types::QueenId;
+use crate::core::types::QueenId;
 
 // ============================================================================
 // DAG-specific types (separate from v2::types to avoid conflicts)

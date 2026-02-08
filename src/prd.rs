@@ -6,7 +6,7 @@
 //! - [x] AC-1.2: Completed task
 //! ```
 
-use crate::types::Task;
+use crate::cli::Task;
 use anyhow::{Context, Result};
 use regex::Regex;
 use std::path::Path;

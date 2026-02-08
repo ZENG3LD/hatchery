@@ -5,10 +5,29 @@
 //! - **Swarm Host**: AI Coordinator + smart workers with shared memory
 //! - **Brood Lord**: Full hierarchy with Opus manager, L2 coordinators, workers
 
-pub mod types;
-pub mod prd;
-pub mod progress;
-pub mod safety;
+/// CLI types: HatcheryConfig, Mode, SwarmResult
+pub mod cli;
 
-/// V2 architecture with Queen trait and message-based coordination
-pub mod v2;
+/// PRD parser (markdown checkbox parsing)
+pub mod prd;
+
+/// Progress display utilities
+pub mod progress;
+
+/// Core infrastructure: types, task DAG, shared memory, etc.
+pub mod core;
+
+/// Queen agents (L1): NativeQueen, CustomQueen, recovery
+pub mod queen;
+
+/// SwarmHost coordinator (L2): task scheduling, validation, merging
+pub mod swarm_host;
+
+/// BroodLord strategist (L3): multi-SwarmHost orchestration
+pub mod brood_lord;
+
+/// Message routing and event logging
+pub mod mailbox;
+
+/// Git safety: attribution, worktree isolation
+pub mod safety;

@@ -5,7 +5,6 @@
 //! - **L2 (`--worktree`):** Git worktree isolation per worker
 //! - **L3 (`--safe-mode`):** Prompt-level command restrictions
 
-pub mod policy;
 pub mod worktree;
 
 use anyhow::Result;
@@ -99,30 +98,4 @@ pub fn get_head_sha(working_dir: &Path) -> Option<String> {
         .ok()
         .filter(|o| o.status.success())
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-}
-
-/// Build a safe-mode prompt suffix. Returns empty string if safe_mode is false.
-pub fn safe_mode_suffix(safe_mode: bool) -> &'static str {
-    if safe_mode {
-        policy::safe_mode_prompt()
-    } else {
-        ""
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_safe_mode_suffix_disabled() {
-        assert!(safe_mode_suffix(false).is_empty());
-    }
-
-    #[test]
-    fn test_safe_mode_suffix_enabled() {
-        let suffix = safe_mode_suffix(true);
-        assert!(!suffix.is_empty());
-        assert!(suffix.contains("FORBIDDEN"));
-    }
 }

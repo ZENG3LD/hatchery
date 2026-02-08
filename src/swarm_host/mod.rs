@@ -5,16 +5,16 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use chrono::{DateTime, Utc};
 
-use crate::v2::types::*;
-use crate::v2::queen::Queen;
-use crate::v2::mailbox::SwarmMailbox;
-use crate::v2::mailbox::event_log::SqliteEventLog;
-use crate::v2::task_dag::{TaskDag, DagTask, DagTaskStatus, Priority, Complexity};
-use crate::v2::compaction::CompactionStrategy;
-use crate::v2::validator::{Validator, ValidationResult};
-use crate::v2::shared_memory::SharedMemory;
-use crate::v2::worktree::{WorktreeManager, MergeResult};
-use crate::v2::queen_recovery::{SessionTracker, RecoveryManager, RecoveryConfig, RecoveryPlan};
+use crate::core::types::*;
+use crate::queen::Queen;
+use crate::mailbox::SwarmMailbox;
+use crate::mailbox::event_log::SqliteEventLog;
+use crate::core::task_dag::{TaskDag, DagTask, DagTaskStatus, Priority, Complexity};
+use crate::core::compaction::CompactionStrategy;
+use crate::core::validator::{Validator, ValidationResult};
+use crate::core::shared_memory::SharedMemory;
+use crate::safety::worktree::{WorktreeManager, MergeResult};
+use crate::queen::recovery::{SessionTracker, RecoveryManager, RecoveryConfig, RecoveryPlan};
 
 /// Configuration for SwarmHost.
 #[derive(Debug, Clone)]
@@ -342,7 +342,7 @@ impl SwarmHost {
                                         .unwrap_or_default();
 
                                     // Mark complete in DAG
-                                    let dag_result = crate::v2::task_dag::DagTaskResult {
+                                    let dag_result = crate::core::task_dag::DagTaskResult {
                                         success: true,
                                         output: output.clone(),
                                         files_modified: files_modified.clone(),
