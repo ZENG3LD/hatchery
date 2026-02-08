@@ -1,15 +1,15 @@
-//! Queen module — core AI agent abstraction for Hatchery V2.
+//! Queen module — Claude Code manager agents for Hatchery V3.
 //!
-//! A Queen is an autonomous AI "sergeant" that receives tasks from SwarmHost,
-//! decomposes them into sub-tasks, manages workers, and reports results.
+//! A Queen is an autonomous AI manager that receives tasks from SwarmHost,
+//! decomposes them into sub-tasks, and spawns worker agents via Claude Code's
+//! native Task tool. Queens NEVER do implementation work themselves.
 //!
-//! Two implementations:
-//! - NativeQueen: wraps Claude Code CLI with PipeProcess (Phase 1.3)
-//! - CustomQueen: manages workers via API calls (Phase 1.4)
+//! Implementations:
+//! - StreamQueen: long-lived subprocess (--input-format stream-json)
+//! - SpawnQueen: spawn-per-task with session resume (--resume)
+//! - NativeQueen: DEPRECATED legacy wrapper
 
 pub mod native;
-pub mod custom;
-pub mod api_backend;
 pub mod recovery;
 pub mod spawn_mode;
 pub mod handle;
@@ -17,9 +17,9 @@ pub mod completion;
 pub mod stream_queen;
 pub mod spawn_queen;
 
-// Re-export Queen trait and key types
+// Re-export key types
+#[allow(deprecated)]
 pub use native::NativeQueen;
-pub use custom::CustomQueen;
 pub use spawn_mode::SpawnMode;
 pub use handle::{QueenCommand, QueenEvent, QueenHandle};
 pub use spawn_queen::{spawn, SpawnQueenConfig};
@@ -36,15 +36,15 @@ pub struct QueenConfig {
     pub model: String,
 }
 
-/// The Queen trait — core abstraction for AI agent managers.
+/// The Queen trait — core abstraction for AI manager agents.
 ///
-/// A Queen is the basic autonomous unit in Hatchery: an AI "sergeant"
-/// that receives tasks from SwarmHost, decomposes them into sub-tasks,
-/// manages workers, and reports results back up.
+/// A Queen receives tasks from SwarmHost, decomposes them, and
+/// spawns worker agents via Claude Code's Task tool.
+/// Queens are managers — they NEVER do implementation work themselves.
 ///
-/// Two implementations:
-/// - NativeQueen: wraps Claude Code CLI with PipeProcess
-/// - CustomQueen: manages workers via API calls with full control stack
+/// V3 implementations (StreamQueen, SpawnQueen) use actor model
+/// with QueenHandle instead of this trait directly.
+/// This trait is kept for backward compatibility with NativeQueen.
 #[async_trait]
 pub trait Queen: Send + Sync {
     /// Unique identifier for this Queen

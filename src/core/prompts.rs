@@ -1,47 +1,87 @@
 //! Prompt templates for Hatchery V2 agent roles.
 //!
 //! Each prompt is designed for a specific role in the hierarchy:
-//! - NativeQueen: AI sergeant managing workers
+//! - Queen: AI manager who spawns and coordinates worker agents
 //! - SwarmHost coordinator: tactical coordinator making scheduling decisions
 //! - BroodLord strategist: strategic decomposer
 //! - Validator reviewer: code/task quality reviewer
 
-/// Prompt for NativeQueen — an AI "sergeant" managing workers.
-pub fn queen_sergeant_prompt(task_description: &str, sub_tasks: &[&str]) -> String {
+/// Prompt for Queen — an AI manager who spawns and coordinates worker agents.
+pub fn queen_manager_prompt(task_description: &str, sub_tasks: &[&str]) -> String {
     let tasks_list = sub_tasks.iter().enumerate()
         .map(|(i, t)| format!("{}. {}", i + 1, t))
         .collect::<Vec<_>>()
         .join("\n");
 
-    format!(r#"You are a Queen agent in the Hatchery swarm system. Your role is to manage workers and complete the assigned task.
+    format!(r#"You are a Queen — an autonomous manager agent in the Hatchery swarm system.
 
 ## Your Task
 {task_description}
 
-## Sub-tasks
+## Identified Sub-tasks
 {tasks_list}
 
-## Communication
-Your completion is detected automatically from process signals.
-- Focus on completing the task using available tools
-- Share important discoveries in your output — they will be captured
-- If you encounter a blocker you cannot resolve, describe it clearly in your output
+## YOUR ROLE
+You are a MANAGER, not a worker. You are FORBIDDEN from doing implementation work yourself.
+Your job is to:
+1. Analyze the assigned task
+2. Decompose it into subtasks
+3. Spawn worker agents using Claude Code's native Task tool
+4. Monitor their progress
+5. Synthesize results and report completion
 
-## Rules
-1. Break down your task into sub-tasks and work through them systematically
-2. Report progress after each sub-task completion
-3. If you encounter a blocker, describe it clearly — don't waste iterations
-4. Share any useful discoveries in your output
-5. When all sub-tasks are done, summarize your results
+## HOW TO SPAWN WORKERS
+Use Claude Code's Task tool to spawn specialized agents:
+- `rust-implementer` — for writing/editing Rust code
+- `implementer` — for TypeScript, Python, Go, and other languages
+- `research-agent` — for API research, documentation, web search
+- `rust-expert` — for architecture decisions, trait design, unsafe code review
+- `Explore` — for codebase exploration, finding files and patterns
+
+Example: Task(subagent_type="rust-implementer", prompt="Implement feature X in src/foo.rs")
+
+## EXECUTION PATTERNS (SKILLS)
+Choose the right pattern based on task type:
+
+### Direct Task Spawning (default)
+For simple tasks — spawn one or more agents directly via Task tool.
+Launch independent agents in parallel when possible.
+
+### /carousel Pattern
+For complex multi-phase tasks (e.g., building exchange connectors):
+Phase 1 (research-agent) → Phase 2 (rust-implementer) → Phase 3 (rust-implementer) → Phase 4 (debug loop)
+Each phase has quality gates. Only proceed when gates pass.
+
+### /ralph Pattern
+For iterative tasks with PRD checklists:
+Autonomous loop: read PRD → pick unchecked item → implement → verify → check off → repeat
+Until all items are done or max iterations reached.
+
+## RULES
+1. NEVER write code yourself — always delegate to worker agents
+2. NEVER read files for implementation — delegate file exploration to Explore agent
+3. You MAY read files only to make coordination decisions (e.g., check if a quality gate passed)
+4. Launch independent agents in PARALLEL — don't serialize work unnecessarily
+5. If a worker fails, analyze the error and either retry with better instructions or escalate
+6. Share important discoveries in your output — they will be captured by SwarmHost
+7. When all subtasks are complete, summarize results clearly
 
 ## Orchestration Discipline (CRITICAL — survives context compression)
 These rules MUST be followed even after context window compression:
-1. After completing each sub-task: summarize progress clearly in output
-2. Track progress — never work on blocked tasks
-3. Share important discoveries in your output
-4. If context was compressed, re-read the PRD before continuing
-5. Report completion ONLY when verified — don't mark done without validation
+1. You are a MANAGER — never do implementation work, always spawn agents
+2. After each agent completes: check results, update progress, spawn next task if needed
+3. Track progress — never assign tasks that are blocked by incomplete dependencies
+4. Share discoveries in your output — they will be captured automatically by SwarmHost
+5. If context was compressed, re-read the task description before continuing
+6. Report completion ONLY when ALL subtasks are verified done
+7. Use parallel agent spawning when tasks are independent
 "#)
+}
+
+/// Deprecated: Use queen_manager_prompt instead.
+#[deprecated(since = "0.2.0", note = "Use queen_manager_prompt instead")]
+pub fn queen_sergeant_prompt(task_description: &str, sub_tasks: &[&str]) -> String {
+    queen_manager_prompt(task_description, sub_tasks)
 }
 
 /// Prompt for SwarmHost coordinator — tactical scheduling.
@@ -51,7 +91,7 @@ pub fn swarm_host_coordinator_prompt(total_tasks: usize, queens: &[&str]) -> Str
         .collect::<Vec<_>>()
         .join("\n");
 
-    format!(r#"You are a SwarmHost coordinator in the Hatchery system. You manage Queens (AI workers) and make tactical decisions about task assignment.
+    format!(r#"You are a SwarmHost coordinator in the Hatchery system. You manage Queens (AI managers) and make tactical decisions about task assignment.
 
 ## Resources
 - Total tasks: {total_tasks}
@@ -76,7 +116,7 @@ These rules MUST be followed even after context window compression:
 1. After each tick cycle: check TaskDag state, refresh readiness, assign ready tasks
 2. ALWAYS validate before merging — never accept unvalidated work from Queens
 3. Track Queen health: if a Queen stalls for 3+ iterations, restart or reassign
-4. Report progress to BroodLord/Operator after every completed task, not just at the end
+4. Report progress after every completed task, not just at the end
 5. If context was compressed: re-read the task DAG, re-check Queen statuses, resume scheduling
 6. Knowledge from Queens goes into SharedMemory — don't let it die in message queues
 7. PRD is the single source of truth — sync TaskDag state with PRD checkboxes
@@ -150,13 +190,13 @@ Respond with a JSON verdict:
 pub fn orchestration_discipline_block() -> &'static str {
     r#"## Orchestration Discipline (CRITICAL — survives context compression)
 These rules MUST be followed even after context window compression:
-1. After completing each sub-task: summarize progress and results clearly
-2. Track progress in the task structure — never work on blocked tasks
-3. Share discoveries in your output — important findings will be captured automatically
-4. If context was compressed, re-read the PRD and project docs before continuing
-5. Report completion ONLY when verified — don't claim done without validation
-6. Use established patterns and follow project conventions
-7. PRD is the single source of truth, not internal todo lists"#
+1. You are a MANAGER — never do implementation work, always spawn agents
+2. After each agent completes: check results, update progress, spawn next task if needed
+3. Track progress — never assign tasks that are blocked by incomplete dependencies
+4. Share discoveries in your output — they will be captured automatically by SwarmHost
+5. If context was compressed, re-read the task description before continuing
+6. Report completion ONLY when ALL subtasks are verified done
+7. Use parallel agent spawning when tasks are independent"#
 }
 
 /// SwarmHost-specific discipline rules for context compression survival.
@@ -188,7 +228,7 @@ These rules MUST be followed even after context window compression:
 /// Get the default system prompt for a given role.
 pub fn default_system_prompt(role: &str) -> &'static str {
     match role {
-        "queen" | "native_queen" => "You are an autonomous AI coding agent (Queen) in the Hatchery swarm. Complete your assigned tasks efficiently and share results in your output.",
+        "queen" | "native_queen" => "You are an autonomous AI manager (Queen) in the Hatchery swarm. You spawn and coordinate worker agents to complete tasks. Never do implementation work yourself.",
         "swarm_host" | "coordinator" => "You are the SwarmHost coordinator. Make tactical decisions about task assignment, validation, and resource allocation.",
         "brood_lord" | "strategist" => "You are the BroodLord strategist. Decompose complex goals into sub-projects and coordinate multiple SwarmHosts.",
         "validator" | "reviewer" => "You are a code reviewer. Evaluate completed work for correctness, quality, and security.",
@@ -201,30 +241,73 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_queen_sergeant_prompt_contains_task_and_subtasks() {
+    fn test_queen_manager_prompt_contains_task_and_subtasks() {
         let task = "Implement authentication system";
         let subtasks = vec!["Create user model", "Add password hashing", "Implement login endpoint"];
 
-        let prompt = queen_sergeant_prompt(task, &subtasks);
+        let prompt = queen_manager_prompt(task, &subtasks);
 
         assert!(prompt.contains("Implement authentication system"));
         assert!(prompt.contains("1. Create user model"));
         assert!(prompt.contains("2. Add password hashing"));
         assert!(prompt.contains("3. Implement login endpoint"));
-        assert!(prompt.contains("completion is detected automatically"));
-        assert!(prompt.contains("available tools"));
+        assert!(prompt.contains("You are a MANAGER"));
+        assert!(prompt.contains("FORBIDDEN from doing implementation work"));
         assert!(prompt.contains("Orchestration Discipline"));
     }
 
     #[test]
-    fn test_queen_sergeant_prompt_with_empty_subtasks() {
+    fn test_queen_manager_prompt_with_empty_subtasks() {
         let task = "Simple task";
         let subtasks: Vec<&str> = vec![];
 
-        let prompt = queen_sergeant_prompt(task, &subtasks);
+        let prompt = queen_manager_prompt(task, &subtasks);
 
         assert!(prompt.contains("Simple task"));
-        assert!(prompt.contains("Sub-tasks\n\n"));
+        assert!(prompt.contains("Identified Sub-tasks\n\n"));
+    }
+
+    #[test]
+    fn test_queen_manager_prompt_includes_skills() {
+        let prompt = queen_manager_prompt("Test task", &[]);
+
+        assert!(prompt.contains("EXECUTION PATTERNS (SKILLS)"));
+        assert!(prompt.contains("/carousel Pattern"));
+        assert!(prompt.contains("/ralph Pattern"));
+        assert!(prompt.contains("Direct Task Spawning"));
+    }
+
+    #[test]
+    fn test_queen_manager_prompt_includes_worker_types() {
+        let prompt = queen_manager_prompt("Test task", &[]);
+
+        assert!(prompt.contains("rust-implementer"));
+        assert!(prompt.contains("implementer"));
+        assert!(prompt.contains("research-agent"));
+        assert!(prompt.contains("rust-expert"));
+        assert!(prompt.contains("Explore"));
+    }
+
+    #[test]
+    fn test_queen_manager_prompt_forbids_implementation() {
+        let prompt = queen_manager_prompt("Test task", &[]);
+
+        assert!(prompt.contains("NEVER write code yourself"));
+        assert!(prompt.contains("NEVER read files for implementation"));
+        assert!(prompt.contains("always delegate to worker agents"));
+    }
+
+    #[test]
+    fn test_queen_sergeant_prompt_is_deprecated() {
+        // Should still work but call queen_manager_prompt
+        let task = "Test task";
+        let subtasks = vec!["subtask1"];
+
+        #[allow(deprecated)]
+        let prompt = queen_sergeant_prompt(task, &subtasks);
+
+        assert!(prompt.contains("Test task"));
+        assert!(prompt.contains("MANAGER"));
     }
 
     #[test]
@@ -292,8 +375,9 @@ mod tests {
 
     #[test]
     fn test_default_system_prompt_for_known_roles() {
-        assert!(default_system_prompt("queen").contains("Queen"));
-        assert!(default_system_prompt("native_queen").contains("Queen"));
+        assert!(default_system_prompt("queen").contains("manager"));
+        assert!(default_system_prompt("queen").contains("Never do implementation work"));
+        assert!(default_system_prompt("native_queen").contains("manager"));
         assert!(default_system_prompt("swarm_host").contains("SwarmHost"));
         assert!(default_system_prompt("coordinator").contains("SwarmHost"));
         assert!(default_system_prompt("brood_lord").contains("BroodLord"));
@@ -310,12 +394,12 @@ mod tests {
 
     #[test]
     fn test_queen_prompt_includes_communication_section() {
-        let prompt = queen_sergeant_prompt("Test task", &[]);
+        let prompt = queen_manager_prompt("Test task", &[]);
 
-        assert!(prompt.contains("Communication"));
-        assert!(prompt.contains("completion is detected automatically"));
-        assert!(prompt.contains("available tools"));
+        assert!(prompt.contains("YOUR ROLE"));
+        assert!(prompt.contains("MANAGER"));
         assert!(prompt.contains("Share important discoveries in your output"));
+        assert!(prompt.contains("they will be captured by SwarmHost"));
     }
 
     #[test]
@@ -343,8 +427,15 @@ mod tests {
         let block = orchestration_discipline_block();
         assert!(block.contains("Orchestration Discipline"));
         assert!(block.contains("context compression"));
-        assert!(block.contains("PRD"));
+        assert!(block.contains("You are a MANAGER"));
         assert!(block.contains("Share discoveries in your output"));
+        assert!(block.contains("parallel agent spawning"));
+    }
+
+    #[test]
+    fn test_orchestration_discipline_no_hatchery_protocol() {
+        let block = orchestration_discipline_block();
+        assert!(!block.contains("@hatchery:"));
     }
 
     #[test]
@@ -379,5 +470,16 @@ mod tests {
         assert!(block.contains("BroodLord Orchestration Discipline"));
         assert!(block.contains("SwarmHost statuses"));
         assert!(block.contains("GlobalMemory"));
+    }
+
+    #[test]
+    fn test_no_hatchery_protocol_in_any_prompt() {
+        assert!(!queen_manager_prompt("task", &[]).contains("@hatchery:"));
+        assert!(!swarm_host_coordinator_prompt(5, &[]).contains("@hatchery:"));
+        assert!(!brood_lord_strategist_prompt("goal").contains("@hatchery:"));
+        assert!(!validator_reviewer_prompt("task", &[]).contains("@hatchery:"));
+        assert!(!orchestration_discipline_block().contains("@hatchery:"));
+        assert!(!swarm_host_discipline_block().contains("@hatchery:"));
+        assert!(!brood_lord_discipline_block().contains("@hatchery:"));
     }
 }

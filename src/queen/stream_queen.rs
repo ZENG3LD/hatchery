@@ -416,7 +416,17 @@ async fn stdout_reader(stdout: ChildStdout, tx: mpsc::Sender<ClaudeEvent>) {
 
 /// Format a task assignment prompt with context.
 fn format_task_prompt(task: &Task, context: &TaskContext) -> String {
-    let mut prompt = format!("## Task: {}\n\n{}", task.id.0, task.description);
+    let mut prompt = String::new();
+
+    // Manager role preamble
+    prompt.push_str("## Your Role: Queen Manager\n\n");
+    prompt.push_str("You are a MANAGER. Do NOT implement anything yourself.\n");
+    prompt.push_str("Decompose the task below into subtasks and spawn worker agents using the Task tool.\n");
+    prompt.push_str("Available agent types: rust-implementer, implementer, research-agent, rust-expert, Explore.\n");
+    prompt.push_str("Launch independent agents in PARALLEL. Only serialize when there are dependencies.\n\n");
+
+    // Task details
+    prompt.push_str(&format!("## Task: {}\n\n{}", task.id.0, task.description));
 
     if !context.knowledge.is_empty() {
         prompt.push_str("\n\n## Context Knowledge\n");
@@ -475,6 +485,8 @@ mod tests {
         };
 
         let prompt = format_task_prompt(&task, &context);
+        assert!(prompt.contains("MANAGER"));
+        assert!(prompt.contains("Task tool"));
         assert!(prompt.contains("Task: T1"));
         assert!(prompt.contains("Implement feature X"));
     }
@@ -507,6 +519,8 @@ mod tests {
         };
 
         let prompt = format_task_prompt(&task, &context);
+        assert!(prompt.contains("MANAGER"));
+        assert!(prompt.contains("Task tool"));
         assert!(prompt.contains("Task: T2"));
         assert!(prompt.contains("Context Knowledge"));
         assert!(prompt.contains("repo_path"));

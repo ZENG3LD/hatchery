@@ -17,7 +17,7 @@ pub mod progress;
 /// Core infrastructure: types, task DAG, shared memory, etc.
 pub mod core;
 
-/// Queen agents (L1): NativeQueen, CustomQueen, recovery
+/// Queen agents (L1): StreamQueen, SpawnQueen, NativeQueen (deprecated)
 pub mod queen;
 
 /// SwarmHost coordinator (L2): task scheduling, validation, merging

@@ -199,7 +199,11 @@ impl SwarmHost {
         let event_tx = self.event_bus.event_sender();
         let shutdown_rx = self.event_bus.shutdown_receiver();
 
-        let system_prompt = Some(crate::core::prompts::orchestration_discipline_block().to_string());
+        let system_prompt = Some(format!(
+            "{}\n\n{}",
+            crate::core::prompts::default_system_prompt("queen"),
+            crate::core::prompts::orchestration_discipline_block()
+        ));
 
         let (handle, join_handle) = match spawn_mode {
             SpawnMode::Stream => {
