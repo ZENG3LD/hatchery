@@ -1,0 +1,49 @@
+# Hatchery V2 Configuration Example
+# Copy to .hatchery/config.toml or hatchery.toml to use
+
+[spawn]
+# Number of worker agents to spawn
+workers = 4
+
+# Operation mode: "native_queen", "swarm_host", "brood_lord"
+mode = "native_queen"
+
+# Backend: "claude", "openai", "custom"
+backend = "claude"
+
+# API configuration (for claude backend)
+api_url = "https://api.anthropic.com"
+api_model = "claude-sonnet-4-5"
+
+# Iteration limits
+max_iterations = 100
+stall_threshold = 3
+
+# Features
+verbose = true
+worktree = true
+safe_mode = false
+
+# Validation
+validator = "rust-expert"
+compaction_threshold = 0.85
+
+# Event logging
+event_log = ".hatchery/events.db"
+
+[queen]
+# Maximum workers per Queen agent
+max_workers = 8
+
+# Model for Queen agents
+model = "claude-opus-4-6"
+
+# Timeout for Queen operations (seconds)
+timeout_secs = 300
+
+[broodlord]
+# Maximum SwarmHost instances
+max_swarm_hosts = 5
+
+# Tick interval for BroodLord (seconds)
+tick_interval_secs = 10

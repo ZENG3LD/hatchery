@@ -5,6 +5,8 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 use hatchery::types::{HatcheryConfig, Mode};
+use hatchery::v2::mailbox::event_log::SqliteEventLog;
+use hatchery::v2::types::{SwarmMessage, AgentId, MessageType, Visibility, SwarmHostId, QueenId};
 
 #[derive(Parser)]
 #[command(name = "hatchery", version, about = "Swarm orchestration for AI coding agents")]
@@ -71,13 +73,108 @@ enum Commands {
         /// Model name for API backend (required when --backend api)
         #[arg(long)]
         api_model: Option<String>,
+
+        /// Validation command (e.g. "cargo check", "cargo test")
+        #[arg(long)]
+        validator: Option<String>,
+
+        /// Context compaction threshold (0.0-1.0, default 0.8)
+        #[arg(long, default_value = "0.8")]
+        compaction_threshold: f32,
+
+        /// Path for SQLite event log (auto-generated if not specified)
+        #[arg(long)]
+        event_log: Option<PathBuf>,
     },
 
     /// Show status of an ongoing or completed run.
     Status {
         /// Path to the PRD markdown file.
         prd: PathBuf,
+
+        /// Path to event log (for detailed status).
+        #[arg(long)]
+        event_log: Option<PathBuf>,
     },
+
+    /// Query the event log for a hatchery run.
+    Events {
+        /// Path to SQLite event log file.
+        log_path: PathBuf,
+
+        /// Maximum number of events to show.
+        #[arg(short = 'n', long, default_value = "50")]
+        limit: usize,
+
+        /// Filter by message type (e.g. "TaskResult", "Escalation").
+        #[arg(long)]
+        filter: Option<String>,
+    },
+
+    /// Send a message to a running swarm (writes to event log).
+    Message {
+        /// Target agent (e.g. "queen:Q0", "swarmhost:SH0")
+        target: String,
+
+        /// Message text
+        text: String,
+
+        /// Event log path
+        #[arg(long)]
+        log_path: PathBuf,
+    },
+}
+
+/// Parse a target string into an AgentId.
+fn parse_target(target: &str) -> AgentId {
+    if let Some(id) = target.strip_prefix("queen:") {
+        AgentId::Queen(QueenId(id.to_string()))
+    } else if let Some(id) = target.strip_prefix("swarmhost:") {
+        AgentId::SwarmHost(SwarmHostId(id.to_string()))
+    } else if target == "validator" {
+        AgentId::Validator
+    } else if target == "broodlord" {
+        AgentId::BroodLord
+    } else {
+        AgentId::Queen(QueenId(target.to_string()))
+    }
+}
+
+/// Format an AgentId for display.
+fn format_agent_id(agent: &AgentId) -> String {
+    match agent {
+        AgentId::Queen(id) => format!("Queen({})", id.0),
+        AgentId::SwarmHost(id) => format!("SwarmHost({})", id.0),
+        AgentId::Validator => "Validator".to_string(),
+        AgentId::BroodLord => "BroodLord".to_string(),
+        AgentId::Operator => "Operator".to_string(),
+    }
+}
+
+/// Format a MessageType for display.
+fn format_msg_type(msg_type: &MessageType) -> String {
+    match msg_type {
+        MessageType::TaskAssignment => "TaskAssignment".to_string(),
+        MessageType::TaskResult => "TaskResult".to_string(),
+        MessageType::TaskProgress => "TaskProgress".to_string(),
+        MessageType::StatusRequest => "StatusRequest".to_string(),
+        MessageType::StatusReport => "StatusReport".to_string(),
+        MessageType::Knowledge => "Knowledge".to_string(),
+        MessageType::KnowledgeQuery => "KnowledgeQuery".to_string(),
+        MessageType::Escalation => "Escalation".to_string(),
+        MessageType::Shutdown => "Shutdown".to_string(),
+        MessageType::Custom(s) => format!("Custom({})", s),
+    }
+}
+
+/// Format payload for display (truncate if too long).
+fn format_payload(payload: &serde_json::Value) -> String {
+    let s = payload.to_string();
+    if s.len() > 80 {
+        format!("{}...", &s[..77])
+    } else {
+        s
+    }
 }
 
 fn main() -> Result<()> {
@@ -99,6 +196,9 @@ fn main() -> Result<()> {
             backend,
             api_url,
             api_model,
+            validator,
+            compaction_threshold,
+            event_log,
         } => {
             let working_dir = dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
@@ -117,6 +217,9 @@ fn main() -> Result<()> {
                 backend,
                 api_url,
                 api_model,
+                validator_cmd: validator,
+                compaction_threshold,
+                event_log_path: event_log,
             };
 
             match config.mode {
@@ -140,7 +243,7 @@ fn main() -> Result<()> {
             }
         }
 
-        Commands::Status { prd } => {
+        Commands::Status { prd, event_log } => {
             let tasks = hatchery::prd::parse_prd(&prd)?;
             let (done, total) = hatchery::prd::progress(&tasks);
 
@@ -152,6 +255,95 @@ fn main() -> Result<()> {
                 let marker = if task.done { "✓" } else { "○" };
                 println!("  {} Task {}: {}", marker, task.id, task.description);
             }
+
+            // If event log specified, show latest events
+            if let Some(log_path) = event_log {
+                if log_path.exists() {
+                    println!("\n--- Latest Events ---");
+                    match SqliteEventLog::new(&log_path) {
+                        Ok(log) => {
+                            let total = log.count();
+                            println!("Total events: {}", total);
+
+                            // Get last 10 events
+                            match log.replay(None) {
+                                Ok(events) => {
+                                    let recent: Vec<_> = events.iter().rev().take(10).collect();
+                                    for msg in recent.iter().rev() {
+                                        println!("[{}] {} → {}: {} | {}",
+                                            msg.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                                            format_agent_id(&msg.from),
+                                            format_agent_id(&msg.to),
+                                            format_msg_type(&msg.msg_type),
+                                            format_payload(&msg.payload));
+                                    }
+                                }
+                                Err(e) => eprintln!("Error reading events: {}", e),
+                            }
+                        }
+                        Err(e) => eprintln!("Error opening event log: {}", e),
+                    }
+                }
+            }
+        }
+
+        Commands::Events { log_path, limit, filter } => {
+            let log = SqliteEventLog::new(&log_path)?;
+            let total = log.count();
+
+            println!("Event log: {}", log_path.display());
+            println!("Total events: {}", total);
+            println!();
+
+            let events = log.replay(None)?;
+
+            // Apply filter if specified
+            let filtered: Vec<_> = if let Some(filter_type) = filter {
+                events.into_iter()
+                    .filter(|msg| {
+                        let msg_type_str = format_msg_type(&msg.msg_type);
+                        msg_type_str.contains(&filter_type)
+                    })
+                    .collect()
+            } else {
+                events
+            };
+
+            // Take last N events
+            let to_show: Vec<_> = filtered.iter().rev().take(limit).collect();
+
+            for msg in to_show.iter().rev() {
+                println!("[{}] {} → {}: {} | {}",
+                    msg.timestamp.format("%Y-%m-%d %H:%M:%S"),
+                    format_agent_id(&msg.from),
+                    format_agent_id(&msg.to),
+                    format_msg_type(&msg.msg_type),
+                    format_payload(&msg.payload));
+            }
+        }
+
+        Commands::Message { target, text, log_path } => {
+            let log = SqliteEventLog::new(&log_path)?;
+
+            let msg = SwarmMessage {
+                id: uuid::Uuid::new_v4().to_string(),
+                from: AgentId::Operator,
+                to: parse_target(&target),
+                msg_type: MessageType::Custom(text.clone()),
+                payload: serde_json::json!({"text": text}),
+                timestamp: chrono::Utc::now(),
+                correlation_id: None,
+                visibility: Visibility {
+                    agent_visible: true,
+                    coordinator_visible: true,
+                    user_visible: true
+                },
+            };
+
+            log.log(&msg);
+            println!("Message sent to {} at {}",
+                format_agent_id(&msg.to),
+                msg.timestamp.format("%Y-%m-%d %H:%M:%S"));
         }
     }
 

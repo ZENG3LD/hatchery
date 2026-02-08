@@ -17,3 +17,5 @@ pub mod worktree;
 pub mod swarm_host;
 pub mod operator;
 pub mod brood_lord;
+pub mod config;
+pub mod prompts;

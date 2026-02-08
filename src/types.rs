@@ -58,6 +58,12 @@ pub struct HatcheryConfig {
     pub api_url: Option<String>,
     /// API model for custom backend
     pub api_model: Option<String>,
+    /// Validation command for v2
+    pub validator_cmd: Option<String>,
+    /// Compaction threshold (0.0-1.0)
+    pub compaction_threshold: f32,
+    /// Event log path
+    pub event_log_path: Option<PathBuf>,
 }
 
 impl Default for HatcheryConfig {
@@ -77,6 +83,9 @@ impl Default for HatcheryConfig {
             backend: "claude-native".to_string(),
             api_url: None,
             api_model: None,
+            validator_cmd: None,
+            compaction_threshold: 0.8,
+            event_log_path: None,
         }
     }
 }

@@ -9,6 +9,7 @@
 
 pub mod native;
 pub mod custom;
+pub mod api_backend;
 
 // Re-export Queen trait and key types
 pub use native::NativeQueen;
