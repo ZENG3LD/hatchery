@@ -3,10 +3,17 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 use hatchery::types::{HatcheryConfig, Mode};
 use hatchery::v2::mailbox::event_log::SqliteEventLog;
 use hatchery::v2::types::{SwarmMessage, AgentId, MessageType, Visibility, SwarmHostId, QueenId};
+use hatchery::v2::queen::native::{NativeQueen, NativeQueenConfig};
+use hatchery::v2::swarm_host::{SwarmHost, SwarmHostConfig};
+use hatchery::v2::brood_lord::{BroodLord, BroodLordConfig};
+use hatchery::v2::operator::NullChannel;
+use hatchery::v2::task_dag::{Priority, Complexity};
+use hatchery::prd;
 
 #[derive(Parser)]
 #[command(name = "hatchery", version, about = "Swarm orchestration for AI coding agents")]
@@ -177,7 +184,8 @@ fn format_payload(payload: &serde_json::Value) -> String {
     }
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
@@ -206,8 +214,8 @@ fn main() -> Result<()> {
                 prd_path: prd,
                 workers,
                 mode,
-                working_dir,
-                verify_cmd: verify,
+                working_dir: working_dir.clone(),
+                verify_cmd: verify.clone(),
                 max_iterations,
                 stall_threshold,
                 progress_path: progress,
@@ -222,23 +230,179 @@ fn main() -> Result<()> {
                 event_log_path: event_log,
             };
 
+            // Parse PRD
+            let prd_tasks = prd::parse_prd(&config.prd_path)?;
+            let (done, total) = prd::progress(&prd_tasks);
+            println!("[HATCHERY] PRD: {}/{} tasks complete", done, total);
+
             match config.mode {
-                Mode::Queen => {
-                    // V2 TODO: when backend != "claude-native", use v2::queen::NativeQueen
-                    // For now, always use v1 Queen mode
-                    let result = hatchery::queen::run(&config)?;
+                Mode::Queen | Mode::SwarmHost => {
+                    // Create SwarmHostConfig
+                    let swarm_config = SwarmHostConfig {
+                        max_queens: config.workers,
+                        verify_cmd: config.verify_cmd.clone(),
+                        working_dir: config.working_dir.clone(),
+                        git_isolation: config.worktree_isolation,
+                        autosave_interval: Duration::from_secs(60),
+                        max_iterations: config.max_iterations,
+                    };
+
+                    // Create SwarmHost
+                    let mut swarm = SwarmHost::new(
+                        SwarmHostId("SH0".to_string()),
+                        swarm_config,
+                    )?;
+
+                    // Spawn and register Queens
+                    for i in 0..config.workers {
+                        let queen_id = QueenId(format!("Q{}", i));
+                        let queen_config = NativeQueenConfig {
+                            model: "sonnet".to_string(),
+                            use_teams: false,
+                            max_workers: 4,
+                            timeout: Duration::from_secs(600),
+                            prompt_template: None,
+                        };
+                        let queen = NativeQueen::spawn(
+                            queen_id,
+                            config.working_dir.clone(),
+                            queen_config,
+                        )?;
+                        swarm.register_queen(Box::new(queen))?;
+                    }
+
+                    // Add PRD tasks to DAG (only uncompleted ones)
+                    for task in &prd_tasks {
+                        if !task.done {
+                            swarm.add_task(
+                                &format!("prd-{}", task.id),
+                                &task.description,
+                                vec![],  // no dependencies for now
+                                Priority::Normal,
+                                Complexity::Medium,
+                            );
+                        }
+                    }
+
+                    // Run tick loop
+                    let start = Instant::now();
+                    let mut iteration = 0;
+                    loop {
+                        let tick_result = swarm.tick().await?;
+                        iteration += 1;
+
+                        let progress = swarm.progress();
+                        println!("[HATCHERY] Tick {}: {}/{} tasks | assigned={} msgs={} completed={} failed={}",
+                            tick_result.iteration,
+                            progress.completed, progress.total_tasks,
+                            tick_result.tasks_assigned, tick_result.messages_processed,
+                            tick_result.tasks_completed, tick_result.tasks_failed);
+
+                        if swarm.is_complete() {
+                            break;
+                        }
+
+                        if iteration >= config.max_iterations {
+                            println!("[HATCHERY] Max iterations reached");
+                            break;
+                        }
+
+                        // Small delay between ticks
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                    }
+
+                    // Shutdown
+                    swarm.shutdown().await?;
+
+                    let elapsed = start.elapsed().as_secs();
+                    let progress = swarm.progress();
                     println!("\n[HATCHERY] Result: {}/{} tasks complete in {}s",
-                        result.completed_tasks, result.total_tasks, result.duration_secs);
+                        progress.completed, progress.total_tasks, elapsed);
                 }
-                Mode::SwarmHost => {
-                    let result = hatchery::swarm_host::run(&config)?;
-                    println!("\n[HATCHERY] Result: {}/{} tasks complete in {}s",
-                        result.completed_tasks, result.total_tasks, result.duration_secs);
-                }
+
                 Mode::BroodLord => {
-                    let result = hatchery::brood_lord::run(&config)?;
+                    // Create SwarmHostConfig
+                    let swarm_config = SwarmHostConfig {
+                        max_queens: config.workers,
+                        verify_cmd: config.verify_cmd.clone(),
+                        working_dir: config.working_dir.clone(),
+                        git_isolation: config.worktree_isolation,
+                        autosave_interval: Duration::from_secs(60),
+                        max_iterations: config.max_iterations,
+                    };
+
+                    // Create BroodLord
+                    let bl_config = BroodLordConfig {
+                        max_swarm_hosts: 4,
+                        default_swarm_config: swarm_config.clone(),
+                        max_total_iterations: config.max_iterations,
+                    };
+                    let mut lord = BroodLord::new(bl_config, Box::new(NullChannel::new()));
+
+                    // Create one SwarmHost with all tasks
+                    let mut swarm = SwarmHost::new(SwarmHostId("SH0".to_string()), swarm_config)?;
+
+                    // Spawn and register Queens
+                    for i in 0..config.workers {
+                        let queen_id = QueenId(format!("Q{}", i));
+                        let queen_config = NativeQueenConfig {
+                            model: "sonnet".to_string(),
+                            use_teams: false,
+                            max_workers: 4,
+                            timeout: Duration::from_secs(600),
+                            prompt_template: None,
+                        };
+                        let queen = NativeQueen::spawn(
+                            queen_id,
+                            config.working_dir.clone(),
+                            queen_config,
+                        )?;
+                        swarm.register_queen(Box::new(queen))?;
+                    }
+
+                    // Add PRD tasks to DAG
+                    for task in &prd_tasks {
+                        if !task.done {
+                            swarm.add_task(
+                                &format!("prd-{}", task.id),
+                                &task.description,
+                                vec![],
+                                Priority::Normal,
+                                Complexity::Medium,
+                            );
+                        }
+                    }
+
+                    // Add swarm to BroodLord
+                    lord.add_swarm("main", swarm, 100)?;
+
+                    // Run tick loop
+                    let start = Instant::now();
+                    loop {
+                        let tick_result = lord.tick().await?;
+                        let progress = lord.global_progress();
+                        println!("[HATCHERY] Tick {}: {}/{} tasks across {} swarms (active={} completed={})",
+                            tick_result.iteration,
+                            progress.completed_tasks, progress.total_tasks,
+                            progress.total_swarms, progress.active_swarms, progress.completed_swarms);
+
+                        if lord.is_complete() {
+                            break;
+                        }
+                        if tick_result.iteration >= config.max_iterations {
+                            println!("[HATCHERY] Max iterations reached");
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                    }
+
+                    // Shutdown
+                    lord.shutdown().await?;
+
+                    let elapsed = start.elapsed().as_secs();
+                    let progress = lord.global_progress();
                     println!("\n[HATCHERY] Result: {}/{} tasks complete in {}s",
-                        result.completed_tasks, result.total_tasks, result.duration_secs);
+                        progress.completed_tasks, progress.total_tasks, elapsed);
                 }
             }
         }
