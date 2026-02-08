@@ -27,6 +27,10 @@ pub enum CompactionScope {
     Knowledge,
     /// Active task context (files, deps, etc.)
     ActiveTaskContext,
+    /// Orchestration discipline rules — never remove.
+    /// These rules ensure agents maintain discipline after context compression:
+    /// update PRD checkboxes, follow protocols, report progress.
+    OrchestrationRules,
 }
 
 /// Action to take at a given compaction level.
@@ -82,6 +86,7 @@ impl CompactionStrategy {
                 CompactionScope::SystemPrompt,
                 CompactionScope::TaskAssignments,
                 CompactionScope::Knowledge,
+                CompactionScope::OrchestrationRules,
                 CompactionScope::RecentMessages(5),
             ],
             levels: vec![
@@ -93,6 +98,7 @@ impl CompactionStrategy {
                         CompactionScope::SystemPrompt,
                         CompactionScope::TaskAssignments,
                         CompactionScope::Knowledge,
+                        CompactionScope::OrchestrationRules,
                         CompactionScope::RecentMessages(3),
                     ],
                 }},
@@ -298,7 +304,7 @@ mod tests {
     fn test_protected_scopes_accessor() {
         let s = CompactionStrategy::default_swarm_host();
         let scopes = s.protected_scopes();
-        assert_eq!(scopes.len(), 4);
+        assert_eq!(scopes.len(), 5);
     }
 
     #[test]

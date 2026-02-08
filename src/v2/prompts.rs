@@ -35,6 +35,14 @@ Communicate with the SwarmHost using the @hatchery: protocol:
 3. If you encounter a blocker, escalate immediately — don't waste iterations
 4. Share any useful discoveries via @hatchery:knowledge
 5. When all sub-tasks are done, report completion with results
+
+## Orchestration Discipline (CRITICAL — survives context compression)
+These rules MUST be followed even after context window compression:
+1. After completing each sub-task: update PRD checkboxes via @hatchery:status
+2. Track progress in the task DAG — never work on blocked tasks
+3. Share discoveries via @hatchery:knowledge — don't let knowledge die with context
+4. If context was compressed, re-read the PRD and ORCHESTRATOR.md before continuing
+5. Report completion ONLY when verified — don't mark done without validation
 "#)
 }
 
@@ -64,6 +72,16 @@ pub fn swarm_host_coordinator_prompt(total_tasks: usize, queens: &[&str]) -> Str
 - If a Queen is blocked, consider reassigning the task
 - If a Queen fails twice, restart it before assigning more work
 - Always validate before merging — never merge unvalidated work
+
+## Orchestration Discipline (CRITICAL — survives context compression)
+These rules MUST be followed even after context window compression:
+1. After each tick cycle: check TaskDag state, refresh readiness, assign ready tasks
+2. ALWAYS validate before merging — never accept unvalidated work from Queens
+3. Track Queen health: if a Queen stalls for 3+ iterations, restart or reassign
+4. Report progress to BroodLord/Operator after every completed task, not just at the end
+5. If context was compressed: re-read the task DAG, re-check Queen statuses, resume scheduling
+6. Knowledge from Queens goes into SharedMemory — don't let it die in message queues
+7. PRD is the single source of truth — sync TaskDag state with PRD checkboxes
 "#)
 }
 
@@ -86,6 +104,16 @@ pub fn brood_lord_strategist_prompt(master_goal: &str) -> String {
 - Assign the most critical path first
 - If two sub-projects conflict, coordinate via global memory
 - Escalate to operator only when AI resolution fails
+
+## Orchestration Discipline (CRITICAL — survives context compression)
+These rules MUST be followed even after context window compression:
+1. After each monitoring cycle: check ALL SwarmHost statuses, not just the active one
+2. Maintain strategic overview — don't tunnel-vision on one sub-project
+3. Report global progress to Operator after every SwarmHost completes a milestone
+4. If context was compressed: re-read master goal, re-check all SwarmHost statuses, resume monitoring
+5. Cross-SwarmHost knowledge goes into GlobalMemory — coordinate shared discoveries
+6. Handle escalations with priority: blocked SwarmHosts first, then failed, then questions
+7. Never lose the decomposition plan — if compressed, reconstruct from SwarmHost statuses
 "#)
 }
 
@@ -119,6 +147,46 @@ Respond with a JSON verdict:
 "#)
 }
 
+/// Orchestration discipline rules — injected into every compaction carry-over.
+/// These rules survive context compression to prevent "dumb iterator" degradation.
+pub fn orchestration_discipline_block() -> &'static str {
+    r#"## Orchestration Discipline (CRITICAL — survives context compression)
+These rules MUST be followed even after context window compression:
+1. After completing each sub-task: update PRD checkboxes via @hatchery:status
+2. Track progress in the task DAG — never work on blocked tasks
+3. Share discoveries via @hatchery:knowledge — don't let knowledge die with context
+4. If context was compressed, re-read the PRD and ORCHESTRATOR.md before continuing
+5. Report completion ONLY when verified — don't mark done without validation
+6. Use the established patterns: /ralph for iterative tasks, /carousel for phased pipelines
+7. PRD is the single source of truth, not internal todo lists"#
+}
+
+/// SwarmHost-specific discipline rules for context compression survival.
+pub fn swarm_host_discipline_block() -> &'static str {
+    r#"## SwarmHost Orchestration Discipline (CRITICAL — survives context compression)
+These rules MUST be followed even after context window compression:
+1. After each tick cycle: check TaskDag state, refresh readiness, assign ready tasks
+2. ALWAYS validate before merging — never accept unvalidated work from Queens
+3. Track Queen health: if a Queen stalls for 3+ iterations, restart or reassign
+4. Report progress to BroodLord/Operator after every completed task, not just at the end
+5. If context was compressed: re-read the task DAG, re-check Queen statuses, resume scheduling
+6. Knowledge from Queens goes into SharedMemory — don't let it die in message queues
+7. PRD is the single source of truth — sync TaskDag state with PRD checkboxes"#
+}
+
+/// BroodLord-specific discipline rules for context compression survival.
+pub fn brood_lord_discipline_block() -> &'static str {
+    r#"## BroodLord Orchestration Discipline (CRITICAL — survives context compression)
+These rules MUST be followed even after context window compression:
+1. After each monitoring cycle: check ALL SwarmHost statuses, not just the active one
+2. Maintain strategic overview — don't tunnel-vision on one sub-project
+3. Report global progress to Operator after every SwarmHost completes a milestone
+4. If context was compressed: re-read master goal, re-check all SwarmHost statuses, resume monitoring
+5. Cross-SwarmHost knowledge goes into GlobalMemory — coordinate shared discoveries
+6. Handle escalations with priority: blocked SwarmHosts first, then failed, then questions
+7. Never lose the decomposition plan — if compressed, reconstruct from SwarmHost statuses"#
+}
+
 /// Get the default system prompt for a given role.
 pub fn default_system_prompt(role: &str) -> &'static str {
     match role {
@@ -147,6 +215,7 @@ mod tests {
         assert!(prompt.contains("3. Implement login endpoint"));
         assert!(prompt.contains("@hatchery:status"));
         assert!(prompt.contains("@hatchery:complete"));
+        assert!(prompt.contains("Orchestration Discipline"));
     }
 
     #[test]
@@ -270,5 +339,48 @@ mod tests {
         assert!(prompt.contains("Decompose the master goal"));
         assert!(prompt.contains("Monitor cross-project dependencies"));
         assert!(prompt.contains("Handle escalations"));
+    }
+
+    #[test]
+    fn test_orchestration_discipline_block_exists() {
+        let block = orchestration_discipline_block();
+        assert!(block.contains("Orchestration Discipline"));
+        assert!(block.contains("context compression"));
+        assert!(block.contains("PRD"));
+        assert!(block.contains("@hatchery:knowledge"));
+    }
+
+    #[test]
+    fn test_swarm_host_prompt_includes_discipline() {
+        let prompt = swarm_host_coordinator_prompt(5, &["q1", "q2"]);
+        assert!(prompt.contains("Orchestration Discipline"));
+        assert!(prompt.contains("context compression"));
+        assert!(prompt.contains("TaskDag"));
+        assert!(prompt.contains("validate before merging"));
+    }
+
+    #[test]
+    fn test_brood_lord_prompt_includes_discipline() {
+        let prompt = brood_lord_strategist_prompt("Build system");
+        assert!(prompt.contains("Orchestration Discipline"));
+        assert!(prompt.contains("context compression"));
+        assert!(prompt.contains("SwarmHost statuses"));
+        assert!(prompt.contains("GlobalMemory"));
+    }
+
+    #[test]
+    fn test_swarm_host_discipline_block_exists() {
+        let block = swarm_host_discipline_block();
+        assert!(block.contains("SwarmHost Orchestration Discipline"));
+        assert!(block.contains("TaskDag"));
+        assert!(block.contains("validate before merging"));
+    }
+
+    #[test]
+    fn test_brood_lord_discipline_block_exists() {
+        let block = brood_lord_discipline_block();
+        assert!(block.contains("BroodLord Orchestration Discipline"));
+        assert!(block.contains("SwarmHost statuses"));
+        assert!(block.contains("GlobalMemory"));
     }
 }

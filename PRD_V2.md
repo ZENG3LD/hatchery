@@ -327,6 +327,13 @@ V2 introduces:
 
 <!-- Auto-updated by workers via @hatchery:write-knowledge -->
 
+### Anti-Degradation: OrchestrationRules Scope (2026-02-08)
+**Problem**: After context compression, agents lose "how to work" rules (update PRD, follow protocols) and degrade to "dumb iterators" that execute tasks without discipline.
+**Solution**: Three-layer fix:
+1. `CompactionScope::OrchestrationRules` — protected scope that survives all compaction levels including FreshStart
+2. `orchestration_discipline_block()` — centralized rules injected into Queen prompts and carry-over
+3. `.claude/CLAUDE.md` injection — NativeQueen::spawn writes discipline rules to worker directories
+
 ## Results
 
 <!-- Auto-updated by workers via @hatchery:write-result -->

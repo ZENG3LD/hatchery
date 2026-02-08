@@ -11,6 +11,7 @@ use anyhow::{Result, Context as AnyhowContext};
 use parking_lot::Mutex;
 use zengeld_hub_core::{CliTool, PipeProcess};
 use crate::v2::types::*;
+use crate::v2::prompts;
 use super::Queen;
 
 /// Configuration for NativeQueen
@@ -60,9 +61,12 @@ Communication protocol:
 - Ask questions: @hatchery:escalate:<json>
 - Share knowledge: @hatchery:knowledge:<json>
 
-You have access to {} workers."#,
+You have access to {} workers.
+
+{}"#,
             self.max_workers,
-            self.max_workers
+            self.max_workers,
+            crate::v2::prompts::orchestration_discipline_block()
         )
     }
 }
@@ -157,6 +161,21 @@ impl NativeQueen {
 
         let process = PipeProcess::new(CliTool::ClaudeCode, &working_dir, &prompt)
             .context("Failed to spawn PipeProcess")?;
+
+        // Inject orchestration discipline rules into worker directory
+        let claude_dir = working_dir.join(".claude");
+        if !claude_dir.exists() {
+            let _ = std::fs::create_dir_all(&claude_dir);
+        }
+        let claude_md_path = claude_dir.join("CLAUDE.md");
+        // Only write if not already present (don't overwrite user's CLAUDE.md)
+        if !claude_md_path.exists() {
+            let rules = format!(
+                "# Hatchery Worker Rules\n\n{}\n\n## Worker Protocol\n- Report progress via @hatchery:status after each sub-task\n- Share discoveries via @hatchery:knowledge\n- Escalate blockers immediately via @hatchery:escalate\n- Mark PRD checkboxes as you complete items\n",
+                prompts::orchestration_discipline_block()
+            );
+            let _ = std::fs::write(&claude_md_path, rules);
+        }
 
         let state = NativeQueenState {
             process: Some(process),

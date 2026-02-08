@@ -12,6 +12,7 @@ use chrono::{DateTime, Utc};
 use crate::v2::types::*;
 use crate::v2::queen::Queen;
 use crate::v2::task_dag::{TaskDag, DagTask, DagTaskStatus, Priority, Complexity, DagTaskResult};
+use crate::v2::prompts;
 
 // ============================================================================
 // Worker
@@ -244,12 +245,25 @@ pub struct CustomQueen {
     status: QueenStatus,
     current_task: Option<TaskId>,
     result: Option<TaskResult>,
+    /// System prompt for API workers (includes discipline rules)
+    system_prompt: String,
 }
 
 impl CustomQueen {
     /// Create a new CustomQueen.
     pub fn new(config: CustomQueenConfig) -> Self {
         let id = QueenId(config.queen_id.clone());
+        let system_prompt = format!(
+            "You are a worker agent managed by Queen {} in the Hatchery swarm system.\n\
+             Your role is to complete assigned tasks efficiently and report results.\n\n\
+             ## Communication Protocol\n\
+             - Report progress in your response\n\
+             - If you encounter a blocker, describe it clearly\n\
+             - Share any useful discoveries or patterns you find\n\n\
+             {}\n",
+            config.queen_id,
+            prompts::orchestration_discipline_block()
+        );
         Self {
             id,
             config,
@@ -259,6 +273,7 @@ impl CustomQueen {
             status: QueenStatus::Idle,
             current_task: None,
             result: None,
+            system_prompt,
         }
     }
 
@@ -310,6 +325,11 @@ impl CustomQueen {
         self.workers.iter()
             .filter(|(_, w)| !matches!(w.status, WorkerStatus::Dead { .. }))
             .count()
+    }
+
+    /// Get the system prompt that should be used for API worker backends.
+    pub fn worker_system_prompt(&self) -> &str {
+        &self.system_prompt
     }
 
     /// Estimate context usage for a worker (chars/4 / max_context_tokens).
@@ -695,5 +715,16 @@ mod tests {
         // Check that queen is dead
         let status = queen.status().await;
         assert!(matches!(status, QueenStatus::Dead));
+    }
+
+    #[test]
+    fn test_custom_queen_has_discipline_in_system_prompt() {
+        let config = CustomQueenConfig::default();
+        let queen = CustomQueen::new(config);
+        let prompt = queen.worker_system_prompt();
+        assert!(prompt.contains("Orchestration Discipline"));
+        assert!(prompt.contains("context compression"));
+        assert!(prompt.contains("PRD"));
+        assert!(prompt.contains("Queen CQ0"));
     }
 }
