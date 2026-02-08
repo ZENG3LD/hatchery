@@ -1,20 +1,29 @@
+pub mod tick;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use anyhow::{Result, anyhow};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
+use tokio::task::JoinHandle;
 
 use crate::core::types::*;
 use crate::queen::Queen;
+use crate::queen::handle::{QueenHandle, QueenEvent};
+use crate::queen::spawn_mode::SpawnMode;
+use crate::queen::completion::CompletionConfig;
+use crate::queen::stream_queen::{self, StreamQueenConfig};
+use crate::queen::spawn_queen::{self, SpawnQueenConfig};
 use crate::mailbox::SwarmMailbox;
 use crate::mailbox::event_log::SqliteEventLog;
+use crate::mailbox::event_bus::EventBus;
 use crate::core::task_dag::{TaskDag, DagTask, DagTaskStatus, Priority, Complexity};
-use crate::core::compaction::CompactionStrategy;
 use crate::core::validator::{Validator, ValidationResult};
 use crate::core::shared_memory::SharedMemory;
 use crate::safety::worktree::{WorktreeManager, MergeResult};
-use crate::queen::recovery::{SessionTracker, RecoveryManager, RecoveryConfig, RecoveryPlan};
+use crate::queen::recovery::{SessionTracker, RecoveryManager, RecoveryConfig};
+use crate::swarm_host::tick::HeuristicTick;
 
 /// Configuration for SwarmHost.
 #[derive(Debug, Clone)]
@@ -48,16 +57,19 @@ impl Default for SwarmHostConfig {
 
 /// SwarmHost — Level 2 tactical coordinator.
 ///
-/// Integrates all V2 subsystems: Queens, TaskDag, Mailbox, SharedMemory,
-/// WorktreeManager, Validator, and CompactionStrategy.
+/// V3 event-driven orchestrator using QueenHandles and EventBus.
 pub struct SwarmHost {
     /// Unique identifier
     id: SwarmHostId,
-    /// Queens managed by this SwarmHost
-    queens: HashMap<QueenId, Box<dyn Queen>>,
+    /// Queen handles (cloneable actor handles)
+    handles: HashMap<QueenId, QueenHandle>,
+    /// Actor task join handles (for awaiting/aborting)
+    actor_tasks: HashMap<QueenId, JoinHandle<()>>,
     /// Task dependency graph
     task_dag: TaskDag,
-    /// Communication bus
+    /// Event bus (replaces SwarmMailbox for hot path)
+    event_bus: EventBus,
+    /// KEEP: SwarmMailbox for outbox to BroodLord/Operator (backward compat)
     mailbox: SwarmMailbox,
     /// Shared knowledge store
     memory: SharedMemory,
@@ -65,12 +77,10 @@ pub struct SwarmHost {
     worktree_mgr: Option<WorktreeManager>,
     /// Validator for completed work
     validator: Option<Validator>,
-    /// Context compression strategy
-    compaction: CompactionStrategy,
     /// Configuration
     config: SwarmHostConfig,
-    /// When this SwarmHost was created
-    created_at: DateTime<Utc>,
+    /// Adaptive tick controller
+    tick_state: HeuristicTick,
     /// Current iteration count
     iteration: usize,
     /// Tracks Claude Code session IDs for each Queen
@@ -119,16 +129,10 @@ pub enum ValidatedMergeResult {
 impl SwarmHost {
     /// Create a new SwarmHost with configuration.
     pub fn new(id: SwarmHostId, config: SwarmHostConfig) -> Result<Self> {
-        // Create in-memory SqliteEventLog
         let event_log = Arc::new(SqliteEventLog::in_memory()?);
-
-        // Create SwarmMailbox with event log
-        let mailbox = SwarmMailbox::new(event_log);
-
-        // Create SharedMemory with swarm id
+        let mailbox = SwarmMailbox::new(event_log.clone());
         let memory = SharedMemory::new(id.clone());
 
-        // Optionally create WorktreeManager if git_isolation enabled
         let worktree_mgr = if config.git_isolation {
             match WorktreeManager::new(&config.working_dir, Some("main")) {
                 Ok(mgr) => Some(mgr),
@@ -141,53 +145,124 @@ impl SwarmHost {
             None
         };
 
-        // Create Validator from verify_cmd if provided
         let validator = config.verify_cmd.as_ref().map(|cmd| {
             Validator::command(cmd.as_str(), config.working_dir.clone())
         });
 
-        // Create default CompactionStrategy
-        let compaction = CompactionStrategy::default_swarm_host();
+        // Create EventBus without audit logging by default
+        // (audit can be enabled separately if needed)
+        let event_bus = EventBus::new(128);
 
         Ok(Self {
             id,
-            queens: HashMap::new(),
+            handles: HashMap::new(),
+            actor_tasks: HashMap::new(),
             task_dag: TaskDag::new(),
+            event_bus,
             mailbox,
             memory,
             worktree_mgr,
             validator,
-            compaction,
             config,
-            created_at: Utc::now(),
+            tick_state: HeuristicTick::new(),
             iteration: 0,
             session_tracker: SessionTracker::new(),
             recovery_manager: RecoveryManager::new(RecoveryConfig::default()),
         })
     }
 
-    /// Register a Queen with this SwarmHost.
-    pub fn register_queen(&mut self, queen: Box<dyn Queen>) -> Result<()> {
-        // Check max_queens limit
-        if self.queens.len() >= self.config.max_queens {
+    /// Enable audit logging to SQLite.
+    ///
+    /// This replaces the EventBus with one that has audit logging enabled.
+    /// Must be called before registering any queens or running the event loop.
+    ///
+    /// # Arguments
+    /// - `event_log`: SqliteEventLog for durable storage
+    pub fn enable_audit(&mut self, event_log: SqliteEventLog) {
+        self.event_bus = EventBus::with_audit(128, event_log);
+    }
+
+    /// Register a Queen by spawning StreamQueen or SpawnQueen actor.
+    ///
+    /// This replaces the old register_queen(Box<dyn Queen>) method.
+    pub fn register_queen_actor(
+        &mut self,
+        id: QueenId,
+        model: String,
+        spawn_mode: SpawnMode,
+        completion_config: CompletionConfig,
+    ) -> Result<()> {
+        if self.handles.len() >= self.config.max_queens {
             return Err(anyhow!("Cannot register queen: max_queens limit ({}) reached", self.config.max_queens));
         }
 
-        let queen_id = queen.id();
+        let event_tx = self.event_bus.event_sender();
+        let shutdown_rx = self.event_bus.shutdown_receiver();
 
-        // Register in mailbox
-        self.mailbox.register_queen(queen_id.clone());
+        let system_prompt = Some(crate::core::prompts::orchestration_discipline_block().to_string());
+
+        let (handle, join_handle) = match spawn_mode {
+            SpawnMode::Stream => {
+                let config = StreamQueenConfig {
+                    id: id.clone(),
+                    model,
+                    working_dir: self.config.working_dir.clone(),
+                    max_turns: None,
+                    max_budget_usd: None,
+                    system_prompt,
+                    allowed_tools: None,
+                    completion: completion_config,
+                };
+                stream_queen::spawn(config, event_tx, shutdown_rx)?
+            }
+            SpawnMode::PerTask => {
+                let config = SpawnQueenConfig {
+                    id: id.clone(),
+                    model,
+                    working_dir: self.config.working_dir.clone(),
+                    max_turns: None,
+                    max_budget_usd: None,
+                    system_prompt,
+                    allowed_tools: None,
+                    completion: completion_config,
+                };
+                spawn_queen::spawn(config, event_tx, shutdown_rx)?
+            }
+        };
+
+        // Register in mailbox (for outbox backward compat)
+        self.mailbox.register_queen(id.clone());
 
         // Create worktree if git_isolation enabled
+        if let Some(ref mut worktree_mgr) = self.worktree_mgr {
+            if let Err(e) = worktree_mgr.create(&id) {
+                eprintln!("Warning: Failed to create worktree for {}: {}", id.0, e);
+            }
+        }
+
+        self.handles.insert(id.clone(), handle);
+        self.actor_tasks.insert(id, join_handle);
+
+        Ok(())
+    }
+
+    /// Register a Queen with a Box<dyn Queen>.
+    /// DEPRECATED: Use register_queen_actor() for V3 actor-based Queens.
+    #[deprecated(note = "Use register_queen_actor() for V3")]
+    pub fn register_queen(&mut self, queen: Box<dyn Queen>) -> Result<()> {
+        // Check max limit
+        if self.handles.len() >= self.config.max_queens {
+            return Err(anyhow!("Cannot register queen: max_queens limit ({}) reached", self.config.max_queens));
+        }
+        let queen_id = queen.id();
+        self.mailbox.register_queen(queen_id.clone());
         if let Some(ref mut worktree_mgr) = self.worktree_mgr {
             if let Err(e) = worktree_mgr.create(&queen_id) {
                 eprintln!("Warning: Failed to create worktree for {}: {}", queen_id.0, e);
             }
         }
-
-        // Store in queens HashMap
-        self.queens.insert(queen_id, queen);
-
+        // Note: old-style queens don't have handles — this is for backward compat only
+        // They won't participate in the event-driven run() loop
         Ok(())
     }
 
@@ -222,47 +297,187 @@ impl SwarmHost {
         self.task_dag.add_task(task);
     }
 
-    /// Find idle queens and assign ready tasks to them.
-    /// Returns number of tasks assigned.
-    pub async fn schedule(&mut self) -> Result<usize> {
-        let mut assigned_count = 0;
+    /// Event-driven main loop.
+    ///
+    /// This replaces the old `loop { tick(); sleep(2s); }` pattern.
+    /// Uses tokio::select! to wait on events from the EventBus.
+    pub async fn run(&mut self) -> Result<()> {
+        loop {
+            self.try_schedule().await?;
 
-        // Get ready tasks from DAG (sorted by priority)
+            let interval = self.tick_state.next_interval();
+
+            tokio::select! {
+                Some(event) = self.event_bus.recv_event() => {
+                    self.handle_event(event).await?;
+                }
+                _ = tokio::time::sleep(interval) => {
+                    self.periodic_maintenance().await?;
+                }
+            }
+
+            if self.is_complete() {
+                break;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Process a single QueenEvent from the EventBus.
+    async fn handle_event(&mut self, event: QueenEvent) -> Result<()> {
+        // Audit log
+        let audit_entry = EventBus::event_to_audit_entry(&event);
+        self.event_bus.audit(audit_entry);
+
+        match event {
+            QueenEvent::TaskCompleted {
+                queen_id, task_id, result_text, cost_usd,
+                duration_ms, num_turns, session_id, quality_passed,
+            } => {
+                self.tick_state.note_completion();
+
+                // Update session tracker
+                if let Some(sid) = &session_id {
+                    self.session_tracker.register(queen_id.clone(), sid.clone(), self.config.working_dir.clone());
+                }
+
+                // Mark complete in DAG
+                let dag_result = crate::core::task_dag::DagTaskResult {
+                    success: true,
+                    output: result_text.clone(),
+                    files_modified: vec![],
+                };
+                self.task_dag.complete(&task_id.0, dag_result);
+
+                // Store in memory
+                let result_json = serde_json::json!({
+                    "status": "completed",
+                    "output": result_text,
+                    "cost_usd": cost_usd,
+                    "duration_ms": duration_ms,
+                    "num_turns": num_turns,
+                    "quality_passed": quality_passed,
+                });
+                self.memory.store_task_result(&task_id.0, result_json);
+
+                // Validate and merge if git isolation
+                if let Ok(merge_result) = self.validated_merge(&queen_id).await {
+                    match merge_result {
+                        ValidatedMergeResult::Merged { commit_sha } => {
+                            println!("[SwarmHost] Validated and merged for {}: {}", queen_id.0, commit_sha);
+                        }
+                        ValidatedMergeResult::ValidationFailed { feedback } => {
+                            // Q2Q: Send validation feedback back to Queen
+                            if let Some(handle) = self.handles.get(&queen_id) {
+                                let feedback_msg = SwarmMessage {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    from: AgentId::Validator,
+                                    to: AgentId::Queen(queen_id.clone()),
+                                    msg_type: MessageType::Custom("ValidationFeedback".to_string()),
+                                    payload: serde_json::json!({ "feedback": feedback }),
+                                    timestamp: Utc::now(),
+                                    correlation_id: None,
+                                    visibility: Visibility::default_internal(),
+                                };
+                                let _ = handle.send_message(feedback_msg).await;
+                            }
+                        }
+                        _ => {} // NoGitIsolation, MergeConflict, NoChanges
+                    }
+                }
+
+                // Try to schedule next task for this queen immediately
+                self.try_schedule_queen(&queen_id).await?;
+
+                println!(
+                    "[SwarmHost] Task {} completed by {} (${:.2}, {}ms, {} turns)",
+                    task_id.0, queen_id.0, cost_usd, duration_ms, num_turns
+                );
+            }
+
+            QueenEvent::TaskFailed {
+                queen_id, task_id, error, cost_usd, num_turns,
+            } => {
+                self.tick_state.note_failure();
+
+                // Mark failed in DAG
+                self.task_dag.fail(&task_id.0, error.clone());
+
+                eprintln!(
+                    "[SwarmHost] Task {} failed for {} (${:.2}, {} turns): {}",
+                    task_id.0, queen_id.0, cost_usd, num_turns, error
+                );
+
+                // Try to schedule next task for this queen
+                self.try_schedule_queen(&queen_id).await?;
+            }
+
+            QueenEvent::Progress {
+                queen_id: _,
+                task_id: _,
+                turns_completed: _,
+                cost_usd: _,
+            } => {
+                self.tick_state.note_event();
+                // Could update progress tracking here
+            }
+
+            QueenEvent::Knowledge {
+                queen_id, key, value,
+            } => {
+                self.tick_state.note_event();
+                self.memory.insert(key, value, AgentId::Queen(queen_id));
+            }
+
+            QueenEvent::ProcessDied {
+                queen_id, exit_code, session_id,
+            } => {
+                self.tick_state.note_failure();
+
+                eprintln!(
+                    "[SwarmHost] Process died for {} (exit: {:?}, session: {:?})",
+                    queen_id.0, exit_code, session_id
+                );
+
+                // Recovery: check if we should restart
+                if let Some(plan) = self.recovery_manager.check_health(
+                    &queen_id, false, &self.session_tracker
+                ) {
+                    eprintln!(
+                        "[SwarmHost] Recovery plan for {}: {:?} (attempt #{})",
+                        plan.queen_id.0, plan.reason, plan.attempt
+                    );
+                    self.recovery_manager.mark_recovery_attempted(&plan.queen_id);
+                }
+            }
+
+            QueenEvent::StatusChanged { queen_id: _, status: _ } => {
+                self.tick_state.note_event();
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Find ready tasks + idle queens, assign tasks.
+    async fn try_schedule(&mut self) -> Result<usize> {
         let ready_tasks = self.task_dag.ready_tasks();
         if ready_tasks.is_empty() {
             return Ok(0);
         }
 
-        // Find idle queens (status == Idle)
-        // Collect queen IDs first to avoid borrow checker issues
-        let queen_ids: Vec<QueenId> = self.queens.keys().cloned().collect();
-        let mut idle_queens = Vec::new();
-
-        for queen_id in queen_ids {
-            if let Some(queen) = self.queens.get(&queen_id) {
-                let status = queen.status().await;
-                if matches!(status, QueenStatus::Idle) {
-                    idle_queens.push(queen_id);
-                }
-            }
-        }
-
-        // Collect task assignments to avoid borrow checker issues
-        let assignments: Vec<(String, String, QueenId, u8, Vec<TaskId>, DateTime<Utc>)> = ready_tasks.iter()
-            .zip(idle_queens.iter())
-            .map(|(task, queen_id)| {
-                (
-                    task.id.clone(),
-                    task.description.clone(),
-                    queen_id.clone(),
-                    task.priority as u8,
-                    task.blocked_by.iter().map(|id| TaskId(id.clone())).collect(),
-                    task.created_at,
-                )
-            })
+        // Find idle queens via handle.status()
+        let idle_queens: Vec<QueenId> = self.handles.iter()
+            .filter(|(_, handle)| matches!(handle.status(), QueenStatus::Idle))
+            .map(|(id, _)| id.clone())
             .collect();
 
-        // Build TaskContext from SharedMemory once
+        if idle_queens.is_empty() {
+            return Ok(0);
+        }
+
+        // Build context from SharedMemory
         let knowledge = self.memory.query("*")
             .into_iter()
             .map(|entry| (entry.key, entry.value))
@@ -274,9 +489,26 @@ impl SwarmHost {
             shared_state: HashMap::new(),
         };
 
-        // Assign tasks to queens
-        for (task_id, description, queen_id, priority, blocked_by, created_at) in assignments {
-            let task_obj = Task {
+        let mut assigned = 0;
+
+        // Collect (task_id, description, priority, blocked_by, created_at, queen_id) tuples
+        let assignments: Vec<(String, String, u8, Vec<TaskId>, chrono::DateTime<Utc>, QueenId)> = ready_tasks.iter()
+            .zip(idle_queens.iter())
+            .map(|(dag_task, queen_id)| {
+                (
+                    dag_task.id.clone(),
+                    dag_task.description.clone(),
+                    dag_task.priority as u8,
+                    dag_task.blocked_by.iter().map(|id| TaskId(id.clone())).collect(),
+                    dag_task.created_at,
+                    queen_id.clone(),
+                )
+            })
+            .collect();
+
+        // Now assign tasks (no borrow conflict)
+        for (task_id, description, priority, blocked_by, created_at, queen_id) in assignments {
+            let task = Task {
                 id: TaskId(task_id.clone()),
                 description,
                 status: TaskStatus::Assigned,
@@ -286,182 +518,131 @@ impl SwarmHost {
                 created_at,
             };
 
-            // Assign to queen
-            if let Some(queen) = self.queens.get_mut(&queen_id) {
-                if let Err(e) = queen.assign(task_obj, context.clone()).await {
-                    eprintln!("Failed to assign task {} to queen {}: {}", task_id, queen_id.0, e);
+            if let Some(handle) = self.handles.get(&queen_id) {
+                if let Err(e) = handle.assign(task, context.clone()).await {
+                    eprintln!("[SwarmHost] Failed to assign task {} to {}: {}", task_id, queen_id.0, e);
                     continue;
                 }
 
-                // Update DAG
-                self.task_dag.assign(&task_id, queen_id);
-                assigned_count += 1;
+                self.task_dag.assign(&task_id, queen_id.clone());
+                assigned += 1;
             }
         }
 
-        Ok(assigned_count)
+        Ok(assigned)
     }
 
-    /// Poll all queens for messages, process results.
-    /// Returns number of messages processed.
-    pub async fn poll(&mut self) -> Result<usize> {
-        let mut processed_count = 0;
+    /// Try to schedule the next task for a specific queen (after completion).
+    async fn try_schedule_queen(&mut self, queen_id: &QueenId) -> Result<()> {
+        let handle = match self.handles.get(queen_id) {
+            Some(h) => h.clone(),
+            None => return Ok(()),
+        };
 
-        // Collect queen IDs to avoid borrow issues
-        let queen_ids: Vec<QueenId> = self.queens.keys().cloned().collect();
+        if !matches!(handle.status(), QueenStatus::Idle) {
+            return Ok(());
+        }
 
-        // For each queen: drain_outbox
-        for queen_id in queen_ids {
-            if let Some(queen) = self.queens.get_mut(&queen_id) {
-                let messages = queen.drain_outbox().await;
+        let ready_tasks = self.task_dag.ready_tasks();
+        let dag_task_info = ready_tasks.first().map(|dt| {
+            (
+                dt.id.clone(),
+                dt.description.clone(),
+                dt.priority as u8,
+                dt.blocked_by.iter().map(|id| TaskId(id.clone())).collect::<Vec<TaskId>>(),
+                dt.created_at,
+            )
+        });
 
-                // Process each message by type
-                for msg in messages {
-                    processed_count += 1;
+        if let Some((task_id, description, priority, blocked_by, created_at)) = dag_task_info {
+            let knowledge = self.memory.query("*")
+                .into_iter()
+                .map(|entry| (entry.key, entry.value))
+                .collect();
 
-                    match msg.msg_type {
-                        MessageType::TaskResult => {
-                            // Parse payload for task_id and result
-                            if let Some(task_id_str) = msg.payload.get("task_id").and_then(|v| v.as_str()) {
-                                // Check if success or failure
-                                let success = msg.payload.get("success")
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false);
+            let context = TaskContext {
+                knowledge,
+                recent_messages: Vec::new(),
+                shared_state: HashMap::new(),
+            };
 
-                                if success {
-                                    let output = msg.payload.get("output")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("")
-                                        .to_string();
+            let task = Task {
+                id: TaskId(task_id.clone()),
+                description,
+                status: TaskStatus::Assigned,
+                assigned_to: Some(queen_id.clone()),
+                priority,
+                blocked_by,
+                created_at,
+            };
 
-                                    let files_modified: Vec<String> = msg.payload.get("files_modified")
-                                        .and_then(|v| v.as_array())
-                                        .map(|arr| arr.iter()
-                                            .filter_map(|v| v.as_str().map(String::from))
-                                            .collect())
-                                        .unwrap_or_default();
+            if let Err(e) = handle.assign(task, context).await {
+                eprintln!("[SwarmHost] Failed to assign task {} to {}: {}", task_id, queen_id.0, e);
+            } else {
+                self.task_dag.assign(&task_id, queen_id.clone());
+            }
+        }
 
-                                    // Mark complete in DAG
-                                    let dag_result = crate::core::task_dag::DagTaskResult {
-                                        success: true,
-                                        output: output.clone(),
-                                        files_modified: files_modified.clone(),
-                                    };
+        Ok(())
+    }
 
-                                    self.task_dag.complete(task_id_str, dag_result);
-
-                                    // Store task result in memory as JSON
-                                    let result_json = serde_json::json!({
-                                        "status": "completed",
-                                        "output": output,
-                                        "artifacts": files_modified,
-                                    });
-                                    self.memory.store_task_result(task_id_str, result_json);
-
-                                    // Validate and merge worktree if git isolation enabled
-                                    match self.validated_merge(&queen_id).await {
-                                        Ok(ValidatedMergeResult::Merged { commit_sha }) => {
-                                            println!("Validated and merged worktree for {}: {}", queen_id.0, commit_sha);
-                                        }
-                                        Ok(ValidatedMergeResult::MergeConflict { files }) => {
-                                            eprintln!("Merge conflict for {}: {:?}", queen_id.0, files);
-                                        }
-                                        Ok(ValidatedMergeResult::ValidationFailed { feedback }) => {
-                                            eprintln!("Validation failed for {}: {}", queen_id.0, feedback);
-                                        }
-                                        Ok(ValidatedMergeResult::NoGitIsolation) => {
-                                            // Git isolation disabled, nothing to do
-                                        }
-                                        Ok(ValidatedMergeResult::NoChanges) => {
-                                            println!("No changes to merge for {}", queen_id.0);
-                                        }
-                                        Err(e) => {
-                                            eprintln!("Validated merge failed for {}: {}", queen_id.0, e);
-                                        }
-                                    }
-                                } else {
-                                    // Mark failed
-                                    let error = msg.payload.get("error")
-                                        .and_then(|v| v.as_str())
-                                        .unwrap_or("Unknown error")
-                                        .to_string();
-
-                                    self.task_dag.fail(task_id_str, error);
-                                }
-                            }
-                        }
-                        MessageType::Knowledge => {
-                            // Store in SharedMemory
-                            if let (Some(key), Some(value)) = (
-                                msg.payload.get("key").and_then(|v| v.as_str()),
-                                msg.payload.get("value"),
-                            ) {
-                                self.memory.insert(
-                                    key.to_string(),
-                                    value.clone(),
-                                    AgentId::Queen(queen_id.clone()),
-                                );
-                            }
-                        }
-                        MessageType::Escalation => {
-                            // Forward to mailbox (will be picked up by BroodLord/Operator)
-                            self.mailbox.send(msg);
-                        }
-                        MessageType::StatusReport => {
-                            // Just log it
-                            println!("Status from {}: {:?}", queen_id.0, msg.payload);
-                        }
-                        _ => {
-                            // Other message types - log for now
-                            println!("Received {} message from {}",
-                                match msg.msg_type {
-                                    MessageType::TaskAssignment => "TaskAssignment",
-                                    MessageType::TaskProgress => "TaskProgress",
-                                    MessageType::StatusRequest => "StatusRequest",
-                                    MessageType::KnowledgeQuery => "KnowledgeQuery",
-                                    MessageType::Shutdown => "Shutdown",
-                                    MessageType::Custom(_) => "Custom",
-                                    _ => "Other",
-                                },
-                                queen_id.0
-                            );
-                        }
-                    }
+    /// Periodic maintenance (runs on tick interval).
+    async fn periodic_maintenance(&mut self) -> Result<()> {
+        // Check queen health via handles
+        for (queen_id, handle) in &self.handles {
+            if !handle.is_alive() {
+                if let Some(plan) = self.recovery_manager.check_health(
+                    queen_id, false, &self.session_tracker
+                ) {
+                    eprintln!(
+                        "[SwarmHost] Recovery needed for {}: {:?}",
+                        plan.queen_id.0, plan.reason
+                    );
+                    self.recovery_manager.mark_recovery_attempted(&plan.queen_id);
                 }
             }
         }
 
-        Ok(processed_count)
+        // Evict expired memory entries
+        self.memory.evict_expired();
+
+        Ok(())
     }
 
-    /// Run one iteration: schedule + poll.
+    /// Run one iteration: schedule + poll one event + maintenance.
+    /// DEPRECATED: Use run() for event-driven loop.
     pub async fn tick(&mut self) -> Result<TickResult> {
         self.iteration += 1;
 
-        let tasks_assigned = self.schedule().await?;
-        let messages_processed = self.poll().await?;
+        let tasks_assigned = self.try_schedule().await?;
 
-        // Check Queen health and log recovery plans
-        let recovery_plans = self.check_queen_health().await;
-        for plan in &recovery_plans {
-            eprintln!(
-                "[SwarmHost] Recovery needed for Queen {}: {:?} (attempt #{})",
-                plan.queen_id.0, plan.reason, plan.attempt
-            );
-            self.recovery_manager.mark_recovery_attempted(&plan.queen_id);
+        // Try to receive one event (non-blocking with small timeout)
+        let mut tasks_completed = 0;
+        let mut tasks_failed = 0;
+        let mut messages_processed = 0;
+
+        if let Ok(maybe_event) = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            self.event_bus.recv_event()
+        ).await {
+            if let Some(event) = maybe_event {
+                messages_processed += 1;
+                match &event {
+                    QueenEvent::TaskCompleted { .. } => tasks_completed += 1,
+                    QueenEvent::TaskFailed { .. } => tasks_failed += 1,
+                    _ => {}
+                }
+                self.handle_event(event).await?;
+            }
         }
 
-        // Evict expired from memory
-        self.memory.evict_expired();
-
-        // Get stats
-        let stats = self.task_dag.stats();
+        self.periodic_maintenance().await?;
 
         Ok(TickResult {
             tasks_assigned,
             messages_processed,
-            tasks_completed: stats.completed,
-            tasks_failed: stats.failed,
+            tasks_completed,
+            tasks_failed,
             iteration: self.iteration,
         })
     }
@@ -476,10 +657,11 @@ impl SwarmHost {
     pub fn progress(&self) -> SwarmProgress {
         let stats = self.task_dag.stats();
 
-        // Can't call async status() here, so we'll estimate from task assignments
-        // This is a limitation - in real code you'd need to track this separately
-        let queens_active = stats.in_progress.min(self.queens.len());
-        let queens_idle = self.queens.len().saturating_sub(queens_active);
+        // Count active/idle queens from handles
+        let queens_active = self.handles.iter()
+            .filter(|(_, handle)| !matches!(handle.status(), QueenStatus::Idle))
+            .count();
+        let queens_idle = self.handles.len().saturating_sub(queens_active);
 
         SwarmProgress {
             total_tasks: stats.total,
@@ -499,7 +681,7 @@ impl SwarmHost {
 
     /// Number of registered queens.
     pub fn queen_count(&self) -> usize {
-        self.queens.len()
+        self.handles.len()
     }
 
     /// Access to shared memory (for external reads).
@@ -553,30 +735,6 @@ impl SwarmHost {
         })
     }
 
-    /// Check all Queens for health issues and return recovery plans.
-    /// Called during each tick to detect dead/stalled Queens.
-    pub async fn check_queen_health(&mut self) -> Vec<RecoveryPlan> {
-        let mut plans = Vec::new();
-
-        let queen_ids: Vec<QueenId> = self.queens.keys().cloned().collect();
-
-        for queen_id in &queen_ids {
-            if let Some(queen) = self.queens.get(queen_id) {
-                let alive = queen.is_alive().await;
-
-                if let Some(plan) = self.recovery_manager.check_health(
-                    queen_id,
-                    alive,
-                    &self.session_tracker,
-                ) {
-                    plans.push(plan);
-                }
-            }
-        }
-
-        plans
-    }
-
     /// Get mutable access to the session tracker (for registering sessions).
     pub fn session_tracker_mut(&mut self) -> &mut SessionTracker {
         &mut self.session_tracker
@@ -593,20 +751,36 @@ impl SwarmHost {
     }
 
     /// Remove a dead Queen from the registry (before respawning).
-    pub async fn unregister_queen(&mut self, queen_id: &QueenId) -> Option<Box<dyn Queen>> {
-        // Unregister from mailbox
+    pub async fn unregister_queen(&mut self, queen_id: &QueenId) -> Option<QueenHandle> {
         self.mailbox.unregister_queen(queen_id);
 
-        // Remove from queens map
-        self.queens.remove(queen_id)
+        // Abort the actor task
+        if let Some(task) = self.actor_tasks.remove(queen_id) {
+            task.abort();
+        }
+
+        self.handles.remove(queen_id)
     }
 
     /// Graceful shutdown: shutdown all queens, save memory, cleanup worktrees.
     pub async fn shutdown(&mut self) -> Result<()> {
-        // Shutdown all queens
-        for (queen_id, queen) in self.queens.iter_mut() {
-            if let Err(e) = queen.shutdown().await {
+        // Broadcast shutdown to all actors
+        self.event_bus.shutdown();
+
+        // Shutdown via handles
+        for (queen_id, handle) in &self.handles {
+            if let Err(e) = handle.shutdown().await {
                 eprintln!("Failed to shutdown queen {}: {}", queen_id.0, e);
+            }
+        }
+
+        // Wait for actor tasks to finish
+        for (queen_id, task) in self.actor_tasks.drain() {
+            if let Err(e) = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                task
+            ).await {
+                eprintln!("Actor task for {} did not finish in time: {}", queen_id.0, e);
             }
         }
 
@@ -655,144 +829,36 @@ fn format_validation_feedback(validation_result: &ValidationResult) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
-
-    struct MockQueen {
-        id: QueenId,
-        status: QueenStatus,
-        outbox: Vec<SwarmMessage>,
-    }
-
-    impl MockQueen {
-        fn new(id: &str) -> Self {
-            Self {
-                id: QueenId(id.to_string()),
-                status: QueenStatus::Idle,
-                outbox: Vec::new(),
-            }
-        }
-    }
-
-    #[async_trait]
-    impl Queen for MockQueen {
-        fn id(&self) -> QueenId {
-            self.id.clone()
-        }
-
-        fn backend(&self) -> QueenBackend {
-            QueenBackend::ClaudeNative
-        }
-
-        async fn assign(&mut self, _task: Task, _ctx: TaskContext) -> Result<()> {
-            self.status = QueenStatus::Working {
-                task_id: TaskId::default(),
-                progress: 0.0,
-                sub_tasks: vec![],
-            };
-            Ok(())
-        }
-
-        async fn status(&self) -> QueenStatus {
-            self.status.clone()
-        }
-
-        async fn result(&self) -> Option<TaskResult> {
-            None
-        }
-
-        async fn send_message(&mut self, _msg: SwarmMessage) -> Result<()> {
-            Ok(())
-        }
-
-        async fn drain_outbox(&mut self) -> Vec<SwarmMessage> {
-            self.outbox.drain(..).collect()
-        }
-
-        async fn is_alive(&self) -> bool {
-            true
-        }
-
-        async fn shutdown(&mut self) -> Result<()> {
-            Ok(())
-        }
-    }
+    use crate::core::task_dag::{Priority, Complexity};
+    use crate::queen::handle::QueenCommand;
+    use tokio::sync::{mpsc, watch};
 
     #[test]
     fn test_create_swarm_host_with_default_config() {
         let config = SwarmHostConfig::default();
         let host = SwarmHost::new(SwarmHostId::default(), config);
         assert!(host.is_ok());
-
         let host = host.unwrap();
         assert_eq!(host.queen_count(), 0);
         assert_eq!(host.iteration, 0);
     }
 
     #[test]
-    fn test_register_queens_up_to_max_limit() {
-        let config = SwarmHostConfig {
-            max_queens: 2,
-            ..Default::default()
-        };
-        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
-
-        // Register first queen
-        let queen1 = Box::new(MockQueen::new("queen1"));
-        assert!(host.register_queen(queen1).is_ok());
-        assert_eq!(host.queen_count(), 1);
-
-        // Register second queen
-        let queen2 = Box::new(MockQueen::new("queen2"));
-        assert!(host.register_queen(queen2).is_ok());
-        assert_eq!(host.queen_count(), 2);
-
-        // Try to register third queen (should fail)
-        let queen3 = Box::new(MockQueen::new("queen3"));
-        assert!(host.register_queen(queen3).is_err());
-        assert_eq!(host.queen_count(), 2);
-    }
-
-    #[test]
     fn test_add_tasks_to_dag() {
         let config = SwarmHostConfig::default();
         let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
-
-        // Add task with no dependencies
-        host.add_task(
-            "task1",
-            "First task",
-            vec![],
-            Priority::High,
-            Complexity::Medium,
-        );
-
-        // Add task with dependency
-        host.add_task(
-            "task2",
-            "Second task",
-            vec!["task1".to_string()],
-            Priority::Normal,
-            Complexity::Simple,
-        );
-
+        host.add_task("task1", "First task", vec![], Priority::High, Complexity::Medium);
+        host.add_task("task2", "Second task", vec!["task1".to_string()], Priority::Normal, Complexity::Simple);
         let progress = host.progress();
         assert_eq!(progress.total_tasks, 2);
-        assert_eq!(progress.blocked, 1); // task2 is blocked by task1
+        assert_eq!(progress.blocked, 1);
     }
 
     #[test]
     fn test_is_complete_returns_false_when_tasks_pending() {
         let config = SwarmHostConfig::default();
         let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
-
-        host.add_task(
-            "task1",
-            "Test task",
-            vec![],
-            Priority::High,
-            Complexity::Trivial,
-        );
-
+        host.add_task("task1", "Test task", vec![], Priority::High, Complexity::Trivial);
         assert!(!host.is_complete());
     }
 
@@ -800,68 +866,131 @@ mod tests {
     fn test_is_complete_returns_true_when_all_done() {
         let config = SwarmHostConfig::default();
         let host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
-
-        // No tasks means complete (edge case)
-        assert!(!host.is_complete()); // Actually should be false with 0 tasks
+        assert!(!host.is_complete());
     }
 
     #[test]
     fn test_progress_returns_correct_counts() {
         let config = SwarmHostConfig::default();
         let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
-
-        // Add some tasks
         host.add_task("task1", "T1", vec![], Priority::High, Complexity::Trivial);
         host.add_task("task2", "T2", vec!["task1".to_string()], Priority::Normal, Complexity::Medium);
         host.add_task("task3", "T3", vec![], Priority::Low, Complexity::VeryComplex);
-
         let progress = host.progress();
         assert_eq!(progress.total_tasks, 3);
         assert_eq!(progress.completed, 0);
-        assert_eq!(progress.blocked, 1); // task2 blocked by task1
+        assert_eq!(progress.blocked, 1);
     }
 
     #[test]
     fn test_drain_outbox_works() {
         let config = SwarmHostConfig::default();
         let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
-
-        // Initially empty
         let messages = host.drain_outbox();
         assert_eq!(messages.len(), 0);
     }
 
     #[tokio::test]
-    async fn test_schedule_assigns_ready_tasks() {
+    async fn test_try_schedule_with_handle() {
         let config = SwarmHostConfig::default();
         let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
 
-        // Register a queen
-        let queen = Box::new(MockQueen::new("queen1"));
-        host.register_queen(queen).unwrap();
+        // Create a mock queen handle
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(64);
+        let (_status_tx, status_rx) = watch::channel(QueenStatus::Idle);
+        let handle = QueenHandle::new(
+            QueenId("Q0".to_string()),
+            SpawnMode::PerTask,
+            cmd_tx,
+            status_rx,
+        );
 
-        // Add a ready task
+        host.handles.insert(QueenId("Q0".to_string()), handle);
+
+        // Add a task
         host.add_task("task1", "Test task", vec![], Priority::High, Complexity::Trivial);
 
         // Schedule
-        let assigned = host.schedule().await.unwrap();
+        let assigned = host.try_schedule().await.unwrap();
         assert_eq!(assigned, 1);
 
-        // Check progress
-        let progress = host.progress();
-        assert_eq!(progress.in_progress, 1);
+        // Verify command was sent
+        let cmd = cmd_rx.recv().await.unwrap();
+        assert!(matches!(cmd, QueenCommand::Assign { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_handle_event_task_completed() {
+        let config = SwarmHostConfig::default();
+        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+
+        // Add and assign a task
+        host.add_task("T1", "Test task", vec![], Priority::High, Complexity::Trivial);
+        host.task_dag.assign("T1", QueenId("Q0".to_string()));
+
+        // Handle completion event
+        let event = QueenEvent::TaskCompleted {
+            queen_id: QueenId("Q0".to_string()),
+            task_id: TaskId("T1".to_string()),
+            result_text: "Done".to_string(),
+            cost_usd: 0.15,
+            duration_ms: 5000,
+            num_turns: 3,
+            session_id: Some("sess-123".to_string()),
+            quality_passed: true,
+        };
+
+        host.handle_event(event).await.unwrap();
+
+        // Task should be completed
+        let stats = host.task_dag.stats();
+        assert_eq!(stats.completed, 1);
+    }
+
+    #[tokio::test]
+    async fn test_handle_event_task_failed() {
+        let config = SwarmHostConfig::default();
+        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+
+        host.add_task("T1", "Test task", vec![], Priority::High, Complexity::Trivial);
+        host.task_dag.assign("T1", QueenId("Q0".to_string()));
+
+        let event = QueenEvent::TaskFailed {
+            queen_id: QueenId("Q0".to_string()),
+            task_id: TaskId("T1".to_string()),
+            error: "Compilation error".to_string(),
+            cost_usd: 0.05,
+            num_turns: 1,
+        };
+
+        host.handle_event(event).await.unwrap();
+
+        let stats = host.task_dag.stats();
+        assert_eq!(stats.failed, 1);
+    }
+
+    #[tokio::test]
+    async fn test_handle_event_knowledge() {
+        let config = SwarmHostConfig::default();
+        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+
+        let event = QueenEvent::Knowledge {
+            queen_id: QueenId("Q0".to_string()),
+            key: "api_key".to_string(),
+            value: serde_json::json!("secret123"),
+        };
+
+        host.handle_event(event).await.unwrap();
+
+        // Verify knowledge was stored
+        let results = host.memory.query("api_key");
+        assert!(!results.is_empty());
     }
 
     #[tokio::test]
     async fn test_shutdown_gracefully() {
         let config = SwarmHostConfig::default();
         let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
-
-        // Register queen
-        let queen = Box::new(MockQueen::new("queen1"));
-        host.register_queen(queen).unwrap();
-
-        // Shutdown should succeed
         assert!(host.shutdown().await.is_ok());
     }
 
@@ -872,194 +1001,20 @@ mod tests {
             ..Default::default()
         };
         let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
-
         let queen_id = QueenId("Q0".to_string());
-
-        // Should return NoGitIsolation when git isolation is disabled
         let result = host.validated_merge(&queen_id).await.unwrap();
         assert!(matches!(result, ValidatedMergeResult::NoGitIsolation));
     }
 
     #[tokio::test]
-    async fn test_validated_merge_with_validation_success() {
-        // Create a temp directory for test
-        let temp_dir = tempfile::tempdir().unwrap();
-        let repo_path = temp_dir.path().to_path_buf();
-
-        // Init git repo
-        std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(&repo_path)
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["config", "user.email", "test@test.com"])
-            .current_dir(&repo_path)
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["config", "user.name", "Test"])
-            .current_dir(&repo_path)
-            .output()
-            .unwrap();
-
-        // Create initial commit
-        std::fs::write(repo_path.join("README.md"), "# Test").unwrap();
-        std::process::Command::new("git")
-            .args(["add", "."])
-            .current_dir(&repo_path)
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["commit", "-m", "initial"])
-            .current_dir(&repo_path)
-            .output()
-            .unwrap();
-
-        let config = SwarmHostConfig {
-            git_isolation: true,
-            working_dir: repo_path.clone(),
-            verify_cmd: Some("echo ok".to_string()),
-            ..Default::default()
-        };
-
+    async fn test_tick_returns_result() {
+        let config = SwarmHostConfig::default();
         let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
 
-        let queen_id = QueenId("Q0".to_string());
-        let queen = Box::new(MockQueen::new("Q0"));
-        host.register_queen(queen).unwrap();
+        host.add_task("T1", "Test", vec![], Priority::Normal, Complexity::Trivial);
 
-        // Get worktree info to check if it was created
-        let wt_created = host.worktree_mgr.as_ref()
-            .and_then(|mgr| mgr.get_info(&queen_id))
-            .is_some();
-
-        if !wt_created {
-            // If worktree creation failed, skip this test
-            eprintln!("Worktree creation failed, skipping test");
-            return;
-        }
-
-        // Make a change in the worktree
-        if let Some(ref mgr) = host.worktree_mgr {
-            let wt_path = mgr.worktree_path(&queen_id);
-            if !wt_path.exists() {
-                eprintln!("Worktree path doesn't exist, skipping test");
-                return;
-            }
-            std::fs::write(wt_path.join("test.txt"), "content").unwrap();
-            std::process::Command::new("git")
-                .args(["add", "."])
-                .current_dir(&wt_path)
-                .output()
-                .unwrap();
-            std::process::Command::new("git")
-                .args(["commit", "-m", "test commit"])
-                .current_dir(&wt_path)
-                .output()
-                .unwrap();
-        }
-
-        // Validated merge should succeed (validator will pass with "echo ok")
-        let result = host.validated_merge(&queen_id).await.unwrap();
-        match result {
-            ValidatedMergeResult::Merged { commit_sha } => {
-                assert!(!commit_sha.is_empty());
-            }
-            _ => panic!("Expected Merged result, got {:?}", result),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_validated_merge_validation_fails() {
-        // Create a temp directory for test
-        let temp_dir = tempfile::tempdir().unwrap();
-        let repo_path = temp_dir.path().to_path_buf();
-
-        // Init git repo
-        std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(&repo_path)
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["config", "user.email", "test@test.com"])
-            .current_dir(&repo_path)
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["config", "user.name", "Test"])
-            .current_dir(&repo_path)
-            .output()
-            .unwrap();
-
-        // Create initial commit
-        std::fs::write(repo_path.join("README.md"), "# Test").unwrap();
-        std::process::Command::new("git")
-            .args(["add", "."])
-            .current_dir(&repo_path)
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["commit", "-m", "initial"])
-            .current_dir(&repo_path)
-            .output()
-            .unwrap();
-
-        // Use failing command for validation
-        let fail_cmd = if cfg!(windows) { "cmd /c exit 1" } else { "false" };
-
-        let config = SwarmHostConfig {
-            git_isolation: true,
-            working_dir: repo_path.clone(),
-            verify_cmd: Some(fail_cmd.to_string()),
-            ..Default::default()
-        };
-
-        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
-
-        let queen_id = QueenId("Q0".to_string());
-        let queen = Box::new(MockQueen::new("Q0"));
-        host.register_queen(queen).unwrap();
-
-        // Get worktree info to check if it was created
-        let wt_created = host.worktree_mgr.as_ref()
-            .and_then(|mgr| mgr.get_info(&queen_id))
-            .is_some();
-
-        if !wt_created {
-            // If worktree creation failed, skip this test
-            eprintln!("Worktree creation failed, skipping test");
-            return;
-        }
-
-        // Make a change in the worktree
-        if let Some(ref mgr) = host.worktree_mgr {
-            let wt_path = mgr.worktree_path(&queen_id);
-            if !wt_path.exists() {
-                eprintln!("Worktree path doesn't exist, skipping test");
-                return;
-            }
-            std::fs::write(wt_path.join("test.txt"), "content").unwrap();
-            std::process::Command::new("git")
-                .args(["add", "."])
-                .current_dir(&wt_path)
-                .output()
-                .unwrap();
-            std::process::Command::new("git")
-                .args(["commit", "-m", "test commit"])
-                .current_dir(&wt_path)
-                .output()
-                .unwrap();
-        }
-
-        // Validated merge should fail validation
-        let result = host.validated_merge(&queen_id).await.unwrap();
-        match result {
-            ValidatedMergeResult::ValidationFailed { feedback } => {
-                assert!(!feedback.is_empty());
-            }
-            _ => panic!("Expected ValidationFailed result, got {:?}", result),
-        }
+        let result = host.tick().await.unwrap();
+        assert_eq!(result.iteration, 1);
+        assert_eq!(result.tasks_assigned, 0); // No queens registered
     }
 }

@@ -21,27 +21,25 @@ pub fn queen_sergeant_prompt(task_description: &str, sub_tasks: &[&str]) -> Stri
 ## Sub-tasks
 {tasks_list}
 
-## Protocol
-Communicate with the SwarmHost using the @hatchery: protocol:
-- @hatchery:status <progress_pct> <detail> — Report progress
-- @hatchery:complete <result_json> — Report task completion
-- @hatchery:error <message> — Report an error
-- @hatchery:escalate <issue> — Escalate a problem you cannot solve
-- @hatchery:knowledge <key> <value_json> — Share a discovery with the swarm
+## Communication
+Your completion is detected automatically from process signals.
+- Focus on completing the task using available tools
+- Share important discoveries in your output — they will be captured
+- If you encounter a blocker you cannot resolve, describe it clearly in your output
 
 ## Rules
 1. Break down your task into sub-tasks and work through them systematically
 2. Report progress after each sub-task completion
-3. If you encounter a blocker, escalate immediately — don't waste iterations
-4. Share any useful discoveries via @hatchery:knowledge
-5. When all sub-tasks are done, report completion with results
+3. If you encounter a blocker, describe it clearly — don't waste iterations
+4. Share any useful discoveries in your output
+5. When all sub-tasks are done, summarize your results
 
 ## Orchestration Discipline (CRITICAL — survives context compression)
 These rules MUST be followed even after context window compression:
-1. After completing each sub-task: update PRD checkboxes via @hatchery:status
-2. Track progress in the task DAG — never work on blocked tasks
-3. Share discoveries via @hatchery:knowledge — don't let knowledge die with context
-4. If context was compressed, re-read the PRD and ORCHESTRATOR.md before continuing
+1. After completing each sub-task: summarize progress clearly in output
+2. Track progress — never work on blocked tasks
+3. Share important discoveries in your output
+4. If context was compressed, re-read the PRD before continuing
 5. Report completion ONLY when verified — don't mark done without validation
 "#)
 }
@@ -152,12 +150,12 @@ Respond with a JSON verdict:
 pub fn orchestration_discipline_block() -> &'static str {
     r#"## Orchestration Discipline (CRITICAL — survives context compression)
 These rules MUST be followed even after context window compression:
-1. After completing each sub-task: update PRD checkboxes via @hatchery:status
-2. Track progress in the task DAG — never work on blocked tasks
-3. Share discoveries via @hatchery:knowledge — don't let knowledge die with context
-4. If context was compressed, re-read the PRD and ORCHESTRATOR.md before continuing
-5. Report completion ONLY when verified — don't mark done without validation
-6. Use the established patterns: /ralph for iterative tasks, /carousel for phased pipelines
+1. After completing each sub-task: summarize progress and results clearly
+2. Track progress in the task structure — never work on blocked tasks
+3. Share discoveries in your output — important findings will be captured automatically
+4. If context was compressed, re-read the PRD and project docs before continuing
+5. Report completion ONLY when verified — don't claim done without validation
+6. Use established patterns and follow project conventions
 7. PRD is the single source of truth, not internal todo lists"#
 }
 
@@ -168,7 +166,7 @@ These rules MUST be followed even after context window compression:
 1. After each tick cycle: check TaskDag state, refresh readiness, assign ready tasks
 2. ALWAYS validate before merging — never accept unvalidated work from Queens
 3. Track Queen health: if a Queen stalls for 3+ iterations, restart or reassign
-4. Report progress to BroodLord/Operator after every completed task, not just at the end
+4. Report progress after every completed task, not just at the end
 5. If context was compressed: re-read the task DAG, re-check Queen statuses, resume scheduling
 6. Knowledge from Queens goes into SharedMemory — don't let it die in message queues
 7. PRD is the single source of truth — sync TaskDag state with PRD checkboxes"#
@@ -190,7 +188,7 @@ These rules MUST be followed even after context window compression:
 /// Get the default system prompt for a given role.
 pub fn default_system_prompt(role: &str) -> &'static str {
     match role {
-        "queen" | "native_queen" => "You are an autonomous AI coding agent (Queen) in the Hatchery swarm. Complete your assigned tasks efficiently and report results via the @hatchery: protocol.",
+        "queen" | "native_queen" => "You are an autonomous AI coding agent (Queen) in the Hatchery swarm. Complete your assigned tasks efficiently and share results in your output.",
         "swarm_host" | "coordinator" => "You are the SwarmHost coordinator. Make tactical decisions about task assignment, validation, and resource allocation.",
         "brood_lord" | "strategist" => "You are the BroodLord strategist. Decompose complex goals into sub-projects and coordinate multiple SwarmHosts.",
         "validator" | "reviewer" => "You are a code reviewer. Evaluate completed work for correctness, quality, and security.",
@@ -213,8 +211,8 @@ mod tests {
         assert!(prompt.contains("1. Create user model"));
         assert!(prompt.contains("2. Add password hashing"));
         assert!(prompt.contains("3. Implement login endpoint"));
-        assert!(prompt.contains("@hatchery:status"));
-        assert!(prompt.contains("@hatchery:complete"));
+        assert!(prompt.contains("completion is detected automatically"));
+        assert!(prompt.contains("available tools"));
         assert!(prompt.contains("Orchestration Discipline"));
     }
 
@@ -311,14 +309,13 @@ mod tests {
     }
 
     #[test]
-    fn test_queen_prompt_includes_protocol_commands() {
+    fn test_queen_prompt_includes_communication_section() {
         let prompt = queen_sergeant_prompt("Test task", &[]);
 
-        assert!(prompt.contains("@hatchery:status"));
-        assert!(prompt.contains("@hatchery:complete"));
-        assert!(prompt.contains("@hatchery:error"));
-        assert!(prompt.contains("@hatchery:escalate"));
-        assert!(prompt.contains("@hatchery:knowledge"));
+        assert!(prompt.contains("Communication"));
+        assert!(prompt.contains("completion is detected automatically"));
+        assert!(prompt.contains("available tools"));
+        assert!(prompt.contains("Share important discoveries in your output"));
     }
 
     #[test]
@@ -347,7 +344,7 @@ mod tests {
         assert!(block.contains("Orchestration Discipline"));
         assert!(block.contains("context compression"));
         assert!(block.contains("PRD"));
-        assert!(block.contains("@hatchery:knowledge"));
+        assert!(block.contains("Share discoveries in your output"));
     }
 
     #[test]

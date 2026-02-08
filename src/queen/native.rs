@@ -83,6 +83,8 @@ struct NativeQueenState {
 }
 
 /// NativeQueen wraps Claude Code CLI with PipeProcess
+/// DEPRECATED: Use StreamQueen or SpawnQueen for V3 actor-based implementation.
+#[deprecated(note = "Use StreamQueen or SpawnQueen for V3")]
 pub struct NativeQueen {
     id: QueenId,
     working_dir: PathBuf,
@@ -149,6 +151,7 @@ impl HatcheryProtocolParser {
     }
 }
 
+#[allow(deprecated)]
 impl NativeQueen {
     /// Build PipeProcessOptions with discipline rules in --append-system-prompt.
     /// This ensures rules are in the system prompt — NEVER compressed, NEVER ignored.
@@ -158,6 +161,12 @@ impl NativeQueen {
             append_system_prompt: Some(discipline),
             resume_session_id,
             model: Some(config.model.clone()),
+            input_format: None,
+            output_format: None,
+            max_turns: None,
+            max_budget_usd: None,
+            json_schema: None,
+            allowed_tools: None,
         }
     }
 
@@ -365,6 +374,7 @@ impl NativeQueen {
 }
 
 #[async_trait]
+#[allow(deprecated)]
 impl Queen for NativeQueen {
     fn id(&self) -> QueenId {
         self.id.clone()

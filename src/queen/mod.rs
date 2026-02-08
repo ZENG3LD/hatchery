@@ -11,10 +11,18 @@ pub mod native;
 pub mod custom;
 pub mod api_backend;
 pub mod recovery;
+pub mod spawn_mode;
+pub mod handle;
+pub mod completion;
+pub mod stream_queen;
+pub mod spawn_queen;
 
 // Re-export Queen trait and key types
 pub use native::NativeQueen;
 pub use custom::CustomQueen;
+pub use spawn_mode::SpawnMode;
+pub use handle::{QueenCommand, QueenEvent, QueenHandle};
+pub use spawn_queen::{spawn, SpawnQueenConfig};
 
 use async_trait::async_trait;
 use anyhow::Result;

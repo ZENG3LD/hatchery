@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 use hatchery::cli::{HatcheryConfig, Mode};
 use hatchery::mailbox::event_log::SqliteEventLog;
 use hatchery::core::types::{SwarmMessage, AgentId, MessageType, Visibility, SwarmHostId, QueenId};
-use hatchery::queen::native::{NativeQueen, NativeQueenConfig};
+use hatchery::queen::spawn_mode::SpawnMode;
+use hatchery::queen::completion::CompletionConfig;
 use hatchery::swarm_host::{SwarmHost, SwarmHostConfig};
 use hatchery::brood_lord::{BroodLord, BroodLordConfig};
 use hatchery::core::operator::NullChannel;
@@ -92,6 +93,10 @@ enum Commands {
         /// Path for SQLite event log (auto-generated if not specified)
         #[arg(long)]
         event_log: Option<PathBuf>,
+
+        /// Spawn mode for Queen actors: "stream" or "per-task"
+        #[arg(long, default_value = "per-task")]
+        spawn_mode: String,
     },
 
     /// Show status of an ongoing or completed run.
@@ -207,6 +212,7 @@ async fn main() -> Result<()> {
             validator,
             compaction_threshold,
             event_log,
+            spawn_mode,
         } => {
             let working_dir = dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
@@ -228,6 +234,7 @@ async fn main() -> Result<()> {
                 validator_cmd: validator,
                 compaction_threshold,
                 event_log_path: event_log,
+                spawn_mode: spawn_mode.clone(),
             };
 
             // Parse PRD
@@ -253,22 +260,21 @@ async fn main() -> Result<()> {
                         swarm_config,
                     )?;
 
-                    // Spawn and register Queens
+                    // Parse spawn mode
+                    let spawn_mode: SpawnMode = config.spawn_mode.parse()
+                        .unwrap_or(SpawnMode::PerTask);
+
+                    let completion_config = CompletionConfig::default();
+
+                    // Register Queen actors
                     for i in 0..config.workers {
                         let queen_id = QueenId(format!("Q{}", i));
-                        let queen_config = NativeQueenConfig {
-                            model: "sonnet".to_string(),
-                            use_teams: false,
-                            max_workers: 4,
-                            timeout: Duration::from_secs(600),
-                            prompt_template: None,
-                        };
-                        let queen = NativeQueen::spawn(
+                        swarm.register_queen_actor(
                             queen_id,
-                            config.working_dir.clone(),
-                            queen_config,
+                            "sonnet".to_string(),
+                            spawn_mode,
+                            completion_config.clone(),
                         )?;
-                        swarm.register_queen(Box::new(queen))?;
                     }
 
                     // Add PRD tasks to DAG (only uncompleted ones)
@@ -284,32 +290,11 @@ async fn main() -> Result<()> {
                         }
                     }
 
-                    // Run tick loop
+                    // Run event-driven loop
                     let start = Instant::now();
-                    let mut iteration = 0;
-                    loop {
-                        let tick_result = swarm.tick().await?;
-                        iteration += 1;
+                    println!("[HATCHERY] Starting event-driven loop (spawn mode: {})", spawn_mode);
 
-                        let progress = swarm.progress();
-                        println!("[HATCHERY] Tick {}: {}/{} tasks | assigned={} msgs={} completed={} failed={}",
-                            tick_result.iteration,
-                            progress.completed, progress.total_tasks,
-                            tick_result.tasks_assigned, tick_result.messages_processed,
-                            tick_result.tasks_completed, tick_result.tasks_failed);
-
-                        if swarm.is_complete() {
-                            break;
-                        }
-
-                        if iteration >= config.max_iterations {
-                            println!("[HATCHERY] Max iterations reached");
-                            break;
-                        }
-
-                        // Small delay between ticks
-                        tokio::time::sleep(Duration::from_secs(2)).await;
-                    }
+                    swarm.run().await?;
 
                     // Shutdown
                     swarm.shutdown().await?;
@@ -342,22 +327,21 @@ async fn main() -> Result<()> {
                     // Create one SwarmHost with all tasks
                     let mut swarm = SwarmHost::new(SwarmHostId("SH0".to_string()), swarm_config)?;
 
-                    // Spawn and register Queens
+                    // Parse spawn mode
+                    let spawn_mode: SpawnMode = config.spawn_mode.parse()
+                        .unwrap_or(SpawnMode::PerTask);
+
+                    let completion_config = CompletionConfig::default();
+
+                    // Register Queen actors
                     for i in 0..config.workers {
                         let queen_id = QueenId(format!("Q{}", i));
-                        let queen_config = NativeQueenConfig {
-                            model: "sonnet".to_string(),
-                            use_teams: false,
-                            max_workers: 4,
-                            timeout: Duration::from_secs(600),
-                            prompt_template: None,
-                        };
-                        let queen = NativeQueen::spawn(
+                        swarm.register_queen_actor(
                             queen_id,
-                            config.working_dir.clone(),
-                            queen_config,
+                            "sonnet".to_string(),
+                            spawn_mode,
+                            completion_config.clone(),
                         )?;
-                        swarm.register_queen(Box::new(queen))?;
                     }
 
                     // Add PRD tasks to DAG
