@@ -7,9 +7,7 @@
 //! Implementations:
 //! - StreamQueen: long-lived subprocess (--input-format stream-json)
 //! - SpawnQueen: spawn-per-task with session resume (--resume)
-//! - NativeQueen: DEPRECATED legacy wrapper
 
-pub mod native;
 pub mod recovery;
 pub mod spawn_mode;
 pub mod handle;
@@ -19,8 +17,6 @@ pub mod spawn_queen;
 pub mod pipe_process;
 
 // Re-export key types
-#[allow(deprecated)]
-pub use native::NativeQueen;
 pub use spawn_mode::SpawnMode;
 pub use handle::{QueenCommand, QueenEvent, QueenHandle};
 pub use spawn_queen::{spawn, SpawnQueenConfig};
@@ -45,7 +41,6 @@ pub struct QueenConfig {
 ///
 /// V3 implementations (StreamQueen, SpawnQueen) use actor model
 /// with QueenHandle instead of this trait directly.
-/// This trait is kept for backward compatibility with NativeQueen.
 #[async_trait]
 pub trait Queen: Send + Sync {
     /// Unique identifier for this Queen

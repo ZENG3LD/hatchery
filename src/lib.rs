@@ -16,7 +16,7 @@ pub mod progress;
 /// Core infrastructure: types, task DAG, shared memory, etc.
 pub mod core;
 
-/// Queen agents (L1): StreamQueen, SpawnQueen, NativeQueen (deprecated)
+/// Queen agents (L1): StreamQueen, SpawnQueen
 pub mod queen;
 
 /// Nydus coordinator (L2): task scheduling, validation, merging

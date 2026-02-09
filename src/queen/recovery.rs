@@ -187,8 +187,6 @@ pub struct RecoveryPlan {
 /// Manages Queen health checks and recovery planning.
 pub struct RecoveryManager {
     config: RecoveryConfig,
-    /// Tracks when each Queen was last checked
-    last_check: HashMap<QueenId, Instant>,
     /// Tracks when each Queen was last recovered (cooldown)
     last_recovery: HashMap<QueenId, Instant>,
     /// Queens that have exceeded max_recoveries (permanently failed)
@@ -199,7 +197,6 @@ impl RecoveryManager {
     pub fn new(config: RecoveryConfig) -> Self {
         Self {
             config,
-            last_check: HashMap::new(),
             last_recovery: HashMap::new(),
             abandoned: Vec::new(),
         }

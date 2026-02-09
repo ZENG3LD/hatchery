@@ -1,5 +1,4 @@
 pub mod event_log;
-pub mod router;
 pub mod event_bus;
 
 use std::collections::{HashMap, VecDeque};
