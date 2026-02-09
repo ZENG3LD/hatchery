@@ -10,7 +10,7 @@ use crate::core::types::{QueenId, QueenStatus, Task, TaskContext, TaskId};
 use crate::queen::completion::{CompletionConfig, CompletionDetector, CompletionSignal, CompletionVerdict};
 use crate::queen::handle::{QueenCommand, QueenEvent, QueenHandle};
 use crate::queen::pipe_process::{PipeProcessOptions, build_stream_command};
-use crate::queen::spawn_mode::{ClaudeEvent, SpawnMode, StreamInput};
+use crate::queen::spawn_mode::{ClaudeEvent, StreamInput};
 use anyhow::{Context as _, Result};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -154,7 +154,6 @@ pub fn spawn(
     // Build handle
     let handle = QueenHandle::new(
         config.id.clone(),
-        SpawnMode::Stream,
         cmd_tx,
         status_rx,
     );

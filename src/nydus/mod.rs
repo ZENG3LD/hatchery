@@ -13,10 +13,8 @@ use tokio::sync::Notify;
 
 use crate::core::types::*;
 use crate::queen::handle::{QueenHandle, QueenEvent};
-use crate::queen::spawn_mode::SpawnMode;
 use crate::queen::completion::CompletionConfig;
 use crate::queen::stream_queen::{self, StreamQueenConfig};
-use crate::queen::spawn_queen::{self, SpawnQueenConfig};
 use self::mailbox::SwarmMailbox;
 use self::mailbox::event_log::SqliteEventLog;
 use self::mailbox::event_bus::EventBus;
@@ -345,10 +343,7 @@ impl Nydus {
                     status: status_str,
                     task_id,
                     progress,
-                    spawn_mode: match handle.spawn_mode() {
-                        crate::queen::spawn_mode::SpawnMode::Stream => "stream".to_string(),
-                        crate::queen::spawn_mode::SpawnMode::PerTask => "per_task".to_string(),
-                    },
+                    spawn_mode: "stream".to_string(),
                     is_alive: handle.is_alive(),
                 }
             })
@@ -372,7 +367,6 @@ impl Nydus {
         &mut self,
         id: QueenId,
         model: String,
-        spawn_mode: SpawnMode,
         completion_config: CompletionConfig,
     ) -> Result<()> {
         if self.handles.len() >= self.config.max_queens {
@@ -470,42 +464,22 @@ impl Nydus {
             self.config.working_dir.clone()
         };
 
-        let (handle, join_handle) = match spawn_mode {
-            SpawnMode::Stream => {
-                let config = StreamQueenConfig {
-                    id: id.clone(),
-                    model,
-                    working_dir: queen_working_dir.clone(),
-                    max_turns: None,
-                    max_budget_usd: None,
-                    system_prompt,
-                    allowed_tools: None,
-                    completion: completion_config,
-                    swarm_id: Some(self.id.0.clone()),
-                    ipc_port: self.ipc_port,
-                    setting_sources: self.config.setting_sources.clone(),
-                    wakeup_notify: Some(self.wakeup_notify.clone()),
-                };
-                stream_queen::spawn(config, event_tx, shutdown_rx)?
-            }
-            SpawnMode::PerTask => {
-                let config = SpawnQueenConfig {
-                    id: id.clone(),
-                    model,
-                    working_dir: queen_working_dir.clone(),
-                    max_turns: None,
-                    max_budget_usd: None,
-                    system_prompt,
-                    allowed_tools: None,
-                    completion: completion_config,
-                    swarm_id: Some(self.id.0.clone()),
-                    ipc_port: self.ipc_port,
-                    setting_sources: self.config.setting_sources.clone(),
-                    wakeup_notify: Some(self.wakeup_notify.clone()),
-                };
-                spawn_queen::spawn(config, event_tx, shutdown_rx)?
-            }
+        // Always use StreamQueen (long-lived subprocess with stream-json mode)
+        let config = StreamQueenConfig {
+            id: id.clone(),
+            model,
+            working_dir: queen_working_dir.clone(),
+            max_turns: None,
+            max_budget_usd: None,
+            system_prompt,
+            allowed_tools: None,
+            completion: completion_config,
+            swarm_id: Some(self.id.0.clone()),
+            ipc_port: self.ipc_port,
+            setting_sources: self.config.setting_sources.clone(),
+            wakeup_notify: Some(self.wakeup_notify.clone()),
         };
+        let (handle, join_handle) = stream_queen::spawn(config, event_tx, shutdown_rx)?;
 
         // Register in mailbox (for outbox backward compat)
         self.mailbox.lock().register_queen(id.clone());

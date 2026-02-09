@@ -51,8 +51,6 @@ pub struct HatcheryConfig {
     pub compaction_threshold: f32,
     /// Event log path
     pub event_log_path: Option<PathBuf>,
-    /// Spawn mode for Queen actors: "stream" or "per-task"
-    pub spawn_mode: String,
 }
 
 impl Default for HatcheryConfig {
@@ -74,7 +72,6 @@ impl Default for HatcheryConfig {
             validator_cmd: None,
             compaction_threshold: 0.8,
             event_log_path: None,
-            spawn_mode: "per-task".to_string(),
         }
     }
 }

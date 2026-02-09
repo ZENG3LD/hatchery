@@ -1,46 +1,9 @@
-//! Spawn mode configuration and Claude Code NDJSON wire types.
+//! Claude Code NDJSON wire types for stream mode.
+//!
+//! Hatchery uses only stream mode for all Queens (long-lived Claude Code subprocess
+//! with --input-format stream-json). These types define the NDJSON protocol.
 
 use serde::{Deserialize, Serialize};
-
-/// How to spawn Claude Code subprocesses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SpawnMode {
-    /// Long-lived subprocess using `--input-format stream-json`.
-    /// One process, send NDJSON messages to stdin, read NDJSON from stdout.
-    Stream,
-    /// Spawn a new process per task, using `--resume <session_id>`.
-    /// Each task gets a fresh process with context via session resumption.
-    PerTask,
-}
-
-impl Default for SpawnMode {
-    fn default() -> Self {
-        Self::PerTask
-    }
-}
-
-impl std::fmt::Display for SpawnMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Stream => write!(f, "stream"),
-            Self::PerTask => write!(f, "per-task"),
-        }
-    }
-}
-
-impl std::str::FromStr for SpawnMode {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "stream" => Ok(Self::Stream),
-            "per-task" | "pertask" | "per_task" => Ok(Self::PerTask),
-            _ => Err(format!(
-                "Unknown spawn mode: '{}'. Expected 'stream' or 'per-task'",
-                s
-            )),
-        }
-    }
-}
 
 // --- NDJSON types for stdin (Stream mode) ---
 
@@ -195,14 +158,6 @@ impl ClaudeEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_spawn_mode_parse() {
-        assert_eq!("stream".parse::<SpawnMode>().unwrap(), SpawnMode::Stream);
-        assert_eq!("per-task".parse::<SpawnMode>().unwrap(), SpawnMode::PerTask);
-        assert_eq!("per_task".parse::<SpawnMode>().unwrap(), SpawnMode::PerTask);
-        assert!("invalid".parse::<SpawnMode>().is_err());
-    }
 
     #[test]
     fn test_stream_input_serialization() {

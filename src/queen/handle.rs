@@ -4,7 +4,6 @@
 //! command and event enums for the actor protocol.
 
 use crate::core::types::{QueenId, QueenStatus, SwarmMessage, Task, TaskContext, TaskId};
-use crate::queen::spawn_mode::SpawnMode;
 use anyhow::{Context, Result};
 use tokio::sync::{mpsc, watch};
 
@@ -102,8 +101,6 @@ pub enum QueenEvent {
 pub struct QueenHandle {
     /// Unique identifier for this Queen.
     id: QueenId,
-    /// Spawn mode for this Queen.
-    spawn_mode: SpawnMode,
     /// Command sender (mpsc allows multiple senders).
     cmd_tx: mpsc::Sender<QueenCommand>,
     /// Status receiver (watch allows multiple receivers).
@@ -115,18 +112,15 @@ impl QueenHandle {
     ///
     /// # Arguments
     /// * `id` - Unique identifier for the Queen
-    /// * `spawn_mode` - How this Queen spawns Claude Code processes
     /// * `cmd_tx` - Command channel sender
     /// * `status_rx` - Status watch channel receiver
     pub fn new(
         id: QueenId,
-        spawn_mode: SpawnMode,
         cmd_tx: mpsc::Sender<QueenCommand>,
         status_rx: watch::Receiver<QueenStatus>,
     ) -> Self {
         Self {
             id,
-            spawn_mode,
             cmd_tx,
             status_rx,
         }
@@ -135,11 +129,6 @@ impl QueenHandle {
     /// Get the Queen ID.
     pub fn id(&self) -> &QueenId {
         &self.id
-    }
-
-    /// Get the spawn mode.
-    pub fn spawn_mode(&self) -> SpawnMode {
-        self.spawn_mode
     }
 
     /// Assign a task to this Queen.
@@ -218,13 +207,11 @@ mod tests {
 
         let handle = QueenHandle::new(
             QueenId("Q0".to_string()),
-            SpawnMode::PerTask,
             cmd_tx,
             status_rx,
         );
 
         assert_eq!(handle.id().0, "Q0");
-        assert_eq!(handle.spawn_mode(), SpawnMode::PerTask);
         assert!(handle.is_alive());
 
         // Drop the status sender to avoid unused variable warning
@@ -238,7 +225,6 @@ mod tests {
 
         let handle = QueenHandle::new(
             QueenId("Q1".to_string()),
-            SpawnMode::Stream,
             cmd_tx,
             status_rx,
         );
@@ -287,7 +273,6 @@ mod tests {
 
         let handle = QueenHandle::new(
             QueenId("Q2".to_string()),
-            SpawnMode::PerTask,
             cmd_tx,
             status_rx,
         );
@@ -324,7 +309,6 @@ mod tests {
 
         let handle = QueenHandle::new(
             QueenId("Q3".to_string()),
-            SpawnMode::Stream,
             cmd_tx,
             status_rx,
         );
@@ -344,7 +328,6 @@ mod tests {
 
         let handle = QueenHandle::new(
             QueenId("Q4".to_string()),
-            SpawnMode::PerTask,
             cmd_tx,
             status_rx,
         );
@@ -377,7 +360,6 @@ mod tests {
 
         let handle = QueenHandle::new(
             QueenId("Q5".to_string()),
-            SpawnMode::Stream,
             cmd_tx,
             status_rx,
         );
@@ -399,7 +381,6 @@ mod tests {
 
         let handle1 = QueenHandle::new(
             QueenId("Q6".to_string()),
-            SpawnMode::PerTask,
             cmd_tx,
             status_rx,
         );
@@ -427,7 +408,6 @@ mod tests {
 
         let handle1 = QueenHandle::new(
             QueenId("Q7".to_string()),
-            SpawnMode::Stream,
             cmd_tx,
             status_rx,
         );

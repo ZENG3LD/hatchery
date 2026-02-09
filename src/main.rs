@@ -9,7 +9,6 @@ use std::io::{BufRead, Write as IoWrite};
 use hatchery::cli::HatcheryConfig;
 use hatchery::nydus::mailbox::event_log::SqliteEventLog;
 use hatchery::core::types::{SwarmMessage, AgentId, MessageType, Visibility, NydusId, QueenId};
-use hatchery::queen::spawn_mode::SpawnMode;
 use hatchery::queen::completion::CompletionConfig;
 use hatchery::nydus::{Nydus, NydusConfig};
 use hatchery::core::task_dag::{Priority, Complexity};
@@ -90,10 +89,6 @@ enum Commands {
         /// Path for SQLite event log (auto-generated if not specified)
         #[arg(long)]
         event_log: Option<PathBuf>,
-
-        /// Spawn mode for Queen actors: "stream" or "per-task"
-        #[arg(long, default_value = "per-task")]
-        spawn_mode: String,
 
         /// Use LLM to decompose PRD into tasks with dependencies.
         #[arg(long)]
@@ -473,7 +468,6 @@ async fn main() -> Result<()> {
             validator,
             compaction_threshold,
             event_log,
-            spawn_mode,
             llm_decompose,
             keep_alive,
         } => {
@@ -496,7 +490,6 @@ async fn main() -> Result<()> {
                 validator_cmd: validator,
                 compaction_threshold,
                 event_log_path: event_log,
-                spawn_mode: spawn_mode.clone(),
             };
 
             // Create NydusConfig
@@ -518,19 +511,14 @@ async fn main() -> Result<()> {
                 nydus_config,
             )?;
 
-            // Parse spawn mode
-            let spawn_mode: SpawnMode = config.spawn_mode.parse()
-                .unwrap_or(SpawnMode::PerTask);
-
             let completion_config = CompletionConfig::default();
 
-            // Register Queen actors
+            // Register Queen actors (all use stream mode)
             for i in 0..config.workers {
                 let queen_id = QueenId(format!("Q{}", i));
                 nydus.register_queen_actor(
                     queen_id,
                     "sonnet".to_string(),
-                    spawn_mode,
                     completion_config.clone(),
                 )?;
             }
@@ -546,7 +534,7 @@ async fn main() -> Result<()> {
 
             // Run event-driven loop
             let start = Instant::now();
-            println!("[HATCHERY] Starting event-driven loop (spawn mode: {})", spawn_mode);
+            println!("[HATCHERY] Starting event-driven loop (stream mode)");
 
             nydus.run().await?;
 
