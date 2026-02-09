@@ -157,7 +157,7 @@ impl Nydus {
         let memory = SharedMemory::with_persistence(id.clone(), &config.working_dir);
 
         let worktree_mgr = if config.git_isolation {
-            match WorktreeManager::new(&config.working_dir, Some("main")) {
+            match WorktreeManager::new(&config.working_dir, None) {
                 Ok(mgr) => Some(mgr),
                 Err(e) => {
                     eprintln!("Warning: Failed to create WorktreeManager: {}", e);
@@ -306,23 +306,80 @@ impl Nydus {
 
         // Determine working directory for this Queen
         // If git_isolation is enabled, create worktree BEFORE spawning Queen
-        let queen_working_dir = if let Some(ref mut worktree_mgr) = self.worktree_mgr {
-            // Create worktree and get its path
-            match worktree_mgr.create(&id) {
-                Ok(worktree_path) => worktree_path,
-                Err(e) => {
-                    // CRITICAL: Worktree creation failed — Queen will work without git isolation
-                    eprintln!("\n========================================");
-                    eprintln!("ERROR: Failed to create worktree for {}", id.0);
-                    eprintln!("Reason: {}", e);
-                    eprintln!("WARNING: Queen will operate in main repo WITHOUT git isolation");
-                    eprintln!("This means git operations are NOT sandboxed and may affect main branch");
-                    eprintln!("========================================\n");
-                    // Fallback to main repo (git safety rules in Queen prompt will still apply)
-                    self.config.working_dir.clone()
+        let queen_working_dir = if self.config.git_isolation {
+            if let Some(ref mut worktree_mgr) = self.worktree_mgr {
+                // Create worktree and get its path
+                match worktree_mgr.create(&id) {
+                    Ok(worktree_path) => worktree_path,
+                    Err(e) => {
+                        // CRITICAL: Worktree creation failed — Queen MUST NOT work without git isolation
+                        eprintln!("\n========================================");
+                        eprintln!("FATAL: Failed to create worktree for {}", id.0);
+                        eprintln!("Reason: {}", e);
+                        eprintln!("Git isolation is REQUIRED but worktree creation failed");
+                        eprintln!("Refusing to register Queen without proper git sandbox");
+                        eprintln!("========================================\n");
+
+                        // Send error message to mailbox for Operator visibility
+                        let error_msg = SwarmMessage {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            from: AgentId::Nydus(self.id.clone()),
+                            to: AgentId::Operator,
+                            msg_type: MessageType::Custom("QueenRegistrationFailed".to_string()),
+                            payload: serde_json::json!({
+                                "queen_id": id.0,
+                                "reason": "worktree_creation_failed",
+                                "error": e.to_string(),
+                                "git_isolation_required": true,
+                            }),
+                            timestamp: Utc::now(),
+                            correlation_id: None,
+                            visibility: Visibility {
+                                agent_visible: false,
+                                coordinator_visible: true,
+                                user_visible: true,
+                            },
+                        };
+                        self.mailbox.lock().send(error_msg);
+
+                        // Return error — DO NOT register this Queen
+                        return Err(anyhow!("Queen {} cannot be registered: worktree creation failed: {}", id.0, e));
+                    }
                 }
+            } else {
+                // Git isolation is enabled but WorktreeManager is None (initialization failed)
+                eprintln!("\n========================================");
+                eprintln!("FATAL: Git isolation is enabled but WorktreeManager is not available");
+                eprintln!("Cannot register Queen {} without git isolation", id.0);
+                eprintln!("========================================\n");
+
+                // Send error message to mailbox
+                let error_msg = SwarmMessage {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    from: AgentId::Nydus(self.id.clone()),
+                    to: AgentId::Operator,
+                    msg_type: MessageType::Custom("QueenRegistrationFailed".to_string()),
+                    payload: serde_json::json!({
+                        "queen_id": id.0,
+                        "reason": "worktree_manager_unavailable",
+                        "error": "Git isolation enabled but WorktreeManager failed to initialize",
+                        "git_isolation_required": true,
+                    }),
+                    timestamp: Utc::now(),
+                    correlation_id: None,
+                    visibility: Visibility {
+                        agent_visible: false,
+                        coordinator_visible: true,
+                        user_visible: true,
+                    },
+                };
+                self.mailbox.lock().send(error_msg);
+
+                // Return error — DO NOT register this Queen
+                return Err(anyhow!("Queen {} cannot be registered: WorktreeManager is not available", id.0));
             }
         } else {
+            // Git isolation disabled, use main repo
             self.config.working_dir.clone()
         };
 
