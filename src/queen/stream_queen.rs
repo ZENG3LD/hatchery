@@ -118,6 +118,9 @@ pub fn spawn(
     if let Some(port) = config.ipc_port {
         envs.push(("HATCHERY_PORT".to_string(), port.to_string()));
     }
+    // Isolate Cargo compilation per Queen to prevent target/ contention
+    let cargo_target_dir = config.working_dir.join(".hatchery").join("targets").join(&config.id.0);
+    envs.push(("CARGO_TARGET_DIR".to_string(), cargo_target_dir.to_string_lossy().to_string()));
 
     // Build command using shared helper
     let std_cmd = build_stream_command(&config.working_dir, &options, &envs);

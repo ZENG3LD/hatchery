@@ -557,8 +557,9 @@ impl Nydus {
                 // Check queen inbox for pending operator messages BEFORE scheduling next DAG task
                 self.deliver_pending_messages(&queen_id).await?;
 
-                // Try to schedule next tasks for ALL idle queens immediately
-                self.try_schedule().await?;
+                // Work stealing: Try to schedule next task to THIS queen first (warm worktree)
+                // Then schedule to other idle queens
+                self.try_schedule_with_preference(Some(&queen_id)).await?;
 
                 println!(
                     "[Nydus] Task {} completed by {} (${:.2}, {}ms, {} turns)",
@@ -788,20 +789,30 @@ impl Nydus {
     }
 
     /// Find ready tasks + idle queens, assign tasks.
-    async fn try_schedule(&mut self) -> Result<usize> {
+    ///
+    /// If `preferred_queen` is provided and is idle, it will be scheduled first (work stealing).
+    /// This keeps the completing Queen busy and reduces context switch overhead.
+    async fn try_schedule_with_preference(&mut self, preferred_queen: Option<&QueenId>) -> Result<usize> {
         let ready_tasks = self.task_dag.ready_tasks();
         if ready_tasks.is_empty() {
             return Ok(0);
         }
 
         // Find idle queens via handle.status()
-        let idle_queens: Vec<QueenId> = self.handles.iter()
+        let mut idle_queens: Vec<QueenId> = self.handles.iter()
             .filter(|(_, handle)| matches!(handle.status(), QueenStatus::Idle))
             .map(|(id, _)| id.clone())
             .collect();
 
         if idle_queens.is_empty() {
             return Ok(0);
+        }
+
+        // Work stealing optimization: put preferred queen first if it's idle
+        if let Some(preferred) = preferred_queen {
+            if let Some(pos) = idle_queens.iter().position(|q| q == preferred) {
+                idle_queens.swap(0, pos);
+            }
         }
 
         // Build context from SharedMemory
@@ -883,6 +894,12 @@ impl Nydus {
         Ok(assigned)
     }
 
+    /// Find ready tasks + idle queens, assign tasks (no preference).
+    ///
+    /// This is a convenience wrapper for try_schedule_with_preference(None).
+    async fn try_schedule(&mut self) -> Result<usize> {
+        self.try_schedule_with_preference(None).await
+    }
 
     /// Periodic maintenance (runs on tick interval).
     async fn periodic_maintenance(&mut self) -> Result<()> {

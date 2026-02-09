@@ -18,9 +18,22 @@ hatchery mailbox read --from "queen:Q0"
 ```
 
 ### Validation — check your work before reporting done
+
+Scope verification to modified crates only:
 ```bash
-hatchery validate --cmd "cargo check"
+# GOOD: scope to the crate you modified
+hatchery validate --cmd "cargo check -p <crate-name>"
+hatchery validate --cmd "cargo test -p <crate-name>"
+
+# AVOID: full workspace tests are slow and wasteful
+# cargo test --workspace  ← only use this for final integration verification
 ```
+
+When verifying work:
+1. Only test the crate(s) you actually modified
+2. Use `cargo check -p <crate>` for quick compilation verification
+3. Use `cargo test -p <crate>` for unit test verification
+4. Reserve `cargo test --workspace` for final integration checks only
 
 ### WHEN TO USE
 - Share discoveries so other Queens benefit

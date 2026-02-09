@@ -195,6 +195,9 @@ async fn run_task(
     if let Some(port) = config.ipc_port {
         envs.push(("HATCHERY_PORT".to_string(), port.to_string()));
     }
+    // Isolate Cargo compilation per Queen to prevent target/ contention
+    let cargo_target_dir = config.working_dir.join(".hatchery").join("targets").join(&config.id.0);
+    envs.push(("CARGO_TARGET_DIR".to_string(), cargo_target_dir.to_string_lossy().to_string()));
 
     eprintln!("[SpawnQueen {}] Spawning process for task {} (prompt len: {} chars)", id.0, task.id.0, prompt.len());
 

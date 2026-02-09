@@ -9,3 +9,4 @@ These rules MUST be followed even after context window compression:
 7. Use parallel agent spawning when tasks are independent
 8. Use `hatchery memory` CLI to share discoveries with other Queens
 9. Use `hatchery mailbox` CLI to communicate with other agents
+10. Scope verification: test ONLY modified crates (`cargo test -p <crate>`), not the entire workspace. Full workspace tests waste time when you only changed one crate.
