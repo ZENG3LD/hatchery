@@ -103,6 +103,8 @@ pub struct Nydus {
     queen_snapshots: Arc<parking_lot::RwLock<Vec<ipc::protocol::QueenStatusSnapshot>>>,
     /// DAG stats snapshot for IPC queries (shared with IPC handler)
     dag_stats: Arc<parking_lot::RwLock<DagStats>>,
+    /// Cost tracking snapshot for IPC queries (shared with IPC handler)
+    cost_tracking: Arc<parking_lot::RwLock<CostTracking>>,
     /// Shutdown signal sender (for IPC-triggered shutdown)
     shutdown_tx: tokio::sync::watch::Sender<bool>,
     /// Shutdown signal receiver (checked in main loop)
@@ -115,6 +117,12 @@ pub struct Nydus {
     infestor: Option<crate::infestor::InfestorHandle>,
     /// Infestor event receiver (QueenEvent because Infestor is a StreamQueen)
     infestor_event_rx: Option<tokio::sync::mpsc::Receiver<QueenEvent>>,
+    /// Total cost across all Queens
+    total_queen_cost_usd: f64,
+    /// Total cost for Infestor reviews
+    total_infestor_cost_usd: f64,
+    /// Number of Infestor reviews completed
+    infestor_reviews_completed: u32,
 }
 
 /// Result of a single tick (schedule + poll cycle).
@@ -137,6 +145,17 @@ pub struct SwarmProgress {
     pub failed: usize,
     pub queens_active: usize,
     pub queens_idle: usize,
+    pub total_queen_cost_usd: f64,
+    pub total_infestor_cost_usd: f64,
+    pub infestor_reviews_completed: u32,
+}
+
+/// Cost tracking for Queens and Infestor.
+#[derive(Debug, Clone)]
+pub struct CostTracking {
+    pub total_queen_cost_usd: f64,
+    pub total_infestor_cost_usd: f64,
+    pub infestor_reviews_completed: u32,
 }
 
 /// Result of validated merge operation.
@@ -250,6 +269,13 @@ impl Nydus {
             failed: 0,
         };
 
+        // Initialize cost tracking with zero values
+        let initial_cost_tracking = CostTracking {
+            total_queen_cost_usd: 0.0,
+            total_infestor_cost_usd: 0.0,
+            infestor_reviews_completed: 0,
+        };
+
         // Create wakeup notify for instant Queen completion handling
         let wakeup_notify = Arc::new(Notify::new());
 
@@ -271,12 +297,16 @@ impl Nydus {
             ipc_port: None,
             queen_snapshots: Arc::new(parking_lot::RwLock::new(Vec::new())),
             dag_stats: Arc::new(parking_lot::RwLock::new(initial_dag_stats)),
+            cost_tracking: Arc::new(parking_lot::RwLock::new(initial_cost_tracking)),
             shutdown_tx,
             shutdown_rx,
             started_at: std::time::Instant::now(),
             wakeup_notify,
             infestor: None,
             infestor_event_rx: None,
+            total_queen_cost_usd: 0.0,
+            total_infestor_cost_usd: 0.0,
+            infestor_reviews_completed: 0,
         })
     }
 
@@ -365,6 +395,14 @@ impl Nydus {
         let stats = self.task_dag.stats();
         let mut dag_stats_lock = self.dag_stats.write();
         *dag_stats_lock = stats;
+    }
+
+    /// Update cost tracking snapshot.
+    fn update_cost_tracking(&self) {
+        let mut cost_lock = self.cost_tracking.write();
+        cost_lock.total_queen_cost_usd = self.total_queen_cost_usd;
+        cost_lock.total_infestor_cost_usd = self.total_infestor_cost_usd;
+        cost_lock.infestor_reviews_completed = self.infestor_reviews_completed;
     }
 
     /// Register a Queen by spawning StreamQueen or SpawnQueen actor.
@@ -551,6 +589,7 @@ impl Nydus {
         let port = ipc::start_ipc_listener(
             self.queen_snapshots.clone(),
             self.dag_stats.clone(),
+            self.cost_tracking.clone(),
             memory_state,
             self.mailbox.clone(),
             inject_tx,
@@ -652,6 +691,10 @@ impl Nydus {
                     "quality_passed": quality_passed,
                 });
                 self.memory.store_task_result(&task_id.0, result_json);
+
+                // Accumulate Queen cost
+                self.total_queen_cost_usd += cost_usd;
+                self.update_cost_tracking();
 
                 // Auto-push TaskCompleted result to outbox for Operator
                 let completion_msg = SwarmMessage {
@@ -870,23 +913,36 @@ impl Nydus {
     /// The Infestor is a StreamQueen, so events are QueenEvents.
     async fn handle_infestor_queen_event(&mut self, event: QueenEvent) -> Result<()> {
         match event {
-            QueenEvent::TaskCompleted { task_id, result_text, .. } => {
+            QueenEvent::TaskCompleted { task_id, result_text, cost_usd, .. } => {
                 // Parse task_id to extract queen_id and original task_id
                 // task_id format: "review-Q0-prd-1"
                 let (queen_id, original_task_id) = parse_review_task_id(&task_id.0);
+
+                // Accumulate Infestor cost
+                self.total_infestor_cost_usd += cost_usd;
+                self.infestor_reviews_completed += 1;
+                self.update_cost_tracking();
 
                 // Parse verdict from result_text
                 if result_text.contains("VERDICT: APPROVE") {
                     let summary = extract_tag(&result_text, "summary")
                         .unwrap_or_else(|| "Approved".to_string());
+                    eprintln!(
+                        "[Nydus] Infestor APPROVED merge for {} task {} (${:.2}): {}",
+                        queen_id.0, original_task_id, cost_usd, summary
+                    );
                     self.handle_infestor_approve(&queen_id, &original_task_id, &summary).await?;
                 } else if result_text.contains("VERDICT: REJECT") {
                     let reason = extract_tag(&result_text, "reason")
                         .unwrap_or_else(|| "Rejected without details".to_string());
+                    eprintln!(
+                        "[Nydus] Infestor REJECTED merge for {} task {} (${:.2}): {}",
+                        queen_id.0, original_task_id, cost_usd, reason
+                    );
                     self.handle_infestor_reject(&queen_id, &original_task_id, &reason).await?;
                 } else {
                     // No clear verdict — treat as auto-approve (don't block on review failures)
-                    eprintln!("[Nydus] Infestor did not provide clear verdict, auto-approving");
+                    eprintln!("[Nydus] Infestor did not provide clear verdict (${:.2}), auto-approving", cost_usd);
                     self.handle_infestor_approve(&queen_id, &original_task_id, "Auto-approved (no clear verdict)").await?;
                 }
             }
@@ -931,11 +987,6 @@ impl Nydus {
         task_id: &str,
         summary: &str,
     ) -> Result<()> {
-        eprintln!(
-            "[Nydus] Infestor APPROVED merge for {} task {}: {}",
-            queen_id.0, task_id, summary
-        );
-
         // Proceed with merge
         if let Some(ref mut worktree_mgr) = self.worktree_mgr {
             match worktree_mgr.merge(queen_id) {
@@ -1004,11 +1055,6 @@ impl Nydus {
         task_id: &str,
         reason: &str,
     ) -> Result<()> {
-        eprintln!(
-            "[Nydus] Infestor REJECTED merge for {} task {}: {}",
-            queen_id.0, task_id, reason
-        );
-
         // Send rejection escalation to operator
         let rejection_msg = SwarmMessage {
             id: uuid::Uuid::new_v4().to_string(),
@@ -1530,6 +1576,9 @@ impl Nydus {
             failed: stats.failed,
             queens_active,
             queens_idle,
+            total_queen_cost_usd: self.total_queen_cost_usd,
+            total_infestor_cost_usd: self.total_infestor_cost_usd,
+            infestor_reviews_completed: self.infestor_reviews_completed,
         }
     }
 
@@ -1793,7 +1842,6 @@ mod tests {
         let (_status_tx, status_rx) = watch::channel(QueenStatus::Idle);
         let handle = QueenHandle::new(
             QueenId("Q0".to_string()),
-            SpawnMode::PerTask,
             cmd_tx,
             status_rx,
         );
@@ -1935,7 +1983,6 @@ mod tests {
         let (_status_tx, status_rx) = watch::channel(QueenStatus::Idle);
         let handle = QueenHandle::new(
             QueenId("Q0".to_string()),
-            SpawnMode::PerTask,
             cmd_tx,
             status_rx,
         );

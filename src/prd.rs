@@ -112,6 +112,7 @@ pub fn mark_task_done(prd_path: &Path, task_id: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     const SAMPLE_PRD: &str = r#"# Test PRD
 
@@ -144,8 +145,6 @@ mod tests {
 
     #[test]
     fn test_mark_task_done() {
-        use std::io::Write;
-
         // Create a temp file with sample PRD content
         let temp_dir = std::env::temp_dir();
         let test_prd_path = temp_dir.join("test_prd_mark_done.md");

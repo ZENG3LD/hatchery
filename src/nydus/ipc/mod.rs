@@ -32,6 +32,7 @@ pub struct IpcConfig {
 pub async fn start_ipc_listener(
     queen_snapshots: Arc<parking_lot::RwLock<Vec<QueenStatusSnapshot>>>,
     dag_stats: Arc<parking_lot::RwLock<crate::core::task_dag::DagStats>>,
+    cost_tracking: Arc<parking_lot::RwLock<crate::nydus::CostTracking>>,
     memory: Arc<RwLock<MemoryState>>,
     mailbox: Arc<Mutex<SwarmMailbox>>,
     inject_tx: mpsc::Sender<InjectRequest>,
@@ -56,6 +57,7 @@ pub async fn start_ipc_listener(
                     let mailbox = mailbox.clone();
                     let queen_snapshots = queen_snapshots.clone();
                     let dag_stats = dag_stats.clone();
+                    let cost_tracking = cost_tracking.clone();
                     let inject_tx = inject_tx.clone();
                     let message_delivery_tx = message_delivery_tx.clone();
                     let config = config.clone();
@@ -68,6 +70,7 @@ pub async fn start_ipc_listener(
                             mailbox,
                             queen_snapshots,
                             dag_stats,
+                            cost_tracking,
                             inject_tx,
                             message_delivery_tx,
                             config,
@@ -96,6 +99,7 @@ async fn handle_connection(
     mailbox: Arc<Mutex<SwarmMailbox>>,
     queen_snapshots: Arc<parking_lot::RwLock<Vec<QueenStatusSnapshot>>>,
     dag_stats: Arc<parking_lot::RwLock<crate::core::task_dag::DagStats>>,
+    cost_tracking: Arc<parking_lot::RwLock<crate::nydus::CostTracking>>,
     inject_tx: mpsc::Sender<InjectRequest>,
     message_delivery_tx: mpsc::Sender<protocol::MessageDeliveryNotification>,
     config: Arc<IpcConfig>,
@@ -133,6 +137,7 @@ async fn handle_connection(
         &mailbox,
         &queen_snapshots,
         &dag_stats,
+        &cost_tracking,
         &inject_tx,
         &message_delivery_tx,
         &config,
@@ -156,6 +161,7 @@ async fn handle_request(
     mailbox: &Arc<Mutex<SwarmMailbox>>,
     queen_snapshots: &Arc<parking_lot::RwLock<Vec<QueenStatusSnapshot>>>,
     dag_stats: &Arc<parking_lot::RwLock<crate::core::task_dag::DagStats>>,
+    cost_tracking: &Arc<parking_lot::RwLock<crate::nydus::CostTracking>>,
     inject_tx: &mpsc::Sender<InjectRequest>,
     message_delivery_tx: &mpsc::Sender<protocol::MessageDeliveryNotification>,
     config: &IpcConfig,
@@ -500,6 +506,9 @@ async fn handle_request(
             // Get task stats from DAG snapshot
             let stats = dag_stats.read();
 
+            // Get cost tracking
+            let costs = cost_tracking.read();
+
             // Get queen stats from snapshots
             let snapshots = queen_snapshots.read();
             let queens_alive = snapshots.iter().filter(|q| q.is_alive).count();
@@ -520,6 +529,9 @@ async fn handle_request(
                     "queens_idle": queens_idle,
                     "uptime_secs": uptime_secs,
                     "keep_alive": keep_alive,
+                    "total_queen_cost_usd": costs.total_queen_cost_usd,
+                    "total_infestor_cost_usd": costs.total_infestor_cost_usd,
+                    "infestor_reviews_completed": costs.infestor_reviews_completed,
                 }),
             }
         }
@@ -651,9 +663,15 @@ mod tests {
             completed: 0,
             failed: 0,
         }));
+        let cost_tracking = Arc::new(parking_lot::RwLock::new(crate::nydus::CostTracking {
+            total_queen_cost_usd: 0.0,
+            total_infestor_cost_usd: 0.0,
+            infestor_reviews_completed: 0,
+        }));
         let port = start_ipc_listener(
             queen_snapshots.clone(),
             dag_stats,
+            cost_tracking,
             memory,
             mailbox,
             inject_tx,
@@ -710,9 +728,15 @@ mod tests {
             completed: 0,
             failed: 0,
         }));
+        let cost_tracking = Arc::new(parking_lot::RwLock::new(crate::nydus::CostTracking {
+            total_queen_cost_usd: 0.0,
+            total_infestor_cost_usd: 0.0,
+            infestor_reviews_completed: 0,
+        }));
         let port = start_ipc_listener(
             queen_snapshots.clone(),
             dag_stats,
+            cost_tracking,
             memory.clone(),
             mailbox,
             inject_tx,
@@ -792,9 +816,15 @@ mod tests {
             completed: 0,
             failed: 0,
         }));
+        let cost_tracking = Arc::new(parking_lot::RwLock::new(crate::nydus::CostTracking {
+            total_queen_cost_usd: 0.0,
+            total_infestor_cost_usd: 0.0,
+            infestor_reviews_completed: 0,
+        }));
         let port = start_ipc_listener(
             queen_snapshots.clone(),
             dag_stats,
+            cost_tracking,
             memory.clone(),
             mailbox,
             inject_tx,
@@ -863,9 +893,15 @@ mod tests {
             completed: 0,
             failed: 0,
         }));
+        let cost_tracking = Arc::new(parking_lot::RwLock::new(crate::nydus::CostTracking {
+            total_queen_cost_usd: 0.0,
+            total_infestor_cost_usd: 0.0,
+            infestor_reviews_completed: 0,
+        }));
         let port = start_ipc_listener(
             queen_snapshots.clone(),
             dag_stats,
+            cost_tracking,
             memory.clone(),
             mailbox,
             inject_tx,
@@ -923,9 +959,15 @@ mod tests {
             completed: 0,
             failed: 0,
         }));
+        let cost_tracking = Arc::new(parking_lot::RwLock::new(crate::nydus::CostTracking {
+            total_queen_cost_usd: 0.0,
+            total_infestor_cost_usd: 0.0,
+            infestor_reviews_completed: 0,
+        }));
         let port = start_ipc_listener(
             queen_snapshots.clone(),
             dag_stats,
+            cost_tracking,
             memory,
             mailbox,
             inject_tx,
@@ -1009,6 +1051,13 @@ mod tests {
             failed: 2,
         }));
 
+        // Create cost tracking
+        let cost_tracking = Arc::new(parking_lot::RwLock::new(crate::nydus::CostTracking {
+            total_queen_cost_usd: 0.0,
+            total_infestor_cost_usd: 0.0,
+            infestor_reviews_completed: 0,
+        }));
+
         let (inject_tx, _inject_rx) = mpsc::channel(32);
         let config = IpcConfig {
             working_dir: std::env::current_dir().unwrap(),
@@ -1020,6 +1069,7 @@ mod tests {
         let port = start_ipc_listener(
             queen_snapshots.clone(),
             dag_stats,
+            cost_tracking,
             memory,
             mailbox,
             inject_tx,
