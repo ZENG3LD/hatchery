@@ -525,8 +525,11 @@ async fn main() -> Result<()> {
 
             // After Queens registration, automatically register Infestor when git isolation is enabled
             if config.worktree_isolation {
-                nydus.register_infestor("sonnet");
-                eprintln!("[HATCHERY] Infestor automatically registered (git isolation enabled)");
+                if let Err(e) = nydus.register_infestor("sonnet") {
+                    eprintln!("[HATCHERY] Warning: Failed to register Infestor: {}", e);
+                } else {
+                    eprintln!("[HATCHERY] Infestor automatically registered (git isolation enabled)");
+                }
             }
 
             // Add tasks to DAG (LLM decomposition or fallback to checkboxes)

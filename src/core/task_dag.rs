@@ -185,6 +185,17 @@ impl TaskDag {
         }
     }
 
+    /// Unassign a task, resetting it back to Ready status.
+    ///
+    /// Used for rollback when assignment fails or for recovery from stuck states.
+    pub fn unassign(&mut self, task_id: &str) {
+        if let Some(task) = self.tasks.get_mut(task_id) {
+            task.status = DagTaskStatus::Ready;
+            task.assigned_to = None;
+            // Keep started_at for debugging/metrics purposes
+        }
+    }
+
     /// Mark a task as completed with its result.
     ///
     /// This also triggers a refresh of readiness to unblock dependent tasks.

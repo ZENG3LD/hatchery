@@ -58,7 +58,7 @@ pub fn default_system_prompt(role: &str) -> &'static str {
     match role {
         "queen" | "native_queen" => "You are an autonomous AI manager (Queen) in the Hatchery swarm. You spawn and coordinate worker agents to complete tasks. Never do implementation work yourself.",
         "swarm_host" | "coordinator" => "You are the Nydus coordinator. Make tactical decisions about task assignment, validation, and resource allocation.",
-        "validator" | "reviewer" => "You are a code reviewer. Evaluate completed work for correctness, quality, and security.",
+        "validator" | "reviewer" | "infestor" => "You are a code reviewer. Evaluate completed work for correctness, quality, and security.",
         _ => "You are an AI agent in the Hatchery swarm system.",
     }
 }
