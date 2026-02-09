@@ -366,13 +366,23 @@ async fn run_task(
                         }
                     }
 
-                    // Process died without sending result event
-                    eprintln!("[SpawnQueen {}] Process died without result event", id.0);
-                    let _ = event_tx.send(QueenEvent::ProcessDied {
-                        queen_id: id.clone(),
-                        exit_code: None,
-                        session_id: session_id.clone(),
-                    }).await;
+                    // Process exited without sending result event — use CompletionDetector
+                    let exit_code = proc.get_exit_code();
+                    let signal = CompletionSignal::ProcessExit { code: exit_code };
+                    let verdict = completion_detector.evaluate(&signal);
+
+                    eprintln!(
+                        "[SpawnQueen {}] Process exited (code: {:?}), verdict: {:?}",
+                        id.0,
+                        exit_code,
+                        match &verdict {
+                            CompletionVerdict::Success { .. } => "Success",
+                            CompletionVerdict::Failed { .. } => "Failed",
+                            CompletionVerdict::TimedOut { .. } => "TimedOut",
+                        }
+                    );
+
+                    emit_verdict(verdict, id, task, event_tx).await;
 
                     // Return to Idle
                     let _ = status_tx.send(QueenStatus::Idle);

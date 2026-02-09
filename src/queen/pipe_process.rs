@@ -335,6 +335,11 @@ impl PipeProcess {
         self.child.try_wait().ok().flatten().is_none()
     }
 
+    /// Get the exit code if the process has exited.
+    pub fn get_exit_code(&mut self) -> Option<i32> {
+        self.child.try_wait().ok().flatten().and_then(|status| status.code())
+    }
+
     /// Kill the process.
     pub fn kill(&mut self) -> Result<(), std::io::Error> {
         self.child.kill()
