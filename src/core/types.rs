@@ -44,19 +44,6 @@ pub struct WorkerId(pub String);
 // Enums
 // ============================================================================
 
-/// Backend type for a Queen agent.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum QueenBackend {
-    /// Wrapped Claude Code CLI with native Teams/mailbox
-    ClaudeNative,
-    /// Wrapped Claude Code CLI without Teams (raw pipe)
-    ClaudeRaw,
-    /// OpenAI Codex sandbox
-    Codex,
-    /// Generic HTTP API (any LLM provider)
-    ApiGeneric { base_url: String, model: String },
-}
-
 /// Current status of a Queen agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum QueenStatus {
@@ -66,7 +53,6 @@ pub enum QueenStatus {
     Working {
         task_id: TaskId,
         progress: f32,
-        sub_tasks: Vec<SubTaskStatus>,
     },
     /// Queen is blocked waiting for dependencies or external input
     Blocked { task_id: TaskId, reason: String },
@@ -76,21 +62,6 @@ pub enum QueenStatus {
     Completed { task_id: TaskId },
     /// Queen is unresponsive or crashed
     Dead,
-}
-
-/// State of a sub-task within a Queen's work breakdown.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum SubTaskState {
-    /// Sub-task is waiting to be started
-    Pending,
-    /// Sub-task has been assigned to a worker
-    Assigned,
-    /// Sub-task is currently being worked on
-    InProgress,
-    /// Sub-task was completed successfully
-    Completed,
-    /// Sub-task failed with an error
-    Failed { error: String },
 }
 
 /// Overall status of a task in the system.
@@ -139,19 +110,6 @@ pub enum MessageType {
     Custom(String),
 }
 
-/// Severity level for escalations.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum Severity {
-    /// Low priority issue
-    Low,
-    /// Medium priority issue
-    Medium,
-    /// High priority issue
-    High,
-    /// Critical issue requiring immediate attention
-    Critical,
-}
-
 /// Agent identifier for message routing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentId {
@@ -168,17 +126,6 @@ pub enum AgentId {
 // ============================================================================
 // Structs
 // ============================================================================
-
-/// Status of a sub-task within a Queen's work breakdown.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SubTaskStatus {
-    pub id: String,
-    pub description: String,
-    pub worker_id: Option<WorkerId>,
-    pub status: SubTaskState,
-    pub started_at: Option<DateTime<Utc>>,
-    pub completed_at: Option<DateTime<Utc>>,
-}
 
 /// Controls visibility of a message to different agent types.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -299,24 +246,6 @@ impl SwarmMessage {
             from,
             to,
             msg_type: MessageType::TaskResult,
-            payload: serde_json::Value::Object(payload),
-            timestamp: Utc::now(),
-            correlation_id: None,
-            visibility: Visibility::default_internal(),
-        }
-    }
-
-    /// Create an escalation message.
-    pub fn escalation(from: AgentId, to: AgentId, issue: String, severity: Severity) -> Self {
-        let mut payload = serde_json::Map::new();
-        payload.insert("issue".to_string(), serde_json::Value::String(issue));
-        payload.insert("severity".to_string(), serde_json::to_value(&severity).unwrap());
-
-        SwarmMessage {
-            id: uuid::Uuid::new_v4().to_string(),
-            from,
-            to,
-            msg_type: MessageType::Escalation,
             payload: serde_json::Value::Object(payload),
             timestamp: Utc::now(),
             correlation_id: None,

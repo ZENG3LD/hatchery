@@ -356,7 +356,6 @@ mod tests {
             .send(QueenStatus::Working {
                 task_id: TaskId("T2".to_string()),
                 progress: 0.5,
-                sub_tasks: vec![],
             })
             .unwrap();
 

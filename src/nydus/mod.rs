@@ -11,7 +11,6 @@ use chrono::Utc;
 use tokio::task::JoinHandle;
 
 use crate::core::types::*;
-use crate::queen::Queen;
 use crate::queen::handle::{QueenHandle, QueenEvent};
 use crate::queen::spawn_mode::SpawnMode;
 use crate::queen::completion::CompletionConfig;
@@ -265,26 +264,6 @@ impl Nydus {
         self.handles.insert(id.clone(), handle);
         self.actor_tasks.insert(id, join_handle);
 
-        Ok(())
-    }
-
-    /// Register a Queen with a Box<dyn Queen>.
-    /// DEPRECATED: Use register_queen_actor() for V3 actor-based Queens.
-    #[deprecated(note = "Use register_queen_actor() for V3")]
-    pub fn register_queen(&mut self, queen: Box<dyn Queen>) -> Result<()> {
-        // Check max limit
-        if self.handles.len() >= self.config.max_queens {
-            return Err(anyhow!("Cannot register queen: max_queens limit ({}) reached", self.config.max_queens));
-        }
-        let queen_id = queen.id();
-        self.mailbox.register_queen(queen_id.clone());
-        if let Some(ref mut worktree_mgr) = self.worktree_mgr {
-            if let Err(e) = worktree_mgr.create(&queen_id) {
-                eprintln!("Warning: Failed to create worktree for {}: {}", queen_id.0, e);
-            }
-        }
-        // Note: old-style queens don't have handles — this is for backward compat only
-        // They won't participate in the event-driven run() loop
         Ok(())
     }
 

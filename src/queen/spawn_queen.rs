@@ -161,14 +161,12 @@ async fn run_task(
     let _ = status_tx.send(QueenStatus::Working {
         task_id: task.id.clone(),
         progress: 0.0,
-        sub_tasks: vec![],
     });
     let _ = event_tx.send(QueenEvent::StatusChanged {
         queen_id: id.clone(),
         status: QueenStatus::Working {
             task_id: task.id.clone(),
             progress: 0.0,
-            sub_tasks: vec![],
         },
     }).await;
 
