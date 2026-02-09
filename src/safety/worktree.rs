@@ -209,6 +209,21 @@ impl WorktreeManager {
             }
         }
 
+        // Commit any uncommitted changes on the main repo (e.g., Cargo.lock from previous merges)
+        // This prevents "Your local changes would be overwritten by merge" errors
+        let main_status = Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(&self.repo_dir)
+            .output();
+
+        if let Ok(main_status) = main_status {
+            let main_status_str = String::from_utf8_lossy(&main_status.stdout);
+            if !main_status_str.trim().is_empty() {
+                let _ = git_cmd(&self.repo_dir, &["add", "-A"]);
+                let _ = git_cmd(&self.repo_dir, &["commit", "-m", "chore: commit changes from previous merge"]);
+            }
+        }
+
         // First check if branch has any commits beyond base
         let output = Command::new("git")
             .args(["log", &format!("{}..{}", self.base_branch, branch_name), "--oneline"])
@@ -239,11 +254,13 @@ impl WorktreeManager {
             format!("merge(hatchery): {}", queen_id.0)
         };
 
-        // Attempt merge with --no-ff
+        // Attempt merge with --no-ff and auto-resolve conflicts in favor of Queen's branch
+        // Queens work in isolation and their changes take precedence over main
         let output = Command::new("git")
             .args([
                 "merge",
                 "--no-ff",
+                "-X", "theirs",
                 branch_name,
                 "-m",
                 &commit_msg,

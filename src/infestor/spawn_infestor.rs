@@ -62,8 +62,8 @@ pub fn spawn_infestor(
         id: queen_id.clone(),
         model: config.model,
         working_dir: config.working_dir,
-        max_turns: Some(15), // Enough turns for diff review, cargo check, and verdict
-        max_budget_usd: Some(0.50), // Cap review cost
+        max_turns: None, // No limits — reviewer is constrained only by its system prompt
+        max_budget_usd: None,
         system_prompt,
         allowed_tools: Some("Read,Glob,Grep,Bash".to_string()), // Read-only + bash for cargo check
         completion: CompletionConfig::default(),
