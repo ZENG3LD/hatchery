@@ -22,11 +22,5 @@ pub mod queen;
 /// Nydus coordinator (L2): task scheduling, validation, merging
 pub mod nydus;
 
-/// Message routing and event logging
-pub mod mailbox;
-
 /// Git safety: attribution, worktree isolation
 pub mod safety;
-
-/// IPC server for CLI ↔ Nydus communication
-pub mod ipc;

@@ -7,14 +7,14 @@ use std::time::{Duration, Instant};
 use std::io::{BufRead, Write as IoWrite};
 
 use hatchery::cli::HatcheryConfig;
-use hatchery::mailbox::event_log::SqliteEventLog;
+use hatchery::nydus::mailbox::event_log::SqliteEventLog;
 use hatchery::core::types::{SwarmMessage, AgentId, MessageType, Visibility, NydusId, QueenId};
 use hatchery::queen::spawn_mode::SpawnMode;
 use hatchery::queen::completion::CompletionConfig;
 use hatchery::nydus::{Nydus, NydusConfig};
 use hatchery::core::task_dag::{Priority, Complexity};
 use hatchery::core::dag_generator;
-use hatchery::ipc::protocol::{IpcRequest, IpcResponse};
+use hatchery::nydus::ipc::protocol::{IpcRequest, IpcResponse};
 use hatchery::prd;
 
 #[derive(Parser)]

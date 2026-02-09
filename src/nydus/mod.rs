@@ -1,4 +1,6 @@
 pub mod tick;
+pub mod mailbox;
+pub mod ipc;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -15,16 +17,15 @@ use crate::queen::spawn_mode::SpawnMode;
 use crate::queen::completion::CompletionConfig;
 use crate::queen::stream_queen::{self, StreamQueenConfig};
 use crate::queen::spawn_queen::{self, SpawnQueenConfig};
-use crate::mailbox::SwarmMailbox;
-use crate::mailbox::event_log::SqliteEventLog;
-use crate::mailbox::event_bus::EventBus;
+use self::mailbox::SwarmMailbox;
+use self::mailbox::event_log::SqliteEventLog;
+use self::mailbox::event_bus::EventBus;
 use crate::core::task_dag::{TaskDag, DagTask, DagTaskStatus, Priority, Complexity};
 use crate::core::validator::{Validator, ValidationResult};
 use crate::core::shared_memory::SharedMemory;
 use crate::safety::worktree::{WorktreeManager, MergeResult};
 use crate::queen::recovery::{SessionTracker, RecoveryManager, RecoveryConfig};
 use crate::nydus::tick::HeuristicTick;
-use crate::ipc;
 
 /// Configuration for Nydus.
 #[derive(Debug, Clone)]

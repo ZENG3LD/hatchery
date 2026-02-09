@@ -7,7 +7,7 @@
 use tokio::sync::{mpsc, broadcast};
 use chrono::{DateTime, Utc};
 use serde::{Serialize, Deserialize};
-use crate::mailbox::event_log::SqliteEventLog;
+use super::event_log::SqliteEventLog;
 use crate::core::types::*;
 use crate::queen::handle::QueenEvent;
 
