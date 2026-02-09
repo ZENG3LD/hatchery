@@ -48,7 +48,7 @@ impl InfestorHandle {
             **Branch**: {branch_name}\n\
             **Worktree**: {worktree_path}\n\n\
             ## Instructions\n\n\
-            1. Run `git diff HEAD~1..HEAD` in the worktree path to see the changes\n\
+            1. Run `git diff main..HEAD` in the worktree path to see only the Queen's changes vs main\n\
             2. Run `cargo check --workspace` to verify compilation\n\
             3. Review the diff for correctness, scope, and quality\n\
             4. Respond with your verdict\n\n\
