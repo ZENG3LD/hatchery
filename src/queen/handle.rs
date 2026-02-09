@@ -259,6 +259,7 @@ mod tests {
             shared_state: HashMap::new(),
             skill_hint: None,
             knowledge_entries: vec![],
+            other_tasks_summary: None,
         };
 
         // Send assign command

@@ -163,6 +163,8 @@ pub struct TaskContext {
     pub skill_hint: Option<String>,
     /// Formatted knowledge entries for prompt (from other Queens)
     pub knowledge_entries: Vec<String>,
+    /// Information about other tasks being worked on by other Queens (for scope awareness)
+    pub other_tasks_summary: Option<String>,
 }
 
 /// Result of a completed task.

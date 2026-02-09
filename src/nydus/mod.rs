@@ -46,6 +46,8 @@ pub struct NydusConfig {
     pub setting_sources: Option<String>,
     /// Keep-alive mode: don't exit after DAG completion, wait for operator commands
     pub keep_alive: bool,
+    /// Path to PRD file (for updating checkboxes)
+    pub prd_path: Option<PathBuf>,
 }
 
 impl Default for NydusConfig {
@@ -59,6 +61,7 @@ impl Default for NydusConfig {
             max_iterations: 100,
             setting_sources: None,
             keep_alive: false,
+            prd_path: None,
         }
     }
 }
@@ -150,6 +153,62 @@ pub enum ValidatedMergeResult {
 }
 
 impl Nydus {
+    /// Build a summary of other tasks being worked on by other Queens.
+    /// This helps Queens understand what work is being done in parallel.
+    fn build_other_tasks_summary(&self, current_task_id: &str) -> String {
+        let mut summary = String::new();
+
+        // Get all tasks from DAG
+        let all_tasks = self.task_dag.all_tasks();
+
+        // Filter and format tasks that are assigned or in progress (excluding current task)
+        let other_tasks: Vec<String> = all_tasks
+            .iter()
+            .filter(|t| {
+                t.id != current_task_id &&
+                (matches!(t.status, crate::core::task_dag::DagTaskStatus::Assigned(_)) ||
+                 matches!(t.status, crate::core::task_dag::DagTaskStatus::InProgress))
+            })
+            .map(|t| {
+                let status_str = match &t.status {
+                    crate::core::task_dag::DagTaskStatus::Assigned(qid) => format!("ASSIGNED to {}", qid.0),
+                    crate::core::task_dag::DagTaskStatus::InProgress => "IN PROGRESS".to_string(),
+                    _ => "UNKNOWN".to_string(),
+                };
+                format!("- {}: {} ({})", t.id, t.description.lines().next().unwrap_or(""), status_str)
+            })
+            .collect();
+
+        // Add completed tasks (for context)
+        let completed_tasks: Vec<String> = all_tasks
+            .iter()
+            .filter(|t| matches!(t.status, crate::core::task_dag::DagTaskStatus::Completed))
+            .map(|t| format!("- {}: COMPLETED", t.id))
+            .collect();
+
+        if !other_tasks.is_empty() {
+            summary.push_str("Active tasks being handled by other Queens:\n");
+            for task in &other_tasks {
+                summary.push_str(task);
+                summary.push('\n');
+            }
+        }
+
+        if !completed_tasks.is_empty() {
+            summary.push_str("\nCompleted tasks:\n");
+            for task in &completed_tasks {
+                summary.push_str(task);
+                summary.push('\n');
+            }
+        }
+
+        if summary.is_empty() {
+            summary.push_str("No other active tasks at this time.\n");
+        }
+
+        summary
+    }
+
     /// Create a new Nydus with configuration.
     pub fn new(id: NydusId, config: NydusConfig) -> Result<Self> {
         let event_log = Arc::new(SqliteEventLog::in_memory()?);
@@ -627,6 +686,13 @@ impl Nydus {
                 // Check queen inbox for pending operator messages BEFORE scheduling next DAG task
                 self.deliver_pending_messages(&queen_id).await?;
 
+                // Update PRD file checkbox
+                if let Some(ref prd_path) = self.config.prd_path {
+                    if let Err(e) = crate::prd::mark_task_done(prd_path, &task_id.0) {
+                        eprintln!("[Nydus] Warning: Failed to update PRD checkbox for {}: {}", task_id.0, e);
+                    }
+                }
+
                 // Work stealing: Try to schedule next task to THIS queen first (warm worktree)
                 // Then schedule to other idle queens
                 self.try_schedule_with_preference(Some(&queen_id)).await?;
@@ -781,12 +847,15 @@ impl Nydus {
                         })
                         .collect();
 
+                    let other_tasks_summary = self.build_other_tasks_summary(&task_id);
+
                     let context = TaskContext {
                         knowledge,
                         recent_messages: Vec::new(),
                         shared_state: HashMap::new(),
                         skill_hint: None,
                         knowledge_entries,
+                        other_tasks_summary: Some(other_tasks_summary),
                     };
 
                     let task = Task {
@@ -886,7 +955,7 @@ impl Nydus {
         }
 
         // Build context from SharedMemory
-        let knowledge = self.memory.query("*")
+        let knowledge: HashMap<String, serde_json::Value> = self.memory.query("*")
             .into_iter()
             .map(|entry| (entry.key, entry.value))
             .collect();
@@ -907,14 +976,6 @@ impl Nydus {
                 format!("[{}] {}: {}", author_str, e.key, e.value)
             })
             .collect();
-
-        let context = TaskContext {
-            knowledge,
-            recent_messages: Vec::new(),
-            shared_state: HashMap::new(),
-            skill_hint: None,  // Will be set per-task below
-            knowledge_entries,
-        };
 
         let mut assigned = 0;
 
@@ -946,9 +1007,17 @@ impl Nydus {
                 created_at,
             };
 
-            // Set skill_hint in context for this task
-            let mut task_context = context.clone();
-            task_context.skill_hint = skill_hint;
+            // Build context for this specific task
+            let other_tasks_summary = self.build_other_tasks_summary(&task_id);
+
+            let task_context = TaskContext {
+                knowledge: knowledge.clone(),
+                recent_messages: Vec::new(),
+                shared_state: HashMap::new(),
+                skill_hint,
+                knowledge_entries: knowledge_entries.clone(),
+                other_tasks_summary: Some(other_tasks_summary),
+            };
 
             if let Some(handle) = self.handles.get(&queen_id) {
                 if let Err(e) = handle.assign(task, task_context).await {
@@ -1128,7 +1197,7 @@ impl Nydus {
             .join("\n\n");
 
         // Build context from SharedMemory
-        let knowledge = self.memory.query("*")
+        let knowledge: HashMap<String, serde_json::Value> = self.memory.query("*")
             .into_iter()
             .map(|entry| (entry.key, entry.value))
             .collect();
@@ -1149,12 +1218,15 @@ impl Nydus {
             })
             .collect();
 
+        let other_tasks_summary = self.build_other_tasks_summary(&task_id);
+
         let context = TaskContext {
             knowledge,
             recent_messages: Vec::new(),
             shared_state: HashMap::new(),
             skill_hint: None,
             knowledge_entries,
+            other_tasks_summary: Some(other_tasks_summary),
         };
 
         let task = Task {

@@ -508,6 +508,7 @@ async fn main() -> Result<()> {
                 max_iterations: config.max_iterations,
                 setting_sources: None,
                 keep_alive,
+                prd_path: Some(config.prd_path.clone()),
             };
 
             // Create Nydus

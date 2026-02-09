@@ -523,6 +523,24 @@ fn format_task_prompt(task: &Task, context: &TaskContext, queued_messages: &[Swa
         }
     }
 
+    // SCOPE BOUNDARY — enforce single-task focus
+    prompt.push_str("\n\n## SCOPE BOUNDARY (MANDATORY)\n\n");
+    prompt.push_str("You are assigned ONLY the task above. Other tasks in the PRD are being handled by other Queens in parallel.\n\n");
+    prompt.push_str("Rules:\n");
+    prompt.push_str("1. Complete ONLY your assigned task — do NOT implement other prd-* tasks\n");
+    prompt.push_str("2. Do NOT read PRD.md to find additional work — your task is fully described above\n");
+    prompt.push_str("3. Do NOT spawn agents to implement tasks outside your scope\n");
+    prompt.push_str("4. If your task depends on code from other tasks, assume it will be provided or work with stubs\n");
+    prompt.push_str("5. Report completion of YOUR task only, then stop\n\n");
+    prompt.push_str("Violating scope boundaries wastes resources and creates merge conflicts with other Queens.\n");
+
+    // Other Queens' assignments (if provided)
+    if let Some(ref other_tasks) = context.other_tasks_summary {
+        prompt.push_str("\n\n## Other Queens' Assignments (DO NOT TOUCH)\n\n");
+        prompt.push_str(other_tasks);
+        prompt.push_str("\n");
+    }
+
     prompt
 }
 
@@ -559,6 +577,7 @@ mod tests {
             shared_state: HashMap::new(),
             skill_hint: None,
             knowledge_entries: vec![],
+            other_tasks_summary: None,
         };
         context.knowledge.insert("key1".to_string(), serde_json::json!("value1"));
         context.shared_state.insert("state1".to_string(), "state_value".to_string());
@@ -613,6 +632,7 @@ mod tests {
             shared_state: HashMap::new(),
             skill_hint: None,
             knowledge_entries: vec![],
+            other_tasks_summary: None,
         };
 
         let msg1 = SwarmMessage {
