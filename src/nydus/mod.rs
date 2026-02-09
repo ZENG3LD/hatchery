@@ -686,6 +686,13 @@ impl Nydus {
                 // Check queen inbox for pending operator messages BEFORE scheduling next DAG task
                 self.deliver_pending_messages(&queen_id).await?;
 
+                // Recovery: Check if this Queen has any other tasks stuck in Assigned state
+                // This can happen if Queen was assigned multiple tasks but only started one
+                let recovered = self.task_dag.recover_stuck_tasks(&[queen_id.clone()]);
+                if recovered > 0 {
+                    eprintln!("[Nydus] Recovered {} stuck tasks assigned to {} after completion", recovered, queen_id.0);
+                }
+
                 // Update PRD file checkbox
                 if let Some(ref prd_path) = self.config.prd_path {
                     if let Err(e) = crate::prd::mark_task_done(prd_path, &task_id.0) {
@@ -1066,14 +1073,30 @@ impl Nydus {
         let has_remaining = stats.total > (stats.completed + stats.failed);
         if all_idle && has_remaining {
             eprintln!(
-                "[Nydus] DEADLOCK DETECTED: All {} Queens idle, {} tasks remaining ({} blocked, {} ready). Attempting rescue scheduling...",
+                "[Nydus] DEADLOCK DETECTED: All {} Queens idle, {} tasks remaining ({} blocked, {} ready, {} in_progress). Attempting recovery...",
                 self.handles.len(),
                 stats.total - stats.completed - stats.failed,
                 stats.blocked,
-                stats.ready
+                stats.ready,
+                stats.in_progress
             );
-            // Force refresh readiness and try scheduling
+
+            // Collect idle queen IDs for recovery
+            let idle_queen_ids: Vec<QueenId> = self.handles.iter()
+                .filter(|(_, h)| matches!(h.status(), QueenStatus::Idle))
+                .map(|(id, _)| id.clone())
+                .collect();
+
+            // Recover stuck tasks (Assigned/InProgress → Ready)
+            let recovered = self.task_dag.recover_stuck_tasks(&idle_queen_ids);
+            if recovered > 0 {
+                eprintln!("[Nydus] Recovered {} stuck tasks, rescheduling", recovered);
+            }
+
+            // Also refresh blocked → ready
             self.task_dag.refresh_readiness();
+
+            // Try scheduling again
             self.try_schedule().await?;
         }
 

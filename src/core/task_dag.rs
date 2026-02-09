@@ -288,6 +288,41 @@ impl TaskDag {
         self.tasks.values().collect()
     }
 
+    /// Recover stuck tasks assigned to idle Queens.
+    ///
+    /// Resets tasks in Assigned(queen_id) or InProgress state where the assigned
+    /// Queen is idle back to Ready state.
+    ///
+    /// Returns the number of recovered tasks.
+    pub fn recover_stuck_tasks(&mut self, idle_queens: &[QueenId]) -> usize {
+        let mut recovered = 0;
+        for task in self.tasks.values_mut() {
+            let should_recover = match &task.status {
+                DagTaskStatus::Assigned(queen_id) => {
+                    // Task assigned to a Queen that is now idle — stuck
+                    idle_queens.contains(queen_id)
+                }
+                DagTaskStatus::InProgress => {
+                    // InProgress task but all Queens are idle — definitely stuck
+                    // This happens when Queen dies or loses the task
+                    !idle_queens.is_empty()
+                }
+                _ => false,
+            };
+
+            if should_recover {
+                eprintln!(
+                    "[DAG] Recovering stuck task {} from {:?} → Ready",
+                    task.id, task.status
+                );
+                task.status = DagTaskStatus::Ready;
+                task.assigned_to = None;
+                recovered += 1;
+            }
+        }
+        recovered
+    }
+
     /// Get statistics about task status distribution.
     pub fn stats(&self) -> DagStats {
         let mut stats = DagStats {
