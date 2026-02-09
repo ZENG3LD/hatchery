@@ -114,12 +114,13 @@ impl WorktreeManager {
         let _ = git_cmd(&self.repo_dir, &["branch", "-D", &branch_name]);
 
         // Create worktree with new branch from base
+        let normalized_path = normalize_path_for_git(&wt_path);
         git_cmd(
             &self.repo_dir,
             &[
                 "worktree",
                 "add",
-                &wt_path.to_string_lossy(),
+                &normalized_path,
                 "-b",
                 &branch_name,
                 &self.base_branch,
@@ -337,9 +338,10 @@ impl WorktreeManager {
     /// Internal: remove a worktree directory.
     fn remove_worktree(&self, wt_path: &Path) -> Result<()> {
         // Try git worktree remove first
+        let normalized_path = normalize_path_for_git(wt_path);
         let result = git_cmd(
             &self.repo_dir,
-            &["worktree", "remove", "--force", &wt_path.to_string_lossy()],
+            &["worktree", "remove", "--force", &normalized_path],
         );
 
         if result.is_err() {
@@ -405,6 +407,14 @@ fn get_conflicted_files(repo_dir: &Path) -> Result<Vec<PathBuf>> {
         .collect();
 
     Ok(files)
+}
+
+/// Convert a Windows path to a forward-slash path suitable for Git CLI.
+///
+/// Git on Windows cannot handle backslash paths or spaces without proper escaping.
+/// This function normalizes paths by converting backslashes to forward slashes.
+fn normalize_path_for_git(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 /// Run a git command and return success/failure.

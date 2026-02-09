@@ -24,6 +24,30 @@ pub fn hatchery_cli_tools_block() -> &'static str {
     include_str!("../../prompts/hatchery_cli_tools.md")
 }
 
+/// Git safety rules for Queens working in isolated branches.
+///
+/// These rules prevent Queens from accidentally modifying main/master branches
+/// or performing destructive git operations that could harm the shared codebase.
+pub fn git_safety_block() -> &'static str {
+    r#"## Git Safety Rules (MANDATORY)
+
+You are working in an isolated git branch. These rules are NON-NEGOTIABLE:
+
+1. NEVER checkout, merge into, or modify the `main` or `master` branch
+2. NEVER run `git push -f`, `git push --force`, or any force push
+3. NEVER run `git reset --hard` on branches other than your own
+4. You may ONLY commit to your current branch (hatchery/*)
+5. You may ONLY use these git commands:
+   - `git status`, `git diff`, `git log` (read-only)
+   - `git add`, `git commit` (on your current branch only)
+   - `git branch` (to list branches, read-only)
+6. Before ANY git operation, verify you are on your assigned branch with `git branch --show-current`
+7. If your current branch is `main` or `master`, STOP and report an error via mailbox
+
+Violating these rules will corrupt the shared codebase and harm other Queens' work.
+"#
+}
+
 /// Recovery notice template — explains to a recovering Queen what happened and what to do.
 pub fn recovery_notice_template() -> &'static str {
     include_str!("../../prompts/recovery_notice.md")
@@ -103,5 +127,18 @@ mod tests {
         assert!(template.contains("{attempt}"));
         assert!(template.contains("{started}"));
         assert!(template.contains("{discipline}"));
+    }
+
+    #[test]
+    fn test_git_safety_block_exists() {
+        let block = git_safety_block();
+        assert!(block.contains("Git Safety Rules"));
+        assert!(block.contains("NON-NEGOTIABLE"));
+        assert!(block.contains("NEVER checkout"));
+        assert!(block.contains("main"));
+        assert!(block.contains("master"));
+        assert!(block.contains("git push -f"));
+        assert!(block.contains("git branch --show-current"));
+        assert!(block.contains("hatchery/*"));
     }
 }

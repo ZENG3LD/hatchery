@@ -289,11 +289,12 @@ impl Nydus {
         let shutdown_rx = self.event_bus.shutdown_receiver();
 
         let system_prompt = Some(format!(
-            "{}\n\n{}\n\n{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}\n\n{}",
             crate::core::prompts::default_system_prompt("queen"),
             crate::core::prompts::queen_preamble(),
             crate::core::prompts::orchestration_discipline_block(),
-            crate::core::prompts::hatchery_cli_tools_block()
+            crate::core::prompts::hatchery_cli_tools_block(),
+            crate::core::prompts::git_safety_block()
         ));
 
         // Determine working directory for this Queen
@@ -303,8 +304,14 @@ impl Nydus {
             match worktree_mgr.create(&id) {
                 Ok(worktree_path) => worktree_path,
                 Err(e) => {
-                    eprintln!("Warning: Failed to create worktree for {}: {}", id.0, e);
-                    // Fallback to main repo
+                    // CRITICAL: Worktree creation failed — Queen will work without git isolation
+                    eprintln!("\n========================================");
+                    eprintln!("ERROR: Failed to create worktree for {}", id.0);
+                    eprintln!("Reason: {}", e);
+                    eprintln!("WARNING: Queen will operate in main repo WITHOUT git isolation");
+                    eprintln!("This means git operations are NOT sandboxed and may affect main branch");
+                    eprintln!("========================================\n");
+                    // Fallback to main repo (git safety rules in Queen prompt will still apply)
                     self.config.working_dir.clone()
                 }
             }
