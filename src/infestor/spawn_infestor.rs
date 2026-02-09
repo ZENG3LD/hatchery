@@ -62,7 +62,7 @@ pub fn spawn_infestor(
         id: queen_id.clone(),
         model: config.model,
         working_dir: config.working_dir,
-        max_turns: Some(3), // Reviews should be quick
+        max_turns: Some(15), // Enough turns for diff review, cargo check, and verdict
         max_budget_usd: Some(0.50), // Cap review cost
         system_prompt,
         allowed_tools: Some("Read,Glob,Grep,Bash".to_string()), // Read-only + bash for cargo check

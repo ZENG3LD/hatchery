@@ -183,6 +183,31 @@ impl WorktreeManager {
             .ok_or_else(|| anyhow!("Worktree not found for Queen {}", queen_id.0))?;
 
         let branch_name = &info.branch;
+        let wt_path = &info.path;
+
+        // Ensure all changes (including generated files like Cargo.lock) are committed in the worktree
+        // before merge to prevent untracked file conflicts
+        let status_output = Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(wt_path)
+            .output()
+            .context("Failed to check worktree status before merge")?;
+
+        if status_output.status.success() {
+            let status = String::from_utf8_lossy(&status_output.stdout);
+            if !status.trim().is_empty() {
+                // There are uncommitted changes - add and commit them
+                git_cmd(wt_path, &["add", "-A"])
+                    .context("Failed to add uncommitted changes before merge")?;
+
+                git_cmd(wt_path, &["commit", "--amend", "--no-edit"])
+                    .or_else(|_| {
+                        // If amend fails (no previous commit), create a new commit
+                        git_cmd(wt_path, &["commit", "-m", "chore: add generated files"])
+                    })
+                    .context("Failed to commit generated files before merge")?;
+            }
+        }
 
         // First check if branch has any commits beyond base
         let output = Command::new("git")
