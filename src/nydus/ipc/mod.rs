@@ -5,17 +5,19 @@
 
 pub mod protocol;
 
-use protocol::{IpcRequest, IpcResponse};
+use protocol::{IpcRequest, IpcResponse, QueenStatusSnapshot, InjectRequest};
 use crate::core::shared_memory::{KnowledgeEntry, MemoryState};
 use crate::core::types::*;
 use crate::core::validator::Validator;
+use crate::nydus::mailbox::SwarmMailbox;
 
 use anyhow::Result;
-use parking_lot::RwLock;
+use parking_lot::{RwLock, Mutex};
 use std::sync::Arc;
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
+use tokio::sync::mpsc;
 
 /// IPC server configuration.
 pub struct IpcConfig {
@@ -28,22 +30,48 @@ pub struct IpcConfig {
 /// Returns the port number. Spawns a tokio task that handles connections.
 /// The listener binds to 127.0.0.1:0 (OS picks a free port).
 pub async fn start_ipc_listener(
+    queen_snapshots: Arc<parking_lot::RwLock<Vec<QueenStatusSnapshot>>>,
     memory: Arc<RwLock<MemoryState>>,
+    mailbox: Arc<Mutex<SwarmMailbox>>,
+    inject_tx: mpsc::Sender<InjectRequest>,
+    message_delivery_tx: mpsc::Sender<protocol::MessageDeliveryNotification>,
     config: IpcConfig,
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
+    started_at: std::time::Instant,
+    keep_alive: bool,
 ) -> Result<u16> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
 
     let config = Arc::new(config);
+    let shutdown_tx = Arc::new(shutdown_tx);
+    let started_at = Arc::new(started_at);
 
     tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
                     let memory = memory.clone();
+                    let mailbox = mailbox.clone();
+                    let queen_snapshots = queen_snapshots.clone();
+                    let inject_tx = inject_tx.clone();
+                    let message_delivery_tx = message_delivery_tx.clone();
                     let config = config.clone();
+                    let shutdown_tx = shutdown_tx.clone();
+                    let started_at = started_at.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = handle_connection(stream, memory, config).await {
+                        if let Err(e) = handle_connection(
+                            stream,
+                            memory,
+                            mailbox,
+                            queen_snapshots,
+                            inject_tx,
+                            message_delivery_tx,
+                            config,
+                            shutdown_tx,
+                            started_at,
+                            keep_alive,
+                        ).await {
                             eprintln!("[IPC] Connection error: {}", e);
                         }
                     });
@@ -62,7 +90,14 @@ pub async fn start_ipc_listener(
 async fn handle_connection(
     stream: tokio::net::TcpStream,
     memory: Arc<RwLock<MemoryState>>,
+    mailbox: Arc<Mutex<SwarmMailbox>>,
+    queen_snapshots: Arc<parking_lot::RwLock<Vec<QueenStatusSnapshot>>>,
+    inject_tx: mpsc::Sender<InjectRequest>,
+    message_delivery_tx: mpsc::Sender<protocol::MessageDeliveryNotification>,
     config: Arc<IpcConfig>,
+    shutdown_tx: Arc<tokio::sync::watch::Sender<bool>>,
+    started_at: Arc<std::time::Instant>,
+    keep_alive: bool,
 ) -> Result<()> {
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();
@@ -88,7 +123,18 @@ async fn handle_connection(
     };
 
     // Handle request
-    let response = handle_request(request, &memory, &config).await;
+    let response = handle_request(
+        request,
+        &memory,
+        &mailbox,
+        &queen_snapshots,
+        &inject_tx,
+        &message_delivery_tx,
+        &config,
+        &shutdown_tx,
+        &started_at,
+        keep_alive,
+    ).await;
 
     // Send response
     let json = serde_json::to_string(&response)?;
@@ -102,7 +148,14 @@ async fn handle_connection(
 async fn handle_request(
     request: IpcRequest,
     memory: &Arc<RwLock<MemoryState>>,
+    mailbox: &Arc<Mutex<SwarmMailbox>>,
+    queen_snapshots: &Arc<parking_lot::RwLock<Vec<QueenStatusSnapshot>>>,
+    inject_tx: &mpsc::Sender<InjectRequest>,
+    message_delivery_tx: &mpsc::Sender<protocol::MessageDeliveryNotification>,
     config: &IpcConfig,
+    shutdown_tx: &Arc<tokio::sync::watch::Sender<bool>>,
+    started_at: &Arc<std::time::Instant>,
+    keep_alive: bool,
 ) -> IpcResponse {
     match request {
         IpcRequest::Ping => IpcResponse::Ok {
@@ -197,60 +250,136 @@ async fn handle_request(
             }
         }
 
-        IpcRequest::MailboxSend { to, message, msg_type: _, queen_id } => {
-            // Store as knowledge entry (mailbox messages in shared memory)
-            let key = format!("msg:{}", uuid::Uuid::new_v4());
-
-            let author = if let Some(qid) = queen_id {
+        IpcRequest::MailboxSend { to, message, msg_type, queen_id } => {
+            // Parse sender (from)
+            let from = if let Some(qid) = queen_id {
                 AgentId::Queen(QueenId(qid))
             } else {
                 AgentId::Operator
             };
 
-            let entry = KnowledgeEntry {
-                key: key.clone(),
-                value: serde_json::json!({"to": to, "message": message}),
-                author,
-                timestamp: chrono::Utc::now(),
-                visibility: Visibility::default_internal(),
-                ttl: Some(std::time::Duration::from_secs(3600)), // 1 hour TTL for messages
+            // Parse recipient (to)
+            let to_agent = parse_agent_id(&to);
+            if to_agent.is_none() {
+                return IpcResponse::Error {
+                    message: format!("Invalid 'to' field: '{}'. Expected format: 'queen:Q0', 'nydus', 'operator', or 'validator'", to),
+                };
+            }
+            let to_agent = to_agent.unwrap();
+
+            // Determine message type
+            let message_type = if let Some(mt) = msg_type {
+                match mt.as_str() {
+                    "status_request" => MessageType::StatusRequest,
+                    "status_report" => MessageType::StatusReport,
+                    "knowledge" => MessageType::Knowledge,
+                    "knowledge_query" => MessageType::KnowledgeQuery,
+                    "escalation" => MessageType::Escalation,
+                    "shutdown" => MessageType::Shutdown,
+                    "memory_ref" => MessageType::MemoryRef,
+                    other => MessageType::Custom(other.to_string()),
+                }
+            } else {
+                MessageType::Custom("operator_message".to_string())
             };
 
+            // Create SwarmMessage
+            let message_id = uuid::Uuid::new_v4().to_string();
+            let swarm_message = SwarmMessage {
+                id: message_id.clone(),
+                from,
+                to: to_agent.clone(),
+                msg_type: message_type,
+                payload: serde_json::json!({ "message": message }),
+                timestamp: chrono::Utc::now(),
+                correlation_id: None,
+                visibility: Visibility::default_internal(),
+            };
+
+            // Route through SwarmMailbox
             {
-                let mut state = memory.write();
-                state.knowledge.insert(key.clone(), entry);
-                state.version += 1;
-                state.metadata.last_updated = chrono::Utc::now();
+                let mut mb = mailbox.lock();
+                mb.send(swarm_message);
+            }
+
+            // If message is sent to a queen, notify Nydus for potential delivery
+            if let AgentId::Queen(qid) = to_agent {
+                let notification = protocol::MessageDeliveryNotification {
+                    queen_id: qid,
+                    message_id: message_id.clone(),
+                };
+                // Best-effort send (don't fail if channel full)
+                let _ = message_delivery_tx.try_send(notification);
             }
 
             IpcResponse::Ok {
-                data: serde_json::json!({"sent": true, "key": key}),
+                data: serde_json::json!({
+                    "sent": true,
+                    "message_id": message_id
+                }),
             }
         }
 
         IpcRequest::MailboxRead { from, limit } => {
-            let state = memory.read();
             let limit = limit.unwrap_or(20);
 
-            let messages: Vec<serde_json::Value> = state.knowledge.iter()
-                .filter(|(k, _)| k.starts_with("msg:"))
-                .filter(|(_, entry)| {
-                    if let Some(ref from_filter) = from {
-                        format!("{:?}", entry.author).contains(from_filter)
-                    } else {
-                        true
+            let messages: Vec<serde_json::Value> = if let Some(ref from_str) = from {
+                // Reading from a specific agent's inbox (e.g., "queen:Q0")
+                let agent_id = parse_agent_id(from_str);
+                if agent_id.is_none() {
+                    return IpcResponse::Error {
+                        message: format!("Invalid 'from' field: '{}'. Expected format: 'queen:Q0', 'nydus', 'operator', or 'validator'", from_str),
+                    };
+                }
+
+                let mut mb = mailbox.lock();
+                let mut msgs = Vec::new();
+
+                match agent_id.unwrap() {
+                    AgentId::Queen(qid) => {
+                        // Read from queen's inbox
+                        for _ in 0..limit {
+                            if let Some(msg) = mb.recv_queen(&qid) {
+                                msgs.push(swarm_message_to_json(&msg));
+                            } else {
+                                break;
+                            }
+                        }
                     }
-                })
-                .take(limit)
-                .map(|(_, entry)| {
-                    serde_json::json!({
-                        "key": entry.key,
-                        "value": entry.value,
-                        "author": format!("{:?}", entry.author),
-                        "timestamp": entry.timestamp.to_rfc3339(),
-                    })
-                })
-                .collect();
+                    AgentId::Nydus(_) => {
+                        // Read from Nydus (host) inbox
+                        for _ in 0..limit {
+                            if let Some(msg) = mb.recv_host() {
+                                msgs.push(swarm_message_to_json(&msg));
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    AgentId::Validator => {
+                        // Read from Validator inbox
+                        for _ in 0..limit {
+                            if let Some(msg) = mb.recv_validator() {
+                                msgs.push(swarm_message_to_json(&msg));
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    AgentId::Operator => {
+                        // Read from outbox (operator sees messages TO operator)
+                        let drained = mb.drain_outbox();
+                        msgs = drained.iter().take(limit).map(swarm_message_to_json).collect();
+                    }
+                }
+
+                msgs
+            } else {
+                // Default: read operator's outbox (messages sent to operator)
+                let mut mb = mailbox.lock();
+                let drained = mb.drain_outbox();
+                drained.iter().take(limit).map(swarm_message_to_json).collect()
+            };
 
             IpcResponse::Ok {
                 data: serde_json::json!(messages),
@@ -277,7 +406,193 @@ async fn handle_request(
                 },
             }
         }
+
+        IpcRequest::QueenStatus { queen_id } => {
+            let snapshots = queen_snapshots.read();
+
+            let filtered_queens: Vec<QueenStatusSnapshot> = if let Some(ref qid) = queen_id {
+                // Filter for specific queen
+                snapshots
+                    .iter()
+                    .filter(|snapshot| snapshot.id == *qid)
+                    .cloned()
+                    .collect()
+            } else {
+                // Return all queens
+                snapshots.clone()
+            };
+
+            IpcResponse::Ok {
+                data: serde_json::json!({
+                    "queens": filtered_queens
+                }),
+            }
+        }
+
+        IpcRequest::InjectTask { queen_id, prompt, priority, task_id } => {
+            // Parse queen_id if provided
+            let queen_opt = queen_id.map(|qid| QueenId(qid));
+
+            // Generate task_id if not provided
+            let task_id = task_id.unwrap_or_else(|| format!("injected-{}", uuid::Uuid::new_v4()));
+
+            // Default priority
+            let priority = priority.unwrap_or(128);
+
+            // Create oneshot channel for response
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+            // Create InjectRequest
+            let inject_req = InjectRequest {
+                queen_id: queen_opt,
+                prompt,
+                priority,
+                task_id: task_id.clone(),
+                response_tx,
+            };
+
+            // Send to Nydus via channel
+            if let Err(e) = inject_tx.send(inject_req).await {
+                return IpcResponse::Error {
+                    message: format!("Failed to inject task: {}", e),
+                };
+            }
+
+            // Wait for response from Nydus
+            match response_rx.await {
+                Ok(inject_response) => {
+                    IpcResponse::Ok {
+                        data: serde_json::to_value(&inject_response).unwrap_or(serde_json::json!({})),
+                    }
+                }
+                Err(e) => {
+                    IpcResponse::Error {
+                        message: format!("Failed to receive inject response: {}", e),
+                    }
+                }
+            }
+        }
+
+        IpcRequest::Shutdown => {
+            // Send shutdown signal to Nydus via watch channel
+            if let Err(e) = shutdown_tx.send(true) {
+                return IpcResponse::Error {
+                    message: format!("Failed to send shutdown signal: {}", e),
+                };
+            }
+
+            IpcResponse::Ok {
+                data: serde_json::json!("Swarm shutting down"),
+            }
+        }
+
+        IpcRequest::SwarmStatus => {
+            // Get task stats from snapshots (we don't have direct access to TaskDag here)
+            // Instead, we compute stats from queen snapshots
+            let snapshots = queen_snapshots.read();
+
+            let queens_alive = snapshots.iter().filter(|q| q.is_alive).count();
+            let queens_idle = snapshots.iter().filter(|q| q.is_alive && q.status == "idle").count();
+
+            // For task stats, we need to query from memory
+            // In a real implementation, we'd pass a separate Arc<RwLock<TaskDagStats>>
+            // For now, we'll use placeholder values from memory or return what we know
+            let state = memory.read();
+            let total_tasks = state.task_results.len();
+
+            // Count completed/failed from task_results
+            let mut completed = 0;
+            let mut failed = 0;
+            for result in state.task_results.values() {
+                if let Some(status) = result.get("status").and_then(|s| s.as_str()) {
+                    match status {
+                        "completed" => completed += 1,
+                        "failed" => failed += 1,
+                        _ => {}
+                    }
+                }
+            }
+
+            let in_progress = snapshots.iter().filter(|q| q.status == "working").count();
+
+            let uptime_secs = started_at.elapsed().as_secs();
+
+            IpcResponse::Ok {
+                data: serde_json::json!({
+                    "total_tasks": total_tasks,
+                    "completed": completed,
+                    "failed": failed,
+                    "in_progress": in_progress,
+                    "queens_alive": queens_alive,
+                    "queens_idle": queens_idle,
+                    "uptime_secs": uptime_secs,
+                    "keep_alive": keep_alive,
+                }),
+            }
+        }
     }
+}
+
+/// Parse agent ID from string format.
+///
+/// Supported formats:
+/// - "queen:Q0" -> AgentId::Queen(QueenId("Q0"))
+/// - "nydus" -> AgentId::Nydus(NydusId::default())
+/// - "operator" -> AgentId::Operator
+/// - "validator" -> AgentId::Validator
+fn parse_agent_id(s: &str) -> Option<AgentId> {
+    if s.starts_with("queen:") {
+        let queen_id = s.strip_prefix("queen:")?;
+        Some(AgentId::Queen(QueenId(queen_id.to_string())))
+    } else if s == "nydus" {
+        Some(AgentId::Nydus(NydusId::default()))
+    } else if s == "operator" {
+        Some(AgentId::Operator)
+    } else if s == "validator" {
+        Some(AgentId::Validator)
+    } else {
+        None
+    }
+}
+
+/// Convert SwarmMessage to JSON for IPC response.
+fn swarm_message_to_json(msg: &SwarmMessage) -> serde_json::Value {
+    let from_str = match &msg.from {
+        AgentId::Queen(qid) => format!("queen:{}", qid.0),
+        AgentId::Nydus(nid) => format!("nydus:{}", nid.0),
+        AgentId::Validator => "validator".to_string(),
+        AgentId::Operator => "operator".to_string(),
+    };
+
+    let to_str = match &msg.to {
+        AgentId::Queen(qid) => format!("queen:{}", qid.0),
+        AgentId::Nydus(nid) => format!("nydus:{}", nid.0),
+        AgentId::Validator => "validator".to_string(),
+        AgentId::Operator => "operator".to_string(),
+    };
+
+    let msg_type_str = match &msg.msg_type {
+        MessageType::TaskAssignment => "task_assignment".to_string(),
+        MessageType::TaskResult => "task_result".to_string(),
+        MessageType::TaskProgress => "task_progress".to_string(),
+        MessageType::StatusRequest => "status_request".to_string(),
+        MessageType::StatusReport => "status_report".to_string(),
+        MessageType::Knowledge => "knowledge".to_string(),
+        MessageType::KnowledgeQuery => "knowledge_query".to_string(),
+        MessageType::Escalation => "escalation".to_string(),
+        MessageType::Shutdown => "shutdown".to_string(),
+        MessageType::MemoryRef => "memory_ref".to_string(),
+        MessageType::Custom(s) => s.clone(),
+    };
+
+    serde_json::json!({
+        "id": msg.id,
+        "from": from_str,
+        "to": to_str,
+        "msg_type": msg_type_str,
+        "payload": msg.payload,
+        "timestamp": msg.timestamp.to_rfc3339(),
+    })
 }
 
 #[cfg(test)]
@@ -321,12 +636,29 @@ mod tests {
             },
         }));
 
+        let event_log = Arc::new(crate::nydus::mailbox::event_log::SqliteEventLog::in_memory().unwrap());
+        let mailbox = Arc::new(Mutex::new(SwarmMailbox::new(event_log)));
+        let queen_snapshots = Arc::new(parking_lot::RwLock::new(Vec::new()));
+        let (inject_tx, _inject_rx) = mpsc::channel(32);
+
         let config = IpcConfig {
             working_dir: std::env::current_dir().unwrap(),
             verify_cmd: None,
         };
 
-        let port = start_ipc_listener(memory, config).await.unwrap();
+        let (message_delivery_tx, _message_delivery_rx) = mpsc::channel(32);
+        let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+        let port = start_ipc_listener(
+            queen_snapshots.clone(),
+            memory,
+            mailbox,
+            inject_tx,
+            message_delivery_tx,
+            config,
+            shutdown_tx,
+            std::time::Instant::now(),
+            false,
+        ).await.unwrap();
 
         // Give the listener a moment to start
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -354,12 +686,29 @@ mod tests {
             },
         }));
 
+        let event_log = Arc::new(crate::nydus::mailbox::event_log::SqliteEventLog::in_memory().unwrap());
+        let mailbox = Arc::new(Mutex::new(SwarmMailbox::new(event_log)));
+        let queen_snapshots = Arc::new(parking_lot::RwLock::new(Vec::new()));
+        let (inject_tx, _inject_rx) = mpsc::channel(32);
+
         let config = IpcConfig {
             working_dir: std::env::current_dir().unwrap(),
             verify_cmd: None,
         };
 
-        let port = start_ipc_listener(memory.clone(), config).await.unwrap();
+        let (message_delivery_tx, _message_delivery_rx) = mpsc::channel(32);
+        let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+        let port = start_ipc_listener(
+            queen_snapshots.clone(),
+            memory.clone(),
+            mailbox,
+            inject_tx,
+            message_delivery_tx,
+            config,
+            shutdown_tx,
+            std::time::Instant::now(),
+            false,
+        ).await.unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         // Write a key
@@ -410,12 +759,29 @@ mod tests {
             },
         }));
 
+        let event_log = Arc::new(crate::nydus::mailbox::event_log::SqliteEventLog::in_memory().unwrap());
+        let mailbox = Arc::new(Mutex::new(SwarmMailbox::new(event_log)));
+        let queen_snapshots = Arc::new(parking_lot::RwLock::new(Vec::new()));
+        let (inject_tx, _inject_rx) = mpsc::channel(32);
+
         let config = IpcConfig {
             working_dir: std::env::current_dir().unwrap(),
             verify_cmd: None,
         };
 
-        let port = start_ipc_listener(memory.clone(), config).await.unwrap();
+        let (message_delivery_tx, _message_delivery_rx) = mpsc::channel(32);
+        let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+        let port = start_ipc_listener(
+            queen_snapshots.clone(),
+            memory.clone(),
+            mailbox,
+            inject_tx,
+            message_delivery_tx,
+            config,
+            shutdown_tx,
+            std::time::Instant::now(),
+            false,
+        ).await.unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         // Write multiple entries
@@ -455,12 +821,29 @@ mod tests {
             },
         }));
 
+        let event_log = Arc::new(crate::nydus::mailbox::event_log::SqliteEventLog::in_memory().unwrap());
+        let mailbox = Arc::new(Mutex::new(SwarmMailbox::new(event_log)));
+        let queen_snapshots = Arc::new(parking_lot::RwLock::new(Vec::new()));
+        let (inject_tx, _inject_rx) = mpsc::channel(32);
+
         let config = IpcConfig {
             working_dir: std::env::current_dir().unwrap(),
             verify_cmd: None,
         };
 
-        let port = start_ipc_listener(memory.clone(), config).await.unwrap();
+        let (message_delivery_tx, _message_delivery_rx) = mpsc::channel(32);
+        let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+        let port = start_ipc_listener(
+            queen_snapshots.clone(),
+            memory.clone(),
+            mailbox,
+            inject_tx,
+            message_delivery_tx,
+            config,
+            shutdown_tx,
+            std::time::Instant::now(),
+            false,
+        ).await.unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         let info_req = IpcRequest::MemoryInfo;
@@ -489,12 +872,29 @@ mod tests {
             },
         }));
 
+        let event_log = Arc::new(crate::nydus::mailbox::event_log::SqliteEventLog::in_memory().unwrap());
+        let mailbox = Arc::new(Mutex::new(SwarmMailbox::new(event_log)));
+        let queen_snapshots = Arc::new(parking_lot::RwLock::new(Vec::new()));
+        let (inject_tx, _inject_rx) = mpsc::channel(32);
+
         let config = IpcConfig {
             working_dir: std::env::current_dir().unwrap(),
             verify_cmd: None,
         };
 
-        let port = start_ipc_listener(memory, config).await.unwrap();
+        let (message_delivery_tx, _message_delivery_rx) = mpsc::channel(32);
+        let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+        let port = start_ipc_listener(
+            queen_snapshots.clone(),
+            memory,
+            mailbox,
+            inject_tx,
+            message_delivery_tx,
+            config,
+            shutdown_tx,
+            std::time::Instant::now(),
+            false,
+        ).await.unwrap();
         tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
 
         // Send invalid JSON

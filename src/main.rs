@@ -98,6 +98,10 @@ enum Commands {
         /// Use LLM to decompose PRD into tasks with dependencies.
         #[arg(long)]
         llm_decompose: bool,
+
+        /// Keep swarm alive after DAG completion, wait for operator commands.
+        #[arg(long)]
+        keep_alive: bool,
     },
 
     /// Show status of an ongoing or completed run.
@@ -156,8 +160,39 @@ enum Commands {
         cmd: Option<String>,
     },
 
+    /// Query status of one or all queens.
+    QueenStatus {
+        /// Queen ID to query (e.g., "Q0"). If not specified, shows all queens.
+        #[arg(long)]
+        queen: Option<String>,
+    },
+
+    /// Inject a new task into the running swarm.
+    Inject {
+        /// Task description/prompt.
+        prompt: String,
+
+        /// Target queen ID (e.g., "Q0"). If not specified, scheduler assigns to next idle queen.
+        #[arg(long)]
+        queen: Option<String>,
+
+        /// Priority (0-255, higher = more important). Default: 128.
+        #[arg(long)]
+        priority: Option<u8>,
+
+        /// Custom task ID. If not specified, auto-generated as "injected-{uuid}".
+        #[arg(long)]
+        task_id: Option<String>,
+    },
+
     /// Health check — ping the running Nydus.
     Ping,
+
+    /// Gracefully shutdown the running swarm.
+    Shutdown,
+
+    /// Get overall swarm status (tasks, queens, uptime).
+    SwarmStatus,
 }
 
 #[derive(Subcommand)]
@@ -424,6 +459,7 @@ async fn main() -> Result<()> {
             event_log,
             spawn_mode,
             llm_decompose,
+            keep_alive,
         } => {
             let working_dir = dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
@@ -456,6 +492,7 @@ async fn main() -> Result<()> {
                 autosave_interval: Duration::from_secs(60),
                 max_iterations: config.max_iterations,
                 setting_sources: None,
+                keep_alive,
             };
 
             // Create Nydus
@@ -751,6 +788,105 @@ async fn main() -> Result<()> {
                         }
                         std::process::exit(1);
                     }
+                }
+                IpcResponse::Error { message } => {
+                    eprintln!("Error: {}", message);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::QueenStatus { queen } => {
+            let req = IpcRequest::QueenStatus {
+                queen_id: queen.clone(),
+            };
+            match ipc_call(req)? {
+                IpcResponse::Ok { data } => {
+                    if let Some(queens) = data["queens"].as_array() {
+                        if queens.is_empty() {
+                            println!("No queens found.");
+                        } else {
+                            for queen_data in queens {
+                                let id = queen_data["id"].as_str().unwrap_or("?");
+                                let status = queen_data["status"].as_str().unwrap_or("?");
+                                let spawn_mode = queen_data["spawn_mode"].as_str().unwrap_or("?");
+                                let is_alive = queen_data["is_alive"].as_bool().unwrap_or(false);
+
+                                let status_detail = if let Some(task_id) = queen_data["task_id"].as_str() {
+                                    if let Some(progress) = queen_data["progress"].as_f64() {
+                                        format!("{} (task: {}, progress: {:.0}%)", status, task_id, progress * 100.0)
+                                    } else {
+                                        format!("{} (task: {})", status, task_id)
+                                    }
+                                } else {
+                                    status.to_string()
+                                };
+
+                                let alive_str = if is_alive { "alive" } else { "dead" };
+                                println!("{}: {} | {} | {}", id, status_detail, spawn_mode, alive_str);
+                            }
+                        }
+                    } else {
+                        eprintln!("Invalid response format");
+                        std::process::exit(1);
+                    }
+                }
+                IpcResponse::Error { message } => {
+                    eprintln!("Error: {}", message);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Inject { prompt, queen, priority, task_id } => {
+            let req = IpcRequest::InjectTask {
+                queen_id: queen,
+                prompt,
+                priority,
+                task_id,
+            };
+            match ipc_call(req)? {
+                IpcResponse::Ok { data } => {
+                    let task_id = data["task_id"].as_str().unwrap_or("?");
+                    let status = data["status"].as_str().unwrap_or("?");
+
+                    if let Some(assigned_to) = data["assigned_to"].as_str() {
+                        println!("Task {} injected and assigned to {} (status: {})", task_id, assigned_to, status);
+                    } else {
+                        println!("Task {} injected and queued in DAG (status: {})", task_id, status);
+                    }
+                }
+                IpcResponse::Error { message } => {
+                    eprintln!("Error: {}", message);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::Shutdown => {
+            match ipc_call(IpcRequest::Shutdown)? {
+                IpcResponse::Ok { data } => {
+                    println!("{}", data);
+                }
+                IpcResponse::Error { message } => {
+                    eprintln!("Error: {}", message);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        Commands::SwarmStatus => {
+            match ipc_call(IpcRequest::SwarmStatus)? {
+                IpcResponse::Ok { data } => {
+                    println!("=== Swarm Status ===");
+                    println!("Total tasks:    {}", data["total_tasks"].as_u64().unwrap_or(0));
+                    println!("Completed:      {}", data["completed"].as_u64().unwrap_or(0));
+                    println!("Failed:         {}", data["failed"].as_u64().unwrap_or(0));
+                    println!("In progress:    {}", data["in_progress"].as_u64().unwrap_or(0));
+                    println!("Queens alive:   {}", data["queens_alive"].as_u64().unwrap_or(0));
+                    println!("Queens idle:    {}", data["queens_idle"].as_u64().unwrap_or(0));
+                    println!("Uptime:         {}s", data["uptime_secs"].as_u64().unwrap_or(0));
+                    println!("Keep-alive:     {}", data["keep_alive"].as_bool().unwrap_or(false));
                 }
                 IpcResponse::Error { message } => {
                     eprintln!("Error: {}", message);

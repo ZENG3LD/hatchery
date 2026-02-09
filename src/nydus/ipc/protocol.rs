@@ -2,6 +2,23 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Snapshot of Queen status for IPC queries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueenStatusSnapshot {
+    /// Queen ID (e.g., "Q0")
+    pub id: String,
+    /// Current status as string ("idle", "working", "blocked", "failed", "completed", "dead")
+    pub status: String,
+    /// Task ID if working/blocked/failed/completed
+    pub task_id: Option<String>,
+    /// Progress (0.0-1.0) if working
+    pub progress: Option<f32>,
+    /// Spawn mode ("stream" or "per_task")
+    pub spawn_mode: String,
+    /// Is the Queen process still alive?
+    pub is_alive: bool,
+}
+
 /// Request from CLI to Nydus (sent as JSON line over TCP).
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "cmd")]
@@ -47,6 +64,64 @@ pub enum IpcRequest {
     },
     /// Health check.
     Ping,
+    /// Query status of one or all queens.
+    QueenStatus {
+        /// Optional queen ID filter (e.g., "Q0"). If None, returns all queens.
+        queen_id: Option<String>,
+    },
+    /// Inject a new task into the running swarm.
+    InjectTask {
+        /// Target queen ID (e.g., "Q0"). If None, scheduler assigns to next idle queen.
+        queen_id: Option<String>,
+        /// Task description/prompt.
+        prompt: String,
+        /// Priority (0-255, higher = more important). Default: 128.
+        #[serde(default)]
+        priority: Option<u8>,
+        /// Custom task ID. If None, auto-generated as "injected-{uuid}".
+        #[serde(default)]
+        task_id: Option<String>,
+    },
+    /// Gracefully shutdown the swarm.
+    Shutdown,
+    /// Get overall swarm status.
+    SwarmStatus,
+}
+
+/// Request to inject a task into the swarm (sent from IPC handler to Nydus).
+#[derive(Debug)]
+pub struct InjectRequest {
+    /// Target queen (if specified)
+    pub queen_id: Option<crate::core::types::QueenId>,
+    /// Task prompt/description
+    pub prompt: String,
+    /// Task priority
+    pub priority: u8,
+    /// Task ID
+    pub task_id: String,
+    /// Response channel
+    pub response_tx: tokio::sync::oneshot::Sender<InjectResponse>,
+}
+
+/// Response to an inject request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InjectResponse {
+    /// The task ID that was created
+    pub task_id: String,
+    /// Which queen it was assigned to (if immediate assignment)
+    pub assigned_to: Option<String>,
+    /// Status: "assigned", "queued", or "error"
+    pub status: String,
+}
+
+/// Notification that a message was sent to a queen's inbox.
+/// Sent from IPC handler to Nydus to trigger message delivery.
+#[derive(Debug, Clone)]
+pub struct MessageDeliveryNotification {
+    /// Target queen ID
+    pub queen_id: crate::core::types::QueenId,
+    /// Message ID (for logging/debugging)
+    pub message_id: String,
 }
 
 /// Response from Nydus to CLI.

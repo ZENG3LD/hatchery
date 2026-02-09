@@ -43,6 +43,8 @@ pub struct NydusConfig {
     pub max_iterations: usize,
     /// Setting sources for Queens (e.g., "user" to skip project CLAUDE.md).
     pub setting_sources: Option<String>,
+    /// Keep-alive mode: don't exit after DAG completion, wait for operator commands
+    pub keep_alive: bool,
 }
 
 impl Default for NydusConfig {
@@ -55,6 +57,7 @@ impl Default for NydusConfig {
             autosave_interval: Duration::from_secs(60),
             max_iterations: 100,
             setting_sources: None,
+            keep_alive: false,
         }
     }
 }
@@ -74,7 +77,8 @@ pub struct Nydus {
     /// Event bus (replaces SwarmMailbox for hot path)
     event_bus: EventBus,
     /// KEEP: SwarmMailbox for outbox to Operator (backward compat)
-    mailbox: SwarmMailbox,
+    /// Wrapped in Arc<Mutex> for sharing with IPC handler
+    mailbox: Arc<parking_lot::Mutex<SwarmMailbox>>,
     /// Shared knowledge store
     memory: SharedMemory,
     /// Git isolation manager (optional)
@@ -93,6 +97,14 @@ pub struct Nydus {
     recovery_manager: RecoveryManager,
     /// IPC listener port (for CLI communication)
     ipc_port: Option<u16>,
+    /// Queen status snapshots for IPC queries (shared with IPC handler)
+    queen_snapshots: Arc<parking_lot::RwLock<Vec<ipc::protocol::QueenStatusSnapshot>>>,
+    /// Shutdown signal sender (for IPC-triggered shutdown)
+    shutdown_tx: tokio::sync::watch::Sender<bool>,
+    /// Shutdown signal receiver (checked in main loop)
+    shutdown_rx: tokio::sync::watch::Receiver<bool>,
+    /// Start time for uptime calculation
+    started_at: std::time::Instant,
 }
 
 /// Result of a single tick (schedule + poll cycle).
@@ -136,7 +148,7 @@ impl Nydus {
     /// Create a new Nydus with configuration.
     pub fn new(id: NydusId, config: NydusConfig) -> Result<Self> {
         let event_log = Arc::new(SqliteEventLog::in_memory()?);
-        let mailbox = SwarmMailbox::new(event_log.clone());
+        let mailbox = Arc::new(parking_lot::Mutex::new(SwarmMailbox::new(event_log.clone())));
         let memory = SharedMemory::with_persistence(id.clone(), &config.working_dir);
 
         let worktree_mgr = if config.git_isolation {
@@ -159,6 +171,9 @@ impl Nydus {
         // (audit can be enabled separately if needed)
         let event_bus = EventBus::new(128);
 
+        // Create shutdown channel for IPC-triggered shutdown
+        let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
         Ok(Self {
             id,
             handles: HashMap::new(),
@@ -175,6 +190,10 @@ impl Nydus {
             session_tracker: SessionTracker::new(),
             recovery_manager: RecoveryManager::new(RecoveryConfig::default()),
             ipc_port: None,
+            queen_snapshots: Arc::new(parking_lot::RwLock::new(Vec::new())),
+            shutdown_tx,
+            shutdown_rx,
+            started_at: std::time::Instant::now(),
         })
     }
 
@@ -187,6 +206,49 @@ impl Nydus {
     /// - `event_log`: SqliteEventLog for durable storage
     pub fn enable_audit(&mut self, event_log: SqliteEventLog) {
         self.event_bus = EventBus::with_audit(128, event_log);
+    }
+
+    /// Update queen status snapshots by reading from handles.
+    fn update_queen_snapshots(&self) {
+        use crate::nydus::ipc::protocol::QueenStatusSnapshot;
+
+        let snapshots: Vec<QueenStatusSnapshot> = self.handles
+            .iter()
+            .map(|(queen_id, handle)| {
+                let status = handle.status();
+                let (status_str, task_id, progress) = match &status {
+                    QueenStatus::Idle => ("idle".to_string(), None, None),
+                    QueenStatus::Working { task_id, progress } => {
+                        ("working".to_string(), Some(task_id.0.clone()), Some(*progress))
+                    }
+                    QueenStatus::Blocked { task_id, .. } => {
+                        ("blocked".to_string(), Some(task_id.0.clone()), None)
+                    }
+                    QueenStatus::Failed { task_id, .. } => {
+                        ("failed".to_string(), Some(task_id.0.clone()), None)
+                    }
+                    QueenStatus::Completed { task_id } => {
+                        ("completed".to_string(), Some(task_id.0.clone()), None)
+                    }
+                    QueenStatus::Dead => ("dead".to_string(), None, None),
+                };
+
+                QueenStatusSnapshot {
+                    id: queen_id.0.clone(),
+                    status: status_str,
+                    task_id,
+                    progress,
+                    spawn_mode: match handle.spawn_mode() {
+                        crate::queen::spawn_mode::SpawnMode::Stream => "stream".to_string(),
+                        crate::queen::spawn_mode::SpawnMode::PerTask => "per_task".to_string(),
+                    },
+                    is_alive: handle.is_alive(),
+                }
+            })
+            .collect();
+
+        let mut snapshots_lock = self.queen_snapshots.write();
+        *snapshots_lock = snapshots;
     }
 
     /// Register a Queen by spawning StreamQueen or SpawnQueen actor.
@@ -266,7 +328,7 @@ impl Nydus {
         };
 
         // Register in mailbox (for outbox backward compat)
-        self.mailbox.register_queen(id.clone());
+        self.mailbox.lock().register_queen(id.clone());
 
         self.handles.insert(id.clone(), handle);
         self.actor_tasks.insert(id, join_handle);
@@ -312,13 +374,29 @@ impl Nydus {
     /// This replaces the old `loop { tick(); sleep(2s); }` pattern.
     /// Uses tokio::select! to wait on events from the EventBus.
     pub async fn run(&mut self) -> Result<()> {
+        // Create inject channel for runtime task injection
+        let (inject_tx, mut inject_rx) = tokio::sync::mpsc::channel::<ipc::protocol::InjectRequest>(32);
+
+        // Create message delivery channel for operator→queen messages
+        let (message_delivery_tx, mut message_delivery_rx) = tokio::sync::mpsc::channel::<ipc::protocol::MessageDeliveryNotification>(32);
+
         // Start IPC listener for CLI commands
         let ipc_config = ipc::IpcConfig {
             working_dir: self.config.working_dir.clone(),
             verify_cmd: self.config.verify_cmd.clone(),
         };
         let memory_state = self.memory.shared_state();
-        let port = ipc::start_ipc_listener(memory_state, ipc_config).await?;
+        let port = ipc::start_ipc_listener(
+            self.queen_snapshots.clone(),
+            memory_state,
+            self.mailbox.clone(),
+            inject_tx,
+            message_delivery_tx,
+            ipc_config,
+            self.shutdown_tx.clone(),
+            self.started_at,
+            self.config.keep_alive,
+        ).await?;
         self.ipc_port = Some(port);
 
         // Write port file
@@ -337,8 +415,20 @@ impl Nydus {
                 Some(event) = self.event_bus.recv_event() => {
                     self.handle_event(event).await?;
                 }
+                Some(inject_req) = inject_rx.recv() => {
+                    self.handle_inject(inject_req).await;
+                }
+                Some(msg_notification) = message_delivery_rx.recv() => {
+                    self.handle_message_delivery(msg_notification).await;
+                }
                 _ = tokio::time::sleep(interval) => {
                     self.periodic_maintenance().await?;
+                }
+                _ = self.shutdown_rx.changed() => {
+                    if *self.shutdown_rx.borrow() {
+                        eprintln!("[Nydus] Shutdown signal received");
+                        break;
+                    }
                 }
             }
 
@@ -387,6 +477,28 @@ impl Nydus {
                 });
                 self.memory.store_task_result(&task_id.0, result_json);
 
+                // Auto-push TaskCompleted result to outbox for Operator
+                let completion_msg = SwarmMessage {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    from: AgentId::Queen(queen_id.clone()),
+                    to: AgentId::Operator,
+                    msg_type: MessageType::TaskResult,
+                    payload: serde_json::json!({
+                        "task_id": task_id.0,
+                        "queen_id": queen_id.0,
+                        "status": "completed",
+                        "result": result_text,
+                        "cost_usd": cost_usd,
+                        "duration_ms": duration_ms,
+                        "num_turns": num_turns,
+                        "quality_passed": quality_passed,
+                    }),
+                    timestamp: Utc::now(),
+                    correlation_id: None,
+                    visibility: Visibility::default_internal(),
+                };
+                self.mailbox.lock().send(completion_msg);
+
                 // Validate and merge if git isolation
                 if let Ok(merge_result) = self.validated_merge(&queen_id).await {
                     match merge_result {
@@ -413,6 +525,9 @@ impl Nydus {
                     }
                 }
 
+                // Check queen inbox for pending operator messages BEFORE scheduling next DAG task
+                self.deliver_pending_messages(&queen_id).await?;
+
                 // Try to schedule next tasks for ALL idle queens immediately
                 self.try_schedule().await?;
 
@@ -434,6 +549,29 @@ impl Nydus {
                     "[Nydus] Task {} failed for {} (${:.2}, {} turns): {}",
                     task_id.0, queen_id.0, cost_usd, num_turns, error
                 );
+
+                // Auto-push TaskFailed result to outbox for Operator
+                let failure_msg = SwarmMessage {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    from: AgentId::Queen(queen_id.clone()),
+                    to: AgentId::Operator,
+                    msg_type: MessageType::TaskResult,
+                    payload: serde_json::json!({
+                        "task_id": task_id.0,
+                        "queen_id": queen_id.0,
+                        "status": "failed",
+                        "error": error,
+                        "cost_usd": cost_usd,
+                        "num_turns": num_turns,
+                    }),
+                    timestamp: Utc::now(),
+                    correlation_id: None,
+                    visibility: Visibility::default_internal(),
+                };
+                self.mailbox.lock().send(failure_msg);
+
+                // Check queen inbox for pending operator messages BEFORE scheduling next DAG task
+                self.deliver_pending_messages(&queen_id).await?;
 
                 // Try to schedule next tasks for all idle queens
                 self.try_schedule().await?;
@@ -503,8 +641,119 @@ impl Nydus {
                 );
             }
         }
+        // Update queen status snapshots after every event
+        self.update_queen_snapshots();
 
         Ok(())
+    }
+
+    /// Handle a runtime task injection request from IPC.
+    async fn handle_inject(&mut self, inject_req: ipc::protocol::InjectRequest) {
+        use crate::core::task_dag::{DagTask, DagTaskStatus, Priority, Complexity};
+
+        let task_id = inject_req.task_id.clone();
+        let queen_id_opt = inject_req.queen_id.clone();
+
+        // Try to assign directly to the specified queen if it's idle
+        if let Some(ref queen_id) = queen_id_opt {
+            if let Some(handle) = self.handles.get(queen_id) {
+                if matches!(handle.status(), QueenStatus::Idle) {
+                    // Build context from SharedMemory
+                    let knowledge = self.memory.query("*")
+                        .into_iter()
+                        .map(|entry| (entry.key, entry.value))
+                        .collect();
+
+                    let all_entries = self.memory.query("");
+                    let knowledge_entries: Vec<String> = all_entries
+                        .iter()
+                        .rev()
+                        .take(10)
+                        .map(|e| {
+                            let author_str = match &e.author {
+                                AgentId::Queen(qid) => qid.0.clone(),
+                                AgentId::Nydus(sid) => sid.0.clone(),
+                                AgentId::Validator => "Validator".to_string(),
+                                AgentId::Operator => "Operator".to_string(),
+                            };
+                            format!("[{}] {}: {}", author_str, e.key, e.value)
+                        })
+                        .collect();
+
+                    let context = TaskContext {
+                        knowledge,
+                        recent_messages: Vec::new(),
+                        shared_state: HashMap::new(),
+                        skill_hint: None,
+                        knowledge_entries,
+                    };
+
+                    let task = Task {
+                        id: TaskId(task_id.clone()),
+                        description: inject_req.prompt.clone(),
+                        status: TaskStatus::Assigned,
+                        assigned_to: Some(queen_id.clone()),
+                        priority: inject_req.priority,
+                        blocked_by: vec![],
+                        created_at: Utc::now(),
+                    };
+
+                    match handle.assign(task, context).await {
+                        Ok(_) => {
+                            eprintln!("[Nydus] Injected task {} assigned to {}", task_id, queen_id.0);
+                            let response = ipc::protocol::InjectResponse {
+                                task_id: task_id.clone(),
+                                assigned_to: Some(queen_id.0.clone()),
+                                status: "assigned".to_string(),
+                            };
+                            let _ = inject_req.response_tx.send(response);
+                            return;
+                        }
+                        Err(e) => {
+                            eprintln!("[Nydus] Failed to assign injected task {} to {}: {}", task_id, queen_id.0, e);
+                        }
+                    }
+                }
+            }
+        }
+
+        // If direct assignment failed or no queen specified, add to DAG
+        // Convert u8 priority to Priority enum
+        let priority = match inject_req.priority {
+            0..=63 => Priority::Low,
+            64..=127 => Priority::Normal,
+            128..=191 => Priority::High,
+            192..=255 => Priority::Critical,
+        };
+
+        let dag_task = DagTask {
+            id: task_id.clone(),
+            description: inject_req.prompt.clone(),
+            status: DagTaskStatus::Ready,
+            assigned_to: None,
+            blocked_by: vec![],
+            blocks: vec![],
+            priority,
+            estimated_complexity: Complexity::Medium,
+            result: None,
+            created_at: Utc::now(),
+            started_at: None,
+            completed_at: None,
+            skill_hint: None,
+        };
+
+        self.task_dag.add_task(dag_task);
+        eprintln!("[Nydus] Injected task {} added to DAG, will be scheduled to next idle queen", task_id);
+
+        // Try to schedule immediately
+        let _ = self.try_schedule().await;
+
+        let response = ipc::protocol::InjectResponse {
+            task_id: task_id.clone(),
+            assigned_to: None,
+            status: "queued".to_string(),
+        };
+        let _ = inject_req.response_tx.send(response);
     }
 
     /// Find ready tasks + idle queens, assign tasks.
@@ -641,6 +890,8 @@ impl Nydus {
             self.try_schedule().await?;
         }
 
+        // Update queen status snapshots
+        self.update_queen_snapshots();
         Ok(())
     }
 
@@ -682,8 +933,145 @@ impl Nydus {
         })
     }
 
+    /// Handle message delivery notification from IPC.
+    /// Called when operator sends a message to a queen.
+    async fn handle_message_delivery(&mut self, notification: ipc::protocol::MessageDeliveryNotification) {
+        eprintln!("[Nydus] Message delivery notification for {}: {}", notification.queen_id.0, notification.message_id);
+
+        // Check if queen is idle, if so deliver message immediately
+        if let Some(handle) = self.handles.get(&notification.queen_id) {
+            if matches!(handle.status(), QueenStatus::Idle) {
+                eprintln!("[Nydus] Queen {} is idle, attempting message delivery", notification.queen_id.0);
+                let _ = self.deliver_pending_messages(&notification.queen_id).await;
+            } else {
+                eprintln!("[Nydus] Queen {} is busy, message will be delivered after task completion", notification.queen_id.0);
+            }
+        }
+    }
+
+    /// Deliver pending messages from queen's inbox as synthetic tasks.
+    /// Returns Ok if messages were delivered or inbox was empty, Err if delivery failed.
+    async fn deliver_pending_messages(&mut self, queen_id: &QueenId) -> Result<()> {
+        // Check if there are messages in the queen's inbox
+        let messages: Vec<SwarmMessage> = {
+            let mut mb = self.mailbox.lock();
+            let mut msgs = Vec::new();
+            // Drain up to 5 messages at a time (configurable)
+            for _ in 0..5 {
+                if let Some(msg) = mb.recv_queen(queen_id) {
+                    msgs.push(msg);
+                } else {
+                    break;
+                }
+            }
+            msgs
+        };
+
+        if messages.is_empty() {
+            return Ok(());
+        }
+
+        eprintln!("[Nydus] Delivering {} pending message(s) to {}", messages.len(), queen_id.0);
+
+        // Get queen handle
+        let handle = match self.handles.get(queen_id) {
+            Some(h) => h,
+            None => {
+                eprintln!("[Nydus] Queen {} not found, cannot deliver messages", queen_id.0);
+                return Ok(());
+            }
+        };
+
+        // Check if queen is still idle
+        if !matches!(handle.status(), QueenStatus::Idle) {
+            eprintln!("[Nydus] Queen {} is no longer idle, re-queueing messages", queen_id.0);
+            // Re-queue messages back to inbox
+            let mut mb = self.mailbox.lock();
+            for msg in messages.iter().rev() {
+                mb.send(msg.clone());
+            }
+            return Ok(());
+        }
+
+        // Create synthetic task from message(s)
+        let task_id = format!("operator-msg-{}", uuid::Uuid::new_v4());
+
+        // Combine message payloads
+        let message_text = messages.iter()
+            .map(|msg| {
+                if let Some(text) = msg.payload.get("message").and_then(|m| m.as_str()) {
+                    text.to_string()
+                } else {
+                    format!("{}", msg.payload)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        // Build context from SharedMemory
+        let knowledge = self.memory.query("*")
+            .into_iter()
+            .map(|entry| (entry.key, entry.value))
+            .collect();
+
+        let all_entries = self.memory.query("");
+        let knowledge_entries: Vec<String> = all_entries
+            .iter()
+            .rev()
+            .take(10)
+            .map(|e| {
+                let author_str = match &e.author {
+                    AgentId::Queen(qid) => qid.0.clone(),
+                    AgentId::Nydus(sid) => sid.0.clone(),
+                    AgentId::Validator => "Validator".to_string(),
+                    AgentId::Operator => "Operator".to_string(),
+                };
+                format!("[{}] {}: {}", author_str, e.key, e.value)
+            })
+            .collect();
+
+        let context = TaskContext {
+            knowledge,
+            recent_messages: Vec::new(),
+            shared_state: HashMap::new(),
+            skill_hint: None,
+            knowledge_entries,
+        };
+
+        let task = Task {
+            id: TaskId(task_id.clone()),
+            description: format!("Operator message:\n\n{}", message_text),
+            status: TaskStatus::Assigned,
+            assigned_to: Some(queen_id.clone()),
+            priority: 128, // Normal priority
+            blocked_by: vec![],
+            created_at: Utc::now(),
+        };
+
+        match handle.assign(task, context).await {
+            Ok(_) => {
+                eprintln!("[Nydus] Delivered {} message(s) to {} as task {}", messages.len(), queen_id.0, task_id);
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("[Nydus] Failed to deliver messages to {}: {}", queen_id.0, e);
+                // Re-queue messages back to inbox
+                let mut mb = self.mailbox.lock();
+                for msg in messages.iter().rev() {
+                    mb.send(msg.clone());
+                }
+                Err(e)
+            }
+        }
+    }
+
     /// Check if all tasks are completed.
+    ///
+    /// In keep-alive mode, this always returns false (swarm never exits on its own).
     pub fn is_complete(&self) -> bool {
+        if self.config.keep_alive {
+            return false;
+        }
         let stats = self.task_dag.stats();
         stats.total > 0 && stats.completed + stats.failed == stats.total
     }
@@ -726,7 +1114,7 @@ impl Nydus {
 
     /// Drain outbox messages (for Operator).
     pub fn drain_outbox(&mut self) -> Vec<SwarmMessage> {
-        self.mailbox.drain_outbox()
+        self.mailbox.lock().drain_outbox()
     }
 
     /// Merge a Queen's worktree after validation passes.
@@ -787,7 +1175,7 @@ impl Nydus {
 
     /// Remove a dead Queen from the registry (before respawning).
     pub async fn unregister_queen(&mut self, queen_id: &QueenId) -> Option<QueenHandle> {
-        self.mailbox.unregister_queen(queen_id);
+        self.mailbox.lock().unregister_queen(queen_id);
 
         // Abort the actor task
         if let Some(task) = self.actor_tasks.remove(queen_id) {
