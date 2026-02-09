@@ -68,6 +68,11 @@ impl SwarmMailbox {
             }
             AgentId::Validator => self.validator_inbox.push_back(msg),
             AgentId::Operator => self.outbox.push_back(msg),
+            AgentId::Infestor(_) => {
+                // Infestor doesn't have an inbox in current design
+                // Messages to Infestor go to operator's outbox for logging
+                self.outbox.push_back(msg);
+            }
         }
     }
 

@@ -140,6 +140,13 @@ impl WorktreeManager {
         Ok(wt_path)
     }
 
+    /// Get the worktree path for a Queen.
+    ///
+    /// Returns None if the worktree doesn't exist.
+    pub fn get_worktree_path(&self, queen_id: &QueenId) -> Option<PathBuf> {
+        self.worktrees.get(queen_id).map(|info| info.path.clone())
+    }
+
     /// Check if a Queen's worktree has uncommitted changes.
     pub fn has_changes(&self, queen_id: &QueenId) -> Result<bool> {
         let info = self.worktrees.get(queen_id)

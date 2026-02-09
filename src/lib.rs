@@ -19,6 +19,9 @@ pub mod core;
 /// Queen agents (L1): StreamQueen, SpawnQueen
 pub mod queen;
 
+/// Infestor: merge validator
+pub mod infestor;
+
 /// Nydus coordinator (L2): task scheduling, validation, merging
 pub mod nydus;
 

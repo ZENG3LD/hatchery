@@ -377,6 +377,10 @@ async fn handle_request(
                         let drained = mb.drain_outbox();
                         msgs = drained.iter().take(limit).map(swarm_message_to_json).collect();
                     }
+                    AgentId::Infestor(_) => {
+                        // Infestor doesn't have an inbox in current design
+                        // Return empty list
+                    }
                 }
 
                 msgs
@@ -551,6 +555,7 @@ fn swarm_message_to_json(msg: &SwarmMessage) -> serde_json::Value {
         AgentId::Nydus(nid) => format!("nydus:{}", nid.0),
         AgentId::Validator => "validator".to_string(),
         AgentId::Operator => "operator".to_string(),
+        AgentId::Infestor(iid) => format!("infestor:{}", iid.0),
     };
 
     let to_str = match &msg.to {
@@ -558,6 +563,7 @@ fn swarm_message_to_json(msg: &SwarmMessage) -> serde_json::Value {
         AgentId::Nydus(nid) => format!("nydus:{}", nid.0),
         AgentId::Validator => "validator".to_string(),
         AgentId::Operator => "operator".to_string(),
+        AgentId::Infestor(iid) => format!("infestor:{}", iid.0),
     };
 
     let msg_type_str = match &msg.msg_type {

@@ -113,6 +113,10 @@ pub struct Nydus {
     started_at: std::time::Instant,
     /// Notify handle for waking Nydus when a Queen completes a task
     wakeup_notify: Arc<Notify>,
+    /// Infestor handle for merge validation
+    infestor: Option<crate::infestor::InfestorHandle>,
+    /// Infestor event receiver
+    infestor_event_rx: Option<tokio::sync::mpsc::UnboundedReceiver<(InfestorId, crate::infestor::InfestorEvent)>>,
 }
 
 /// Result of a single tick (schedule + poll cycle).
@@ -273,6 +277,8 @@ impl Nydus {
             shutdown_rx,
             started_at: std::time::Instant::now(),
             wakeup_notify,
+            infestor: None,
+            infestor_event_rx: None,
         })
     }
 
@@ -285,6 +291,28 @@ impl Nydus {
     /// - `event_log`: SqliteEventLog for durable storage
     pub fn enable_audit(&mut self, event_log: SqliteEventLog) {
         self.event_bus = EventBus::with_audit(128, event_log);
+    }
+
+    /// Register an Infestor for merge validation.
+    ///
+    /// This spawns an Infestor actor that reviews Queen-completed tasks before merging.
+    pub fn register_infestor(&mut self, model: &str) {
+        use crate::infestor::{spawn_infestor_actor, SpawnInfestorConfig};
+
+        let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let config = SpawnInfestorConfig {
+            id: crate::core::types::InfestorId("infestor-0".to_string()),
+            model: model.to_string(),
+            working_dir: self.config.working_dir.clone(),
+            wakeup_notify: Some(self.wakeup_notify.clone()),
+        };
+
+        let handle = spawn_infestor_actor(config, event_tx);
+        eprintln!("[Nydus] Registered Infestor with model: {}", model);
+
+        self.infestor = Some(handle);
+        self.infestor_event_rx = Some(event_rx);
     }
 
     /// Update queen status snapshots by reading from handles.
@@ -575,6 +603,15 @@ impl Nydus {
                 Some(msg_notification) = message_delivery_rx.recv() => {
                     self.handle_message_delivery(msg_notification).await;
                 }
+                Some((infestor_id, event)) = async {
+                    if let Some(ref mut rx) = self.infestor_event_rx {
+                        rx.recv().await
+                    } else {
+                        std::future::pending().await
+                    }
+                } => {
+                    self.handle_infestor_event(infestor_id, event).await?;
+                }
                 _ = self.wakeup_notify.notified() => {
                     // Queen completed a task, immediately try to schedule ready tasks
                     self.try_schedule().await?;
@@ -657,29 +694,54 @@ impl Nydus {
                 };
                 self.mailbox.lock().send(completion_msg);
 
-                // Validate and merge if git isolation
-                if let Ok(merge_result) = self.validated_merge(&queen_id).await {
-                    match merge_result {
-                        ValidatedMergeResult::Merged { commit_sha } => {
-                            println!("[Nydus] Validated and merged for {}: {}", queen_id.0, commit_sha);
-                        }
-                        ValidatedMergeResult::ValidationFailed { feedback } => {
-                            // Q2Q: Send validation feedback back to Queen
-                            if let Some(handle) = self.handles.get(&queen_id) {
-                                let feedback_msg = SwarmMessage {
-                                    id: uuid::Uuid::new_v4().to_string(),
-                                    from: AgentId::Validator,
-                                    to: AgentId::Queen(queen_id.clone()),
-                                    msg_type: MessageType::Custom("ValidationFeedback".to_string()),
-                                    payload: serde_json::json!({ "feedback": feedback }),
-                                    timestamp: Utc::now(),
-                                    correlation_id: None,
-                                    visibility: Visibility::default_internal(),
-                                };
-                                let _ = handle.send_message(feedback_msg).await;
+                // Trigger Infestor review if available and git isolation is enabled
+                if self.config.git_isolation && self.infestor.is_some() {
+                    // Get worktree info for review
+                    if let Some(ref worktree_mgr) = self.worktree_mgr {
+                        if let Some(worktree_path) = worktree_mgr.get_worktree_path(&queen_id) {
+                            let branch_name = format!("hatchery/{}", queen_id.0);
+
+                            eprintln!(
+                                "[Nydus] Sending task {} from {} to Infestor for review",
+                                task_id.0, queen_id.0
+                            );
+
+                            // Send review command to Infestor
+                            if let Some(ref infestor_handle) = self.infestor {
+                                let _ = infestor_handle.review(
+                                    queen_id.clone(),
+                                    task_id.0.clone(),
+                                    branch_name,
+                                    worktree_path.clone(),
+                                );
                             }
                         }
-                        _ => {} // NoGitIsolation, MergeConflict, NoChanges
+                    }
+                } else if self.config.git_isolation {
+                    // No Infestor, fall back to old validation + merge flow
+                    if let Ok(merge_result) = self.validated_merge(&queen_id).await {
+                        match merge_result {
+                            ValidatedMergeResult::Merged { commit_sha } => {
+                                println!("[Nydus] Validated and merged for {}: {}", queen_id.0, commit_sha);
+                            }
+                            ValidatedMergeResult::ValidationFailed { feedback } => {
+                                // Q2Q: Send validation feedback back to Queen
+                                if let Some(handle) = self.handles.get(&queen_id) {
+                                    let feedback_msg = SwarmMessage {
+                                        id: uuid::Uuid::new_v4().to_string(),
+                                        from: AgentId::Validator,
+                                        to: AgentId::Queen(queen_id.clone()),
+                                        msg_type: MessageType::Custom("ValidationFeedback".to_string()),
+                                        payload: serde_json::json!({ "feedback": feedback }),
+                                        timestamp: Utc::now(),
+                                        correlation_id: None,
+                                        visibility: Visibility::default_internal(),
+                                    };
+                                    let _ = handle.send_message(feedback_msg).await;
+                                }
+                            }
+                            _ => {} // NoGitIsolation, MergeConflict, NoChanges
+                        }
                     }
                 }
 
@@ -821,6 +883,145 @@ impl Nydus {
         Ok(())
     }
 
+    /// Handle events from the Infestor (merge validator).
+    async fn handle_infestor_event(
+        &mut self,
+        _infestor_id: InfestorId,
+        event: crate::infestor::InfestorEvent,
+    ) -> Result<()> {
+        use crate::infestor::InfestorEvent;
+
+        match event {
+            InfestorEvent::ReviewApproved {
+                queen_id,
+                task_id,
+                summary,
+            } => {
+                eprintln!(
+                    "[Nydus] Infestor APPROVED merge for {} task {}: {}",
+                    queen_id.0, task_id, summary
+                );
+
+                // Proceed with merge
+                if let Some(ref mut worktree_mgr) = self.worktree_mgr {
+                    match worktree_mgr.merge(&queen_id) {
+                        Ok(MergeResult::Success { commit_sha }) => {
+                            eprintln!("[Nydus] Successfully merged {} to main: {}", queen_id.0, commit_sha);
+
+                            // Send approval message to operator
+                            let approval_msg = SwarmMessage {
+                                id: uuid::Uuid::new_v4().to_string(),
+                                from: AgentId::Infestor(InfestorId("infestor-0".to_string())),
+                                to: AgentId::Operator,
+                                msg_type: MessageType::Custom("MergeApproved".to_string()),
+                                payload: serde_json::json!({
+                                    "queen_id": queen_id.0,
+                                    "task_id": task_id,
+                                    "commit_sha": commit_sha,
+                                    "summary": summary,
+                                }),
+                                timestamp: Utc::now(),
+                                correlation_id: None,
+                                visibility: Visibility::default_internal(),
+                            };
+                            self.mailbox.lock().send(approval_msg);
+                        }
+                        Ok(MergeResult::Conflict { files }) => {
+                            eprintln!(
+                                "[Nydus] Merge conflict for {} despite approval: {} files",
+                                queen_id.0,
+                                files.len()
+                            );
+
+                            // Send conflict notification
+                            let conflict_msg = SwarmMessage {
+                                id: uuid::Uuid::new_v4().to_string(),
+                                from: AgentId::Nydus(self.id.clone()),
+                                to: AgentId::Operator,
+                                msg_type: MessageType::Escalation,
+                                payload: serde_json::json!({
+                                    "queen_id": queen_id.0,
+                                    "task_id": task_id,
+                                    "reason": "merge_conflict_after_approval",
+                                    "files": files.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
+                                }),
+                                timestamp: Utc::now(),
+                                correlation_id: None,
+                                visibility: Visibility::default_internal(),
+                            };
+                            self.mailbox.lock().send(conflict_msg);
+                        }
+                        Ok(MergeResult::NoChanges) => {
+                            eprintln!("[Nydus] No changes to merge for {}", queen_id.0);
+                        }
+                        Err(e) => {
+                            eprintln!("[Nydus] Merge failed for {}: {}", queen_id.0, e);
+                        }
+                    }
+                }
+            }
+
+            InfestorEvent::ReviewRejected {
+                queen_id,
+                task_id,
+                reason,
+            } => {
+                eprintln!(
+                    "[Nydus] Infestor REJECTED merge for {} task {}: {}",
+                    queen_id.0, task_id, reason
+                );
+
+                // Send rejection escalation to operator
+                let rejection_msg = SwarmMessage {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    from: AgentId::Infestor(InfestorId("infestor-0".to_string())),
+                    to: AgentId::Operator,
+                    msg_type: MessageType::Escalation,
+                    payload: serde_json::json!({
+                        "queen_id": queen_id.0,
+                        "task_id": task_id,
+                        "status": "rejected_by_infestor",
+                        "reason": reason,
+                    }),
+                    timestamp: Utc::now(),
+                    correlation_id: None,
+                    visibility: Visibility::default_internal(),
+                };
+                self.mailbox.lock().send(rejection_msg);
+
+                // Mark task as requiring manual review in DAG
+                // (Currently just notifies operator; could add DAG state for this)
+            }
+
+            InfestorEvent::StatusChanged(_status) => {
+                // Infestor status changed, currently no action needed
+            }
+
+            InfestorEvent::ProcessDied(reason) => {
+                eprintln!("[Nydus] Infestor process died: {}", reason);
+
+                // Send process death notification
+                let death_msg = SwarmMessage {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    from: AgentId::Nydus(self.id.clone()),
+                    to: AgentId::Operator,
+                    msg_type: MessageType::Escalation,
+                    payload: serde_json::json!({
+                        "agent": "infestor",
+                        "status": "process_died",
+                        "reason": reason,
+                    }),
+                    timestamp: Utc::now(),
+                    correlation_id: None,
+                    visibility: Visibility::default_internal(),
+                };
+                self.mailbox.lock().send(death_msg);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Handle a runtime task injection request from IPC.
     async fn handle_inject(&mut self, inject_req: ipc::protocol::InjectRequest) {
         use crate::core::task_dag::{DagTask, DagTaskStatus, Priority, Complexity};
@@ -849,6 +1050,7 @@ impl Nydus {
                                 AgentId::Nydus(sid) => sid.0.clone(),
                                 AgentId::Validator => "Validator".to_string(),
                                 AgentId::Operator => "Operator".to_string(),
+                                AgentId::Infestor(iid) => iid.0.clone(),
                             };
                             format!("[{}] {}: {}", author_str, e.key, e.value)
                         })
@@ -979,6 +1181,7 @@ impl Nydus {
                     AgentId::Nydus(sid) => sid.0.clone(),
                     AgentId::Validator => "Validator".to_string(),
                     AgentId::Operator => "Operator".to_string(),
+                    AgentId::Infestor(iid) => iid.0.clone(),
                 };
                 format!("[{}] {}: {}", author_str, e.key, e.value)
             })
@@ -1236,6 +1439,7 @@ impl Nydus {
                     AgentId::Nydus(sid) => sid.0.clone(),
                     AgentId::Validator => "Validator".to_string(),
                     AgentId::Operator => "Operator".to_string(),
+                    AgentId::Infestor(iid) => iid.0.clone(),
                 };
                 format!("[{}] {}: {}", author_str, e.key, e.value)
             })

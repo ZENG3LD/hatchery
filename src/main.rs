@@ -279,6 +279,7 @@ fn format_agent_id(agent: &AgentId) -> String {
         AgentId::Nydus(id) => format!("Nydus({})", id.0),
         AgentId::Validator => "Validator".to_string(),
         AgentId::Operator => "Operator".to_string(),
+        AgentId::Infestor(id) => format!("Infestor({})", id.0),
     }
 }
 

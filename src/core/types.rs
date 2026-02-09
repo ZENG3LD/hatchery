@@ -40,6 +40,16 @@ impl Default for NydusId {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct WorkerId(pub String);
 
+/// Unique identifier for an Infestor agent.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct InfestorId(pub String);
+
+impl std::fmt::Display for InfestorId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 // ============================================================================
 // Enums
 // ============================================================================
@@ -117,6 +127,8 @@ pub enum AgentId {
     Nydus(NydusId),
     /// A Queen worker agent
     Queen(QueenId),
+    /// An Infestor merge validator
+    Infestor(InfestorId),
     /// The validator agent
     Validator,
     /// The human operator
