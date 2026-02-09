@@ -78,6 +78,10 @@ pub struct PipeProcessOptions {
 
     /// If true, pass --no-project to Claude CLI to prevent loading CLAUDE.md
     pub no_project: Option<bool>,
+
+    /// Setting sources for Claude Code (e.g., "user" to disable project CLAUDE.md).
+    /// Maps to --setting-sources flag. None = default (all sources).
+    pub setting_sources: Option<String>,
 }
 
 /// A pipe-based process for Claude Code CLI execution.
@@ -234,6 +238,10 @@ impl PipeProcess {
             if options.no_project.unwrap_or(false) {
                 cmd.arg("--no-project");
             }
+            if let Some(ref sources) = options.setting_sources {
+                cmd.arg("--setting-sources");
+                cmd.arg(sources);
+            }
 
             // Append prompt
             cmd.arg(prompt);
@@ -277,6 +285,10 @@ impl PipeProcess {
             }
             if options.no_project.unwrap_or(false) {
                 cmd.arg("--no-project");
+            }
+            if let Some(ref sources) = options.setting_sources {
+                cmd.arg("--setting-sources");
+                cmd.arg(sources);
             }
 
             cmd.arg(prompt);
@@ -669,6 +681,10 @@ pub fn build_stream_command(
         if options.no_project.unwrap_or(false) {
             c.arg("--no-project");
         }
+        if let Some(ref sources) = options.setting_sources {
+            c.arg("--setting-sources");
+            c.arg(sources);
+        }
         c
     } else {
         // Unix: use individual args
@@ -700,6 +716,9 @@ pub fn build_stream_command(
         }
         if options.no_project.unwrap_or(false) {
             cmd.arg("--no-project");
+        }
+        if let Some(ref sources) = options.setting_sources {
+            cmd.args(["--setting-sources", sources]);
         }
         cmd
     };

@@ -41,6 +41,8 @@ pub struct NydusConfig {
     pub autosave_interval: Duration,
     /// Max iterations before stopping
     pub max_iterations: usize,
+    /// Setting sources for Queens (e.g., "user" to skip project CLAUDE.md).
+    pub setting_sources: Option<String>,
 }
 
 impl Default for NydusConfig {
@@ -52,6 +54,7 @@ impl Default for NydusConfig {
             git_isolation: false,
             autosave_interval: Duration::from_secs(60),
             max_iterations: 100,
+            setting_sources: None,
         }
     }
 }
@@ -204,9 +207,11 @@ impl Nydus {
         let shutdown_rx = self.event_bus.shutdown_receiver();
 
         let system_prompt = Some(format!(
-            "{}\n\n{}",
+            "{}\n\n{}\n\n{}\n\n{}",
             crate::core::prompts::default_system_prompt("queen"),
-            crate::core::prompts::orchestration_discipline_block()
+            crate::core::prompts::queen_preamble(),
+            crate::core::prompts::orchestration_discipline_block(),
+            crate::core::prompts::hatchery_cli_tools_block()
         ));
 
         // Determine working directory for this Queen
@@ -238,6 +243,7 @@ impl Nydus {
                     completion: completion_config,
                     swarm_id: Some(self.id.0.clone()),
                     ipc_port: self.ipc_port,
+                    setting_sources: self.config.setting_sources.clone(),
                 };
                 stream_queen::spawn(config, event_tx, shutdown_rx)?
             }
@@ -253,6 +259,7 @@ impl Nydus {
                     completion: completion_config,
                     swarm_id: Some(self.id.0.clone()),
                     ipc_port: self.ipc_port,
+                    setting_sources: self.config.setting_sources.clone(),
                 };
                 spawn_queen::spawn(config, event_tx, shutdown_rx)?
             }

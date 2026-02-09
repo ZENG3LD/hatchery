@@ -455,6 +455,7 @@ async fn main() -> Result<()> {
                 git_isolation: config.worktree_isolation,
                 autosave_interval: Duration::from_secs(60),
                 max_iterations: config.max_iterations,
+                setting_sources: None,
             };
 
             // Create Nydus

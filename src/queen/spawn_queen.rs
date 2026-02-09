@@ -27,6 +27,8 @@ pub struct SpawnQueenConfig {
     pub swarm_id: Option<String>,
     /// IPC port for CLI communication.
     pub ipc_port: Option<u16>,
+    /// Setting sources for Claude Code (e.g., "user" to skip project CLAUDE.md).
+    pub setting_sources: Option<String>,
 }
 
 impl Default for SpawnQueenConfig {
@@ -42,6 +44,7 @@ impl Default for SpawnQueenConfig {
             allowed_tools: None,
             swarm_id: None,
             ipc_port: None,
+            setting_sources: None,
         }
     }
 }
@@ -178,6 +181,7 @@ async fn run_task(
         max_turns: config.max_turns,
         max_budget_usd: config.max_budget_usd,
         allowed_tools: config.allowed_tools.clone(),
+        setting_sources: config.setting_sources.clone(),
         ..Default::default()
     };
 
@@ -453,34 +457,25 @@ async fn emit_verdict(
 fn format_task_prompt(task: &Task, context: &TaskContext, queued_messages: &[SwarmMessage]) -> String {
     let mut prompt = String::new();
 
-    // Manager role preamble
-    prompt.push_str(crate::core::prompts::queen_preamble());
-    prompt.push_str("\n\n");
-
-    // Orchestration discipline (survives context compression)
-    prompt.push_str(&format!("{}\n\n", crate::core::prompts::orchestration_discipline_block()));
-
-    // Hatchery CLI tools documentation
-    prompt.push_str(&format!("{}\n\n", crate::core::prompts::hatchery_cli_tools_block()));
-
     // Skill hint (if provided)
     if let Some(ref hint) = context.skill_hint {
         prompt.push_str(&format!(
-            "\n## Recommended Execution Pattern\nUse /{} pattern for this task. Read the skill docs and follow its phases.\n",
+            "## Recommended Execution Pattern\nUse /{} pattern for this task. Read the skill docs and follow its phases.\n\n",
             hint
         ));
     }
 
     // Shared knowledge from other Queens (via SharedMemory)
     if !context.knowledge_entries.is_empty() {
-        prompt.push_str("\n## Shared Knowledge (from other Queens)\n");
+        prompt.push_str("## Shared Knowledge (from other Queens)\n");
         for entry in &context.knowledge_entries {
             prompt.push_str(&format!("- {}\n", entry));
         }
+        prompt.push_str("\n");
     }
 
     // Task details
-    prompt.push_str(&format!("\n## Task: {}\n\n{}", task.id.0, task.description));
+    prompt.push_str(&format!("## Task: {}\n\n{}", task.id.0, task.description));
 
     if !context.knowledge.is_empty() {
         prompt.push_str("\n\n## Context Knowledge\n");
@@ -545,8 +540,7 @@ mod tests {
 
         let prompt = format_task_prompt(&task, &context, &[]);
 
-        assert!(prompt.contains("MANAGER"));
-        assert!(prompt.contains("Task tool"));
+        // Static blocks (MANAGER, Task tool) are now in system prompt, not task prompt
         assert!(prompt.contains("## Task: T1"));
         assert!(prompt.contains("Test task description"));
         assert!(prompt.contains("## Context Knowledge"));
