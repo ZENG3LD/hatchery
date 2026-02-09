@@ -19,7 +19,7 @@ use crate::queen::spawn_queen::{self, SpawnQueenConfig};
 use self::mailbox::SwarmMailbox;
 use self::mailbox::event_log::SqliteEventLog;
 use self::mailbox::event_bus::EventBus;
-use crate::core::task_dag::{TaskDag, DagTask, DagTaskStatus, Priority, Complexity};
+use crate::core::task_dag::{TaskDag, DagTask, DagTaskStatus, Priority, Complexity, DagStats};
 use crate::core::validator::{Validator, ValidationResult};
 use crate::core::shared_memory::SharedMemory;
 use crate::safety::worktree::{WorktreeManager, MergeResult};
@@ -99,6 +99,8 @@ pub struct Nydus {
     ipc_port: Option<u16>,
     /// Queen status snapshots for IPC queries (shared with IPC handler)
     queen_snapshots: Arc<parking_lot::RwLock<Vec<ipc::protocol::QueenStatusSnapshot>>>,
+    /// DAG stats snapshot for IPC queries (shared with IPC handler)
+    dag_stats: Arc<parking_lot::RwLock<DagStats>>,
     /// Shutdown signal sender (for IPC-triggered shutdown)
     shutdown_tx: tokio::sync::watch::Sender<bool>,
     /// Shutdown signal receiver (checked in main loop)
@@ -174,6 +176,16 @@ impl Nydus {
         // Create shutdown channel for IPC-triggered shutdown
         let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
+        // Initialize DAG stats with zero values
+        let initial_dag_stats = DagStats {
+            total: 0,
+            blocked: 0,
+            ready: 0,
+            in_progress: 0,
+            completed: 0,
+            failed: 0,
+        };
+
         Ok(Self {
             id,
             handles: HashMap::new(),
@@ -191,6 +203,7 @@ impl Nydus {
             recovery_manager: RecoveryManager::new(RecoveryConfig::default()),
             ipc_port: None,
             queen_snapshots: Arc::new(parking_lot::RwLock::new(Vec::new())),
+            dag_stats: Arc::new(parking_lot::RwLock::new(initial_dag_stats)),
             shutdown_tx,
             shutdown_rx,
             started_at: std::time::Instant::now(),
@@ -249,6 +262,13 @@ impl Nydus {
 
         let mut snapshots_lock = self.queen_snapshots.write();
         *snapshots_lock = snapshots;
+    }
+
+    /// Update DAG stats snapshot by reading from TaskDag.
+    fn update_dag_stats(&self) {
+        let stats = self.task_dag.stats();
+        let mut dag_stats_lock = self.dag_stats.write();
+        *dag_stats_lock = stats;
     }
 
     /// Register a Queen by spawning StreamQueen or SpawnQueen actor.
@@ -367,6 +387,7 @@ impl Nydus {
         };
 
         self.task_dag.add_task(task);
+        self.update_dag_stats();
     }
 
     /// Event-driven main loop.
@@ -388,6 +409,7 @@ impl Nydus {
         let memory_state = self.memory.shared_state();
         let port = ipc::start_ipc_listener(
             self.queen_snapshots.clone(),
+            self.dag_stats.clone(),
             memory_state,
             self.mailbox.clone(),
             inject_tx,
@@ -641,8 +663,9 @@ impl Nydus {
                 );
             }
         }
-        // Update queen status snapshots after every event
+        // Update queen status snapshots and DAG stats after every event
         self.update_queen_snapshots();
+        self.update_dag_stats();
 
         Ok(())
     }
@@ -743,6 +766,7 @@ impl Nydus {
         };
 
         self.task_dag.add_task(dag_task);
+        self.update_dag_stats();
         eprintln!("[Nydus] Injected task {} added to DAG, will be scheduled to next idle queen", task_id);
 
         // Try to schedule immediately
@@ -890,8 +914,9 @@ impl Nydus {
             self.try_schedule().await?;
         }
 
-        // Update queen status snapshots
+        // Update queen status snapshots and DAG stats
         self.update_queen_snapshots();
+        self.update_dag_stats();
         Ok(())
     }
 

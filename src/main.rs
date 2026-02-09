@@ -282,6 +282,21 @@ fn format_agent_id(agent: &AgentId) -> String {
     }
 }
 
+/// Format agent ID from wire format (e.g., "queen:Q0" -> "Queen(Q0)")
+fn format_agent_id_from_wire(wire: &str) -> String {
+    if let Some(qid) = wire.strip_prefix("queen:") {
+        format!("Queen({})", qid)
+    } else if let Some(nid) = wire.strip_prefix("nydus:") {
+        format!("Nydus({})", nid)
+    } else if wire == "validator" {
+        "Validator".to_string()
+    } else if wire == "operator" {
+        "Operator".to_string()
+    } else {
+        wire.to_string()
+    }
+}
+
 /// Format a MessageType for display.
 fn format_msg_type(msg_type: &MessageType) -> String {
     match msg_type {
@@ -755,10 +770,18 @@ async fn main() -> Result<()> {
                         IpcResponse::Ok { data } => {
                             if let Some(arr) = data.as_array() {
                                 for msg in arr {
-                                    println!("[{}] {} -> {}",
-                                        msg["timestamp"].as_str().unwrap_or("?"),
-                                        msg["author"].as_str().unwrap_or("?"),
-                                        msg["value"]);
+                                    let timestamp = msg["timestamp"].as_str().unwrap_or("?");
+                                    let from_str = msg["from"].as_str().unwrap_or("?");
+                                    let to_str = msg["to"].as_str().unwrap_or("?");
+                                    let msg_type = msg["msg_type"].as_str().unwrap_or("?");
+                                    let payload = format_payload(&msg["payload"]);
+
+                                    // Convert wire format to human-readable format
+                                    let from_display = format_agent_id_from_wire(from_str);
+                                    let to_display = format_agent_id_from_wire(to_str);
+
+                                    println!("[{}] {} -> {}: {} | {}",
+                                        timestamp, from_display, to_display, msg_type, payload);
                                 }
                                 if arr.is_empty() {
                                     println!("No messages.");

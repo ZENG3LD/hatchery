@@ -31,6 +31,7 @@ pub struct IpcConfig {
 /// The listener binds to 127.0.0.1:0 (OS picks a free port).
 pub async fn start_ipc_listener(
     queen_snapshots: Arc<parking_lot::RwLock<Vec<QueenStatusSnapshot>>>,
+    dag_stats: Arc<parking_lot::RwLock<crate::core::task_dag::DagStats>>,
     memory: Arc<RwLock<MemoryState>>,
     mailbox: Arc<Mutex<SwarmMailbox>>,
     inject_tx: mpsc::Sender<InjectRequest>,
@@ -54,6 +55,7 @@ pub async fn start_ipc_listener(
                     let memory = memory.clone();
                     let mailbox = mailbox.clone();
                     let queen_snapshots = queen_snapshots.clone();
+                    let dag_stats = dag_stats.clone();
                     let inject_tx = inject_tx.clone();
                     let message_delivery_tx = message_delivery_tx.clone();
                     let config = config.clone();
@@ -65,6 +67,7 @@ pub async fn start_ipc_listener(
                             memory,
                             mailbox,
                             queen_snapshots,
+                            dag_stats,
                             inject_tx,
                             message_delivery_tx,
                             config,
@@ -92,6 +95,7 @@ async fn handle_connection(
     memory: Arc<RwLock<MemoryState>>,
     mailbox: Arc<Mutex<SwarmMailbox>>,
     queen_snapshots: Arc<parking_lot::RwLock<Vec<QueenStatusSnapshot>>>,
+    dag_stats: Arc<parking_lot::RwLock<crate::core::task_dag::DagStats>>,
     inject_tx: mpsc::Sender<InjectRequest>,
     message_delivery_tx: mpsc::Sender<protocol::MessageDeliveryNotification>,
     config: Arc<IpcConfig>,
@@ -128,6 +132,7 @@ async fn handle_connection(
         &memory,
         &mailbox,
         &queen_snapshots,
+        &dag_stats,
         &inject_tx,
         &message_delivery_tx,
         &config,
@@ -150,6 +155,7 @@ async fn handle_request(
     memory: &Arc<RwLock<MemoryState>>,
     mailbox: &Arc<Mutex<SwarmMailbox>>,
     queen_snapshots: &Arc<parking_lot::RwLock<Vec<QueenStatusSnapshot>>>,
+    dag_stats: &Arc<parking_lot::RwLock<crate::core::task_dag::DagStats>>,
     inject_tx: &mpsc::Sender<InjectRequest>,
     message_delivery_tx: &mpsc::Sender<protocol::MessageDeliveryNotification>,
     config: &IpcConfig,
@@ -487,41 +493,24 @@ async fn handle_request(
         }
 
         IpcRequest::SwarmStatus => {
-            // Get task stats from snapshots (we don't have direct access to TaskDag here)
-            // Instead, we compute stats from queen snapshots
-            let snapshots = queen_snapshots.read();
+            // Get task stats from DAG snapshot
+            let stats = dag_stats.read();
 
+            // Get queen stats from snapshots
+            let snapshots = queen_snapshots.read();
             let queens_alive = snapshots.iter().filter(|q| q.is_alive).count();
             let queens_idle = snapshots.iter().filter(|q| q.is_alive && q.status == "idle").count();
 
-            // For task stats, we need to query from memory
-            // In a real implementation, we'd pass a separate Arc<RwLock<TaskDagStats>>
-            // For now, we'll use placeholder values from memory or return what we know
-            let state = memory.read();
-            let total_tasks = state.task_results.len();
-
-            // Count completed/failed from task_results
-            let mut completed = 0;
-            let mut failed = 0;
-            for result in state.task_results.values() {
-                if let Some(status) = result.get("status").and_then(|s| s.as_str()) {
-                    match status {
-                        "completed" => completed += 1,
-                        "failed" => failed += 1,
-                        _ => {}
-                    }
-                }
-            }
-
+            // in_progress is the number of queens currently working
             let in_progress = snapshots.iter().filter(|q| q.status == "working").count();
 
             let uptime_secs = started_at.elapsed().as_secs();
 
             IpcResponse::Ok {
                 data: serde_json::json!({
-                    "total_tasks": total_tasks,
-                    "completed": completed,
-                    "failed": failed,
+                    "total_tasks": stats.total,
+                    "completed": stats.completed,
+                    "failed": stats.failed,
                     "in_progress": in_progress,
                     "queens_alive": queens_alive,
                     "queens_idle": queens_idle,
@@ -648,8 +637,17 @@ mod tests {
 
         let (message_delivery_tx, _message_delivery_rx) = mpsc::channel(32);
         let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+        let dag_stats = Arc::new(parking_lot::RwLock::new(crate::core::task_dag::DagStats {
+            total: 0,
+            blocked: 0,
+            ready: 0,
+            in_progress: 0,
+            completed: 0,
+            failed: 0,
+        }));
         let port = start_ipc_listener(
             queen_snapshots.clone(),
+            dag_stats,
             memory,
             mailbox,
             inject_tx,
@@ -698,8 +696,17 @@ mod tests {
 
         let (message_delivery_tx, _message_delivery_rx) = mpsc::channel(32);
         let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+        let dag_stats = Arc::new(parking_lot::RwLock::new(crate::core::task_dag::DagStats {
+            total: 0,
+            blocked: 0,
+            ready: 0,
+            in_progress: 0,
+            completed: 0,
+            failed: 0,
+        }));
         let port = start_ipc_listener(
             queen_snapshots.clone(),
+            dag_stats,
             memory.clone(),
             mailbox,
             inject_tx,
@@ -771,8 +778,17 @@ mod tests {
 
         let (message_delivery_tx, _message_delivery_rx) = mpsc::channel(32);
         let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+        let dag_stats = Arc::new(parking_lot::RwLock::new(crate::core::task_dag::DagStats {
+            total: 0,
+            blocked: 0,
+            ready: 0,
+            in_progress: 0,
+            completed: 0,
+            failed: 0,
+        }));
         let port = start_ipc_listener(
             queen_snapshots.clone(),
+            dag_stats,
             memory.clone(),
             mailbox,
             inject_tx,
@@ -833,8 +849,17 @@ mod tests {
 
         let (message_delivery_tx, _message_delivery_rx) = mpsc::channel(32);
         let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+        let dag_stats = Arc::new(parking_lot::RwLock::new(crate::core::task_dag::DagStats {
+            total: 0,
+            blocked: 0,
+            ready: 0,
+            in_progress: 0,
+            completed: 0,
+            failed: 0,
+        }));
         let port = start_ipc_listener(
             queen_snapshots.clone(),
+            dag_stats,
             memory.clone(),
             mailbox,
             inject_tx,
@@ -884,8 +909,17 @@ mod tests {
 
         let (message_delivery_tx, _message_delivery_rx) = mpsc::channel(32);
         let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+        let dag_stats = Arc::new(parking_lot::RwLock::new(crate::core::task_dag::DagStats {
+            total: 0,
+            blocked: 0,
+            ready: 0,
+            in_progress: 0,
+            completed: 0,
+            failed: 0,
+        }));
         let port = start_ipc_listener(
             queen_snapshots.clone(),
+            dag_stats,
             memory,
             mailbox,
             inject_tx,
@@ -911,6 +945,99 @@ mod tests {
                 assert!(message.contains("Invalid request"));
             }
             IpcResponse::Ok { .. } => panic!("Expected error response"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_swarm_status_shows_dag_stats() {
+        // This test verifies the fix: SwarmStatus should read from DAG stats, not memory.task_results
+        let memory = Arc::new(RwLock::new(MemoryState {
+            version: 0,
+            knowledge: std::collections::HashMap::new(),
+            task_results: std::collections::HashMap::new(), // Empty - should NOT be used
+            metadata: crate::core::shared_memory::MemoryMetadata {
+                created_at: chrono::Utc::now(),
+                last_updated: chrono::Utc::now(),
+                swarm_id: test_nydus_id(),
+            },
+        }));
+
+        let event_log = Arc::new(crate::nydus::mailbox::event_log::SqliteEventLog::in_memory().unwrap());
+        let mailbox = Arc::new(Mutex::new(SwarmMailbox::new(event_log)));
+
+        // Create queen snapshots: 3 working queens
+        let queen_snapshots = Arc::new(parking_lot::RwLock::new(vec![
+            QueenStatusSnapshot {
+                id: "Q0".to_string(),
+                status: "working".to_string(),
+                task_id: Some("T1".to_string()),
+                progress: Some(0.5),
+                spawn_mode: "stream".to_string(),
+                is_alive: true,
+            },
+            QueenStatusSnapshot {
+                id: "Q1".to_string(),
+                status: "working".to_string(),
+                task_id: Some("T2".to_string()),
+                progress: Some(0.3),
+                spawn_mode: "stream".to_string(),
+                is_alive: true,
+            },
+            QueenStatusSnapshot {
+                id: "Q2".to_string(),
+                status: "working".to_string(),
+                task_id: Some("T3".to_string()),
+                progress: Some(0.7),
+                spawn_mode: "stream".to_string(),
+                is_alive: true,
+            },
+        ]));
+
+        // Create DAG stats: 13 total tasks, 5 completed, 2 failed
+        let dag_stats = Arc::new(parking_lot::RwLock::new(crate::core::task_dag::DagStats {
+            total: 13,
+            blocked: 3,
+            ready: 0,
+            in_progress: 3,
+            completed: 5,
+            failed: 2,
+        }));
+
+        let (inject_tx, _inject_rx) = mpsc::channel(32);
+        let config = IpcConfig {
+            working_dir: std::env::current_dir().unwrap(),
+            verify_cmd: None,
+        };
+
+        let (message_delivery_tx, _message_delivery_rx) = mpsc::channel(32);
+        let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+        let port = start_ipc_listener(
+            queen_snapshots.clone(),
+            dag_stats,
+            memory,
+            mailbox,
+            inject_tx,
+            message_delivery_tx,
+            config,
+            shutdown_tx,
+            std::time::Instant::now(),
+            false,
+        ).await.unwrap();
+        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+
+        // Send SwarmStatus request
+        let response = send_request(port, &IpcRequest::SwarmStatus).await.unwrap();
+
+        match response {
+            IpcResponse::Ok { data } => {
+                // Verify the fix: total_tasks should be 13 (from DAG), not 0 (from memory.task_results)
+                assert_eq!(data["total_tasks"], 13, "total_tasks should come from DAG stats");
+                assert_eq!(data["completed"], 5, "completed should come from DAG stats");
+                assert_eq!(data["failed"], 2, "failed should come from DAG stats");
+                assert_eq!(data["in_progress"], 3, "in_progress should be count of working queens");
+                assert_eq!(data["queens_alive"], 3, "queens_alive should match snapshot count");
+            }
+            IpcResponse::Error { message } => panic!("Unexpected error: {}", message),
         }
     }
 }
