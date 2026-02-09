@@ -77,9 +77,9 @@ impl CompactionStrategy {
         Self { threshold_pct, protected, levels }
     }
 
-    /// Default strategy for SwarmHost coordinator sessions.
+    /// Default strategy for Nydus coordinator sessions.
     /// Based on Goose's DEFAULT_COMPACTION_THRESHOLD = 0.8
-    pub fn default_swarm_host() -> Self {
+    pub fn default_nydus() -> Self {
         Self {
             threshold_pct: 0.80,
             protected: vec![
@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn test_should_compact() {
-        let s = CompactionStrategy::default_swarm_host();
+        let s = CompactionStrategy::default_nydus();
         assert!(!s.should_compact(0.5));
         assert!(!s.should_compact(0.79));
         assert!(s.should_compact(0.80));
@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_get_action_levels() {
-        let s = CompactionStrategy::default_swarm_host();
+        let s = CompactionStrategy::default_nydus();
         // Below threshold — no action
         assert!(s.get_action(0.5).is_none());
         // At 80% — RemoveToolResponses(20)
@@ -223,7 +223,7 @@ mod tests {
 
     #[test]
     fn test_compact_removes_old_tool_responses() {
-        let s = CompactionStrategy::default_swarm_host();
+        let s = CompactionStrategy::default_nydus();
         let entries = vec![
             ContextEntry { turn: 0, is_tool_response: true, is_thinking_block: false, is_protected: false },
             ContextEntry { turn: 5, is_tool_response: true, is_thinking_block: false, is_protected: false },
@@ -240,7 +240,7 @@ mod tests {
 
     #[test]
     fn test_compact_fresh_start() {
-        let s = CompactionStrategy::default_swarm_host();
+        let s = CompactionStrategy::default_nydus();
         let entries = vec![
             ContextEntry { turn: 0, is_tool_response: false, is_thinking_block: false, is_protected: true },
             ContextEntry { turn: 1, is_tool_response: false, is_thinking_block: false, is_protected: false },
@@ -253,7 +253,7 @@ mod tests {
 
     #[test]
     fn test_no_compact_below_threshold() {
-        let s = CompactionStrategy::default_swarm_host();
+        let s = CompactionStrategy::default_nydus();
         let entries = vec![
             ContextEntry { turn: 0, is_tool_response: true, is_thinking_block: false, is_protected: false },
             ContextEntry { turn: 1, is_tool_response: true, is_thinking_block: false, is_protected: false },
@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn test_compact_summarize_protects_recent() {
-        let s = CompactionStrategy::default_swarm_host();
+        let s = CompactionStrategy::default_nydus();
         let entries = vec![
             ContextEntry { turn: 0, is_tool_response: false, is_thinking_block: false, is_protected: false },
             ContextEntry { turn: 5, is_tool_response: false, is_thinking_block: false, is_protected: false },
@@ -302,14 +302,14 @@ mod tests {
 
     #[test]
     fn test_protected_scopes_accessor() {
-        let s = CompactionStrategy::default_swarm_host();
+        let s = CompactionStrategy::default_nydus();
         let scopes = s.protected_scopes();
         assert_eq!(scopes.len(), 5);
     }
 
     #[test]
     fn test_threshold_accessor() {
-        let s = CompactionStrategy::default_swarm_host();
+        let s = CompactionStrategy::default_nydus();
         assert_eq!(s.threshold(), 0.80);
     }
 }

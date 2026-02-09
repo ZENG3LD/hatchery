@@ -23,12 +23,12 @@ use crate::core::validator::{Validator, ValidationResult};
 use crate::core::shared_memory::SharedMemory;
 use crate::safety::worktree::{WorktreeManager, MergeResult};
 use crate::queen::recovery::{SessionTracker, RecoveryManager, RecoveryConfig};
-use crate::swarm_host::tick::HeuristicTick;
+use crate::nydus::tick::HeuristicTick;
 use crate::ipc;
 
-/// Configuration for SwarmHost.
+/// Configuration for Nydus.
 #[derive(Debug, Clone)]
-pub struct SwarmHostConfig {
+pub struct NydusConfig {
     /// Maximum number of Queens
     pub max_queens: usize,
     /// Verification command (e.g., "cargo check")
@@ -43,7 +43,7 @@ pub struct SwarmHostConfig {
     pub max_iterations: usize,
 }
 
-impl Default for SwarmHostConfig {
+impl Default for NydusConfig {
     fn default() -> Self {
         Self {
             max_queens: 4,
@@ -56,12 +56,12 @@ impl Default for SwarmHostConfig {
     }
 }
 
-/// SwarmHost — Level 2 tactical coordinator.
+/// Nydus — transport & scheduling node.
 ///
 /// V3 event-driven orchestrator using QueenHandles and EventBus.
-pub struct SwarmHost {
+pub struct Nydus {
     /// Unique identifier
-    id: SwarmHostId,
+    id: NydusId,
     /// Queen handles (cloneable actor handles)
     handles: HashMap<QueenId, QueenHandle>,
     /// Actor task join handles (for awaiting/aborting)
@@ -70,7 +70,7 @@ pub struct SwarmHost {
     task_dag: TaskDag,
     /// Event bus (replaces SwarmMailbox for hot path)
     event_bus: EventBus,
-    /// KEEP: SwarmMailbox for outbox to BroodLord/Operator (backward compat)
+    /// KEEP: SwarmMailbox for outbox to Operator (backward compat)
     mailbox: SwarmMailbox,
     /// Shared knowledge store
     memory: SharedMemory,
@@ -79,7 +79,7 @@ pub struct SwarmHost {
     /// Validator for completed work
     validator: Option<Validator>,
     /// Configuration
-    config: SwarmHostConfig,
+    config: NydusConfig,
     /// Adaptive tick controller
     tick_state: HeuristicTick,
     /// Current iteration count
@@ -129,9 +129,9 @@ pub enum ValidatedMergeResult {
     NoChanges,
 }
 
-impl SwarmHost {
-    /// Create a new SwarmHost with configuration.
-    pub fn new(id: SwarmHostId, config: SwarmHostConfig) -> Result<Self> {
+impl Nydus {
+    /// Create a new Nydus with configuration.
+    pub fn new(id: NydusId, config: NydusConfig) -> Result<Self> {
         let event_log = Arc::new(SqliteEventLog::in_memory()?);
         let mailbox = SwarmMailbox::new(event_log.clone());
         let memory = SharedMemory::with_persistence(id.clone(), &config.working_dir);
@@ -209,12 +209,28 @@ impl SwarmHost {
             crate::core::prompts::orchestration_discipline_block()
         ));
 
+        // Determine working directory for this Queen
+        // If git_isolation is enabled, create worktree BEFORE spawning Queen
+        let queen_working_dir = if let Some(ref mut worktree_mgr) = self.worktree_mgr {
+            // Create worktree and get its path
+            match worktree_mgr.create(&id) {
+                Ok(worktree_path) => worktree_path,
+                Err(e) => {
+                    eprintln!("Warning: Failed to create worktree for {}: {}", id.0, e);
+                    // Fallback to main repo
+                    self.config.working_dir.clone()
+                }
+            }
+        } else {
+            self.config.working_dir.clone()
+        };
+
         let (handle, join_handle) = match spawn_mode {
             SpawnMode::Stream => {
                 let config = StreamQueenConfig {
                     id: id.clone(),
                     model,
-                    working_dir: self.config.working_dir.clone(),
+                    working_dir: queen_working_dir.clone(),
                     max_turns: None,
                     max_budget_usd: None,
                     system_prompt,
@@ -229,7 +245,7 @@ impl SwarmHost {
                 let config = SpawnQueenConfig {
                     id: id.clone(),
                     model,
-                    working_dir: self.config.working_dir.clone(),
+                    working_dir: queen_working_dir.clone(),
                     max_turns: None,
                     max_budget_usd: None,
                     system_prompt,
@@ -244,13 +260,6 @@ impl SwarmHost {
 
         // Register in mailbox (for outbox backward compat)
         self.mailbox.register_queen(id.clone());
-
-        // Create worktree if git_isolation enabled
-        if let Some(ref mut worktree_mgr) = self.worktree_mgr {
-            if let Err(e) = worktree_mgr.create(&id) {
-                eprintln!("Warning: Failed to create worktree for {}: {}", id.0, e);
-            }
-        }
 
         self.handles.insert(id.clone(), handle);
         self.actor_tasks.insert(id, join_handle);
@@ -330,7 +339,7 @@ impl SwarmHost {
         std::fs::create_dir_all(&port_dir)?;
         let port_path = port_dir.join(format!("{}.port", self.id.0));
         std::fs::write(&port_path, port.to_string())?;
-        eprintln!("[SwarmHost] IPC listener started on port {}", port);
+        eprintln!("[Nydus] IPC listener started on port {}", port);
 
         loop {
             self.try_schedule().await?;
@@ -395,7 +404,7 @@ impl SwarmHost {
                 if let Ok(merge_result) = self.validated_merge(&queen_id).await {
                     match merge_result {
                         ValidatedMergeResult::Merged { commit_sha } => {
-                            println!("[SwarmHost] Validated and merged for {}: {}", queen_id.0, commit_sha);
+                            println!("[Nydus] Validated and merged for {}: {}", queen_id.0, commit_sha);
                         }
                         ValidatedMergeResult::ValidationFailed { feedback } => {
                             // Q2Q: Send validation feedback back to Queen
@@ -417,11 +426,11 @@ impl SwarmHost {
                     }
                 }
 
-                // Try to schedule next task for this queen immediately
-                self.try_schedule_queen(&queen_id).await?;
+                // Try to schedule next tasks for ALL idle queens immediately
+                self.try_schedule().await?;
 
                 println!(
-                    "[SwarmHost] Task {} completed by {} (${:.2}, {}ms, {} turns)",
+                    "[Nydus] Task {} completed by {} (${:.2}, {}ms, {} turns)",
                     task_id.0, queen_id.0, cost_usd, duration_ms, num_turns
                 );
             }
@@ -435,12 +444,12 @@ impl SwarmHost {
                 self.task_dag.fail(&task_id.0, error.clone());
 
                 eprintln!(
-                    "[SwarmHost] Task {} failed for {} (${:.2}, {} turns): {}",
+                    "[Nydus] Task {} failed for {} (${:.2}, {} turns): {}",
                     task_id.0, queen_id.0, cost_usd, num_turns, error
                 );
 
-                // Try to schedule next task for this queen
-                self.try_schedule_queen(&queen_id).await?;
+                // Try to schedule next tasks for all idle queens
+                self.try_schedule().await?;
             }
 
             QueenEvent::Progress {
@@ -466,7 +475,7 @@ impl SwarmHost {
                 self.tick_state.note_failure();
 
                 eprintln!(
-                    "[SwarmHost] Process died for {} (exit: {:?}, session: {:?})",
+                    "[Nydus] Process died for {} (exit: {:?}, session: {:?})",
                     queen_id.0, exit_code, session_id
                 );
 
@@ -475,26 +484,26 @@ impl SwarmHost {
                     &queen_id, false, &self.session_tracker
                 ) {
                     eprintln!(
-                        "[SwarmHost] Recovery plan for {}: {:?} (attempt #{})",
+                        "[Nydus] Recovery plan for {}: {:?} (attempt #{})",
                         plan.queen_id.0, plan.reason, plan.attempt
                     );
                     self.recovery_manager.mark_recovery_attempted(&plan.queen_id);
                 }
             }
 
-            QueenEvent::StatusChanged { queen_id, status } => {
+            QueenEvent::StatusChanged { queen_id: _, status } => {
                 self.tick_state.note_event();
-                // When a Queen becomes Idle, try to schedule the next ready task
+                // When a Queen becomes Idle, try to schedule ready tasks to all idle queens
                 // This fixes the race condition where TaskCompleted arrives before StatusChanged
                 if matches!(status, QueenStatus::Idle) {
-                    self.try_schedule_queen(&queen_id).await?;
+                    self.try_schedule().await?;
                 }
             }
 
             QueenEvent::ContextCompressed { queen_id, pre_tokens, trigger } => {
                 self.tick_state.note_event();
                 eprintln!(
-                    "[SwarmHost] Context compressed for {} (pre_tokens: {}, trigger: {})",
+                    "[Nydus] Context compressed for {} (pre_tokens: {}, trigger: {})",
                     queen_id.0, pre_tokens, trigger
                 );
             }
@@ -502,7 +511,7 @@ impl SwarmHost {
             QueenEvent::MessagesReceived { queen_id, count } => {
                 self.tick_state.note_event();
                 eprintln!(
-                    "[SwarmHost] {} received {} queued messages after task completion",
+                    "[Nydus] {} received {} queued messages after task completion",
                     queen_id.0, count
                 );
             }
@@ -543,9 +552,8 @@ impl SwarmHost {
             .map(|e| {
                 let author_str = match &e.author {
                     AgentId::Queen(qid) => qid.0.clone(),
-                    AgentId::SwarmHost(sid) => sid.0.clone(),
+                    AgentId::Nydus(sid) => sid.0.clone(),
                     AgentId::Validator => "Validator".to_string(),
-                    AgentId::BroodLord => "BroodLord".to_string(),
                     AgentId::Operator => "Operator".to_string(),
                 };
                 format!("[{}] {}: {}", author_str, e.key, e.value)
@@ -596,7 +604,7 @@ impl SwarmHost {
 
             if let Some(handle) = self.handles.get(&queen_id) {
                 if let Err(e) = handle.assign(task, task_context).await {
-                    eprintln!("[SwarmHost] Failed to assign task {} to {}: {}", task_id, queen_id.0, e);
+                    eprintln!("[Nydus] Failed to assign task {} to {}: {}", task_id, queen_id.0, e);
                     continue;
                 }
 
@@ -608,80 +616,6 @@ impl SwarmHost {
         Ok(assigned)
     }
 
-    /// Try to schedule the next task for a specific queen (after completion).
-    async fn try_schedule_queen(&mut self, queen_id: &QueenId) -> Result<()> {
-        let handle = match self.handles.get(queen_id) {
-            Some(h) => h.clone(),
-            None => return Ok(()),
-        };
-
-        if !matches!(handle.status(), QueenStatus::Idle) {
-            return Ok(());
-        }
-
-        let ready_tasks = self.task_dag.ready_tasks();
-        let dag_task_info = ready_tasks.first().map(|dt| {
-            (
-                dt.id.clone(),
-                dt.description.clone(),
-                dt.priority as u8,
-                dt.blocked_by.iter().map(|id| TaskId(id.clone())).collect::<Vec<TaskId>>(),
-                dt.created_at,
-                dt.skill_hint.clone(),
-            )
-        });
-
-        if let Some((task_id, description, priority, blocked_by, created_at, skill_hint)) = dag_task_info {
-            let knowledge = self.memory.query("*")
-                .into_iter()
-                .map(|entry| (entry.key, entry.value))
-                .collect();
-
-            // Get recent knowledge entries from SharedMemory for sharing between Queens
-            let all_entries = self.memory.query("");
-            let knowledge_entries: Vec<String> = all_entries
-                .iter()
-                .rev()
-                .take(10)
-                .map(|e| {
-                    let author_str = match &e.author {
-                        AgentId::Queen(qid) => qid.0.clone(),
-                        AgentId::SwarmHost(sid) => sid.0.clone(),
-                        AgentId::Validator => "Validator".to_string(),
-                        AgentId::BroodLord => "BroodLord".to_string(),
-                        AgentId::Operator => "Operator".to_string(),
-                    };
-                    format!("[{}] {}: {}", author_str, e.key, e.value)
-                })
-                .collect();
-
-            let context = TaskContext {
-                knowledge,
-                recent_messages: Vec::new(),
-                shared_state: HashMap::new(),
-                skill_hint,
-                knowledge_entries,
-            };
-
-            let task = Task {
-                id: TaskId(task_id.clone()),
-                description,
-                status: TaskStatus::Assigned,
-                assigned_to: Some(queen_id.clone()),
-                priority,
-                blocked_by,
-                created_at,
-            };
-
-            if let Err(e) = handle.assign(task, context).await {
-                eprintln!("[SwarmHost] Failed to assign task {} to {}: {}", task_id, queen_id.0, e);
-            } else {
-                self.task_dag.assign(&task_id, queen_id.clone());
-            }
-        }
-
-        Ok(())
-    }
 
     /// Periodic maintenance (runs on tick interval).
     async fn periodic_maintenance(&mut self) -> Result<()> {
@@ -692,7 +626,7 @@ impl SwarmHost {
                     queen_id, false, &self.session_tracker
                 ) {
                     eprintln!(
-                        "[SwarmHost] Recovery needed for {}: {:?}",
+                        "[Nydus] Recovery needed for {}: {:?}",
                         plan.queen_id.0, plan.reason
                     );
                     self.recovery_manager.mark_recovery_attempted(&plan.queen_id);
@@ -702,6 +636,23 @@ impl SwarmHost {
 
         // Evict expired memory entries
         self.memory.evict_expired();
+
+        // Deadlock detection: all Queens idle but tasks remain
+        let all_idle = self.handles.values().all(|h| matches!(h.status(), QueenStatus::Idle));
+        let stats = self.task_dag.stats();
+        let has_remaining = stats.total > (stats.completed + stats.failed);
+        if all_idle && has_remaining {
+            eprintln!(
+                "[Nydus] DEADLOCK DETECTED: All {} Queens idle, {} tasks remaining ({} blocked, {} ready). Attempting rescue scheduling...",
+                self.handles.len(),
+                stats.total - stats.completed - stats.failed,
+                stats.blocked,
+                stats.ready
+            );
+            // Force refresh readiness and try scheduling
+            self.task_dag.refresh_readiness();
+            self.try_schedule().await?;
+        }
 
         Ok(())
     }
@@ -771,8 +722,8 @@ impl SwarmHost {
         }
     }
 
-    /// Get the SwarmHost ID.
-    pub fn id(&self) -> &SwarmHostId {
+    /// Get the Nydus ID.
+    pub fn id(&self) -> &NydusId {
         &self.id
     }
 
@@ -786,7 +737,7 @@ impl SwarmHost {
         &self.memory
     }
 
-    /// Drain outbox messages (for BroodLord/Operator).
+    /// Drain outbox messages (for Operator).
     pub fn drain_outbox(&mut self) -> Vec<SwarmMessage> {
         self.mailbox.drain_outbox()
     }
@@ -937,9 +888,9 @@ mod tests {
     use tokio::sync::{mpsc, watch};
 
     #[test]
-    fn test_create_swarm_host_with_default_config() {
-        let config = SwarmHostConfig::default();
-        let host = SwarmHost::new(SwarmHostId::default(), config);
+    fn test_create_nydus_with_default_config() {
+        let config = NydusConfig::default();
+        let host = Nydus::new(NydusId::default(), config);
         assert!(host.is_ok());
         let host = host.unwrap();
         assert_eq!(host.queen_count(), 0);
@@ -948,8 +899,8 @@ mod tests {
 
     #[test]
     fn test_add_tasks_to_dag() {
-        let config = SwarmHostConfig::default();
-        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+        let config = NydusConfig::default();
+        let mut host = Nydus::new(NydusId::default(), config).unwrap();
         host.add_task("task1", "First task", vec![], Priority::High, Complexity::Medium, None);
         host.add_task("task2", "Second task", vec!["task1".to_string()], Priority::Normal, Complexity::Simple, None);
         let progress = host.progress();
@@ -959,23 +910,23 @@ mod tests {
 
     #[test]
     fn test_is_complete_returns_false_when_tasks_pending() {
-        let config = SwarmHostConfig::default();
-        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+        let config = NydusConfig::default();
+        let mut host = Nydus::new(NydusId::default(), config).unwrap();
         host.add_task("task1", "Test task", vec![], Priority::High, Complexity::Trivial, None);
         assert!(!host.is_complete());
     }
 
     #[test]
     fn test_is_complete_returns_true_when_all_done() {
-        let config = SwarmHostConfig::default();
-        let host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+        let config = NydusConfig::default();
+        let host = Nydus::new(NydusId::default(), config).unwrap();
         assert!(!host.is_complete());
     }
 
     #[test]
     fn test_progress_returns_correct_counts() {
-        let config = SwarmHostConfig::default();
-        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+        let config = NydusConfig::default();
+        let mut host = Nydus::new(NydusId::default(), config).unwrap();
         host.add_task("task1", "T1", vec![], Priority::High, Complexity::Trivial, None);
         host.add_task("task2", "T2", vec!["task1".to_string()], Priority::Normal, Complexity::Medium, None);
         host.add_task("task3", "T3", vec![], Priority::Low, Complexity::VeryComplex, None);
@@ -987,16 +938,16 @@ mod tests {
 
     #[test]
     fn test_drain_outbox_works() {
-        let config = SwarmHostConfig::default();
-        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+        let config = NydusConfig::default();
+        let mut host = Nydus::new(NydusId::default(), config).unwrap();
         let messages = host.drain_outbox();
         assert_eq!(messages.len(), 0);
     }
 
     #[tokio::test]
     async fn test_try_schedule_with_handle() {
-        let config = SwarmHostConfig::default();
-        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+        let config = NydusConfig::default();
+        let mut host = Nydus::new(NydusId::default(), config).unwrap();
 
         // Create a mock queen handle
         let (cmd_tx, mut cmd_rx) = mpsc::channel(64);
@@ -1024,8 +975,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_event_task_completed() {
-        let config = SwarmHostConfig::default();
-        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+        let config = NydusConfig::default();
+        let mut host = Nydus::new(NydusId::default(), config).unwrap();
 
         // Add and assign a task
         host.add_task("T1", "Test task", vec![], Priority::High, Complexity::Trivial, None);
@@ -1052,8 +1003,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_event_task_failed() {
-        let config = SwarmHostConfig::default();
-        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+        let config = NydusConfig::default();
+        let mut host = Nydus::new(NydusId::default(), config).unwrap();
 
         host.add_task("T1", "Test task", vec![], Priority::High, Complexity::Trivial, None);
         host.task_dag.assign("T1", QueenId("Q0".to_string()));
@@ -1074,8 +1025,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_event_knowledge() {
-        let config = SwarmHostConfig::default();
-        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+        let config = NydusConfig::default();
+        let mut host = Nydus::new(NydusId::default(), config).unwrap();
 
         let event = QueenEvent::Knowledge {
             queen_id: QueenId("Q0".to_string()),
@@ -1092,18 +1043,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_shutdown_gracefully() {
-        let config = SwarmHostConfig::default();
-        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+        let config = NydusConfig::default();
+        let mut host = Nydus::new(NydusId::default(), config).unwrap();
         assert!(host.shutdown().await.is_ok());
     }
 
     #[tokio::test]
     async fn test_validated_merge_no_git_isolation() {
-        let config = SwarmHostConfig {
+        let config = NydusConfig {
             git_isolation: false,
             ..Default::default()
         };
-        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+        let mut host = Nydus::new(NydusId::default(), config).unwrap();
         let queen_id = QueenId("Q0".to_string());
         let result = host.validated_merge(&queen_id).await.unwrap();
         assert!(matches!(result, ValidatedMergeResult::NoGitIsolation));
@@ -1111,8 +1062,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_tick_returns_result() {
-        let config = SwarmHostConfig::default();
-        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+        let config = NydusConfig::default();
+        let mut host = Nydus::new(NydusId::default(), config).unwrap();
 
         host.add_task("T1", "Test", vec![], Priority::Normal, Complexity::Trivial, None);
 
@@ -1123,8 +1074,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_skill_hint_in_task_context() {
-        let config = SwarmHostConfig::default();
-        let mut host = SwarmHost::new(SwarmHostId::default(), config).unwrap();
+        let config = NydusConfig::default();
+        let mut host = Nydus::new(NydusId::default(), config).unwrap();
 
         // Add task with skill_hint
         host.add_task(

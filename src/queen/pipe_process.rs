@@ -75,6 +75,9 @@ pub struct PipeProcessOptions {
 
     /// Allowed tools whitelist via --allowedTools
     pub allowed_tools: Option<String>,
+
+    /// If true, pass --no-project to Claude CLI to prevent loading CLAUDE.md
+    pub no_project: Option<bool>,
 }
 
 /// A pipe-based process for Claude Code CLI execution.
@@ -228,6 +231,9 @@ impl PipeProcess {
                 cmd.arg("--allowedTools");
                 cmd.arg(allowed_tools);
             }
+            if options.no_project.unwrap_or(false) {
+                cmd.arg("--no-project");
+            }
 
             // Append prompt
             cmd.arg(prompt);
@@ -268,6 +274,9 @@ impl PipeProcess {
             if let Some(ref allowed_tools) = options.allowed_tools {
                 cmd.arg("--allowedTools");
                 cmd.arg(allowed_tools);
+            }
+            if options.no_project.unwrap_or(false) {
+                cmd.arg("--no-project");
             }
 
             cmd.arg(prompt);
@@ -657,6 +666,9 @@ pub fn build_stream_command(
             c.arg("--allowedTools");
             c.arg(tools);
         }
+        if options.no_project.unwrap_or(false) {
+            c.arg("--no-project");
+        }
         c
     } else {
         // Unix: use individual args
@@ -685,6 +697,9 @@ pub fn build_stream_command(
         }
         if let Some(ref tools) = options.allowed_tools {
             cmd.args(["--allowedTools", tools]);
+        }
+        if options.no_project.unwrap_or(false) {
+            cmd.arg("--no-project");
         }
         cmd
     };

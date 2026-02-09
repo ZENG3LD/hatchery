@@ -1,4 +1,4 @@
-//! Heuristic tick interval for event-driven SwarmHost.
+//! Heuristic tick interval for event-driven Nydus.
 //!
 //! Instead of a fixed 2-second sleep, adapts the tick interval based on activity:
 //! - Shrinks to minimum when completions are happening (fast scheduling)
@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 /// Adaptive tick interval controller.
 ///
-/// Tracks activity and adjusts the sleep duration between SwarmHost ticks.
+/// Tracks activity and adjusts the sleep duration between Nydus ticks.
 /// When tasks are completing rapidly, ticks happen frequently.
 /// When nothing is happening, ticks slow down to save resources.
 #[derive(Debug)]

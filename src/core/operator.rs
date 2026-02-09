@@ -1,6 +1,6 @@
 //! Operator communication channel for Hatchery V2.
 //!
-//! This module provides the bidirectional communication layer between BroodLord
+//! This module provides the bidirectional communication layer between Nydus
 //! and the human operator, enabling progress updates, escalations, and commands.
 
 use anyhow::Result;
@@ -10,24 +10,24 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use crate::core::types::{AgentId, Severity, SwarmHostId};
+use crate::core::types::{AgentId, Severity, NydusId};
 
 // ============================================================================
-// Events (Up: BroodLord → Operator)
+// Events (Up: Nydus → Operator)
 // ============================================================================
 
-/// Events emitted from BroodLord to Operator.
+/// Events emitted from Nydus to Operator.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum OperatorEvent {
-    /// Progress update for a specific SwarmHost
+    /// Progress update for a specific Nydus
     #[serde(rename = "progress")]
     Progress {
-        swarm_id: SwarmHostId,
+        swarm_id: NydusId,
         done: usize,
         total: usize,
     },
-    /// Global progress across all SwarmHosts
+    /// Global progress across all Nydus nodes
     #[serde(rename = "global_progress")]
     GlobalProgress {
         done: usize,
@@ -48,15 +48,15 @@ pub enum OperatorEvent {
         text: String,
         options: Vec<String>,
     },
-    /// A SwarmHost completed its work
+    /// A Nydus completed its work
     #[serde(rename = "swarm_completed")]
     SwarmCompleted {
-        swarm_id: SwarmHostId,
+        swarm_id: NydusId,
         tasks_done: usize,
         tasks_total: usize,
         duration_secs: u64,
     },
-    /// All SwarmHosts are done
+    /// All Nydus nodes are done
     #[serde(rename = "all_complete")]
     AllComplete {
         total_tasks: usize,
@@ -81,22 +81,22 @@ pub enum LogLevel {
 }
 
 // ============================================================================
-// Commands (Down: Operator → BroodLord)
+// Commands (Down: Operator → Nydus)
 // ============================================================================
 
-/// Commands from Operator to BroodLord.
+/// Commands from Operator to Nydus.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum OperatorCommand {
-    /// Change priority of a SwarmHost
+    /// Change priority of a Nydus node
     #[serde(rename = "reprioritize")]
     Reprioritize {
-        swarm_id: SwarmHostId,
+        swarm_id: NydusId,
         priority: u8,
     },
-    /// Cancel a SwarmHost
+    /// Cancel a Nydus node
     #[serde(rename = "cancel")]
-    Cancel { swarm_id: SwarmHostId },
+    Cancel { swarm_id: NydusId },
     /// Answer a question
     #[serde(rename = "answer")]
     Answer {
@@ -106,10 +106,10 @@ pub enum OperatorCommand {
     /// Send message to a specific agent
     #[serde(rename = "message")]
     Message { target: AgentId, text: String },
-    /// Add/remove Queens from a SwarmHost
+    /// Add/remove Queens from a Nydus node
     #[serde(rename = "scale")]
     Scale {
-        swarm_id: SwarmHostId,
+        swarm_id: NydusId,
         queens: usize,
     },
     /// Shutdown everything
@@ -121,7 +121,7 @@ pub enum OperatorCommand {
 // OperatorChannel Trait
 // ============================================================================
 
-/// Bidirectional communication channel between BroodLord and Operator.
+/// Bidirectional communication channel between Nydus and Operator.
 #[async_trait]
 pub trait OperatorChannel: Send + Sync {
     /// Emit an event to the operator.
@@ -260,10 +260,10 @@ impl Default for NullChannel {
 }
 
 // ============================================================================
-// PipeChannel Implementation (stub for nested BroodLord)
+// PipeChannel Implementation (stub for nested Nydus)
 // ============================================================================
 
-/// Placeholder for nested BroodLord communication.
+/// Placeholder for nested Nydus communication.
 ///
 /// Will be implemented in Phase 6 when full nesting is needed.
 pub struct PipeChannel;
@@ -309,7 +309,7 @@ mod tests {
         let channel = NullChannel::new();
 
         let event1 = OperatorEvent::Progress {
-            swarm_id: SwarmHostId("swarm1".to_string()),
+            swarm_id: NydusId("swarm1".to_string()),
             done: 5,
             total: 10,
         };
@@ -358,7 +358,7 @@ mod tests {
         let mut channel = NullChannel::new();
 
         let cmd1 = OperatorCommand::Cancel {
-            swarm_id: SwarmHostId("swarm2".to_string()),
+            swarm_id: NydusId("swarm2".to_string()),
         };
         let cmd2 = OperatorCommand::ShutdownAll;
 
@@ -427,7 +427,7 @@ mod tests {
     #[tokio::test]
     async fn test_operator_command_serialization_roundtrip() {
         let command = OperatorCommand::Reprioritize {
-            swarm_id: SwarmHostId("swarm3".to_string()),
+            swarm_id: NydusId("swarm3".to_string()),
             priority: 255,
         };
 

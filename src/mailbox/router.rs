@@ -106,10 +106,9 @@ impl MessageRouter {
 /// This is used to map AgentId enum variants to HashMap keys.
 fn agent_id_to_key(agent: &AgentId) -> String {
     match agent {
-        AgentId::SwarmHost(id) => format!("swarm_host:{}", id.0),
+        AgentId::Nydus(id) => format!("nydus:{}", id.0),
         AgentId::Queen(id) => format!("queen:{}", id.0),
         AgentId::Validator => "validator".to_string(),
-        AgentId::BroodLord => "brood_lord".to_string(),
         AgentId::Operator => "operator".to_string(),
     }
 }
@@ -121,11 +120,10 @@ mod tests {
     #[test]
     fn test_agent_id_to_key() {
         assert_eq!(agent_id_to_key(&AgentId::Validator), "validator");
-        assert_eq!(agent_id_to_key(&AgentId::BroodLord), "brood_lord");
         assert_eq!(agent_id_to_key(&AgentId::Operator), "operator");
 
-        let swarm_host_id = SwarmHostId("test".to_string());
-        assert_eq!(agent_id_to_key(&AgentId::SwarmHost(swarm_host_id)), "swarm_host:test");
+        let nydus_id = NydusId("test".to_string());
+        assert_eq!(agent_id_to_key(&AgentId::Nydus(nydus_id)), "nydus:test");
 
         let queen_id = QueenId("Q0".to_string());
         assert_eq!(agent_id_to_key(&AgentId::Queen(queen_id)), "queen:Q0");
@@ -140,7 +138,7 @@ mod tests {
 
         let msg = SwarmMessage {
             id: uuid::Uuid::new_v4().to_string(),
-            from: AgentId::SwarmHost(SwarmHostId::default()),
+            from: AgentId::Nydus(NydusId::default()),
             to: AgentId::Queen(QueenId("Q0".into())),
             msg_type: MessageType::TaskAssignment,
             payload: serde_json::json!({"task": "test"}),
@@ -173,8 +171,8 @@ mod tests {
 
         let msg = SwarmMessage {
             id: uuid::Uuid::new_v4().to_string(),
-            from: AgentId::SwarmHost(SwarmHostId::default()),
-            to: AgentId::BroodLord,
+            from: AgentId::Nydus(NydusId::default()),
+            to: AgentId::Operator,
             msg_type: MessageType::StatusReport,
             payload: serde_json::json!({}),
             timestamp: chrono::Utc::now(),
@@ -194,7 +192,7 @@ mod tests {
 
         let msg = SwarmMessage {
             id: uuid::Uuid::new_v4().to_string(),
-            from: AgentId::SwarmHost(SwarmHostId::default()),
+            from: AgentId::Nydus(NydusId::default()),
             to: AgentId::Queen(QueenId("NonExistent".into())),
             msg_type: MessageType::TaskAssignment,
             payload: serde_json::json!({}),
@@ -256,7 +254,7 @@ mod tests {
         for i in 0..5 {
             let msg = SwarmMessage {
                 id: uuid::Uuid::new_v4().to_string(),
-                from: AgentId::SwarmHost(SwarmHostId::default()),
+                from: AgentId::Nydus(NydusId::default()),
                 to: AgentId::Queen(QueenId("Q0".into())),
                 msg_type: MessageType::TaskProgress,
                 payload: serde_json::json!({"progress": i}),

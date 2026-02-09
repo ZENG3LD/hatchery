@@ -1,4 +1,4 @@
-//! IPC server for Hatchery CLI ↔ SwarmHost communication.
+//! IPC server for Hatchery CLI ↔ Nydus communication.
 //!
 //! Starts a TCP listener that handles JSON requests from `hatchery` CLI.
 //! Each connection is stateless: connect → request → response → close.
@@ -283,12 +283,12 @@ async fn handle_request(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::types::SwarmHostId;
+    use crate::core::types::NydusId;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    fn test_swarm_id() -> SwarmHostId {
-        SwarmHostId("test-swarm".to_string())
+    fn test_nydus_id() -> NydusId {
+        NydusId("test-swarm".to_string())
     }
 
     async fn send_request(port: u16, request: &IpcRequest) -> Result<IpcResponse> {
@@ -317,7 +317,7 @@ mod tests {
             metadata: crate::core::shared_memory::MemoryMetadata {
                 created_at: chrono::Utc::now(),
                 last_updated: chrono::Utc::now(),
-                swarm_id: test_swarm_id(),
+                swarm_id: test_nydus_id(),
             },
         }));
 
@@ -350,7 +350,7 @@ mod tests {
             metadata: crate::core::shared_memory::MemoryMetadata {
                 created_at: chrono::Utc::now(),
                 last_updated: chrono::Utc::now(),
-                swarm_id: test_swarm_id(),
+                swarm_id: test_nydus_id(),
             },
         }));
 
@@ -406,7 +406,7 @@ mod tests {
             metadata: crate::core::shared_memory::MemoryMetadata {
                 created_at: chrono::Utc::now(),
                 last_updated: chrono::Utc::now(),
-                swarm_id: test_swarm_id(),
+                swarm_id: test_nydus_id(),
             },
         }));
 
@@ -451,7 +451,7 @@ mod tests {
             metadata: crate::core::shared_memory::MemoryMetadata {
                 created_at: chrono::Utc::now(),
                 last_updated: chrono::Utc::now(),
-                swarm_id: test_swarm_id(),
+                swarm_id: test_nydus_id(),
             },
         }));
 
@@ -485,7 +485,7 @@ mod tests {
             metadata: crate::core::shared_memory::MemoryMetadata {
                 created_at: chrono::Utc::now(),
                 last_updated: chrono::Utc::now(),
-                swarm_id: test_swarm_id(),
+                swarm_id: test_nydus_id(),
             },
         }));
 

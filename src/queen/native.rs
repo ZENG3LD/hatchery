@@ -48,11 +48,11 @@ impl NativeQueenConfig {
             r#"You are a Queen in the Hatchery swarm system.
 
 Your role:
-1. Receive a task from SwarmHost
+1. Receive a task from Nydus
 2. Break it into {} or fewer sub-tasks
 3. Assign sub-tasks to workers using the Task tool
 4. Monitor progress and handle failures
-5. Report status to SwarmHost via @hatchery: protocol
+5. Report status to Nydus via @hatchery: protocol
 
 Communication protocol:
 - Report status: @hatchery:status:<json>
@@ -304,7 +304,7 @@ impl NativeQueen {
                         state.cached_status = status.clone();
                         let msg = SwarmMessage::status_report(
                             AgentId::Queen(self.id.clone()),
-                            AgentId::SwarmHost(SwarmHostId::default()),
+                            AgentId::Nydus(NydusId::default()),
                             status,
                         );
                         state.outbox.push_back(msg);
@@ -317,7 +317,7 @@ impl NativeQueen {
                         state.completed_result = Some(result.clone());
                         let msg = SwarmMessage::task_result(
                             AgentId::Queen(self.id.clone()),
-                            AgentId::SwarmHost(SwarmHostId::default()),
+                            AgentId::Nydus(NydusId::default()),
                             task_id,
                             result,
                         );
@@ -331,7 +331,7 @@ impl NativeQueen {
                         };
                         let msg = SwarmMessage::escalation(
                             AgentId::Queen(self.id.clone()),
-                            AgentId::SwarmHost(SwarmHostId::default()),
+                            AgentId::Nydus(NydusId::default()),
                             error,
                             Severity::High,
                         );
@@ -340,7 +340,7 @@ impl NativeQueen {
                     Ok(ParsedMessage::Escalation { issue, severity }) => {
                         let msg = SwarmMessage::escalation(
                             AgentId::Queen(self.id.clone()),
-                            AgentId::SwarmHost(SwarmHostId::default()),
+                            AgentId::Nydus(NydusId::default()),
                             issue,
                             severity,
                         );
@@ -349,7 +349,7 @@ impl NativeQueen {
                     Ok(ParsedMessage::Knowledge { key, value }) => {
                         let msg = SwarmMessage::knowledge(
                             AgentId::Queen(self.id.clone()),
-                            AgentId::SwarmHost(SwarmHostId::default()),
+                            AgentId::Nydus(NydusId::default()),
                             key,
                             value,
                         );

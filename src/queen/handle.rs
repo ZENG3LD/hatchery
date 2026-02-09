@@ -15,7 +15,7 @@ use tokio::sync::{mpsc, watch};
 /// Commands sent to a Queen actor.
 #[derive(Debug, Clone)]
 pub enum QueenCommand {
-    /// Assign a task from SwarmHost with context.
+    /// Assign a task from Nydus with context.
     Assign {
         task: Task,
         context: TaskContext,

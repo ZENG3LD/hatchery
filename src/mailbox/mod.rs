@@ -12,13 +12,13 @@ use event_log::SqliteEventLog;
 /// Manages per-agent inboxes with VecDeque, logs all messages to SQLite,
 /// and supports subscribers for real-time notifications.
 pub struct SwarmMailbox {
-    /// Inbox for SwarmHost coordinator
+    /// Inbox for Nydus coordinator
     host_inbox: VecDeque<SwarmMessage>,
     /// Per-queen inboxes
     queen_inboxes: HashMap<QueenId, VecDeque<SwarmMessage>>,
     /// Validator inbox
     validator_inbox: VecDeque<SwarmMessage>,
-    /// Outbox (messages going up to BroodLord/Operator)
+    /// Outbox (messages going up to Operator)
     outbox: VecDeque<SwarmMessage>,
     /// Durable event log
     event_log: Arc<SqliteEventLog>,
@@ -60,7 +60,7 @@ impl SwarmMailbox {
         self.enforce_cap_and_ttl();
 
         match &msg.to {
-            AgentId::SwarmHost(_) => self.host_inbox.push_back(msg),
+            AgentId::Nydus(_) => self.host_inbox.push_back(msg),
             AgentId::Queen(qid) => {
                 self.queen_inboxes
                     .entry(qid.clone())
@@ -68,7 +68,7 @@ impl SwarmMailbox {
                     .push_back(msg);
             }
             AgentId::Validator => self.validator_inbox.push_back(msg),
-            AgentId::BroodLord | AgentId::Operator => self.outbox.push_back(msg),
+            AgentId::Operator => self.outbox.push_back(msg),
         }
     }
 
@@ -219,7 +219,7 @@ mod tests {
         let mut mb = SwarmMailbox::new(make_event_log());
         let msg = make_msg(
             AgentId::Queen(QueenId("Q0".into())),
-            AgentId::SwarmHost(SwarmHostId::default()),
+            AgentId::Nydus(NydusId::default()),
         );
         mb.send(msg);
         assert!(mb.recv_host().is_some());
@@ -232,7 +232,7 @@ mod tests {
         let qid = QueenId("Q1".into());
         mb.register_queen(qid.clone());
 
-        let msg = make_msg(AgentId::SwarmHost(SwarmHostId::default()), AgentId::Queen(qid.clone()));
+        let msg = make_msg(AgentId::Nydus(NydusId::default()), AgentId::Queen(qid.clone()));
         mb.send(msg);
         assert!(mb.recv_queen(&qid).is_some());
     }
@@ -241,7 +241,7 @@ mod tests {
     fn test_send_to_validator() {
         let mut mb = SwarmMailbox::new(make_event_log());
         let msg = make_msg(
-            AgentId::SwarmHost(SwarmHostId::default()),
+            AgentId::Nydus(NydusId::default()),
             AgentId::Validator,
         );
         mb.send(msg);
@@ -256,7 +256,7 @@ mod tests {
         mb.register_queen(q0.clone());
         mb.register_queen(q1.clone());
 
-        let msg = make_msg(AgentId::SwarmHost(SwarmHostId::default()), AgentId::Operator);
+        let msg = make_msg(AgentId::Nydus(NydusId::default()), AgentId::Operator);
         mb.broadcast(msg);
 
         assert!(mb.recv_queen(&q0).is_some());
@@ -271,7 +271,7 @@ mod tests {
         for i in 0..5 {
             let msg = make_msg(
                 AgentId::Queen(QueenId(format!("Q{}", i))),
-                AgentId::SwarmHost(SwarmHostId::default()),
+                AgentId::Nydus(NydusId::default()),
             );
             mb.send(msg);
         }
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn test_outbox() {
         let mut mb = SwarmMailbox::new(make_event_log());
-        let msg = make_msg(AgentId::SwarmHost(SwarmHostId::default()), AgentId::BroodLord);
+        let msg = make_msg(AgentId::Nydus(NydusId::default()), AgentId::Operator);
         mb.send(msg);
         let drained = mb.drain_outbox();
         assert_eq!(drained.len(), 1);
@@ -294,7 +294,7 @@ mod tests {
     #[test]
     fn test_outbox_operator() {
         let mut mb = SwarmMailbox::new(make_event_log());
-        let msg = make_msg(AgentId::SwarmHost(SwarmHostId::default()), AgentId::Operator);
+        let msg = make_msg(AgentId::Nydus(NydusId::default()), AgentId::Operator);
         mb.send(msg);
         assert_eq!(mb.outbox_len(), 1);
         let drained = mb.drain_outbox();
@@ -306,7 +306,7 @@ mod tests {
     fn test_event_log_integration() {
         let log = make_event_log();
         let mut mb = SwarmMailbox::new(log.clone());
-        let msg = make_msg(AgentId::Operator, AgentId::SwarmHost(SwarmHostId::default()));
+        let msg = make_msg(AgentId::Operator, AgentId::Nydus(NydusId::default()));
         mb.send(msg);
         assert_eq!(log.count(), 1);
     }
@@ -318,7 +318,7 @@ mod tests {
 
         // Register and send message
         mb.register_queen(qid.clone());
-        let msg = make_msg(AgentId::SwarmHost(SwarmHostId::default()), AgentId::Queen(qid.clone()));
+        let msg = make_msg(AgentId::Nydus(NydusId::default()), AgentId::Queen(qid.clone()));
         mb.send(msg);
         assert_eq!(mb.queen_inbox_len(&qid), 1);
 
@@ -334,10 +334,10 @@ mod tests {
         mb.register_queen(qid.clone());
 
         // Send to different inboxes
-        mb.send(make_msg(AgentId::Operator, AgentId::SwarmHost(SwarmHostId::default())));
+        mb.send(make_msg(AgentId::Operator, AgentId::Nydus(NydusId::default())));
         mb.send(make_msg(AgentId::Operator, AgentId::Queen(qid.clone())));
         mb.send(make_msg(AgentId::Operator, AgentId::Validator));
-        mb.send(make_msg(AgentId::Operator, AgentId::BroodLord));
+        mb.send(make_msg(AgentId::Nydus(NydusId::default()), AgentId::Operator));
 
         assert_eq!(mb.host_inbox_len(), 1);
         assert_eq!(mb.queen_inbox_len(&qid), 1);

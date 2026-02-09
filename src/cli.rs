@@ -16,17 +16,6 @@ pub struct Task {
     pub line_number: usize,
 }
 
-/// Swarm operation mode.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
-pub enum Mode {
-    /// Simple Ralph-style: N workers iterate PRD checkboxes independently.
-    Queen,
-    /// AI Coordinator + smart workers with shared memory.
-    SwarmHost,
-    /// Full hierarchy: Opus manager → L2 coordinators → workers.
-    BroodLord,
-}
-
 /// Configuration for a hatchery run.
 #[derive(Debug, Clone)]
 pub struct HatcheryConfig {
@@ -34,8 +23,6 @@ pub struct HatcheryConfig {
     pub prd_path: PathBuf,
     /// Number of worker sessions.
     pub workers: usize,
-    /// Operation mode.
-    pub mode: Mode,
     /// Working directory for workers.
     pub working_dir: PathBuf,
     /// Verification command (e.g. "cargo check").
@@ -73,7 +60,6 @@ impl Default for HatcheryConfig {
         Self {
             prd_path: PathBuf::from("PRD.md"),
             workers: 1,
-            mode: Mode::Queen,
             working_dir: std::env::current_dir().unwrap_or_default(),
             verify_cmd: None,
             max_iterations: 100,

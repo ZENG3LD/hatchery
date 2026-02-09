@@ -75,7 +75,7 @@ impl StreamQueenConfig {
 ///
 /// # Arguments
 /// * `config` - Configuration for this Queen
-/// * `event_tx` - Channel for sending events back to the SwarmHost
+/// * `event_tx` - Channel for sending events back to the Nydus
 /// * `shutdown_rx` - Broadcast receiver for shutdown signal
 ///
 /// # Errors
@@ -214,7 +214,7 @@ async fn run_actor(
     // Main select loop
     loop {
         tokio::select! {
-            // Command from SwarmHost
+            // Command from Nydus
             Some(cmd) = cmd_rx.recv() => {
                 match cmd {
                     QueenCommand::Assign { task, context } => {

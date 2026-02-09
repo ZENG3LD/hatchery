@@ -1,6 +1,6 @@
 //! EventBus — Hot-path IPC using tokio channels for V2 Queen architecture.
 //!
-//! This replaces SwarmMailbox for hot-path IPC. All actors (Queen, SwarmHost, Validator)
+//! This replaces SwarmMailbox for hot-path IPC. All actors (Queen, Nydus, Validator)
 //! send events to a central EventBus using tokio mpsc channels. The bus optionally
 //! logs events to SqliteEventLog via a fire-and-forget audit writer task.
 
@@ -131,7 +131,7 @@ impl EventBus {
 
     /// Get a cloned sender for sending events to the bus.
     ///
-    /// This sender can be shared with actors (Queen, SwarmHost, Validator).
+    /// This sender can be shared with actors (Queen, Nydus, Validator).
     pub fn event_sender(&self) -> mpsc::Sender<QueenEvent> {
         self.event_tx.clone()
     }
@@ -191,7 +191,7 @@ impl EventBus {
                 AuditEntry {
                     timestamp,
                     from: format!("Queen({})", queen_id.0),
-                    to: "SwarmHost".to_string(),
+                    to: "Nydus".to_string(),
                     event_type: "TaskCompleted".to_string(),
                     payload: serde_json::json!({
                         "task_id": task_id,
@@ -214,7 +214,7 @@ impl EventBus {
                 AuditEntry {
                     timestamp,
                     from: format!("Queen({})", queen_id.0),
-                    to: "SwarmHost".to_string(),
+                    to: "Nydus".to_string(),
                     event_type: "TaskFailed".to_string(),
                     payload: serde_json::json!({
                         "task_id": task_id,
@@ -233,7 +233,7 @@ impl EventBus {
                 AuditEntry {
                     timestamp,
                     from: format!("Queen({})", queen_id.0),
-                    to: "SwarmHost".to_string(),
+                    to: "Nydus".to_string(),
                     event_type: "Progress".to_string(),
                     payload: serde_json::json!({
                         "task_id": task_id,
@@ -250,7 +250,7 @@ impl EventBus {
                 AuditEntry {
                     timestamp,
                     from: format!("Queen({})", queen_id.0),
-                    to: "SwarmHost".to_string(),
+                    to: "Nydus".to_string(),
                     event_type: "Knowledge".to_string(),
                     payload: serde_json::json!({
                         "key": key,
@@ -266,7 +266,7 @@ impl EventBus {
                 AuditEntry {
                     timestamp,
                     from: format!("Queen({})", queen_id.0),
-                    to: "SwarmHost".to_string(),
+                    to: "Nydus".to_string(),
                     event_type: "ProcessDied".to_string(),
                     payload: serde_json::json!({
                         "exit_code": exit_code,
@@ -281,7 +281,7 @@ impl EventBus {
                 AuditEntry {
                     timestamp,
                     from: format!("Queen({})", queen_id.0),
-                    to: "SwarmHost".to_string(),
+                    to: "Nydus".to_string(),
                     event_type: "StatusChanged".to_string(),
                     payload: serde_json::to_value(status).unwrap_or(serde_json::Value::Null),
                 }
@@ -294,7 +294,7 @@ impl EventBus {
                 AuditEntry {
                     timestamp,
                     from: format!("Queen({})", queen_id.0),
-                    to: "SwarmHost".to_string(),
+                    to: "Nydus".to_string(),
                     event_type: "ContextCompressed".to_string(),
                     payload: serde_json::json!({
                         "pre_tokens": pre_tokens,
@@ -307,7 +307,7 @@ impl EventBus {
                 AuditEntry {
                     timestamp,
                     from: format!("Queen({})", queen_id.0),
-                    to: "SwarmHost".to_string(),
+                    to: "Nydus".to_string(),
                     event_type: "MessagesReceived".to_string(),
                     payload: serde_json::json!({
                         "count": count,
@@ -442,7 +442,7 @@ mod tests {
         let entry = AuditEntry {
             timestamp: Utc::now(),
             from: "Queen(Q0)".to_string(),
-            to: "SwarmHost".to_string(),
+            to: "Nydus".to_string(),
             event_type: "StatusChanged".to_string(),
             payload: serde_json::json!({"test": true}),
         };
@@ -548,7 +548,7 @@ mod tests {
             let entry = AuditEntry {
                 timestamp: Utc::now(),
                 from: format!("Queen(Q{})", i),
-                to: "SwarmHost".to_string(),
+                to: "Nydus".to_string(),
                 event_type: "Progress".to_string(),
                 payload: serde_json::json!({
                     "task_id": format!("T{}", i),

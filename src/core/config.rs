@@ -11,7 +11,6 @@ use anyhow::Result;
 pub struct HatcheryFileConfig {
     /// [spawn] section
     pub workers: Option<usize>,
-    pub mode: Option<String>,
     pub backend: Option<String>,
     pub api_url: Option<String>,
     pub api_model: Option<String>,
@@ -29,9 +28,6 @@ pub struct HatcheryFileConfig {
     pub queen_model: Option<String>,
     pub queen_timeout_secs: Option<u64>,
 
-    /// [broodlord] section
-    pub max_swarm_hosts: Option<usize>,
-    pub tick_interval_secs: Option<u64>,
 }
 
 impl HatcheryFileConfig {
@@ -94,7 +90,6 @@ impl HatcheryFileConfig {
                 // Map section.key to config fields
                 match (current_section.as_str(), key) {
                     ("spawn", "workers") => config.workers = clean_value.parse().ok(),
-                    ("spawn", "mode") => config.mode = Some(clean_value.to_string()),
                     ("spawn", "backend") => config.backend = Some(clean_value.to_string()),
                     ("spawn", "api_url") => config.api_url = Some(clean_value.to_string()),
                     ("spawn", "api_model") => config.api_model = Some(clean_value.to_string()),
@@ -109,8 +104,6 @@ impl HatcheryFileConfig {
                     ("queen", "max_workers") => config.queen_max_workers = clean_value.parse().ok(),
                     ("queen", "model") => config.queen_model = Some(clean_value.to_string()),
                     ("queen", "timeout_secs") => config.queen_timeout_secs = clean_value.parse().ok(),
-                    ("broodlord", "max_swarm_hosts") => config.max_swarm_hosts = clean_value.parse().ok(),
-                    ("broodlord", "tick_interval_secs") => config.tick_interval_secs = clean_value.parse().ok(),
                     _ => {} // Ignore unknown keys
                 }
             }
@@ -130,7 +123,6 @@ mod tests {
     fn test_parse_empty_config() {
         let config = HatcheryFileConfig::parse("").unwrap();
         assert!(config.workers.is_none());
-        assert!(config.mode.is_none());
         assert!(config.queen_max_workers.is_none());
     }
 
@@ -139,7 +131,6 @@ mod tests {
         let toml = r#"
 [spawn]
 workers = 4
-mode = "native_queen"
 backend = "claude"
 api_url = "https://api.anthropic.com"
 api_model = "claude-sonnet-4-5"
@@ -155,7 +146,6 @@ event_log = ".hatchery/events.db"
 
         let config = HatcheryFileConfig::parse(toml).unwrap();
         assert_eq!(config.workers, Some(4));
-        assert_eq!(config.mode, Some("native_queen".to_string()));
         assert_eq!(config.backend, Some("claude".to_string()));
         assert_eq!(config.api_url, Some("https://api.anthropic.com".to_string()));
         assert_eq!(config.api_model, Some("claude-sonnet-4-5".to_string()));
@@ -185,19 +175,6 @@ timeout_secs = 300
     }
 
     #[test]
-    fn test_parse_broodlord_section() {
-        let toml = r#"
-[broodlord]
-max_swarm_hosts = 5
-tick_interval_secs = 10
-        "#;
-
-        let config = HatcheryFileConfig::parse(toml).unwrap();
-        assert_eq!(config.max_swarm_hosts, Some(5));
-        assert_eq!(config.tick_interval_secs, Some(10));
-    }
-
-    #[test]
     fn test_parse_with_comments_and_empty_lines() {
         let toml = r#"
 # This is a comment
@@ -205,7 +182,6 @@ tick_interval_secs = 10
 
 # Workers configuration
 workers = 4
-mode = "native_queen"
 
 # Another comment
 
@@ -215,7 +191,6 @@ max_workers = 8
 
         let config = HatcheryFileConfig::parse(toml).unwrap();
         assert_eq!(config.workers, Some(4));
-        assert_eq!(config.mode, Some("native_queen".to_string()));
         assert_eq!(config.queen_max_workers, Some(8));
     }
 
@@ -223,13 +198,11 @@ max_workers = 8
     fn test_parse_string_values_with_quotes() {
         let toml = r#"
 [spawn]
-mode = "native_queen"
 backend = 'claude'
 validator = rust-expert
         "#;
 
         let config = HatcheryFileConfig::parse(toml).unwrap();
-        assert_eq!(config.mode, Some("native_queen".to_string()));
         assert_eq!(config.backend, Some("claude".to_string()));
         assert_eq!(config.validator, Some("rust-expert".to_string()));
     }

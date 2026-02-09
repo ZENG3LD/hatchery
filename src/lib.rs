@@ -1,9 +1,8 @@
 //! Hatchery — swarm orchestration for AI coding agents.
 //!
-//! Three modes named after StarCraft II Zerg units:
-//! - **Queen**: Simple iteration (NativeQueen wraps Claude Code CLI)
-//! - **Swarm Host**: AI Coordinator + smart workers with shared memory
-//! - **Brood Lord**: Full hierarchy with Opus manager, L2 coordinators, workers
+//! Named after StarCraft II Zerg units:
+//! - **Nydus**: transport & scheduling node — assigns tasks, validates, merges
+//! - **Queen**: AI manager — spawns and coordinates worker agents
 
 /// CLI types: HatcheryConfig, Mode, SwarmResult
 pub mod cli;
@@ -20,11 +19,8 @@ pub mod core;
 /// Queen agents (L1): StreamQueen, SpawnQueen, NativeQueen (deprecated)
 pub mod queen;
 
-/// SwarmHost coordinator (L2): task scheduling, validation, merging
-pub mod swarm_host;
-
-/// BroodLord strategist (L3): multi-SwarmHost orchestration
-pub mod brood_lord;
+/// Nydus coordinator (L2): task scheduling, validation, merging
+pub mod nydus;
 
 /// Message routing and event logging
 pub mod mailbox;
@@ -32,5 +28,5 @@ pub mod mailbox;
 /// Git safety: attribution, worktree isolation
 pub mod safety;
 
-/// IPC server for CLI ↔ SwarmHost communication
+/// IPC server for CLI ↔ Nydus communication
 pub mod ipc;

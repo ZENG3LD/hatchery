@@ -1,6 +1,6 @@
 //! Queen module — Claude Code manager agents for Hatchery V3.
 //!
-//! A Queen is an autonomous AI manager that receives tasks from SwarmHost,
+//! A Queen is an autonomous AI manager that receives tasks from Nydus,
 //! decomposes them into sub-tasks, and spawns worker agents via Claude Code's
 //! native Task tool. Queens NEVER do implementation work themselves.
 //!
@@ -39,7 +39,7 @@ pub struct QueenConfig {
 
 /// The Queen trait — core abstraction for AI manager agents.
 ///
-/// A Queen receives tasks from SwarmHost, decomposes them, and
+/// A Queen receives tasks from Nydus, decomposes them, and
 /// spawns worker agents via Claude Code's Task tool.
 /// Queens are managers — they NEVER do implementation work themselves.
 ///
@@ -54,7 +54,7 @@ pub trait Queen: Send + Sync {
     /// Backend type (for routing and logging)
     fn backend(&self) -> QueenBackend;
 
-    /// Assign a task from SwarmHost
+    /// Assign a task from Nydus
     async fn assign(&mut self, task: Task, context: TaskContext) -> Result<()>;
 
     /// Get current status
@@ -63,7 +63,7 @@ pub trait Queen: Send + Sync {
     /// Get completed result (None if still working)
     async fn result(&self) -> Option<TaskResult>;
 
-    /// Receive a message from SwarmHost or another Queen
+    /// Receive a message from Nydus or another Queen
     async fn send_message(&mut self, msg: SwarmMessage) -> Result<()>;
 
     /// Drain outgoing messages (status reports, escalations, knowledge)

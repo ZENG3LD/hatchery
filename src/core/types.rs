@@ -1,7 +1,7 @@
 //! V2 Core types for Hatchery swarm orchestration.
 //!
 //! This module contains the type definitions for the V2 architecture which introduces
-//! the Queen trait, SwarmHost coordination, and hierarchical task management.
+//! the Queen trait, Nydus coordination, and hierarchical task management.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -26,13 +26,13 @@ impl Default for TaskId {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct QueenId(pub String); // e.g., "Q0", "Q1", "L2.0.Q0"
 
-/// Unique identifier for a SwarmHost coordinator.
+/// Unique identifier for a Nydus coordinator.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct SwarmHostId(pub String);
+pub struct NydusId(pub String);
 
-impl Default for SwarmHostId {
+impl Default for NydusId {
     fn default() -> Self {
-        SwarmHostId(String::new())
+        NydusId(String::new())
     }
 }
 
@@ -155,14 +155,12 @@ pub enum Severity {
 /// Agent identifier for message routing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AgentId {
-    /// A SwarmHost coordinator
-    SwarmHost(SwarmHostId),
+    /// A Nydus coordinator
+    Nydus(NydusId),
     /// A Queen worker agent
     Queen(QueenId),
     /// The validator agent
     Validator,
-    /// The BroodLord top-level orchestrator
-    BroodLord,
     /// The human operator
     Operator,
 }
@@ -187,7 +185,7 @@ pub struct SubTaskStatus {
 pub struct Visibility {
     /// Whether the message is visible to agent-level code
     pub agent_visible: bool,
-    /// Whether the message is visible to coordinators (SwarmHost/BroodLord)
+    /// Whether the message is visible to coordinators (Nydus)
     pub coordinator_visible: bool,
     /// Whether the message is visible to the user/operator
     pub user_visible: bool,

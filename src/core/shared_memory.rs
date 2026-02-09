@@ -7,7 +7,7 @@
 //! - JSON file persistence for crash recovery
 //! - Automatic expiration with evict_expired()
 
-use crate::core::types::{AgentId, SwarmHostId, Visibility};
+use crate::core::types::{AgentId, NydusId, Visibility};
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
@@ -46,7 +46,7 @@ impl KnowledgeEntry {
 pub struct MemoryMetadata {
     pub created_at: DateTime<Utc>,
     pub last_updated: DateTime<Utc>,
-    pub swarm_id: SwarmHostId,
+    pub swarm_id: NydusId,
 }
 
 /// Internal state of shared memory, protected by RwLock.
@@ -69,7 +69,7 @@ pub struct SharedMemory {
 
 impl SharedMemory {
     /// Create a new in-memory SharedMemory (no persistence).
-    pub fn new(swarm_id: SwarmHostId) -> Self {
+    pub fn new(swarm_id: NydusId) -> Self {
         let now = Utc::now();
         let state = MemoryState {
             version: 0,
@@ -90,7 +90,7 @@ impl SharedMemory {
 
     /// Create a new SharedMemory with JSON file persistence.
     /// Auto-creates the path based on swarm_id: `.hatchery/{swarm_id}_memory.json`
-    pub fn with_persistence(swarm_id: SwarmHostId, working_dir: &std::path::Path) -> Self {
+    pub fn with_persistence(swarm_id: NydusId, working_dir: &std::path::Path) -> Self {
         let persist_path = working_dir.join(".hatchery").join(format!("{}_memory.json", swarm_id.0));
         let mut memory = Self::new(swarm_id);
         memory.persist_path = Some(persist_path);
@@ -306,13 +306,13 @@ mod tests {
         AgentId::Queen(QueenId("Q0".to_string()))
     }
 
-    fn test_swarm_id() -> SwarmHostId {
-        SwarmHostId("test-swarm".to_string())
+    fn test_nydus_id() -> NydusId {
+        NydusId("test-swarm".to_string())
     }
 
     #[test]
     fn test_insert_and_get() {
-        let mem = SharedMemory::new(test_swarm_id());
+        let mem = SharedMemory::new(test_nydus_id());
         let value = serde_json::json!({"data": "test"});
 
         mem.insert("key1".to_string(), value.clone(), test_agent());
@@ -326,7 +326,7 @@ mod tests {
 
     #[test]
     fn test_insert_with_ttl_and_evict_expired() {
-        let mem = SharedMemory::new(test_swarm_id());
+        let mem = SharedMemory::new(test_nydus_id());
 
         // Insert entry with 1ms TTL (will expire immediately)
         mem.insert_with_options(
@@ -366,7 +366,7 @@ mod tests {
 
     #[test]
     fn test_query_by_pattern() {
-        let mem = SharedMemory::new(test_swarm_id());
+        let mem = SharedMemory::new(test_nydus_id());
 
         mem.insert("user:alice".to_string(), serde_json::json!("data1"), test_agent());
         mem.insert("user:bob".to_string(), serde_json::json!("data2"), test_agent());
@@ -384,7 +384,7 @@ mod tests {
 
     #[test]
     fn test_store_and_get_task_results() {
-        let mem = SharedMemory::new(test_swarm_id());
+        let mem = SharedMemory::new(test_nydus_id());
 
         let result1 = serde_json::json!({"status": "completed", "output": "success"});
         let result2 = serde_json::json!({"status": "failed", "error": "timeout"});
@@ -404,7 +404,7 @@ mod tests {
 
     #[test]
     fn test_version_increments_on_writes() {
-        let mem = SharedMemory::new(test_swarm_id());
+        let mem = SharedMemory::new(test_nydus_id());
 
         assert_eq!(mem.version(), 0);
 
@@ -428,7 +428,7 @@ mod tests {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
 
         // Create memory with data (with_persistence now auto-creates the path)
-        let mem1 = SharedMemory::with_persistence(test_swarm_id(), temp_dir.path());
+        let mem1 = SharedMemory::with_persistence(test_nydus_id(), temp_dir.path());
         mem1.insert("key1".to_string(), serde_json::json!("value1"), test_agent());
         mem1.insert("key2".to_string(), serde_json::json!(42), test_agent());
         mem1.store_task_result("task-1", serde_json::json!({"status": "done"}));
@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn test_get_entry_returns_full_entry() {
-        let mem = SharedMemory::new(test_swarm_id());
+        let mem = SharedMemory::new(test_nydus_id());
         let agent = test_agent();
         let visibility = Visibility {
             agent_visible: true,
@@ -482,7 +482,7 @@ mod tests {
 
     #[test]
     fn test_evict_removes_only_expired() {
-        let mem = SharedMemory::new(test_swarm_id());
+        let mem = SharedMemory::new(test_nydus_id());
 
         // Add 3 entries: 2 expired, 1 valid
         mem.insert_with_options(
@@ -526,7 +526,7 @@ mod tests {
     fn test_auto_persist_on_insert() {
         let temp_dir = tempfile::tempdir().unwrap();
         let mem = SharedMemory::with_persistence(
-            SwarmHostId("test-swarm".to_string()),
+            NydusId("test-swarm".to_string()),
             temp_dir.path(),
         );
 
@@ -543,14 +543,14 @@ mod tests {
 
     #[test]
     fn test_insert_returns_key() {
-        let mem = SharedMemory::new(test_swarm_id());
+        let mem = SharedMemory::new(test_nydus_id());
         let key = mem.insert("test-key".to_string(), serde_json::json!("value"), test_agent());
         assert_eq!(key, "test-key");
     }
 
     #[test]
     fn test_store_task_result_returns_key() {
-        let mem = SharedMemory::new(test_swarm_id());
+        let mem = SharedMemory::new(test_nydus_id());
         let task_id = mem.store_task_result("task-123", serde_json::json!({"status": "done"}));
         assert_eq!(task_id, "task-123");
     }

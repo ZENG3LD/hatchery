@@ -6,15 +6,14 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::io::{BufRead, Write as IoWrite};
 
-use hatchery::cli::{HatcheryConfig, Mode};
+use hatchery::cli::HatcheryConfig;
 use hatchery::mailbox::event_log::SqliteEventLog;
-use hatchery::core::types::{SwarmMessage, AgentId, MessageType, Visibility, SwarmHostId, QueenId};
+use hatchery::core::types::{SwarmMessage, AgentId, MessageType, Visibility, NydusId, QueenId};
 use hatchery::queen::spawn_mode::SpawnMode;
 use hatchery::queen::completion::CompletionConfig;
-use hatchery::swarm_host::{SwarmHost, SwarmHostConfig};
-use hatchery::brood_lord::{BroodLord, BroodLordConfig};
-use hatchery::core::operator::NullChannel;
+use hatchery::nydus::{Nydus, NydusConfig};
 use hatchery::core::task_dag::{Priority, Complexity};
+use hatchery::core::dag_generator;
 use hatchery::ipc::protocol::{IpcRequest, IpcResponse};
 use hatchery::prd;
 
@@ -35,10 +34,6 @@ enum Commands {
         /// Number of worker sessions.
         #[arg(short, long, default_value = "1")]
         workers: usize,
-
-        /// Operation mode.
-        #[arg(short, long, value_enum, default_value = "queen")]
-        mode: Mode,
 
         /// Working directory for workers.
         #[arg(long)]
@@ -99,6 +94,10 @@ enum Commands {
         /// Spawn mode for Queen actors: "stream" or "per-task"
         #[arg(long, default_value = "per-task")]
         spawn_mode: String,
+
+        /// Use LLM to decompose PRD into tasks with dependencies.
+        #[arg(long)]
+        llm_decompose: bool,
     },
 
     /// Show status of an ongoing or completed run.
@@ -157,7 +156,7 @@ enum Commands {
         cmd: Option<String>,
     },
 
-    /// Health check — ping the running SwarmHost.
+    /// Health check — ping the running Nydus.
     Ping,
 }
 
@@ -230,11 +229,9 @@ fn parse_target(target: &str) -> AgentId {
     if let Some(id) = target.strip_prefix("queen:") {
         AgentId::Queen(QueenId(id.to_string()))
     } else if let Some(id) = target.strip_prefix("swarmhost:") {
-        AgentId::SwarmHost(SwarmHostId(id.to_string()))
+        AgentId::Nydus(NydusId(id.to_string()))
     } else if target == "validator" {
         AgentId::Validator
-    } else if target == "broodlord" {
-        AgentId::BroodLord
     } else {
         AgentId::Queen(QueenId(target.to_string()))
     }
@@ -244,9 +241,8 @@ fn parse_target(target: &str) -> AgentId {
 fn format_agent_id(agent: &AgentId) -> String {
     match agent {
         AgentId::Queen(id) => format!("Queen({})", id.0),
-        AgentId::SwarmHost(id) => format!("SwarmHost({})", id.0),
+        AgentId::Nydus(id) => format!("Nydus({})", id.0),
         AgentId::Validator => "Validator".to_string(),
-        AgentId::BroodLord => "BroodLord".to_string(),
         AgentId::Operator => "Operator".to_string(),
     }
 }
@@ -308,7 +304,7 @@ fn resolve_ipc_port() -> Result<u16> {
     }
 
     Err(anyhow::anyhow!(
-        "Cannot find IPC port. Set HATCHERY_PORT env var or ensure SwarmHost is running."
+        "Cannot find IPC port. Set HATCHERY_PORT env var or ensure Nydus is running."
     ))
 }
 
@@ -318,7 +314,7 @@ fn ipc_call(request: IpcRequest) -> Result<IpcResponse> {
     let addr = format!("127.0.0.1:{}", port);
 
     let mut stream = std::net::TcpStream::connect(&addr)
-        .map_err(|e| anyhow::anyhow!("Cannot connect to SwarmHost at {}: {}", addr, e))?;
+        .map_err(|e| anyhow::anyhow!("Cannot connect to Nydus at {}: {}", addr, e))?;
 
     // Send request
     let json = serde_json::to_string(&request)?;
@@ -340,6 +336,70 @@ fn ipc_call(request: IpcRequest) -> Result<IpcResponse> {
     Ok(response)
 }
 
+/// Populate Nydus DAG with tasks from PRD.
+///
+/// If `llm_decompose` is true, uses Claude CLI to analyze the PRD and generate
+/// tasks with dependency relationships. Falls back to checkbox parsing on any error.
+async fn populate_dag(
+    nydus: &mut Nydus,
+    prd_path: &std::path::Path,
+    working_dir: &std::path::Path,
+    llm_decompose: bool,
+) -> Result<()> {
+    let prd_content = std::fs::read_to_string(prd_path)
+        .map_err(|e| anyhow::anyhow!("Failed to read PRD {}: {}", prd_path.display(), e))?;
+
+    if llm_decompose {
+        eprintln!("[HATCHERY] LLM decomposition enabled, calling Claude CLI...");
+        match dag_generator::decompose_prd(&prd_content, working_dir).await {
+            Ok(tasks) => {
+                eprintln!("[HATCHERY] LLM generated {} tasks with dependencies", tasks.len());
+                for gt in &tasks {
+                    let deps: Vec<String> = gt.dependencies
+                        .iter()
+                        .map(|d| format!("llm-{}", d))
+                        .collect();
+                    nydus.add_task(
+                        &format!("llm-{}", gt.id),
+                        &gt.description,
+                        deps,
+                        gt.priority,
+                        gt.complexity,
+                        gt.skill_hint.clone(),
+                    );
+                }
+                let stats = nydus.progress();
+                let ready = stats.total_tasks - stats.completed - stats.in_progress - stats.blocked - stats.failed;
+                eprintln!("[HATCHERY] DAG: {} total, {} ready, {} blocked",
+                    stats.total_tasks, ready, stats.blocked);
+                return Ok(());
+            }
+            Err(e) => {
+                eprintln!("[HATCHERY] LLM decomposition failed: {}. Falling back to checkbox parsing.", e);
+            }
+        }
+    }
+
+    // Fallback: regex-based checkbox parsing (original behavior)
+    let prd_tasks = prd::parse_prd_content(&prd_content)?;
+    let (done, total) = prd::progress(&prd_tasks);
+    eprintln!("[HATCHERY] PRD: {}/{} tasks (checkbox mode, {}/{} done)", total - done, total, done, total);
+
+    for task in &prd_tasks {
+        if !task.done {
+            nydus.add_task(
+                &format!("prd-{}", task.id),
+                &task.description,
+                vec![],
+                Priority::Normal,
+                Complexity::Medium,
+                None,
+            );
+        }
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -348,7 +408,6 @@ async fn main() -> Result<()> {
         Commands::Spawn {
             prd,
             workers,
-            mode,
             dir,
             verify,
             max_iterations,
@@ -364,13 +423,13 @@ async fn main() -> Result<()> {
             compaction_threshold,
             event_log,
             spawn_mode,
+            llm_decompose,
         } => {
             let working_dir = dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 
             let config = HatcheryConfig {
                 prd_path: prd,
                 workers,
-                mode,
                 working_dir: working_dir.clone(),
                 verify_cmd: verify.clone(),
                 max_iterations,
@@ -388,160 +447,55 @@ async fn main() -> Result<()> {
                 spawn_mode: spawn_mode.clone(),
             };
 
-            // Parse PRD
-            let prd_tasks = prd::parse_prd(&config.prd_path)?;
-            let (done, total) = prd::progress(&prd_tasks);
-            println!("[HATCHERY] PRD: {}/{} tasks complete", done, total);
+            // Create NydusConfig
+            let nydus_config = NydusConfig {
+                max_queens: config.workers,
+                verify_cmd: config.verify_cmd.clone(),
+                working_dir: config.working_dir.clone(),
+                git_isolation: config.worktree_isolation,
+                autosave_interval: Duration::from_secs(60),
+                max_iterations: config.max_iterations,
+            };
 
-            match config.mode {
-                Mode::Queen | Mode::SwarmHost => {
-                    // Create SwarmHostConfig
-                    let swarm_config = SwarmHostConfig {
-                        max_queens: config.workers,
-                        verify_cmd: config.verify_cmd.clone(),
-                        working_dir: config.working_dir.clone(),
-                        git_isolation: config.worktree_isolation,
-                        autosave_interval: Duration::from_secs(60),
-                        max_iterations: config.max_iterations,
-                    };
+            // Create Nydus
+            let mut nydus = Nydus::new(
+                NydusId("SH0".to_string()),
+                nydus_config,
+            )?;
 
-                    // Create SwarmHost
-                    let mut swarm = SwarmHost::new(
-                        SwarmHostId("SH0".to_string()),
-                        swarm_config,
-                    )?;
+            // Parse spawn mode
+            let spawn_mode: SpawnMode = config.spawn_mode.parse()
+                .unwrap_or(SpawnMode::PerTask);
 
-                    // Parse spawn mode
-                    let spawn_mode: SpawnMode = config.spawn_mode.parse()
-                        .unwrap_or(SpawnMode::PerTask);
+            let completion_config = CompletionConfig::default();
 
-                    let completion_config = CompletionConfig::default();
-
-                    // Register Queen actors
-                    for i in 0..config.workers {
-                        let queen_id = QueenId(format!("Q{}", i));
-                        swarm.register_queen_actor(
-                            queen_id,
-                            "sonnet".to_string(),
-                            spawn_mode,
-                            completion_config.clone(),
-                        )?;
-                    }
-
-                    // Add PRD tasks to DAG (only uncompleted ones)
-                    for task in &prd_tasks {
-                        if !task.done {
-                            swarm.add_task(
-                                &format!("prd-{}", task.id),
-                                &task.description,
-                                vec![],  // no dependencies for now
-                                Priority::Normal,
-                                Complexity::Medium,
-                                None,
-                            );
-                        }
-                    }
-
-                    // Run event-driven loop
-                    let start = Instant::now();
-                    println!("[HATCHERY] Starting event-driven loop (spawn mode: {})", spawn_mode);
-
-                    swarm.run().await?;
-
-                    // Shutdown
-                    swarm.shutdown().await?;
-
-                    let elapsed = start.elapsed().as_secs();
-                    let progress = swarm.progress();
-                    println!("\n[HATCHERY] Result: {}/{} tasks complete in {}s",
-                        progress.completed, progress.total_tasks, elapsed);
-                }
-
-                Mode::BroodLord => {
-                    // Create SwarmHostConfig
-                    let swarm_config = SwarmHostConfig {
-                        max_queens: config.workers,
-                        verify_cmd: config.verify_cmd.clone(),
-                        working_dir: config.working_dir.clone(),
-                        git_isolation: config.worktree_isolation,
-                        autosave_interval: Duration::from_secs(60),
-                        max_iterations: config.max_iterations,
-                    };
-
-                    // Create BroodLord
-                    let bl_config = BroodLordConfig {
-                        max_swarm_hosts: 4,
-                        default_swarm_config: swarm_config.clone(),
-                        max_total_iterations: config.max_iterations,
-                    };
-                    let mut lord = BroodLord::new(bl_config, Box::new(NullChannel::new()));
-
-                    // Create one SwarmHost with all tasks
-                    let mut swarm = SwarmHost::new(SwarmHostId("SH0".to_string()), swarm_config)?;
-
-                    // Parse spawn mode
-                    let spawn_mode: SpawnMode = config.spawn_mode.parse()
-                        .unwrap_or(SpawnMode::PerTask);
-
-                    let completion_config = CompletionConfig::default();
-
-                    // Register Queen actors
-                    for i in 0..config.workers {
-                        let queen_id = QueenId(format!("Q{}", i));
-                        swarm.register_queen_actor(
-                            queen_id,
-                            "sonnet".to_string(),
-                            spawn_mode,
-                            completion_config.clone(),
-                        )?;
-                    }
-
-                    // Add PRD tasks to DAG
-                    for task in &prd_tasks {
-                        if !task.done {
-                            swarm.add_task(
-                                &format!("prd-{}", task.id),
-                                &task.description,
-                                vec![],
-                                Priority::Normal,
-                                Complexity::Medium,
-                                None,
-                            );
-                        }
-                    }
-
-                    // Add swarm to BroodLord
-                    lord.add_swarm("main", swarm, 100)?;
-
-                    // Run tick loop
-                    let start = Instant::now();
-                    loop {
-                        let tick_result = lord.tick().await?;
-                        let progress = lord.global_progress();
-                        println!("[HATCHERY] Tick {}: {}/{} tasks across {} swarms (active={} completed={})",
-                            tick_result.iteration,
-                            progress.completed_tasks, progress.total_tasks,
-                            progress.total_swarms, progress.active_swarms, progress.completed_swarms);
-
-                        if lord.is_complete() {
-                            break;
-                        }
-                        if tick_result.iteration >= config.max_iterations {
-                            println!("[HATCHERY] Max iterations reached");
-                            break;
-                        }
-                        tokio::time::sleep(Duration::from_secs(2)).await;
-                    }
-
-                    // Shutdown
-                    lord.shutdown().await?;
-
-                    let elapsed = start.elapsed().as_secs();
-                    let progress = lord.global_progress();
-                    println!("\n[HATCHERY] Result: {}/{} tasks complete in {}s",
-                        progress.completed_tasks, progress.total_tasks, elapsed);
-                }
+            // Register Queen actors
+            for i in 0..config.workers {
+                let queen_id = QueenId(format!("Q{}", i));
+                nydus.register_queen_actor(
+                    queen_id,
+                    "sonnet".to_string(),
+                    spawn_mode,
+                    completion_config.clone(),
+                )?;
             }
+
+            // Add tasks to DAG (LLM decomposition or fallback to checkboxes)
+            populate_dag(&mut nydus, &config.prd_path, &config.working_dir, llm_decompose).await?;
+
+            // Run event-driven loop
+            let start = Instant::now();
+            println!("[HATCHERY] Starting event-driven loop (spawn mode: {})", spawn_mode);
+
+            nydus.run().await?;
+
+            // Shutdown
+            nydus.shutdown().await?;
+
+            let elapsed = start.elapsed().as_secs();
+            let progress = nydus.progress();
+            println!("\n[HATCHERY] Result: {}/{} tasks complete in {}s",
+                progress.completed, progress.total_tasks, elapsed);
         }
 
         Commands::Status { prd, event_log } => {

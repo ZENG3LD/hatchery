@@ -240,7 +240,7 @@ mod tests {
 
         let msg = make_test_message(
             AgentId::Queen(QueenId("Q0".into())),
-            AgentId::SwarmHost(SwarmHostId::default()),
+            AgentId::Nydus(NydusId::default()),
             MessageType::StatusReport,
         );
         log.log(&msg);
@@ -253,7 +253,7 @@ mod tests {
         for i in 0..5 {
             let msg = make_test_message(
                 AgentId::Queen(QueenId(format!("Q{}", i))),
-                AgentId::SwarmHost(SwarmHostId::default()),
+                AgentId::Nydus(NydusId::default()),
                 MessageType::TaskProgress,
             );
             log.log(&msg);
@@ -267,7 +267,7 @@ mod tests {
         for i in 0..5 {
             let msg = make_test_message(
                 AgentId::Queen(QueenId(format!("Q{}", i))),
-                AgentId::SwarmHost(SwarmHostId::default()),
+                AgentId::Nydus(NydusId::default()),
                 MessageType::TaskProgress,
             );
             log.log(&msg);
@@ -284,7 +284,7 @@ mod tests {
         for i in 0..5 {
             let msg = make_test_message(
                 AgentId::Queen(QueenId(format!("Q{}", i))),
-                AgentId::SwarmHost(SwarmHostId::default()),
+                AgentId::Nydus(NydusId::default()),
                 MessageType::TaskProgress,
             );
             ids.push(msg.id.clone());
@@ -301,7 +301,7 @@ mod tests {
         let log = SqliteEventLog::in_memory().unwrap();
         let msg = make_test_message(
             AgentId::Operator,
-            AgentId::BroodLord,
+            AgentId::Nydus(NydusId::default()),
             MessageType::Shutdown,
         );
         log.log(&msg);
@@ -315,7 +315,7 @@ mod tests {
         for i in 0..3 {
             let msg = make_test_message(
                 AgentId::Queen(QueenId(format!("Q{}", i))),
-                AgentId::SwarmHost(SwarmHostId::default()),
+                AgentId::Nydus(NydusId::default()),
                 MessageType::StatusReport,
             );
             log.log(&msg);

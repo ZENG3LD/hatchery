@@ -1,8 +1,8 @@
-//! IPC protocol types for Hatchery CLI ↔ SwarmHost communication.
+//! IPC protocol types for Hatchery CLI ↔ Nydus communication.
 
 use serde::{Deserialize, Serialize};
 
-/// Request from CLI to SwarmHost (sent as JSON line over TCP).
+/// Request from CLI to Nydus (sent as JSON line over TCP).
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "cmd")]
 pub enum IpcRequest {
@@ -49,7 +49,7 @@ pub enum IpcRequest {
     Ping,
 }
 
-/// Response from SwarmHost to CLI.
+/// Response from Nydus to CLI.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "status")]
 pub enum IpcResponse {

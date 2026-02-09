@@ -4,8 +4,8 @@
 //! at `~/.claude/projects/{project}/{session_id}.jsonl`.
 //!
 //! Recovery protocol (2 steps):
-//! 1. SwarmHost detects dead Queen, reads stored session_id
-//! 2. SwarmHost spawns new Queen with `--resume {session_id}` —
+//! 1. Nydus detects dead Queen, reads stored session_id
+//! 2. Nydus spawns new Queen with `--resume {session_id}` —
 //!    Claude Code restores full conversation context automatically
 
 use std::collections::HashMap;
@@ -163,7 +163,7 @@ pub enum RecoveryReason {
     FatalError(String),
 }
 
-/// Instructions for SwarmHost on how to respawn a Queen.
+/// Instructions for Nydus on how to respawn a Queen.
 #[derive(Debug, Clone)]
 pub struct RecoveryPlan {
     /// Which Queen to recover
