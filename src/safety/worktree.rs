@@ -260,6 +260,7 @@ impl WorktreeManager {
             .args([
                 "merge",
                 "--no-ff",
+                "--allow-unrelated-histories",
                 "-X", "theirs",
                 branch_name,
                 "-m",
