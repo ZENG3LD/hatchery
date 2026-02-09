@@ -59,9 +59,9 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
 
-        /// Enable git worktree isolation per worker (each worker gets its own branch).
+        /// Disable git worktree isolation per worker (enabled by default).
         #[arg(long)]
-        worktree: bool,
+        no_worktree: bool,
 
         /// Enable safe-mode: restrict dangerous commands in worker prompts.
         #[arg(long)]
@@ -465,7 +465,7 @@ async fn main() -> Result<()> {
             stall_threshold,
             progress,
             verbose,
-            worktree,
+            no_worktree,
             safe_mode,
             backend,
             api_url,
@@ -488,7 +488,7 @@ async fn main() -> Result<()> {
                 stall_threshold,
                 progress_path: progress,
                 verbose,
-                worktree_isolation: worktree,
+                worktree_isolation: !no_worktree,
                 safe_mode,
                 backend,
                 api_url,
@@ -533,6 +533,12 @@ async fn main() -> Result<()> {
                     spawn_mode,
                     completion_config.clone(),
                 )?;
+            }
+
+            // After Queens registration, automatically register Infestor when git isolation is enabled
+            if config.worktree_isolation {
+                nydus.register_infestor("sonnet");
+                eprintln!("[HATCHERY] Infestor automatically registered (git isolation enabled)");
             }
 
             // Add tasks to DAG (LLM decomposition or fallback to checkboxes)
