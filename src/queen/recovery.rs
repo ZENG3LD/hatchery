@@ -321,37 +321,15 @@ fn build_recovery_prompt(
         None => "No status was reported before crash".to_string(),
     };
 
-    format!(
-        r#"## RECOVERY NOTICE — You are resuming from a crashed session
-
-{reason_str}.
-
-### Context
-- Queen ID: {queen_id}
-- {task_str}
-- {status_str}
-- Recovery attempt: #{attempt}
-- Session started: {started}
-
-### Recovery Protocol
-1. Re-read the PRD to understand overall progress
-2. Check git status to see what files were modified
-3. Determine what was completed vs what still needs doing
-4. Report your findings via @hatchery:status
-5. Continue working from where you left off
-
-### Rules
-- Do NOT redo work that's already complete (check git log)
-- Report what you find immediately via @hatchery:knowledge
-- If you can't determine the state, escalate via @hatchery:escalate
-
-{discipline}
-"#,
-        queen_id = queen_id.0,
-        attempt = record.recovery_count + 1,
-        started = record.started_at.format("%Y-%m-%d %H:%M:%S UTC"),
-        discipline = crate::core::prompts::orchestration_discipline_block(),
-    )
+    let template = crate::core::prompts::recovery_notice_template();
+    template
+        .replace("{reason}", reason_str)
+        .replace("{queen_id}", &queen_id.0)
+        .replace("{task_str}", &task_str)
+        .replace("{status_str}", &status_str)
+        .replace("{attempt}", &(record.recovery_count + 1).to_string())
+        .replace("{started}", &record.started_at.format("%Y-%m-%d %H:%M:%S UTC").to_string())
+        .replace("{discipline}", crate::core::prompts::orchestration_discipline_block())
 }
 
 // ============================================================================

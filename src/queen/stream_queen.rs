@@ -472,11 +472,8 @@ fn format_task_prompt(task: &Task, context: &TaskContext) -> String {
     let mut prompt = String::new();
 
     // Manager role preamble
-    prompt.push_str("## Your Role: Queen Manager\n\n");
-    prompt.push_str("You are a MANAGER. Do NOT implement anything yourself.\n");
-    prompt.push_str("Decompose the task below into subtasks and spawn worker agents using the Task tool.\n");
-    prompt.push_str("Available agent types: rust-implementer, implementer, research-agent, rust-expert, Explore.\n");
-    prompt.push_str("Launch independent agents in PARALLEL. Only serialize when there are dependencies.\n\n");
+    prompt.push_str(crate::core::prompts::queen_preamble());
+    prompt.push_str("\n\n");
 
     // Orchestration discipline (survives context compression)
     prompt.push_str(&format!("{}\n\n", crate::core::prompts::orchestration_discipline_block()));

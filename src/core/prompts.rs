@@ -5,23 +5,15 @@
 //! - Nydus coordinator: tactical coordinator making scheduling decisions
 //! - Validator reviewer: code/task quality reviewer
 
+/// Queen manager role preamble — explains the manager role and available agent types.
+pub fn queen_preamble() -> &'static str {
+    include_str!("../../prompts/queen_preamble.md")
+}
+
 /// Orchestration discipline rules — injected into every compaction carry-over.
 /// These rules survive context compression to prevent "dumb iterator" degradation.
 pub fn orchestration_discipline_block() -> &'static str {
-    r#"## Orchestration Discipline (CRITICAL — survives context compression)
-These rules MUST be followed even after context window compression:
-1. You are a MANAGER — never do implementation work, always spawn agents
-2. After each agent completes: check results, update progress, spawn next task if needed
-3. Track progress — never assign tasks that are blocked by incomplete dependencies
-4. Share discoveries in your output — they will be captured automatically by Nydus
-5. If context was compressed, re-read the task description before continuing
-6. Report completion ONLY when ALL subtasks are verified done
-7. Use parallel agent spawning when tasks are independent
-8. Use `hatchery memory` CLI to share discoveries with other Queens
-9. Use `hatchery mailbox` CLI to communicate with other agents
-
-**CRITICAL MODEL RULE**: When spawning ANY sub-agents (Task tool), you MUST use model: "sonnet".
-NEVER use "haiku", "opus", or any other model. ALL agents MUST be Sonnet. This is a strict cost control requirement."#
+    include_str!("../../prompts/orchestration_discipline.md")
 }
 
 /// Hatchery CLI tools documentation for Queen prompts.
@@ -29,43 +21,12 @@ NEVER use "haiku", "opus", or any other model. ALL agents MUST be Sonnet. This i
 /// This block tells Queens they can interact with SharedMemory and Mailbox
 /// during execution via the `hatchery` CLI binary.
 pub fn hatchery_cli_tools_block() -> &'static str {
-    r#"## Hatchery CLI (available via bash)
+    include_str!("../../prompts/hatchery_cli_tools.md")
+}
 
-### Shared Memory — read/write knowledge visible to all Queens
-```bash
-hatchery memory read --key "api-endpoints"        # read specific key
-hatchery memory read --pattern "config:"          # search by pattern
-hatchery memory list                               # list all keys
-hatchery memory write --key "discovery:auth" --value '{"method":"HMAC"}'
-hatchery memory info                               # show metadata
-```
-
-### Messaging — communicate with other agents
-```bash
-hatchery mailbox send --to "queen:Q1" --message "need auth module first"
-hatchery mailbox send --to "swarmhost:SH0" --message "found critical bug"
-hatchery mailbox read --limit 10
-hatchery mailbox read --from "queen:Q0"
-```
-
-### Validation — check your work before reporting done
-```bash
-hatchery validate --cmd "cargo check"
-```
-
-### WHEN TO USE
-- Share discoveries so other Queens benefit
-- Coordinate if your task depends on another Queen's output
-- Check messages for updates from Nydus or other Queens
-- Validate before reporting completion
-
-### IMPORTANT
-- Memory writes are visible to ALL Queens and Nydus within seconds
-- Use descriptive key names with namespaces (e.g. "task:T1:result", "config:api-base")
-- Don't spam writes — write meaningful, consolidated entries
-
-**CRITICAL MODEL RULE**: When spawning ANY sub-agents (Task tool), you MUST use model: "sonnet".
-NEVER use "haiku", "opus", or any other model. ALL agents MUST be Sonnet. This is a strict cost control requirement."#
+/// Recovery notice template — explains to a recovering Queen what happened and what to do.
+pub fn recovery_notice_template() -> &'static str {
+    include_str!("../../prompts/recovery_notice.md")
 }
 
 /// Get the default system prompt for a given role.
@@ -117,7 +78,30 @@ mod tests {
 
     #[test]
     fn test_no_hatchery_protocol_in_any_prompt() {
+        assert!(!queen_preamble().contains("@hatchery:"));
         assert!(!orchestration_discipline_block().contains("@hatchery:"));
         assert!(!hatchery_cli_tools_block().contains("@hatchery:"));
+        assert!(!recovery_notice_template().contains("@hatchery:"));
+    }
+
+    #[test]
+    fn test_queen_preamble_exists() {
+        let preamble = queen_preamble();
+        assert!(preamble.contains("Queen Manager"));
+        assert!(preamble.contains("You are a MANAGER"));
+        assert!(preamble.contains("CRITICAL MODEL RULE"));
+        assert!(preamble.contains("sonnet"));
+    }
+
+    #[test]
+    fn test_recovery_notice_template_has_placeholders() {
+        let template = recovery_notice_template();
+        assert!(template.contains("{reason}"));
+        assert!(template.contains("{queen_id}"));
+        assert!(template.contains("{task_str}"));
+        assert!(template.contains("{status_str}"));
+        assert!(template.contains("{attempt}"));
+        assert!(template.contains("{started}"));
+        assert!(template.contains("{discipline}"));
     }
 }
