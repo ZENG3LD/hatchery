@@ -246,6 +246,7 @@ mod tests {
             skill_hint: None,
             knowledge_entries: vec![],
             other_tasks_summary: None,
+            rejection_feedback: None,
         };
 
         // Send assign command

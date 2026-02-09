@@ -83,6 +83,10 @@ pub struct DagTask {
     pub completed_at: Option<DateTime<Utc>>,
     /// Optional hint for which skill/pattern to use (e.g., "carousel", "ralph")
     pub skill_hint: Option<String>,
+    /// Number of times this task has been rejected by Infestor and requeued
+    pub retry_count: usize,
+    /// Feedback from previous rejection(s), used to guide the Queen on retry
+    pub rejection_feedback: Vec<String>,
 }
 
 /// Result of a completed task.
@@ -219,6 +223,26 @@ impl TaskDag {
                 1
             };
             task.status = DagTaskStatus::Failed { error, attempts };
+        }
+    }
+
+    /// Requeue a completed task back to Ready with rejection feedback.
+    ///
+    /// Used when Infestor rejects a task — it goes back to Ready so a Queen can retry.
+    /// Returns true if successfully requeued.
+    pub fn requeue_with_feedback(&mut self, task_id: &str, feedback: String) -> bool {
+        if let Some(task) = self.tasks.get_mut(task_id) {
+            task.status = DagTaskStatus::Ready;
+            task.assigned_to = None;
+            task.retry_count += 1;
+            task.rejection_feedback.push(feedback);
+            // Clear completion state
+            task.result = None;
+            task.started_at = None;
+            task.completed_at = None;
+            true
+        } else {
+            false
         }
     }
 
@@ -411,6 +435,8 @@ mod tests {
             started_at: None,
             completed_at: None,
             skill_hint: None,
+            retry_count: 0,
+            rejection_feedback: Vec::new(),
         }
     }
 

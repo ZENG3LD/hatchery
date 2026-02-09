@@ -565,6 +565,7 @@ mod tests {
             skill_hint: None,
             knowledge_entries: vec![],
             other_tasks_summary: None,
+            rejection_feedback: None,
         };
 
         let prompt = format_task_prompt(&task, &context);
@@ -601,6 +602,7 @@ mod tests {
             skill_hint: None,
             knowledge_entries: vec![],
             other_tasks_summary: None,
+            rejection_feedback: None,
         };
 
         let prompt = format_task_prompt(&task, &context);

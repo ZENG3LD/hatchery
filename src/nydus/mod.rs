@@ -21,7 +21,7 @@ use self::mailbox::event_bus::EventBus;
 use crate::core::task_dag::{TaskDag, DagTask, DagTaskStatus, Priority, Complexity, DagStats};
 use crate::core::validator::{Validator, ValidationResult};
 use crate::core::shared_memory::SharedMemory;
-use crate::safety::worktree::{WorktreeManager, MergeResult};
+use crate::safety::worktree::{WorktreeManager, MergeResult, SyncResult};
 use crate::queen::recovery::{SessionTracker, RecoveryManager, RecoveryConfig};
 use crate::nydus::tick::HeuristicTick;
 
@@ -563,6 +563,8 @@ impl Nydus {
             started_at: None,
             completed_at: None,
             skill_hint,
+            retry_count: 0,
+            rejection_feedback: Vec::new(),
         };
 
         self.task_dag.add_task(task);
@@ -993,6 +995,56 @@ impl Nydus {
                 Ok(MergeResult::Success { commit_sha }) => {
                     eprintln!("[Nydus] Successfully merged {} to main: {}", queen_id.0, commit_sha);
 
+                    // Post-merge verification: run cargo check on the main repository
+                    eprintln!("[Nydus] Running post-merge verification for task {}", task_id);
+                    let check_output = tokio::process::Command::new("cargo")
+                        .arg("check")
+                        .arg("--workspace")
+                        .current_dir(&self.config.working_dir)
+                        .output()
+                        .await;
+
+                    match check_output {
+                        Ok(output) if !output.status.success() => {
+                            // Verification failed — revert merge and requeue task
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            eprintln!(
+                                "[Nydus] Post-merge verification failed for task {}, reverting merge",
+                                task_id
+                            );
+
+                            // Revert the merge
+                            if let Err(e) = worktree_mgr.revert_last_merge() {
+                                eprintln!("[Nydus] Failed to revert merge for {}: {}", task_id, e);
+                            } else {
+                                eprintln!("[Nydus] Reverted merge for task {}", task_id);
+                            }
+
+                            // Requeue the task with feedback
+                            let feedback = format!("Post-merge cargo check failed:\n{}", stderr);
+                            let requeued = self.task_dag.requeue_with_feedback(task_id, feedback);
+                            if requeued {
+                                eprintln!("[Nydus] Task {} requeued with compilation error feedback", task_id);
+                                // Try to schedule the requeued task
+                                self.try_schedule().await?;
+                            } else {
+                                eprintln!("[Nydus] Failed to requeue task {}", task_id);
+                            }
+
+                            // Return early without syncing worktrees
+                            return Ok(());
+                        }
+                        Ok(_) => {
+                            // Verification passed
+                            eprintln!("[Nydus] Post-merge verification passed for task {}", task_id);
+                        }
+                        Err(e) => {
+                            // Failed to run cargo check (command not found, etc.)
+                            eprintln!("[Nydus] Warning: Failed to run post-merge verification: {}", e);
+                            // Continue with merge (don't block on verification failures)
+                        }
+                    }
+
                     // Send approval message to operator
                     let approval_msg = SwarmMessage {
                         id: uuid::Uuid::new_v4().to_string(),
@@ -1010,6 +1062,17 @@ impl Nydus {
                         visibility: Visibility::default_internal(),
                     };
                     self.mailbox.lock().send(approval_msg);
+
+                    // Sync all other Queens' worktrees with the latest main
+                    let results = worktree_mgr.sync_all_with_base(Some(queen_id));
+                    for (qid, result) in &results {
+                        match result {
+                            SyncResult::Synced => eprintln!("[Nydus] Synced {} worktree with main", qid.0),
+                            SyncResult::Skipped(reason) => eprintln!("[Nydus] Skipped sync for {}: {}", qid.0, reason),
+                            SyncResult::ConflictAborted => eprintln!("[Nydus] Sync conflict in {}, aborted", qid.0),
+                            SyncResult::Error(e) => eprintln!("[Nydus] Sync error for {}: {}", qid.0, e),
+                        }
+                    }
                 }
                 Ok(MergeResult::Conflict { files }) => {
                     eprintln!(
@@ -1048,30 +1111,72 @@ impl Nydus {
         Ok(())
     }
 
-    /// Handle Infestor rejection — escalate to operator.
+    /// Handle Infestor rejection — requeue with feedback or escalate.
     async fn handle_infestor_reject(
         &mut self,
         queen_id: &QueenId,
         task_id: &str,
         reason: &str,
     ) -> Result<()> {
-        // Send rejection escalation to operator
-        let rejection_msg = SwarmMessage {
-            id: uuid::Uuid::new_v4().to_string(),
-            from: AgentId::Infestor(InfestorId("infestor-0".to_string())),
-            to: AgentId::Operator,
-            msg_type: MessageType::Escalation,
-            payload: serde_json::json!({
-                "queen_id": queen_id.0,
-                "task_id": task_id,
-                "status": "rejected_by_infestor",
-                "reason": reason,
-            }),
-            timestamp: Utc::now(),
-            correlation_id: None,
-            visibility: Visibility::default_internal(),
-        };
-        self.mailbox.lock().send(rejection_msg);
+        const MAX_RETRIES: usize = 3;
+
+        let retry_count = self.task_dag.get(task_id)
+            .map(|t| t.retry_count)
+            .unwrap_or(0);
+
+        if retry_count >= MAX_RETRIES {
+            eprintln!(
+                "[Nydus] Task {} rejected {} times, escalating to operator",
+                task_id, retry_count
+            );
+            // Send escalation (existing code)
+            let rejection_msg = SwarmMessage {
+                id: uuid::Uuid::new_v4().to_string(),
+                from: AgentId::Infestor(InfestorId("infestor-0".to_string())),
+                to: AgentId::Operator,
+                msg_type: MessageType::Escalation,
+                payload: serde_json::json!({
+                    "queen_id": queen_id.0,
+                    "task_id": task_id,
+                    "status": "rejected_by_infestor_max_retries",
+                    "reason": reason,
+                    "retry_count": retry_count,
+                }),
+                timestamp: Utc::now(),
+                correlation_id: None,
+                visibility: Visibility::default_internal(),
+            };
+            self.mailbox.lock().send(rejection_msg);
+        } else {
+            // Requeue with feedback
+            let requeued = self.task_dag.requeue_with_feedback(task_id, reason.to_string());
+            if requeued {
+                eprintln!(
+                    "[Nydus] Task {} rejected (attempt {}/{}), requeued with feedback: {}",
+                    task_id, retry_count + 1, MAX_RETRIES, reason
+                );
+                self.try_schedule().await?;
+            } else {
+                eprintln!("[Nydus] Failed to requeue task {}, escalating", task_id);
+                // Fallback escalation
+                let rejection_msg = SwarmMessage {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    from: AgentId::Infestor(InfestorId("infestor-0".to_string())),
+                    to: AgentId::Operator,
+                    msg_type: MessageType::Escalation,
+                    payload: serde_json::json!({
+                        "queen_id": queen_id.0,
+                        "task_id": task_id,
+                        "status": "rejected_requeue_failed",
+                        "reason": reason,
+                    }),
+                    timestamp: Utc::now(),
+                    correlation_id: None,
+                    visibility: Visibility::default_internal(),
+                };
+                self.mailbox.lock().send(rejection_msg);
+            }
+        }
 
         Ok(())
     }
@@ -1119,6 +1224,7 @@ impl Nydus {
                         skill_hint: None,
                         knowledge_entries,
                         other_tasks_summary: Some(other_tasks_summary),
+                        rejection_feedback: None,
                     };
 
                     let task = Task {
@@ -1173,6 +1279,8 @@ impl Nydus {
             started_at: None,
             completed_at: None,
             skill_hint: None,
+            retry_count: 0,
+            rejection_feedback: Vec::new(),
         };
 
         self.task_dag.add_task(dag_task);
@@ -1260,11 +1368,32 @@ impl Nydus {
             .collect();
 
         // Now assign tasks (no borrow conflict)
-        for (task_id, description, priority, blocked_by, created_at, skill_hint, queen_id) in assignments {
+        for (task_id, mut description, priority, blocked_by, created_at, skill_hint, queen_id) in assignments {
             // CRITICAL: Mark as assigned in DAG FIRST to prevent double-assignment race
             // If another try_schedule() runs before handle.assign() completes,
             // ready_tasks() will not return this task anymore
             self.task_dag.assign(&task_id, queen_id.clone());
+
+            // Get rejection feedback if present and prepend to description
+            let rejection_feedback = self.task_dag.get(&task_id)
+                .and_then(|t| {
+                    if t.rejection_feedback.is_empty() {
+                        None
+                    } else {
+                        Some(t.rejection_feedback.clone())
+                    }
+                });
+
+            // Prepend feedback to description if present
+            if let Some(ref feedback) = rejection_feedback {
+                let retry_count = self.task_dag.get(&task_id).map(|t| t.retry_count).unwrap_or(0);
+                description = format!(
+                    "{}\n\n## PREVIOUS REJECTION (attempt #{}):\n{}\n\nFix the issues above and resubmit.",
+                    description,
+                    retry_count,
+                    feedback.join("\n---\n")
+                );
+            }
 
             let task = Task {
                 id: TaskId(task_id.clone()),
@@ -1286,6 +1415,7 @@ impl Nydus {
                 skill_hint,
                 knowledge_entries: knowledge_entries.clone(),
                 other_tasks_summary: Some(other_tasks_summary),
+                rejection_feedback,
             };
 
             if let Some(handle) = self.handles.get(&queen_id) {
@@ -1518,6 +1648,7 @@ impl Nydus {
             skill_hint: None,
             knowledge_entries,
             other_tasks_summary: Some(other_tasks_summary),
+            rejection_feedback: None,
         };
 
         let task = Task {

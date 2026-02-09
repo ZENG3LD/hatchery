@@ -588,6 +588,7 @@ mod tests {
             skill_hint: None,
             knowledge_entries: vec![],
             other_tasks_summary: None,
+            rejection_feedback: None,
         };
         context.knowledge.insert("key1".to_string(), serde_json::json!("value1"));
         context.shared_state.insert("state1".to_string(), "state_value".to_string());
@@ -643,6 +644,7 @@ mod tests {
             skill_hint: None,
             knowledge_entries: vec![],
             other_tasks_summary: None,
+            rejection_feedback: None,
         };
 
         let msg1 = SwarmMessage {

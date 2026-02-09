@@ -177,6 +177,8 @@ pub struct TaskContext {
     pub knowledge_entries: Vec<String>,
     /// Information about other tasks being worked on by other Queens (for scope awareness)
     pub other_tasks_summary: Option<String>,
+    /// Feedback from previous rejection(s), used to guide the Queen on retry
+    pub rejection_feedback: Option<Vec<String>>,
 }
 
 /// Result of a completed task.

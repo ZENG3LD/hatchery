@@ -54,6 +54,19 @@ pub enum ConflictStrategy {
     Escalate,
 }
 
+/// Result of syncing a worktree with the base branch.
+#[derive(Debug, Clone)]
+pub enum SyncResult {
+    /// Successfully merged base branch into worktree
+    Synced,
+    /// Skipped (Queen has uncommitted changes or is excluded)
+    Skipped(String),
+    /// Merge conflict detected, aborted
+    ConflictAborted,
+    /// Error during sync
+    Error(String),
+}
+
 // ============================================================================
 // WorktreeManager
 // ============================================================================
@@ -383,6 +396,89 @@ impl WorktreeManager {
             Some(sid) => format!("hatchery/{}/{}", sid, queen_id.0),
             None => format!("hatchery/{}", queen_id.0),
         }
+    }
+
+    /// Sync all active worktrees with the latest base branch.
+    ///
+    /// After a merge to main, other Queens need to see the new code.
+    /// For each worktree:
+    /// 1. Skip if queen_id == skip_queen (the one that just merged)
+    /// 2. Check `git status --porcelain` — skip if dirty (Queen mid-task)
+    /// 3. Run `git merge {base_branch}` to pull latest code
+    /// 4. If merge conflicts, abort and log
+    pub fn sync_all_with_base(&self, skip_queen: Option<&QueenId>) -> Vec<(QueenId, SyncResult)> {
+        let mut results = Vec::new();
+
+        for (queen_id, info) in &self.worktrees {
+            // Skip the Queen that just merged
+            if let Some(skip) = skip_queen {
+                if queen_id == skip {
+                    continue;
+                }
+            }
+
+            // Check if worktree has uncommitted changes
+            let status_output = Command::new("git")
+                .args(["status", "--porcelain"])
+                .current_dir(&info.path)
+                .output();
+
+            match status_output {
+                Ok(output) => {
+                    let status_str = String::from_utf8_lossy(&output.stdout);
+                    if !status_str.trim().is_empty() {
+                        results.push((queen_id.clone(), SyncResult::Skipped("uncommitted changes".to_string())));
+                        continue;
+                    }
+                }
+                Err(e) => {
+                    results.push((queen_id.clone(), SyncResult::Error(format!("git status failed: {}", e))));
+                    continue;
+                }
+            }
+
+            // Merge base branch into worktree
+            let merge_output = Command::new("git")
+                .args(["merge", &self.base_branch, "--no-edit"])
+                .current_dir(&info.path)
+                .output();
+
+            match merge_output {
+                Ok(output) if output.status.success() => {
+                    results.push((queen_id.clone(), SyncResult::Synced));
+                }
+                Ok(_) => {
+                    // Merge failed (conflict) — abort
+                    let _ = Command::new("git")
+                        .args(["merge", "--abort"])
+                        .current_dir(&info.path)
+                        .output();
+                    results.push((queen_id.clone(), SyncResult::ConflictAborted));
+                }
+                Err(e) => {
+                    results.push((queen_id.clone(), SyncResult::Error(format!("git merge failed: {}", e))));
+                }
+            }
+        }
+
+        results
+    }
+
+    /// Revert the last merge commit on the base branch.
+    /// Used when post-merge verification fails.
+    pub fn revert_last_merge(&self) -> Result<()> {
+        let output = Command::new("git")
+            .args(["revert", "HEAD", "--no-edit"])
+            .current_dir(&self.repo_dir)
+            .output()
+            .context("Failed to run git revert")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("git revert failed: {}", stderr);
+        }
+
+        Ok(())
     }
 
     /// Internal: remove a worktree directory.
