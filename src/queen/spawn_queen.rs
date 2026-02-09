@@ -10,7 +10,8 @@ use crate::queen::pipe_process::{PipeProcess, PipeProcessOptions};
 use crate::queen::spawn_mode::{ClaudeEvent, SpawnMode};
 use anyhow::Result;
 use std::path::PathBuf;
-use tokio::sync::{broadcast, mpsc, watch};
+use std::sync::Arc;
+use tokio::sync::{broadcast, mpsc, watch, Notify};
 
 /// Configuration for SpawnQueen.
 #[derive(Debug, Clone)]
@@ -29,6 +30,8 @@ pub struct SpawnQueenConfig {
     pub ipc_port: Option<u16>,
     /// Setting sources for Claude Code (e.g., "user" to skip project CLAUDE.md).
     pub setting_sources: Option<String>,
+    /// Notify handle to wake Nydus when task completes.
+    pub wakeup_notify: Option<Arc<Notify>>,
 }
 
 impl Default for SpawnQueenConfig {
@@ -45,6 +48,7 @@ impl Default for SpawnQueenConfig {
             swarm_id: None,
             ipc_port: None,
             setting_sources: None,
+            wakeup_notify: None,
         }
     }
 }
@@ -67,12 +71,14 @@ pub fn spawn(
         status_rx,
     );
 
+    let wakeup_notify = config.wakeup_notify.clone();
     let join_handle = tokio::spawn(run_actor(
         config,
         cmd_rx,
         event_tx,
         status_tx,
         shutdown_rx,
+        wakeup_notify,
     ));
 
     Ok((handle, join_handle))
@@ -85,6 +91,7 @@ async fn run_actor(
     event_tx: mpsc::Sender<QueenEvent>,
     status_tx: watch::Sender<QueenStatus>,
     mut shutdown_rx: broadcast::Receiver<()>,
+    wakeup_notify: Option<Arc<Notify>>,
 ) {
     let id = config.id.clone();
     let completion_detector = CompletionDetector::new(config.completion.clone());
@@ -112,6 +119,7 @@ async fn run_actor(
                             &completion_detector,
                             &mut cmd_rx,
                             &mut shutdown_rx,
+                            &wakeup_notify,
                         ).await;
 
                         // Forum-style: report queued messages after task completion
@@ -143,6 +151,7 @@ async fn run_actor(
 }
 
 /// Execute a single task by spawning a new Claude Code process.
+#[allow(clippy::too_many_arguments)]
 async fn run_task(
     config: &SpawnQueenConfig,
     task: &Task,
@@ -155,6 +164,7 @@ async fn run_task(
     completion_detector: &CompletionDetector,
     cmd_rx: &mut mpsc::Receiver<QueenCommand>,
     shutdown_rx: &mut broadcast::Receiver<()>,
+    wakeup_notify: &Option<Arc<Notify>>,
 ) {
     // Build the task prompt
     let prompt = format_task_prompt(task, context, queued_messages);
@@ -292,6 +302,10 @@ async fn run_task(
                                     queen_id: id.clone(),
                                     status: QueenStatus::Idle,
                                 }).await;
+                                // Wake Nydus immediately for instant task scheduling
+                                if let Some(ref notify) = wakeup_notify {
+                                    notify.notify_one();
+                                }
                                 return;
                             }
                         }
@@ -341,6 +355,10 @@ async fn run_task(
                                         queen_id: id.clone(),
                                         status: QueenStatus::Idle,
                                     }).await;
+                                    // Wake Nydus immediately for instant task scheduling
+                                    if let Some(ref notify) = wakeup_notify {
+                                        notify.notify_one();
+                                    }
                                     return;
                                 }
                             }
@@ -362,6 +380,10 @@ async fn run_task(
                         queen_id: id.clone(),
                         status: QueenStatus::Idle,
                     }).await;
+                    // Wake Nydus immediately for instant task scheduling
+                    if let Some(ref notify) = wakeup_notify {
+                        notify.notify_one();
+                    }
                     return;
                 }
             }

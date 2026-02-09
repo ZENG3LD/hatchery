@@ -9,6 +9,7 @@ use std::time::Duration;
 use anyhow::{Result, anyhow};
 use chrono::Utc;
 use tokio::task::JoinHandle;
+use tokio::sync::Notify;
 
 use crate::core::types::*;
 use crate::queen::handle::{QueenHandle, QueenEvent};
@@ -107,6 +108,8 @@ pub struct Nydus {
     shutdown_rx: tokio::sync::watch::Receiver<bool>,
     /// Start time for uptime calculation
     started_at: std::time::Instant,
+    /// Notify handle for waking Nydus when a Queen completes a task
+    wakeup_notify: Arc<Notify>,
 }
 
 /// Result of a single tick (schedule + poll cycle).
@@ -186,6 +189,9 @@ impl Nydus {
             failed: 0,
         };
 
+        // Create wakeup notify for instant Queen completion handling
+        let wakeup_notify = Arc::new(Notify::new());
+
         Ok(Self {
             id,
             handles: HashMap::new(),
@@ -207,6 +213,7 @@ impl Nydus {
             shutdown_tx,
             shutdown_rx,
             started_at: std::time::Instant::now(),
+            wakeup_notify,
         })
     }
 
@@ -333,6 +340,7 @@ impl Nydus {
                     swarm_id: Some(self.id.0.clone()),
                     ipc_port: self.ipc_port,
                     setting_sources: self.config.setting_sources.clone(),
+                    wakeup_notify: Some(self.wakeup_notify.clone()),
                 };
                 stream_queen::spawn(config, event_tx, shutdown_rx)?
             }
@@ -349,6 +357,7 @@ impl Nydus {
                     swarm_id: Some(self.id.0.clone()),
                     ipc_port: self.ipc_port,
                     setting_sources: self.config.setting_sources.clone(),
+                    wakeup_notify: Some(self.wakeup_notify.clone()),
                 };
                 spawn_queen::spawn(config, event_tx, shutdown_rx)?
             }
@@ -449,6 +458,10 @@ impl Nydus {
                 }
                 Some(msg_notification) = message_delivery_rx.recv() => {
                     self.handle_message_delivery(msg_notification).await;
+                }
+                _ = self.wakeup_notify.notified() => {
+                    // Queen completed a task, immediately try to schedule ready tasks
+                    self.try_schedule().await?;
                 }
                 _ = tokio::time::sleep(interval) => {
                     self.periodic_maintenance().await?;

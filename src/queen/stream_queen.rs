@@ -13,9 +13,10 @@ use crate::queen::pipe_process::{PipeProcessOptions, build_stream_command};
 use crate::queen::spawn_mode::{ClaudeEvent, SpawnMode, StreamInput};
 use anyhow::{Context as _, Result};
 use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::{broadcast, mpsc, watch};
+use tokio::sync::{broadcast, mpsc, watch, Notify};
 
 // ============================================================================
 // Configuration
@@ -46,6 +47,8 @@ pub struct StreamQueenConfig {
     pub ipc_port: Option<u16>,
     /// Setting sources for Claude Code (e.g., "user" to skip project CLAUDE.md).
     pub setting_sources: Option<String>,
+    /// Notify handle to wake Nydus when task completes.
+    pub wakeup_notify: Option<Arc<Notify>>,
 }
 
 impl StreamQueenConfig {
@@ -63,6 +66,7 @@ impl StreamQueenConfig {
             swarm_id: None,
             ipc_port: None,
             setting_sources: None,
+            wakeup_notify: None,
         }
     }
 }
@@ -167,6 +171,7 @@ pub fn spawn(
 
     // Spawn the main actor task
     let completion_detector = CompletionDetector::new(config.completion);
+    let wakeup_notify = config.wakeup_notify;
     let join_handle = tokio::spawn(run_actor(
         config.id,
         child,
@@ -179,6 +184,7 @@ pub fn spawn(
         stdin_rx,
         shutdown_rx,
         completion_detector,
+        wakeup_notify,
     ));
 
     Ok((handle, join_handle))
@@ -201,6 +207,7 @@ async fn run_actor(
     stdin_rx: mpsc::Receiver<String>,
     mut shutdown_rx: broadcast::Receiver<()>,
     completion_detector: CompletionDetector,
+    wakeup_notify: Option<Arc<Notify>>,
 ) {
     // Internal state
     let mut session_id: Option<String> = None;
@@ -362,6 +369,10 @@ async fn run_actor(
                                     queen_id: id.clone(),
                                     status: QueenStatus::Idle,
                                 }).await;
+                                // Wake Nydus immediately for instant task scheduling
+                                if let Some(ref notify) = wakeup_notify {
+                                    notify.notify_one();
+                                }
                             }
                             current_task = None;
                             turn_count = 0;
