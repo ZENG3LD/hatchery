@@ -408,6 +408,7 @@ async fn populate_dag(
                         gt.priority,
                         gt.complexity,
                         gt.skill_hint.clone(),
+                        None, // LLM decomposed tasks don't have verify_cmd yet
                     );
                 }
                 let stats = nydus.progress();
@@ -436,6 +437,7 @@ async fn populate_dag(
                 Priority::Normal,
                 Complexity::Medium,
                 task.skill_hint.clone(),
+                task.verify_cmd.clone(),
             );
         }
     }

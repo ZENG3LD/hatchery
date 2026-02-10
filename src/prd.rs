@@ -52,6 +52,9 @@ pub fn parse_prd_content(content: &str) -> Result<Vec<Task>> {
             // Parse skill hint from description
             let skill_hint = extract_skill_hint(&description);
 
+            // Parse verification command from description
+            let verify_cmd = extract_verify_cmd(&description);
+
             tasks.push(Task {
                 id,
                 description,
@@ -59,6 +62,7 @@ pub fn parse_prd_content(content: &str) -> Result<Vec<Task>> {
                 line_number,
                 dependencies: current_track_dependencies.clone(),
                 skill_hint,
+                verify_cmd,
             });
             id += 1;
         }
@@ -82,6 +86,14 @@ fn extract_skill_hint(description: &str) -> Option<String> {
     skill_re
         .captures(description)
         .and_then(|cap| cap.get(1).map(|m| m.as_str().to_lowercase()))
+}
+
+/// Extract verification command from description like "Verify: `cargo test -p kv-core` passes."
+fn extract_verify_cmd(description: &str) -> Option<String> {
+    let verify_re = Regex::new(r"(?i)Verify:\s*`([^`]+)`").expect("valid regex");
+    verify_re
+        .captures(description)
+        .and_then(|cap| cap.get(1).map(|m| m.as_str().trim().to_string()))
 }
 
 /// Count completed vs total tasks.
@@ -190,6 +202,7 @@ mod tests {
         assert_eq!(tasks[1].description, "AC-1.2: Second task (done)");
         assert!(tasks[0].dependencies.is_empty());
         assert_eq!(tasks[0].skill_hint, None);
+        assert_eq!(tasks[0].verify_cmd, None);
     }
 
     #[test]
@@ -216,6 +229,22 @@ mod tests {
         assert_eq!(tasks[4].description, "prd-5: Advanced features USE /research SKILL");
         assert!(tasks[4].dependencies.is_empty());
         assert_eq!(tasks[4].skill_hint, Some("research".to_string()));
+        assert_eq!(tasks[4].verify_cmd, None);
+    }
+
+    #[test]
+    fn test_parse_verify_cmd() {
+        const PRD_WITH_VERIFY: &str = r#"# Test PRD with Verify Commands
+
+- [ ] prd-1: Implement feature X. Verify: `cargo test -p kv-core` passes.
+- [ ] prd-2: Fix bug Y. Verify: `cargo check --workspace` passes.
+- [ ] prd-3: Add docs (no verification)
+"#;
+        let tasks = parse_prd_content(PRD_WITH_VERIFY).unwrap();
+        assert_eq!(tasks.len(), 3);
+        assert_eq!(tasks[0].verify_cmd, Some("cargo test -p kv-core".to_string()));
+        assert_eq!(tasks[1].verify_cmd, Some("cargo check --workspace".to_string()));
+        assert_eq!(tasks[2].verify_cmd, None);
     }
 
     #[test]

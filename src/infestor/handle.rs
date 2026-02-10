@@ -39,7 +39,22 @@ impl InfestorHandle {
         task_id: String,
         branch_name: String,
         worktree_path: PathBuf,
+        task_description: &str,
+        verify_cmd: Option<&str>,
     ) -> Result<(), anyhow::Error> {
+        // Build verification command section
+        let verify_section = if let Some(cmd) = verify_cmd {
+            format!(
+                "## Verification Command\n\n\
+                The task requires this verification command to pass:\n\
+                ```\n{}\n```\n\n\
+                You MUST run this command and it MUST pass for approval.\n\n",
+                cmd
+            )
+        } else {
+            "## Verification Command\n\nNo verification command specified for this task.\n\n".to_string()
+        };
+
         // Build review prompt with instructions
         let review_description = format!(
             "## Review Request\n\n\
@@ -47,11 +62,20 @@ impl InfestorHandle {
             **Task**: {task_id}\n\
             **Branch**: {branch_name}\n\
             **Worktree**: {worktree_path}\n\n\
+            ## Task Description\n\n\
+            {task_description}\n\n\
+            {verify_section}\
             ## Instructions\n\n\
             1. Run `git diff main..HEAD` in the worktree path to see only the Queen's changes vs main\n\
             2. Run `cargo check --workspace` to verify compilation\n\
-            3. Review the diff for correctness, scope, and quality\n\
-            4. Respond with your verdict\n\n\
+            3. **Run the verification command** (if specified) to validate task completion\n\
+            4. Review the diff against the task description — does it actually implement what was requested?\n\
+            5. Respond with your verdict\n\n\
+            ## Approval Criteria\n\n\
+            - Code MUST compile (cargo check passes)\n\
+            - **Verification command MUST pass** (if specified)\n\
+            - Changes must match the task description — stub code or placeholder implementations are NOT acceptable\n\
+            - Code must follow existing patterns and be correct\n\n\
             ## Response Format\n\n\
             You MUST end your response with exactly one of:\n\n\
             VERDICT: APPROVE\n\
@@ -63,6 +87,8 @@ impl InfestorHandle {
             task_id = task_id,
             branch_name = branch_name,
             worktree_path = worktree_path.display(),
+            task_description = task_description,
+            verify_section = verify_section,
         );
 
         let task = Task {

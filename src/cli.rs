@@ -18,6 +18,8 @@ pub struct Task {
     pub dependencies: Vec<String>,
     /// Skill hint extracted from task description (e.g., "carousel").
     pub skill_hint: Option<String>,
+    /// Verification command extracted from description (e.g., "cargo test -p kv-core").
+    pub verify_cmd: Option<String>,
 }
 
 /// Configuration for a hatchery run.

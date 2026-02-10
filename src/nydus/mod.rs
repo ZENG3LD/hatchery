@@ -577,6 +577,7 @@ impl Nydus {
         priority: Priority,
         complexity: Complexity,
         skill_hint: Option<String>,
+        verify_cmd: Option<String>,
     ) {
         let task = DagTask {
             id: id.to_string(),
@@ -598,6 +599,7 @@ impl Nydus {
             skill_hint,
             retry_count: 0,
             rejection_feedback: Vec::new(),
+            verify_cmd,
         };
 
         self.task_dag.add_task(task);
@@ -814,6 +816,13 @@ impl Nydus {
                                 task_id.0, queen_id.0
                             );
 
+                            // Look up task description and verify_cmd from DAG
+                            let (task_description, verify_cmd) = if let Some(dag_task) = self.task_dag.get(&task_id.0) {
+                                (dag_task.description.clone(), dag_task.verify_cmd.clone())
+                            } else {
+                                (format!("Task {}", task_id.0), None)
+                            };
+
                             // Send review command to Infestor (now async)
                             if let Some(ref infestor_handle) = self.infestor {
                                 if let Err(e) = infestor_handle.review(
@@ -821,6 +830,8 @@ impl Nydus {
                                     task_id.0.clone(),
                                     branch_name,
                                     worktree_path.clone(),
+                                    &task_description,
+                                    verify_cmd.as_deref(),
                                 ).await {
                                     eprintln!("[Nydus] Failed to send review task to Infestor: {}", e);
                                 }
@@ -1025,16 +1036,16 @@ impl Nydus {
                     );
                     self.handle_infestor_reject(&queen_id, &original_task_id, &reason).await?;
                 } else {
-                    // No clear verdict — treat as auto-approve (don't block on review failures)
-                    eprintln!("[Nydus] Infestor did not provide clear verdict (${:.2}), auto-approving", cost_usd);
-                    self.handle_infestor_approve(&queen_id, &original_task_id, "Auto-approved (no clear verdict)").await?;
+                    // No clear verdict — REJECT (do not auto-approve)
+                    eprintln!("[Nydus] Infestor did not provide clear verdict (${:.2}), rejecting", cost_usd);
+                    self.handle_infestor_reject(&queen_id, &original_task_id, "No clear verdict from Infestor review").await?;
                 }
             }
             QueenEvent::TaskFailed { task_id, error, .. } => {
-                // Review failed — AUTO-APPROVE (if reviewer can't review, let code through)
+                // Review failed — REJECT or escalate (do NOT auto-approve failed reviews)
                 let (queen_id, original_task_id) = parse_review_task_id(&task_id.0);
-                eprintln!("[Nydus] Infestor review failed, auto-approving: {}", error);
-                self.handle_infestor_approve(&queen_id, &original_task_id, "Auto-approved (review process failed)").await?;
+                eprintln!("[Nydus] Infestor review process failed, rejecting task: {}", error);
+                self.handle_infestor_reject(&queen_id, &original_task_id, &format!("Review process failed: {}", error)).await?;
             }
             QueenEvent::ProcessDied { exit_code, .. } => {
                 eprintln!("[Nydus] Infestor process died: exit_code={:?}", exit_code);
@@ -1422,6 +1433,7 @@ impl Nydus {
             skill_hint: None,
             retry_count: 0,
             rejection_feedback: Vec::new(),
+            verify_cmd: None,
         };
 
         self.task_dag.add_task(dag_task);
@@ -2291,8 +2303,8 @@ mod tests {
     fn test_add_tasks_to_dag() {
         let config = NydusConfig::default();
         let mut host = Nydus::new(NydusId::default(), config).unwrap();
-        host.add_task("task1", "First task", vec![], Priority::High, Complexity::Medium, None);
-        host.add_task("task2", "Second task", vec!["task1".to_string()], Priority::Normal, Complexity::Simple, None);
+        host.add_task("task1", "First task", vec![], Priority::High, Complexity::Medium, None, None);
+        host.add_task("task2", "Second task", vec!["task1".to_string()], Priority::Normal, Complexity::Simple, None, None);
         let progress = host.progress();
         assert_eq!(progress.total_tasks, 2);
         assert_eq!(progress.blocked, 1);
@@ -2302,7 +2314,7 @@ mod tests {
     fn test_is_complete_returns_false_when_tasks_pending() {
         let config = NydusConfig::default();
         let mut host = Nydus::new(NydusId::default(), config).unwrap();
-        host.add_task("task1", "Test task", vec![], Priority::High, Complexity::Trivial, None);
+        host.add_task("task1", "Test task", vec![], Priority::High, Complexity::Trivial, None, None);
         assert!(!host.is_complete());
     }
 
@@ -2317,9 +2329,9 @@ mod tests {
     fn test_progress_returns_correct_counts() {
         let config = NydusConfig::default();
         let mut host = Nydus::new(NydusId::default(), config).unwrap();
-        host.add_task("task1", "T1", vec![], Priority::High, Complexity::Trivial, None);
-        host.add_task("task2", "T2", vec!["task1".to_string()], Priority::Normal, Complexity::Medium, None);
-        host.add_task("task3", "T3", vec![], Priority::Low, Complexity::VeryComplex, None);
+        host.add_task("task1", "T1", vec![], Priority::High, Complexity::Trivial, None, None);
+        host.add_task("task2", "T2", vec!["task1".to_string()], Priority::Normal, Complexity::Medium, None, None);
+        host.add_task("task3", "T3", vec![], Priority::Low, Complexity::VeryComplex, None, None);
         let progress = host.progress();
         assert_eq!(progress.total_tasks, 3);
         assert_eq!(progress.completed, 0);
@@ -2351,7 +2363,7 @@ mod tests {
         host.handles.insert(QueenId("Q0".to_string()), handle);
 
         // Add a task
-        host.add_task("task1", "Test task", vec![], Priority::High, Complexity::Trivial, None);
+        host.add_task("task1", "Test task", vec![], Priority::High, Complexity::Trivial, None, None);
 
         // Schedule
         let assigned = host.try_schedule().await.unwrap();
@@ -2368,7 +2380,7 @@ mod tests {
         let mut host = Nydus::new(NydusId::default(), config).unwrap();
 
         // Add and assign a task
-        host.add_task("T1", "Test task", vec![], Priority::High, Complexity::Trivial, None);
+        host.add_task("T1", "Test task", vec![], Priority::High, Complexity::Trivial, None, None);
         host.task_dag.assign("T1", QueenId("Q0".to_string()));
 
         // Handle completion event
@@ -2385,9 +2397,10 @@ mod tests {
 
         host.handle_event(event).await.unwrap();
 
-        // Task should be completed
+        // Task should be in Validating status (awaiting Infestor review), not completed
         let stats = host.task_dag.stats();
-        assert_eq!(stats.completed, 1);
+        assert_eq!(stats.validating, 1);
+        assert_eq!(stats.completed, 0);
     }
 
     #[tokio::test]
@@ -2395,7 +2408,7 @@ mod tests {
         let config = NydusConfig::default();
         let mut host = Nydus::new(NydusId::default(), config).unwrap();
 
-        host.add_task("T1", "Test task", vec![], Priority::High, Complexity::Trivial, None);
+        host.add_task("T1", "Test task", vec![], Priority::High, Complexity::Trivial, None, None);
         host.task_dag.assign("T1", QueenId("Q0".to_string()));
 
         let event = QueenEvent::TaskFailed {
@@ -2454,7 +2467,7 @@ mod tests {
         let config = NydusConfig::default();
         let mut host = Nydus::new(NydusId::default(), config).unwrap();
 
-        host.add_task("T1", "Test", vec![], Priority::Normal, Complexity::Trivial, None);
+        host.add_task("T1", "Test", vec![], Priority::Normal, Complexity::Trivial, None, None);
 
         let result = host.tick().await.unwrap();
         assert_eq!(result.iteration, 1);
@@ -2474,6 +2487,7 @@ mod tests {
             Priority::High,
             Complexity::VeryComplex,
             Some("carousel".to_string()),
+            None,
         );
 
         // Verify the DagTask has the skill_hint

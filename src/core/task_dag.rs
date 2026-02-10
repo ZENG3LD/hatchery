@@ -92,6 +92,8 @@ pub struct DagTask {
     pub retry_count: usize,
     /// Feedback from previous rejection(s), used to guide the Queen on retry
     pub rejection_feedback: Vec<String>,
+    /// Verification command to run when validating task completion (e.g., "cargo test -p kv-core")
+    pub verify_cmd: Option<String>,
 }
 
 /// Result of a completed task.
@@ -531,6 +533,7 @@ mod tests {
             skill_hint: None,
             retry_count: 0,
             rejection_feedback: Vec::new(),
+            verify_cmd: None,
         }
     }
 
