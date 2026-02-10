@@ -1162,6 +1162,11 @@ impl Nydus {
                             SyncResult::Error(e) => eprintln!("[Nydus] Sync error for {}: {}", qid.0, e),
                         }
                     }
+
+                    // Cleanup merged Queen's worktree (no longer needed)
+                    if let Err(e) = worktree_mgr.cleanup(queen_id) {
+                        eprintln!("[Nydus] Failed to cleanup worktree after merge for {}: {}", queen_id.0, e);
+                    }
                 }
                 Ok(MergeResult::Conflict { files }) => {
                     eprintln!(
@@ -1427,6 +1432,13 @@ impl Nydus {
 
         // Remove from mailbox
         self.mailbox.lock().unregister_queen(queen_id);
+
+        // Cleanup worktree and branch
+        if let Some(ref mut worktree_mgr) = self.worktree_mgr {
+            if let Err(e) = worktree_mgr.cleanup(queen_id) {
+                eprintln!("[Nydus] ELASTIC POOL: Failed to cleanup worktree for {}: {}", queen_id.0, e);
+            }
+        }
 
         eprintln!("[Nydus] ELASTIC POOL: Queen {} removed from pool (current size: {})", queen_id.0, self.total_queens());
     }
