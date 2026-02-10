@@ -1338,6 +1338,12 @@ impl Nydus {
             }
         }
 
+        // Run post-merge verification scan to detect tasks completed by the same commit
+        // This must be AFTER the worktree_mgr scope ends to avoid mutable borrow conflicts
+        if let Err(e) = self.post_merge_verify_scan().await {
+            eprintln!("[Nydus] POST-MERGE SCAN: Error during scan: {}", e);
+        }
+
         Ok(())
     }
 
@@ -1409,6 +1415,97 @@ impl Nydus {
                 };
                 self.mailbox.lock().send(rejection_msg);
             }
+        }
+
+        Ok(())
+    }
+
+    /// Post-merge verification scan: check if any other tasks are now satisfiable.
+    ///
+    /// This handles the case where a Queen implements multiple tasks in one commit
+    /// but only the assigned task gets marked as completed. After a successful merge,
+    /// we scan all pending/blocked tasks and run their verify commands to see if
+    /// any were accidentally completed by the same commit.
+    async fn post_merge_verify_scan(&mut self) -> Result<()> {
+        // Get all tasks that are NOT completed or failed
+        let pending_tasks: Vec<(String, Option<String>)> = self.task_dag
+            .all_tasks()
+            .iter()
+            .filter(|t| !matches!(t.status, DagTaskStatus::Completed | DagTaskStatus::Failed { .. }))
+            .map(|t| (t.id.clone(), t.verify_cmd.clone()))
+            .collect();
+
+        if pending_tasks.is_empty() {
+            return Ok(());
+        }
+
+        eprintln!(
+            "[Nydus] POST-MERGE SCAN: Checking {} pending tasks for accidental completion...",
+            pending_tasks.len()
+        );
+
+        let mut newly_completed = 0;
+
+        for (task_id, verify_cmd) in pending_tasks {
+            if let Some(ref cmd) = verify_cmd {
+                // Run verify command in the main working directory
+                let output = tokio::process::Command::new("bash")
+                    .arg("-c")
+                    .arg(cmd)
+                    .current_dir(&self.config.working_dir)
+                    .output()
+                    .await;
+
+                match output {
+                    Ok(result) if result.status.success() => {
+                        eprintln!(
+                            "[Nydus] POST-MERGE SCAN: Task {} verify command passed! Marking as completed.",
+                            task_id
+                        );
+
+                        // Mark task as completed in DAG
+                        let dag_result = crate::core::task_dag::DagTaskResult {
+                            success: true,
+                            output: format!("Completed via post-merge verification scan (verify: {})", cmd),
+                            files_modified: vec![],
+                        };
+                        self.task_dag.complete(&task_id, dag_result);
+
+                        // Update PRD checkbox
+                        if let Some(ref prd_path) = self.config.prd_path {
+                            if let Err(e) = crate::prd::mark_task_done(prd_path, &task_id) {
+                                eprintln!(
+                                    "[Nydus] POST-MERGE SCAN: Warning: Failed to update PRD checkbox for {}: {}",
+                                    task_id, e
+                                );
+                            }
+                        }
+
+                        newly_completed += 1;
+                    }
+                    Ok(_) => {
+                        // Verify command failed — task not done yet, that's fine
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[Nydus] POST-MERGE SCAN: Error running verify for {}: {}",
+                            task_id, e
+                        );
+                    }
+                }
+            }
+        }
+
+        if newly_completed > 0 {
+            eprintln!(
+                "[Nydus] POST-MERGE SCAN: Found {} tasks that were completed by the same commit",
+                newly_completed
+            );
+
+            // Re-schedule after scan (new tasks may have become unblocked)
+            self.try_schedule().await?;
+        } else {
+            eprintln!("[Nydus] POST-MERGE SCAN: No additional completed tasks found");
         }
 
         Ok(())
