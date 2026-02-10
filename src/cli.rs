@@ -25,8 +25,6 @@ pub struct Task {
 pub struct HatcheryConfig {
     /// Path to the PRD markdown file.
     pub prd_path: PathBuf,
-    /// Number of worker sessions.
-    pub workers: usize,
     /// Working directory for workers.
     pub working_dir: PathBuf,
     /// Verification command (e.g. "cargo check").
@@ -61,7 +59,6 @@ impl Default for HatcheryConfig {
     fn default() -> Self {
         Self {
             prd_path: PathBuf::from("PRD.md"),
-            workers: 1,
             working_dir: std::env::current_dir().unwrap_or_default(),
             verify_cmd: None,
             max_iterations: 100,

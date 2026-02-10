@@ -116,6 +116,19 @@ impl CompletionDetector {
                 session_id,
             } => {
                 if subtype == "success" {
+                    // Check for rate limit in output — these are NOT real completions
+                    let result_lower = result_text.as_deref().unwrap_or("").to_lowercase();
+                    if result_lower.contains("hit your limit")
+                        || result_lower.contains("rate limit")
+                        || (result_lower.contains("resets ") && result_lower.len() < 200)
+                    {
+                        return CompletionVerdict::Failed {
+                            error: "rate_limit_hit".to_string(),
+                            cost_usd: *cost_usd,
+                            num_turns: *num_turns,
+                        };
+                    }
+
                     let quality_passed = self.run_quality_gates();
                     CompletionVerdict::Success {
                         result_text: result_text.clone().unwrap_or_default(),
@@ -352,5 +365,83 @@ mod tests {
     fn test_quality_gate_no_gates() {
         let detector = CompletionDetector::new(CompletionConfig::default());
         assert!(detector.run_quality_gates());
+    }
+
+    #[test]
+    fn test_rate_limit_detection_hit_your_limit() {
+        let detector = CompletionDetector::new(CompletionConfig::default());
+        let signal = CompletionSignal::ResultEvent {
+            subtype: "success".to_string(),
+            result_text: Some("You've hit your limit · resets 1pm".to_string()),
+            cost_usd: 0.05,
+            duration_ms: 1000,
+            num_turns: 1,
+            session_id: None,
+        };
+        match detector.evaluate(&signal) {
+            CompletionVerdict::Failed { error, cost_usd, num_turns } => {
+                assert_eq!(error, "rate_limit_hit");
+                assert_eq!(cost_usd, 0.05);
+                assert_eq!(num_turns, 1);
+            }
+            other => panic!("Expected Failed due to rate limit, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_rate_limit_detection_rate_limit_keyword() {
+        let detector = CompletionDetector::new(CompletionConfig::default());
+        let signal = CompletionSignal::ResultEvent {
+            subtype: "success".to_string(),
+            result_text: Some("Error: API rate limit exceeded".to_string()),
+            cost_usd: 0.02,
+            duration_ms: 500,
+            num_turns: 1,
+            session_id: None,
+        };
+        match detector.evaluate(&signal) {
+            CompletionVerdict::Failed { error, .. } => {
+                assert_eq!(error, "rate_limit_hit");
+            }
+            other => panic!("Expected Failed due to rate limit, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_rate_limit_detection_resets_keyword() {
+        let detector = CompletionDetector::new(CompletionConfig::default());
+        let signal = CompletionSignal::ResultEvent {
+            subtype: "success".to_string(),
+            result_text: Some("Limit resets at 3pm".to_string()),
+            cost_usd: 0.01,
+            duration_ms: 200,
+            num_turns: 1,
+            session_id: None,
+        };
+        match detector.evaluate(&signal) {
+            CompletionVerdict::Failed { error, .. } => {
+                assert_eq!(error, "rate_limit_hit");
+            }
+            other => panic!("Expected Failed due to rate limit, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_normal_success_not_flagged_as_rate_limit() {
+        let detector = CompletionDetector::new(CompletionConfig::default());
+        let signal = CompletionSignal::ResultEvent {
+            subtype: "success".to_string(),
+            result_text: Some("Task completed successfully. All tests pass.".to_string()),
+            cost_usd: 0.15,
+            duration_ms: 5000,
+            num_turns: 3,
+            session_id: Some("sess-123".to_string()),
+        };
+        match detector.evaluate(&signal) {
+            CompletionVerdict::Success { result_text, .. } => {
+                assert!(result_text.contains("successfully"));
+            }
+            other => panic!("Expected Success for normal completion, got {:?}", other),
+        }
     }
 }

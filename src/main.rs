@@ -30,10 +30,6 @@ enum Commands {
         /// Path to the PRD markdown file.
         prd: PathBuf,
 
-        /// Number of worker sessions.
-        #[arg(short, long, default_value = "1")]
-        workers: usize,
-
         /// Working directory for workers.
         #[arg(long)]
         dir: Option<PathBuf>,
@@ -453,7 +449,6 @@ async fn main() -> Result<()> {
     match cli.command {
         Commands::Spawn {
             prd,
-            workers,
             dir,
             verify,
             max_iterations,
@@ -475,7 +470,6 @@ async fn main() -> Result<()> {
 
             let config = HatcheryConfig {
                 prd_path: prd,
-                workers,
                 working_dir: working_dir.clone(),
                 verify_cmd: verify.clone(),
                 max_iterations,
@@ -515,7 +509,16 @@ async fn main() -> Result<()> {
                 nydus_config,
             )?;
 
-            let completion_config = CompletionConfig::default();
+            // Create CompletionConfig with quality gates from --verify flag
+            let mut quality_gates = vec![];
+            if let Some(ref verify) = verify {
+                quality_gates.push(verify.clone());
+            }
+            let completion_config = CompletionConfig {
+                quality_gates,
+                working_dir: Some(config.working_dir.clone()),
+                ..CompletionConfig::default()
+            };
 
             // Register initial Queen actors (min_queens = 3)
             for i in 0..3 {
