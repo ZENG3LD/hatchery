@@ -388,6 +388,12 @@ impl WorktreeManager {
         self.worktrees.len()
     }
 
+    /// Returns list of all Queen IDs that have registered worktrees.
+    /// Used for debugging worktree lookup failures.
+    pub fn known_queen_ids(&self) -> Vec<String> {
+        self.worktrees.keys().map(|k| k.0.clone()).collect()
+    }
+
     /// Get the branch name for a Queen with optional swarm context.
     /// Default: "hatchery/{queen_id}"
     /// With swarm: "hatchery/{swarm_id}/{queen_id}"

@@ -810,6 +810,12 @@ impl Nydus {
 
                     // Get worktree info for review
                     if let Some(ref worktree_mgr) = self.worktree_mgr {
+                        // DEBUG: Log all known worktrees to diagnose missing paths
+                        let known_queens = worktree_mgr.known_queen_ids();
+                        eprintln!(
+                            "[Nydus] DEBUG: Looking up worktree for Queen {}. Known worktrees: {:?}",
+                            queen_id.0, known_queens
+                        );
                         if let Some(worktree_path) = worktree_mgr.get_worktree_path(&queen_id) {
                             let branch_name = format!("hatchery/{}", queen_id.0);
 
@@ -1523,12 +1529,12 @@ impl Nydus {
         // Remove from mailbox
         self.mailbox.lock().unregister_queen(queen_id);
 
-        // Cleanup worktree and branch
-        if let Some(ref mut worktree_mgr) = self.worktree_mgr {
-            if let Err(e) = worktree_mgr.cleanup(queen_id) {
-                eprintln!("[Nydus] ELASTIC POOL: Failed to cleanup worktree for {}: {}", queen_id.0, e);
-            }
-        }
+        // NOTE: We intentionally do NOT cleanup worktrees for aborted Queens.
+        // Keeping their worktrees + branches allows post-mortem analysis of
+        // solution quality. The `git worktree prune` fallback in cleanup()
+        // is a GLOBAL operation that can corrupt state for other Queens.
+        // Worktrees are cleaned up at session end or manually.
+        eprintln!("[Nydus] ELASTIC POOL: Aborted Queen {} — worktree preserved for forensics", queen_id.0);
 
         eprintln!("[Nydus] ELASTIC POOL: Queen {} removed from pool (current size: {})", queen_id.0, self.total_queens());
     }
