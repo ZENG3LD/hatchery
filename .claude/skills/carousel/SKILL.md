@@ -47,10 +47,11 @@ Done: commit
 
 ### Generic шаблоны
 
-Шаблоны всех 7 файлов (6 фаз + coordinator) лежат в `carousel/`:
+Шаблоны всех 7 файлов (6 фаз + coordinator) лежат рядом с этим файлом:
 
 ```
-carousel/
+.claude/skills/carousel/
+├── SKILL.md                  — этот файл
 ├── 00_coordinator.md         — оркестратор пайплайна
 ├── 01_research.md            — фаза ресерча
 ├── 02_implement.md           — фаза имплементации
@@ -64,7 +65,7 @@ carousel/
 
 ### Как использовать шаблоны
 
-1. Скопируй `carousel/` в промпты проекта: `cp -r carousel/ my-project/prompts/`
+1. Прочитай шаблоны из `.claude/skills/carousel/` для структуры
 2. Замени все `{VARIABLES}` в каждом файле под свой домен
 3. Убери/добавь фазы по необходимости
 4. Запусти coordinator prompt — он делегирует фазы агентам
@@ -83,16 +84,10 @@ carousel/
   commit           commit           commit
 ```
 
-### Существующие инстансы (примеры)
-
-- `v5/prompts/00-06` — exchange connectors (6 phases, domain-specific)
-- `v5/prompts/data_providers/00-06` — data providers (6 phases, domain-specific)
-- `carousel/` — generic шаблоны (domain-agnostic, с `{VARIABLE}` плейсхолдерами)
-
 ### Твоя задача
 
 Если пользователь вызвал `/carousel`:
-1. Прочитай generic шаблоны в `carousel/` для структуры
+1. Прочитай generic шаблоны из `.claude/skills/carousel/` для структуры
 2. Определи фазы для задачи $ARGUMENTS (обычно 6, но может быть меньше)
 3. Определи агентов для каждой фазы
 4. Определи quality gates
