@@ -806,6 +806,8 @@ impl Nydus {
 
                 // Trigger Infestor review if available and git isolation is enabled
                 if self.config.git_isolation && self.infestor.is_some() {
+                    let mut review_sent = false;
+
                     // Get worktree info for review
                     if let Some(ref worktree_mgr) = self.worktree_mgr {
                         if let Some(worktree_path) = worktree_mgr.get_worktree_path(&queen_id) {
@@ -833,10 +835,42 @@ impl Nydus {
                                     &task_description,
                                     verify_cmd.as_deref(),
                                 ).await {
-                                    eprintln!("[Nydus] Failed to send review task to Infestor: {}", e);
+                                    eprintln!("[Nydus] ERROR: Failed to send review task to Infestor: {}", e);
+                                } else {
+                                    review_sent = true;
                                 }
                             }
+                        } else {
+                            eprintln!("[Nydus] ERROR: No worktree path found for Queen {} — cannot send task {} to Infestor!", queen_id.0, task_id.0);
                         }
+                    } else {
+                        eprintln!("[Nydus] ERROR: WorktreeManager is None — cannot send task {} to Infestor!", task_id.0);
+                    }
+
+                    // CRITICAL: If review was NOT sent, task is stuck in Validating forever.
+                    // Fail it loudly so operator sees it and dependencies don't silently stall.
+                    if !review_sent {
+                        eprintln!("[Nydus] CRITICAL: Infestor review NOT sent for task {}! Failing task to prevent silent stall.", task_id.0);
+                        self.task_dag.fail(&task_id.0, "FAILED: Infestor review could not be sent (no worktree path)".to_string());
+
+                        // Send escalation to operator
+                        let escalation_msg = SwarmMessage {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            from: AgentId::Nydus(crate::core::types::NydusId("SH0".to_string())),
+                            to: AgentId::Operator,
+                            msg_type: MessageType::Escalation,
+                            payload: serde_json::json!({
+                                "type": "infestor_review_failed",
+                                "task_id": task_id.0,
+                                "queen_id": queen_id.0,
+                                "reason": "No worktree path found — Infestor review could not be sent. Task failed."
+                            }),
+                            timestamp: Utc::now(),
+                            correlation_id: None,
+                            visibility: Visibility::default_internal(),
+                        };
+                        self.mailbox.lock().send(escalation_msg);
+                        self.try_schedule().await?;
                     }
                 } else if self.config.git_isolation {
                     // No Infestor, fall back to old validation + merge flow
