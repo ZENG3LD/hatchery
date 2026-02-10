@@ -436,10 +436,10 @@ async fn populate_dag(
             nydus.add_task(
                 &format!("prd-{}", task.id),
                 &task.description,
-                vec![],
+                task.dependencies.clone(),
                 Priority::Normal,
                 Complexity::Medium,
-                None,
+                task.skill_hint.clone(),
             );
         }
     }
@@ -494,7 +494,8 @@ async fn main() -> Result<()> {
 
             // Create NydusConfig
             let nydus_config = NydusConfig {
-                max_queens: config.workers,
+                min_queens: 3,
+                max_queens: 8,
                 verify_cmd: config.verify_cmd.clone(),
                 working_dir: config.working_dir.clone(),
                 git_isolation: config.worktree_isolation,
@@ -505,7 +506,7 @@ async fn main() -> Result<()> {
                 prd_path: Some(config.prd_path.clone()),
                 zerg_rush_enabled: true,
                 zerg_rush_min_bottleneck: 2,
-                zerg_rush_max_queens: 3,
+                zerg_rush_max_queens: 5,
             };
 
             // Create Nydus
@@ -516,8 +517,8 @@ async fn main() -> Result<()> {
 
             let completion_config = CompletionConfig::default();
 
-            // Register Queen actors (all use stream mode)
-            for i in 0..config.workers {
+            // Register initial Queen actors (min_queens = 3)
+            for i in 0..3 {
                 let queen_id = QueenId(format!("Q{}", i));
                 nydus.register_queen_actor(
                     queen_id,

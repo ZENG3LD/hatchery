@@ -14,6 +14,10 @@ pub struct Task {
     pub done: bool,
     /// Line number in the PRD file (0-based).
     pub line_number: usize,
+    /// Task IDs this task depends on (e.g., ["prd-1", "prd-2"]).
+    pub dependencies: Vec<String>,
+    /// Skill hint extracted from task description (e.g., "carousel").
+    pub skill_hint: Option<String>,
 }
 
 /// Configuration for a hatchery run.

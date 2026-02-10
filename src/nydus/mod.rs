@@ -28,7 +28,9 @@ use crate::nydus::tick::HeuristicTick;
 /// Configuration for Nydus.
 #[derive(Debug, Clone)]
 pub struct NydusConfig {
-    /// Maximum number of Queens
+    /// Minimum number of Queens in elastic pool
+    pub min_queens: usize,
+    /// Maximum number of Queens in elastic pool
     pub max_queens: usize,
     /// Verification command (e.g., "cargo check")
     pub verify_cmd: Option<String>,
@@ -57,7 +59,8 @@ pub struct NydusConfig {
 impl Default for NydusConfig {
     fn default() -> Self {
         Self {
-            max_queens: 4,
+            min_queens: 3,
+            max_queens: 8,
             verify_cmd: None,
             working_dir: PathBuf::from("."),
             git_isolation: false,
@@ -68,7 +71,7 @@ impl Default for NydusConfig {
             prd_path: None,
             zerg_rush_enabled: true,
             zerg_rush_min_bottleneck: 2,
-            zerg_rush_max_queens: 3,
+            zerg_rush_max_queens: 5,
         }
     }
 }
@@ -134,6 +137,12 @@ pub struct Nydus {
     infestor_reviews_completed: u32,
     /// Tasks currently under Infestor review (task_id -> winner queen_id)
     in_review: HashMap<String, QueenId>,
+    /// Next Queen ID counter for dynamic spawning
+    next_queen_id: usize,
+    /// Model name for dynamically spawned Queens
+    default_model: String,
+    /// Completion config for dynamically spawned Queens
+    default_completion_config: CompletionConfig,
 }
 
 /// Result of a single tick (schedule + poll cycle).
@@ -327,6 +336,9 @@ impl Nydus {
             total_infestor_cost_usd: 0.0,
             infestor_reviews_completed: 0,
             in_review: HashMap::new(),
+            next_queen_id: 3,  // Start at Q3, since we register Q0-Q2 initially
+            default_model: "sonnet".to_string(),
+            default_completion_config: CompletionConfig::default(),
         })
     }
 
@@ -717,13 +729,33 @@ impl Nydus {
                     // Insert into in_review
                     self.in_review.insert(task_id.0.clone(), queen_id.clone());
 
-                    // Cancel loser tasks (send cancel message to each loser)
+                    // ABORT loser Queens (kill subprocesses and remove from pool)
                     for loser in &losers {
-                        eprintln!("[Nydus] ZERG RUSH: Cancelling task {} for loser Queen {}", task_id.0, loser.0);
-                        self.cancel_queen_task(loser, &task_id).await;
+                        eprintln!("[Nydus] ZERG RUSH: Aborting loser Queen {} for task {}", loser.0, task_id.0);
+                        self.abort_queen(loser);
+                    }
 
-                        // Note: Loser worktrees will be cleaned up naturally on their next task assignment
-                        // No need to explicitly sync/reset here
+                    // Maintain minimum pool size: spawn new Queens if below min_queens
+                    let current_queens = self.total_queens();
+                    if current_queens < self.config.min_queens {
+                        let to_spawn = self.config.min_queens.saturating_sub(current_queens);
+                        eprintln!(
+                            "[Nydus] ELASTIC POOL: Below min_queens ({}), spawning {} Queens",
+                            self.config.min_queens,
+                            to_spawn
+                        );
+
+                        for _ in 0..to_spawn {
+                            match self.spawn_queen().await {
+                                Ok(new_queen_id) => {
+                                    eprintln!("[Nydus] ELASTIC POOL: Spawned replacement Queen {}", new_queen_id.0);
+                                }
+                                Err(e) => {
+                                    eprintln!("[Nydus] ELASTIC POOL: Failed to spawn replacement Queen: {}", e);
+                                    break;
+                                }
+                            }
+                        }
                     }
 
                     // Continue with normal completion flow for winner (Infestor review, etc.)
@@ -1358,58 +1390,102 @@ impl Nydus {
         let _ = inject_req.response_tx.send(response);
     }
 
+    /// Helper: Get total number of Queens currently in the pool.
+    fn total_queens(&self) -> usize {
+        self.handles.len()
+    }
+
+    /// Dynamically spawn a new Queen and add it to the pool.
+    /// Returns the new Queen's ID.
+    async fn spawn_queen(&mut self) -> Result<QueenId> {
+        let queen_id = QueenId(format!("Q{}", self.next_queen_id));
+        self.next_queen_id += 1;
+
+        eprintln!("[Nydus] ELASTIC POOL: Spawning dynamic Queen {}", queen_id.0);
+
+        self.register_queen_actor(
+            queen_id.clone(),
+            self.default_model.clone(),
+            self.default_completion_config.clone(),
+        )?;
+
+        Ok(queen_id)
+    }
+
+    /// Abort a Queen subprocess and remove it from the pool.
+    /// This is used to kill loser Queens in Zerg Rush scenarios.
+    fn abort_queen(&mut self, queen_id: &QueenId) {
+        eprintln!("[Nydus] ELASTIC POOL: Aborting Queen {}", queen_id.0);
+
+        // Abort the actor task (kills subprocess)
+        if let Some(join_handle) = self.actor_tasks.remove(queen_id) {
+            join_handle.abort();
+        }
+
+        // Remove handle
+        self.handles.remove(queen_id);
+
+        // Remove from mailbox
+        self.mailbox.lock().unregister_queen(queen_id);
+
+        eprintln!("[Nydus] ELASTIC POOL: Queen {} removed from pool (current size: {})", queen_id.0, self.total_queens());
+    }
+
     /// Check if conditions are right for zerg rush.
     ///
-    /// Returns true if:
-    /// - Config enabled
-    /// - Bottleneck tasks exist (based on min_bottleneck threshold)
-    /// - More idle queens than ready tasks (we have spare capacity)
+    /// Simplified condition: if bottlenecks exist, zerg rush them.
     fn should_zerg_rush(&self) -> bool {
         if !self.config.zerg_rush_enabled {
             return false;
         }
 
         let bottlenecks = self.task_dag.bottleneck_tasks(self.config.zerg_rush_min_bottleneck);
-        if bottlenecks.is_empty() {
-            return false;
-        }
-
-        // Count idle queens
-        let idle_count = self.handles.iter()
-            .filter(|(_, handle)| matches!(handle.status(), QueenStatus::Idle))
-            .count();
-
-        let ready_count = self.task_dag.ready_tasks().len();
-
-        // Only zerg rush if we have more idle queens than ready tasks
-        idle_count > ready_count
+        !bottlenecks.is_empty()
     }
 
-    /// Plan zerg rush assignments.
+    /// Plan zerg rush assignment for the TOP bottleneck.
     ///
-    /// Returns (task_id, queen_ids) tuples for tasks that should be zerged.
-    /// Requires at least 2 queens per task.
-    fn plan_zerg_rush(&self, idle_queens: &[QueenId]) -> Vec<(String, Vec<QueenId>)> {
+    /// Returns (task_id, queen_ids) for the single bottleneck to zerg.
+    /// ALL idle queens are assigned to this one task.
+    /// Returns None if no bottlenecks exist.
+    async fn plan_zerg_rush(&mut self, idle_queens: &[QueenId]) -> Option<(String, Vec<QueenId>)> {
         let bottlenecks = self.task_dag.bottleneck_tasks(self.config.zerg_rush_min_bottleneck);
-        let mut assignments = Vec::new();
-        let mut available_queens = idle_queens.to_vec();
-
-        for bottleneck in bottlenecks {
-            // Need at least 2 queens for zerg rush
-            if available_queens.len() < 2 {
-                break;
-            }
-
-            let num_queens = available_queens.len().min(self.config.zerg_rush_max_queens);
-            if num_queens < 2 {
-                break;
-            }
-
-            let assigned_queens: Vec<QueenId> = available_queens.drain(..num_queens).collect();
-            assignments.push((bottleneck.id.clone(), assigned_queens));
+        if bottlenecks.is_empty() {
+            return None;
         }
 
-        assignments
+        // Get the TOP bottleneck (highest blocks count) and clone data before mutable borrow
+        let task_id = bottlenecks[0].id.clone();
+        let blocks_count = bottlenecks[0].blocks.len();
+
+        // ALL idle queens go to this bottleneck
+        let mut queens_for_zerg: Vec<QueenId> = idle_queens.to_vec();
+
+        // Spawn additional queens if needed (up to max_zerg_queens)
+        let need_more = self.config.zerg_rush_max_queens.saturating_sub(queens_for_zerg.len());
+        let can_spawn = self.config.max_queens.saturating_sub(self.total_queens());
+        let to_spawn = need_more.min(can_spawn);
+
+        for _ in 0..to_spawn {
+            match self.spawn_queen().await {
+                Ok(new_queen) => {
+                    queens_for_zerg.push(new_queen);
+                }
+                Err(e) => {
+                    eprintln!("[Nydus] ZERG RUSH: Failed to spawn additional Queen: {}", e);
+                    break;
+                }
+            }
+        }
+
+        eprintln!(
+            "[Nydus] ZERG RUSH: Planning {} Queens for bottleneck task {} (blocks {} tasks)",
+            queens_for_zerg.len(),
+            task_id,
+            blocks_count
+        );
+
+        Some((task_id, queens_for_zerg))
     }
 
     /// Find ready tasks + idle queens, assign tasks.
@@ -1467,9 +1543,7 @@ impl Nydus {
 
         // PHASE 1: Zerg Rush bottleneck tasks if conditions are right
         if self.should_zerg_rush() {
-            let zerg_assignments = self.plan_zerg_rush(&idle_queens);
-
-            for (task_id, queen_ids) in zerg_assignments {
+            if let Some((task_id, queen_ids)) = self.plan_zerg_rush(&idle_queens).await {
                 eprintln!(
                     "[Nydus] ZERG RUSH: Assigning task {} to {} Queens: {:?}",
                     task_id,
@@ -1480,7 +1554,7 @@ impl Nydus {
                 // Mark as zerg rush in DAG
                 if !self.task_dag.assign_zerg(&task_id, queen_ids.clone()) {
                     eprintln!("[Nydus] Failed to assign zerg rush for task {}", task_id);
-                    continue;
+                    return Ok(assigned);
                 }
 
                 // Get task description and metadata
@@ -1488,7 +1562,7 @@ impl Nydus {
                     Some(t) => t,
                     None => {
                         eprintln!("[Nydus] Task {} not found in DAG", task_id);
-                        continue;
+                        return Ok(assigned);
                     }
                 };
 
@@ -1554,28 +1628,55 @@ impl Nydus {
             }
         }
 
-        // Refresh ready tasks (exclude zerged tasks)
-        let ready_tasks: Vec<_> = self.task_dag.ready_tasks()
+        // Refresh ready tasks (exclude zerged tasks) and clone task data immediately
+        let ready_task_data: Vec<(String, String, u8, Vec<String>, chrono::DateTime<Utc>, Option<String>)> = self.task_dag.ready_tasks()
             .into_iter()
             .filter(|t| !self.task_dag.is_zerg_task(&t.id))
+            .map(|t| (
+                t.id.clone(),
+                t.description.clone(),
+                t.priority as u8,
+                t.blocked_by.clone(),
+                t.created_at,
+                t.skill_hint.clone(),
+            ))
             .collect();
 
-        if ready_tasks.is_empty() || idle_queens.is_empty() {
+        if ready_task_data.is_empty() || idle_queens.is_empty() {
             return Ok(assigned);
         }
 
         // PHASE 2: Standard 1:1 assignment for remaining tasks
+        // Spawn additional queens if needed
+        if ready_task_data.len() > idle_queens.len() {
+            let need_more = ready_task_data.len().saturating_sub(idle_queens.len());
+            let can_spawn = self.config.max_queens.saturating_sub(self.total_queens());
+            let to_spawn = need_more.min(can_spawn);
+
+            for _ in 0..to_spawn {
+                match self.spawn_queen().await {
+                    Ok(new_queen) => {
+                        idle_queens.push(new_queen);
+                    }
+                    Err(e) => {
+                        eprintln!("[Nydus] ELASTIC POOL: Failed to spawn additional Queen for normal assignment: {}", e);
+                        break;
+                    }
+                }
+            }
+        }
+
         // Collect (task_id, description, priority, blocked_by, created_at, skill_hint, queen_id) tuples
-        let assignments: Vec<(String, String, u8, Vec<TaskId>, chrono::DateTime<Utc>, Option<String>, QueenId)> = ready_tasks.iter()
+        let assignments: Vec<(String, String, u8, Vec<TaskId>, chrono::DateTime<Utc>, Option<String>, QueenId)> = ready_task_data.iter()
             .zip(idle_queens.iter())
-            .map(|(dag_task, queen_id)| {
+            .map(|((task_id, description, priority, blocked_by, created_at, skill_hint), queen_id)| {
                 (
-                    dag_task.id.clone(),
-                    dag_task.description.clone(),
-                    dag_task.priority as u8,
-                    dag_task.blocked_by.iter().map(|id| TaskId(id.clone())).collect(),
-                    dag_task.created_at,
-                    dag_task.skill_hint.clone(),
+                    task_id.clone(),
+                    description.clone(),
+                    *priority,
+                    blocked_by.iter().map(|id| TaskId(id.clone())).collect(),
+                    *created_at,
+                    skill_hint.clone(),
                     queen_id.clone(),
                 )
             })
@@ -1767,35 +1868,6 @@ impl Nydus {
                 let _ = self.deliver_pending_messages(&notification.queen_id).await;
             } else {
                 eprintln!("[Nydus] Queen {} is busy, message will be delivered after task completion", notification.queen_id.0);
-            }
-        }
-    }
-
-    /// Cancel a task for a specific Queen (used for zerg rush losers).
-    ///
-    /// Sends a cancellation message to the Queen. The Queen may or may not honor it
-    /// (if it completes before receiving the message, its result will be ignored anyway).
-    async fn cancel_queen_task(&self, queen_id: &QueenId, task_id: &TaskId) {
-        if let Some(handle) = self.handles.get(queen_id) {
-            let cancel_msg = SwarmMessage {
-                id: uuid::Uuid::new_v4().to_string(),
-                from: AgentId::Nydus(self.id.clone()),
-                to: AgentId::Queen(queen_id.clone()),
-                msg_type: MessageType::Custom("CancelTask".to_string()),
-                payload: serde_json::json!({
-                    "task_id": task_id.0,
-                    "reason": "zerg_rush_loser",
-                }),
-                timestamp: Utc::now(),
-                correlation_id: None,
-                visibility: Visibility::default_internal(),
-            };
-
-            if let Err(e) = handle.send_message(cancel_msg).await {
-                eprintln!(
-                    "[Nydus] Failed to send cancel message to {} for task {}: {}",
-                    queen_id.0, task_id.0, e
-                );
             }
         }
     }

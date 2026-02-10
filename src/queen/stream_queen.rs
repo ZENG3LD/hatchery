@@ -269,6 +269,23 @@ async fn run_actor(
                             }
                         }
                     }
+                    QueenCommand::AbortTask { task_id, reason } => {
+                        if let Some((ref current_tid, _)) = current_task {
+                            if current_tid.0 == task_id {
+                                eprintln!("[Queen {}] Aborting task {} (reason: {})", id.0, task_id, reason);
+
+                                // Kill the Claude subprocess immediately
+                                let _ = child.kill().await;
+
+                                // Clear current task and pending messages
+                                current_task = None;
+                                pending_messages.clear();
+
+                                // The process death will be detected by the `child.wait()` branch
+                                // which will emit ProcessDied event and exit the loop
+                            }
+                        }
+                    }
                     QueenCommand::Shutdown => {
                         // Drop stdin to signal EOF
                         drop(stdin_tx);
@@ -488,11 +505,18 @@ async fn stdout_reader(stdout: ChildStdout, tx: mpsc::Sender<ClaudeEvent>) {
 fn format_task_prompt(task: &Task, context: &TaskContext) -> String {
     let mut prompt = String::new();
 
-    // Skill hint (if provided)
+    // Skill hint (if provided) - MANDATORY when present
     if let Some(ref hint) = context.skill_hint {
         prompt.push_str(&format!(
-            "## Recommended Execution Pattern\nUse /{} pattern for this task. Read the skill docs and follow its phases.\n\n",
-            hint
+            "## REQUIRED EXECUTION PATTERN — MANDATORY\n\n\
+            You MUST use the /{hint} skill for this task. This is NOT optional.\n\n\
+            **INSTRUCTIONS:**\n\
+            1. FIRST, invoke the /{hint} skill using the Skill tool\n\
+            2. Follow the skill's phase system exactly as documented\n\
+            3. Do NOT spawn agents directly — let the skill orchestrate the work\n\
+            4. Do NOT skip or deviate from this pattern\n\n\
+            Failure to use /{hint} will result in task rejection.\n\n",
+            hint = hint
         ));
     }
 

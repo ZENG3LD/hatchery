@@ -21,6 +21,11 @@ pub enum QueenCommand {
     },
     /// Send a message from another agent (Queen-to-Queen communication).
     Message(SwarmMessage),
+    /// Abort the current task and kill the subprocess immediately.
+    AbortTask {
+        task_id: String,
+        reason: String,
+    },
     /// Request graceful shutdown.
     Shutdown,
 }
@@ -169,6 +174,25 @@ impl QueenHandle {
         self.status_rx.clone()
     }
 
+    /// Abort the current task and kill the subprocess immediately.
+    ///
+    /// # Arguments
+    /// * `task_id` - ID of the task to abort
+    /// * `reason` - Reason for aborting (e.g., "zerg_rush_loser")
+    ///
+    /// # Errors
+    /// Returns an error if the Queen's command channel is closed.
+    pub async fn abort_task(&self, task_id: &str, reason: &str) -> Result<()> {
+        self.cmd_tx
+            .send(QueenCommand::AbortTask {
+                task_id: task_id.to_string(),
+                reason: reason.to_string(),
+            })
+            .await
+            .context("Failed to send AbortTask command: Queen channel closed")?;
+        Ok(())
+    }
+
     /// Request graceful shutdown of this Queen.
     ///
     /// # Errors
@@ -304,12 +328,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_shutdown_command() {
+    async fn test_abort_task_command() {
         let (cmd_tx, mut cmd_rx) = mpsc::channel(10);
         let (_status_tx, status_rx) = watch::channel(QueenStatus::Idle);
 
         let handle = QueenHandle::new(
             QueenId("Q3".to_string()),
+            cmd_tx,
+            status_rx,
+        );
+
+        // Send abort task command
+        handle.abort_task("T1", "zerg_rush_loser").await.unwrap();
+
+        // Verify command was received
+        let cmd = cmd_rx.recv().await.unwrap();
+        match cmd {
+            QueenCommand::AbortTask { task_id, reason } => {
+                assert_eq!(task_id, "T1");
+                assert_eq!(reason, "zerg_rush_loser");
+            }
+            _ => panic!("Expected AbortTask command"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_command() {
+        let (cmd_tx, mut cmd_rx) = mpsc::channel(10);
+        let (_status_tx, status_rx) = watch::channel(QueenStatus::Idle);
+
+        let handle = QueenHandle::new(
+            QueenId("Q4".to_string()),
             cmd_tx,
             status_rx,
         );
@@ -328,7 +377,7 @@ mod tests {
         let (status_tx, status_rx) = watch::channel(QueenStatus::Idle);
 
         let handle = QueenHandle::new(
-            QueenId("Q4".to_string()),
+            QueenId("Q5".to_string()),
             cmd_tx,
             status_rx,
         );
@@ -360,7 +409,7 @@ mod tests {
         let (_status_tx, status_rx) = watch::channel(QueenStatus::Idle);
 
         let handle = QueenHandle::new(
-            QueenId("Q5".to_string()),
+            QueenId("Q6".to_string()),
             cmd_tx,
             status_rx,
         );
@@ -381,7 +430,7 @@ mod tests {
         let (_status_tx, status_rx) = watch::channel(QueenStatus::Idle);
 
         let handle1 = QueenHandle::new(
-            QueenId("Q6".to_string()),
+            QueenId("Q7".to_string()),
             cmd_tx,
             status_rx,
         );
@@ -408,7 +457,7 @@ mod tests {
         let (_status_tx, status_rx) = watch::channel(QueenStatus::Idle);
 
         let handle1 = QueenHandle::new(
-            QueenId("Q7".to_string()),
+            QueenId("Q8".to_string()),
             cmd_tx,
             status_rx,
         );
