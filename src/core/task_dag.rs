@@ -319,6 +319,19 @@ impl TaskDag {
         }
     }
 
+    /// Set a task's status to Validating (awaiting Infestor review).
+    ///
+    /// Used when a Queen completes a task but before Infestor approves it.
+    /// Returns true if task exists and was updated.
+    pub fn set_validating(&mut self, task_id: &str) -> bool {
+        if let Some(task) = self.tasks.get_mut(task_id) {
+            task.status = DagTaskStatus::Validating;
+            true
+        } else {
+            false
+        }
+    }
+
     /// Compute the critical path through the DAG.
     ///
     /// The critical path is the longest chain of dependencies from start to finish.

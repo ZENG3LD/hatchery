@@ -761,13 +761,8 @@ impl Nydus {
                     // Continue with normal completion flow for winner (Infestor review, etc.)
                 }
 
-                // Mark complete in DAG
-                let dag_result = crate::core::task_dag::DagTaskResult {
-                    success: true,
-                    output: result_text.clone(),
-                    files_modified: vec![],
-                };
-                self.task_dag.complete(&task_id.0, dag_result);
+                // Mark as validating (awaiting Infestor review), NOT completed yet
+                self.task_dag.set_validating(&task_id.0);
 
                 // Store in memory
                 let result_json = serde_json::json!({
@@ -1126,6 +1121,14 @@ impl Nydus {
                         Ok(_) => {
                             // Verification passed
                             eprintln!("[Nydus] Post-merge verification passed for task {}", task_id);
+
+                            // Now mark task as complete in DAG (after successful merge and verification)
+                            let dag_result = crate::core::task_dag::DagTaskResult {
+                                success: true,
+                                output: format!("Completed and merged to main ({})", commit_sha),
+                                files_modified: vec![],
+                            };
+                            self.task_dag.complete(task_id, dag_result);
                         }
                         Err(e) => {
                             // Failed to run cargo check (command not found, etc.)
@@ -1169,13 +1172,29 @@ impl Nydus {
                     }
                 }
                 Ok(MergeResult::Conflict { files }) => {
+                    let file_list: Vec<String> = files.iter().map(|p| p.to_string_lossy().to_string()).collect();
                     eprintln!(
-                        "[Nydus] Merge conflict for {} despite approval: {} files",
-                        queen_id.0,
-                        files.len()
+                        "[Nydus] Merge conflict for {} despite approval: {:?}",
+                        queen_id.0, file_list
                     );
 
-                    // Send conflict notification
+                    // Requeue task with conflict feedback so Queen can retry with context
+                    let feedback = format!(
+                        "Merge conflict detected in {} files after Infestor approval.\n\
+                         Conflicted files: {:?}\n\
+                         The Queen's worktree was reset (merge --abort). \
+                         Please resolve conflicts with the latest main branch before re-submitting.",
+                        files.len(), file_list
+                    );
+                    let requeued = self.task_dag.requeue_with_feedback(task_id, feedback);
+                    if requeued {
+                        eprintln!("[Nydus] Task {} requeued after merge conflict", task_id);
+                        self.try_schedule().await?;
+                    } else {
+                        eprintln!("[Nydus] Failed to requeue task {} after merge conflict", task_id);
+                    }
+
+                    // Also send conflict notification to operator
                     let conflict_msg = SwarmMessage {
                         id: uuid::Uuid::new_v4().to_string(),
                         from: AgentId::Nydus(self.id.clone()),
@@ -1185,7 +1204,7 @@ impl Nydus {
                             "queen_id": queen_id.0,
                             "task_id": task_id,
                             "reason": "merge_conflict_after_approval",
-                            "files": files.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
+                            "files": file_list,
                         }),
                         timestamp: Utc::now(),
                         correlation_id: None,
@@ -1194,10 +1213,23 @@ impl Nydus {
                     self.mailbox.lock().send(conflict_msg);
                 }
                 Ok(MergeResult::NoChanges) => {
-                    eprintln!("[Nydus] No changes to merge for {}", queen_id.0);
+                    eprintln!("[Nydus] No changes to merge for {} (task {}), marking complete", queen_id.0, task_id);
+                    // Still mark as complete — the work was done, just nothing to merge
+                    let dag_result = crate::core::task_dag::DagTaskResult {
+                        success: true,
+                        output: "Completed with no merge changes (approved by Infestor)".to_string(),
+                        files_modified: vec![],
+                    };
+                    self.task_dag.complete(task_id, dag_result);
                 }
                 Err(e) => {
                     eprintln!("[Nydus] Merge failed for {}: {}", queen_id.0, e);
+                    let feedback = format!("Merge operation failed: {}", e);
+                    let requeued = self.task_dag.requeue_with_feedback(task_id, feedback);
+                    if requeued {
+                        eprintln!("[Nydus] Task {} requeued after merge failure", task_id);
+                        self.try_schedule().await?;
+                    }
                 }
             }
         }
