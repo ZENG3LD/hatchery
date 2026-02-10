@@ -833,17 +833,58 @@ impl Nydus {
 
                             // Send review command to Infestor (now async)
                             if let Some(ref infestor_handle) = self.infestor {
-                                if let Err(e) = infestor_handle.review(
+                                match infestor_handle.review(
                                     queen_id.clone(),
                                     task_id.0.clone(),
-                                    branch_name,
+                                    branch_name.clone(),
                                     worktree_path.clone(),
                                     &task_description,
                                     verify_cmd.as_deref(),
                                 ).await {
-                                    eprintln!("[Nydus] ERROR: Failed to send review task to Infestor: {}", e);
-                                } else {
-                                    review_sent = true;
+                                    Ok(_) => {
+                                        review_sent = true;
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[Nydus] ERROR: Failed to send review task to Infestor: {}", e);
+
+                                        // Check if the error is due to a closed channel
+                                        let error_msg = e.to_string();
+                                        if error_msg.contains("Queen channel closed") {
+                                            eprintln!("[Nydus] Infestor channel closed. Attempting re-registration...");
+
+                                            // Try to re-register the Infestor
+                                            match self.register_infestor("sonnet") {
+                                                Ok(_) => {
+                                                    eprintln!("[Nydus] Infestor re-registered successfully. Retrying review send...");
+
+                                                    // Retry the review send with the new Infestor
+                                                    if let Some(ref new_infestor_handle) = self.infestor {
+                                                        match new_infestor_handle.review(
+                                                            queen_id.clone(),
+                                                            task_id.0.clone(),
+                                                            branch_name,
+                                                            worktree_path.clone(),
+                                                            &task_description,
+                                                            verify_cmd.as_deref(),
+                                                        ).await {
+                                                            Ok(_) => {
+                                                                review_sent = true;
+                                                                eprintln!("[Nydus] Retry successful: Infestor review sent for task {}", task_id.0);
+                                                            }
+                                                            Err(e2) => {
+                                                                eprintln!("[Nydus] ERROR: Retry also failed: {}", e2);
+                                                            }
+                                                        }
+                                                    } else {
+                                                        eprintln!("[Nydus] ERROR: Infestor handle is None after re-registration");
+                                                    }
+                                                }
+                                                Err(re_err) => {
+                                                    eprintln!("[Nydus] ERROR: Failed to re-register Infestor: {}", re_err);
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         } else {
@@ -857,7 +898,7 @@ impl Nydus {
                     // Fail it loudly so operator sees it and dependencies don't silently stall.
                     if !review_sent {
                         eprintln!("[Nydus] CRITICAL: Infestor review NOT sent for task {}! Failing task to prevent silent stall.", task_id.0);
-                        self.task_dag.fail(&task_id.0, "FAILED: Infestor review could not be sent (no worktree path)".to_string());
+                        self.task_dag.fail(&task_id.0, "FAILED: Infestor review could not be sent (channel closed and retry failed)".to_string());
 
                         // Send escalation to operator
                         let escalation_msg = SwarmMessage {
@@ -869,7 +910,7 @@ impl Nydus {
                                 "type": "infestor_review_failed",
                                 "task_id": task_id.0,
                                 "queen_id": queen_id.0,
-                                "reason": "No worktree path found — Infestor review could not be sent. Task failed."
+                                "reason": "Infestor review could not be sent (channel closed, re-registration attempted, retry failed). Task failed."
                             }),
                             timestamp: Utc::now(),
                             correlation_id: None,
