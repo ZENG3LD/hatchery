@@ -1267,9 +1267,18 @@ impl Nydus {
                         }
                     }
 
-                    // Cleanup merged Queen's worktree (no longer needed)
+                    // Recreate merged Queen's worktree from fresh main
+                    // The old branch was merged, so we need a new clean branch from main
                     if let Err(e) = worktree_mgr.cleanup(queen_id) {
-                        eprintln!("[Nydus] Failed to cleanup worktree after merge for {}: {}", queen_id.0, e);
+                        eprintln!("[Nydus] Warning: Failed to cleanup old worktree for {}: {}", queen_id.0, e);
+                    }
+                    match worktree_mgr.create(queen_id) {
+                        Ok(new_path) => {
+                            eprintln!("[Nydus] Recreated worktree for {} from fresh main: {}", queen_id.0, new_path.display());
+                        }
+                        Err(e) => {
+                            eprintln!("[Nydus] ERROR: Failed to recreate worktree for {}: {}", queen_id.0, e);
+                        }
                     }
 
                     // Schedule newly-unblocked tasks
