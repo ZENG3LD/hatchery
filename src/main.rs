@@ -503,6 +503,9 @@ async fn main() -> Result<()> {
                 setting_sources: None,
                 keep_alive,
                 prd_path: Some(config.prd_path.clone()),
+                zerg_rush_enabled: true,
+                zerg_rush_min_bottleneck: 2,
+                zerg_rush_max_queens: 3,
             };
 
             // Create Nydus

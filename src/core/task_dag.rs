@@ -52,6 +52,11 @@ pub enum DagTaskStatus {
     Completed,
     /// Task failed with error details
     Failed { error: String, attempts: usize },
+    /// Task assigned to multiple Queens racing (zerg rush mode)
+    ZergRush {
+        queens: Vec<QueenId>,
+        winner: Option<QueenId>,
+    },
 }
 
 /// A task within the dependency graph.
@@ -63,8 +68,8 @@ pub struct DagTask {
     pub description: String,
     /// Current status of the task
     pub status: DagTaskStatus,
-    /// Which Queen is assigned to this task (if any)
-    pub assigned_to: Option<QueenId>,
+    /// Which Queen(s) are assigned to this task (if any)
+    pub assigned_to: Option<Vec<QueenId>>,
     /// List of task IDs that must complete before this task can start
     pub blocked_by: Vec<String>,
     /// List of task IDs that are blocked by this task (reverse dependencies)
@@ -184,9 +189,77 @@ impl TaskDag {
     pub fn assign(&mut self, task_id: &str, queen_id: QueenId) {
         if let Some(task) = self.tasks.get_mut(task_id) {
             task.status = DagTaskStatus::Assigned(queen_id.clone());
-            task.assigned_to = Some(queen_id);
+            task.assigned_to = Some(vec![queen_id]);
             task.started_at = Some(Utc::now());
         }
+    }
+
+    /// Assign a task to multiple Queens (zerg rush mode).
+    ///
+    /// Returns true if successful, false if task doesn't exist.
+    pub fn assign_zerg(&mut self, task_id: &str, queen_ids: Vec<QueenId>) -> bool {
+        if let Some(task) = self.tasks.get_mut(task_id) {
+            task.status = DagTaskStatus::ZergRush {
+                queens: queen_ids.clone(),
+                winner: None,
+            };
+            task.assigned_to = Some(queen_ids);
+            task.started_at = Some(Utc::now());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Mark the first Queen to complete a zerg rush task as the winner.
+    ///
+    /// Returns list of loser Queens that need to be cancelled.
+    pub fn zerg_winner(&mut self, task_id: &str, winner: QueenId) -> Vec<QueenId> {
+        if let Some(task) = self.tasks.get_mut(task_id) {
+            if let DagTaskStatus::ZergRush { queens, winner: w } = &mut task.status {
+                *w = Some(winner.clone());
+                // Return all queens except the winner
+                return queens.iter()
+                    .filter(|q| **q != winner)
+                    .cloned()
+                    .collect();
+            }
+        }
+        Vec::new()
+    }
+
+    /// Check if a task is in zerg rush mode.
+    pub fn is_zerg_task(&self, task_id: &str) -> bool {
+        self.tasks.get(task_id)
+            .map(|t| matches!(t.status, DagTaskStatus::ZergRush { .. }))
+            .unwrap_or(false)
+    }
+
+    /// Get all Queens assigned to a task (handles both normal and zerg mode).
+    pub fn assigned_queens(&self, task_id: &str) -> Vec<QueenId> {
+        self.tasks.get(task_id)
+            .and_then(|t| t.assigned_to.clone())
+            .unwrap_or_default()
+    }
+
+    /// Calculate bottleneck score for a task = blocks.len()
+    pub fn bottleneck_score(&self, task_id: &str) -> usize {
+        self.tasks.get(task_id)
+            .map(|t| t.blocks.len())
+            .unwrap_or(0)
+    }
+
+    /// Get Ready bottleneck tasks sorted by score (highest first).
+    ///
+    /// Bottleneck = blocks.len() >= min_score
+    pub fn bottleneck_tasks(&self, min_score: usize) -> Vec<&DagTask> {
+        let mut tasks: Vec<&DagTask> = self.ready_tasks()
+            .into_iter()
+            .filter(|t| t.blocks.len() >= min_score)
+            .collect();
+
+        tasks.sort_by(|a, b| b.blocks.len().cmp(&a.blocks.len()));
+        tasks
     }
 
     /// Unassign a task, resetting it back to Ready status.
@@ -342,6 +415,10 @@ impl TaskDag {
                     // This happens when Queen dies or loses the task
                     !idle_queens.is_empty()
                 }
+                DagTaskStatus::ZergRush { queens, .. } => {
+                    // Zerg rush task where all queens are idle — stuck
+                    queens.iter().all(|q| idle_queens.contains(q))
+                }
                 _ => false,
             };
 
@@ -373,7 +450,7 @@ impl TaskDag {
             match &task.status {
                 DagTaskStatus::Blocked => stats.blocked += 1,
                 DagTaskStatus::Ready => stats.ready += 1,
-                DagTaskStatus::Assigned(_) | DagTaskStatus::InProgress | DagTaskStatus::Validating => {
+                DagTaskStatus::Assigned(_) | DagTaskStatus::InProgress | DagTaskStatus::Validating | DagTaskStatus::ZergRush { .. } => {
                     stats.in_progress += 1
                 }
                 DagTaskStatus::Completed => stats.completed += 1,
@@ -497,7 +574,7 @@ mod tests {
         dag.assign("A", queen_id.clone());
 
         let task = dag.get("A").unwrap();
-        assert_eq!(task.assigned_to, Some(queen_id.clone()));
+        assert_eq!(task.assigned_to, Some(vec![queen_id.clone()]));
         assert!(matches!(task.status, DagTaskStatus::Assigned(_)));
 
         dag.complete("A", DagTaskResult {
@@ -625,5 +702,145 @@ mod tests {
 
         let all = dag.all_tasks();
         assert_eq!(all.len(), 3);
+    }
+
+    #[test]
+    fn test_zerg_rush_assignment() {
+        let mut dag = TaskDag::new();
+        dag.add_task(make_task("A", vec![]));
+
+        let queens = vec![
+            QueenId("Q1".to_string()),
+            QueenId("Q2".to_string()),
+            QueenId("Q3".to_string()),
+        ];
+
+        assert!(dag.assign_zerg("A", queens.clone()));
+
+        let task = dag.get("A").unwrap();
+        assert!(matches!(task.status, DagTaskStatus::ZergRush { .. }));
+        assert_eq!(task.assigned_to, Some(queens));
+        assert!(dag.is_zerg_task("A"));
+    }
+
+    #[test]
+    fn test_zerg_winner() {
+        let mut dag = TaskDag::new();
+        dag.add_task(make_task("A", vec![]));
+
+        let queens = vec![
+            QueenId("Q1".to_string()),
+            QueenId("Q2".to_string()),
+            QueenId("Q3".to_string()),
+        ];
+
+        dag.assign_zerg("A", queens.clone());
+
+        let winner = QueenId("Q2".to_string());
+        let losers = dag.zerg_winner("A", winner.clone());
+
+        assert_eq!(losers.len(), 2);
+        assert!(losers.contains(&QueenId("Q1".to_string())));
+        assert!(losers.contains(&QueenId("Q3".to_string())));
+        assert!(!losers.contains(&winner));
+
+        // Check that winner is recorded in status
+        if let Some(task) = dag.get("A") {
+            if let DagTaskStatus::ZergRush { winner: w, .. } = &task.status {
+                assert_eq!(w, &Some(winner));
+            } else {
+                panic!("Expected ZergRush status");
+            }
+        }
+    }
+
+    #[test]
+    fn test_assigned_queens() {
+        let mut dag = TaskDag::new();
+        dag.add_task(make_task("A", vec![]));
+        dag.add_task(make_task("B", vec![]));
+
+        // Normal assignment
+        dag.assign("A", QueenId("Q1".to_string()));
+        assert_eq!(dag.assigned_queens("A"), vec![QueenId("Q1".to_string())]);
+
+        // Zerg rush assignment
+        let queens = vec![
+            QueenId("Q2".to_string()),
+            QueenId("Q3".to_string()),
+        ];
+        dag.assign_zerg("B", queens.clone());
+        assert_eq!(dag.assigned_queens("B"), queens);
+
+        // Non-existent task
+        assert_eq!(dag.assigned_queens("C"), Vec::new());
+    }
+
+    #[test]
+    fn test_bottleneck_score() {
+        let mut dag = TaskDag::new();
+
+        dag.add_task(make_task("A", vec![]));
+        dag.add_task(make_task("B", vec!["A"]));
+        dag.add_task(make_task("C", vec!["A"]));
+        dag.add_task(make_task("D", vec!["A"]));
+
+        // A blocks 3 tasks, so score = 3
+        assert_eq!(dag.bottleneck_score("A"), 3);
+        // B, C, D block nothing, so score = 0
+        assert_eq!(dag.bottleneck_score("B"), 0);
+        assert_eq!(dag.bottleneck_score("C"), 0);
+        assert_eq!(dag.bottleneck_score("D"), 0);
+    }
+
+    #[test]
+    fn test_bottleneck_tasks() {
+        let mut dag = TaskDag::new();
+
+        // Create bottleneck: A blocks 3 tasks
+        dag.add_task(make_task("A", vec![]));
+        dag.add_task(make_task("B", vec!["A"]));
+        dag.add_task(make_task("C", vec!["A"]));
+        dag.add_task(make_task("D", vec!["A"]));
+
+        // E blocks 2 tasks
+        dag.add_task(make_task("E", vec![]));
+        dag.add_task(make_task("F", vec!["E"]));
+        dag.add_task(make_task("G", vec!["E"]));
+
+        // Get tasks with min_score = 2
+        let bottlenecks = dag.bottleneck_tasks(2);
+        assert_eq!(bottlenecks.len(), 2);
+
+        // Should be sorted by score (highest first)
+        assert_eq!(bottlenecks[0].id, "A"); // score = 3
+        assert_eq!(bottlenecks[1].id, "E"); // score = 2
+
+        // Get tasks with min_score = 3
+        let bottlenecks = dag.bottleneck_tasks(3);
+        assert_eq!(bottlenecks.len(), 1);
+        assert_eq!(bottlenecks[0].id, "A");
+    }
+
+    #[test]
+    fn test_recover_stuck_zerg_tasks() {
+        let mut dag = TaskDag::new();
+        dag.add_task(make_task("A", vec![]));
+
+        let queens = vec![
+            QueenId("Q1".to_string()),
+            QueenId("Q2".to_string()),
+            QueenId("Q3".to_string()),
+        ];
+
+        dag.assign_zerg("A", queens.clone());
+
+        // All queens are now idle - task should be recovered
+        let recovered = dag.recover_stuck_tasks(&queens);
+        assert_eq!(recovered, 1);
+
+        let task = dag.get("A").unwrap();
+        assert!(matches!(task.status, DagTaskStatus::Ready));
+        assert_eq!(task.assigned_to, None);
     }
 }
