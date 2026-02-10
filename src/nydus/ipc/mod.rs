@@ -525,6 +525,7 @@ async fn handle_request(
                     "completed": stats.completed,
                     "failed": stats.failed,
                     "in_progress": in_progress,
+                    "validating": stats.validating,
                     "queens_alive": queens_alive,
                     "queens_idle": queens_idle,
                     "uptime_secs": uptime_secs,
@@ -660,6 +661,7 @@ mod tests {
             blocked: 0,
             ready: 0,
             in_progress: 0,
+            validating: 0,
             completed: 0,
             failed: 0,
         }));
@@ -725,6 +727,7 @@ mod tests {
             blocked: 0,
             ready: 0,
             in_progress: 0,
+            validating: 0,
             completed: 0,
             failed: 0,
         }));
@@ -813,6 +816,7 @@ mod tests {
             blocked: 0,
             ready: 0,
             in_progress: 0,
+            validating: 0,
             completed: 0,
             failed: 0,
         }));
@@ -890,6 +894,7 @@ mod tests {
             blocked: 0,
             ready: 0,
             in_progress: 0,
+            validating: 0,
             completed: 0,
             failed: 0,
         }));
@@ -956,6 +961,7 @@ mod tests {
             blocked: 0,
             ready: 0,
             in_progress: 0,
+            validating: 0,
             completed: 0,
             failed: 0,
         }));
@@ -1047,6 +1053,7 @@ mod tests {
             blocked: 3,
             ready: 0,
             in_progress: 3,
+            validating: 0,
             completed: 5,
             failed: 2,
         }));

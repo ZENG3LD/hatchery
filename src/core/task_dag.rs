@@ -455,6 +455,7 @@ impl TaskDag {
             blocked: 0,
             ready: 0,
             in_progress: 0,
+            validating: 0,
             completed: 0,
             failed: 0,
         };
@@ -463,9 +464,10 @@ impl TaskDag {
             match &task.status {
                 DagTaskStatus::Blocked => stats.blocked += 1,
                 DagTaskStatus::Ready => stats.ready += 1,
-                DagTaskStatus::Assigned(_) | DagTaskStatus::InProgress | DagTaskStatus::Validating | DagTaskStatus::ZergRush { .. } => {
+                DagTaskStatus::Assigned(_) | DagTaskStatus::InProgress | DagTaskStatus::ZergRush { .. } => {
                     stats.in_progress += 1
                 }
+                DagTaskStatus::Validating => stats.validating += 1,
                 DagTaskStatus::Completed => stats.completed += 1,
                 DagTaskStatus::Failed { .. } => stats.failed += 1,
             }
@@ -490,8 +492,10 @@ pub struct DagStats {
     pub blocked: usize,
     /// Number of ready tasks
     pub ready: usize,
-    /// Number of in-progress tasks (Assigned, InProgress, Validating)
+    /// Number of in-progress tasks (Assigned, InProgress, ZergRush)
     pub in_progress: usize,
+    /// Number of tasks being validated (Validating)
+    pub validating: usize,
     /// Number of completed tasks
     pub completed: usize,
     /// Number of failed tasks

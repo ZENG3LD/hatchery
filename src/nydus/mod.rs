@@ -293,6 +293,7 @@ impl Nydus {
             blocked: 0,
             ready: 0,
             in_progress: 0,
+            validating: 0,
             completed: 0,
             failed: 0,
         };
@@ -1134,6 +1135,14 @@ impl Nydus {
                             // Failed to run cargo check (command not found, etc.)
                             eprintln!("[Nydus] Warning: Failed to run post-merge verification: {}", e);
                             // Continue with merge (don't block on verification failures)
+
+                            // Still mark complete — don't block on verification tool failures
+                            let dag_result = crate::core::task_dag::DagTaskResult {
+                                success: true,
+                                output: format!("Completed and merged to main (verification skipped: {})", e),
+                                files_modified: vec![],
+                            };
+                            self.task_dag.complete(task_id, dag_result);
                         }
                     }
 
@@ -1170,6 +1179,9 @@ impl Nydus {
                     if let Err(e) = worktree_mgr.cleanup(queen_id) {
                         eprintln!("[Nydus] Failed to cleanup worktree after merge for {}: {}", queen_id.0, e);
                     }
+
+                    // Schedule newly-unblocked tasks
+                    self.try_schedule().await?;
                 }
                 Ok(MergeResult::Conflict { files }) => {
                     let file_list: Vec<String> = files.iter().map(|p| p.to_string_lossy().to_string()).collect();

@@ -542,6 +542,18 @@ async fn main() -> Result<()> {
             // Add tasks to DAG (LLM decomposition or fallback to checkboxes)
             populate_dag(&mut nydus, &config.prd_path, &config.working_dir, llm_decompose).await?;
 
+            // Enable event logging to file
+            let events_db_path = config.working_dir.join("hatchery-events.db");
+            match hatchery::nydus::mailbox::event_log::SqliteEventLog::new(&events_db_path) {
+                Ok(event_log) => {
+                    nydus.enable_audit(event_log);
+                    eprintln!("[HATCHERY] Event logging enabled: {}", events_db_path.display());
+                }
+                Err(e) => {
+                    eprintln!("[HATCHERY] Warning: Failed to enable event logging: {}", e);
+                }
+            }
+
             // Run event-driven loop
             let start = Instant::now();
             println!("[HATCHERY] Starting event-driven loop (stream mode)");
