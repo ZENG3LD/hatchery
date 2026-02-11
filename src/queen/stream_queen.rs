@@ -501,23 +501,17 @@ async fn stdout_reader(stdout: ChildStdout, tx: mpsc::Sender<ClaudeEvent>) {
 // Prompt Formatting
 // ============================================================================
 
+/// Load skill hint pattern template.
+const SKILL_HINT_PATTERN: &str = include_str!("prompts/required_skill_pattern.md");
+
 /// Format a task assignment prompt with context.
 fn format_task_prompt(task: &Task, context: &TaskContext) -> String {
     let mut prompt = String::new();
 
     // Skill hint (if provided) - MANDATORY when present
     if let Some(ref hint) = context.skill_hint {
-        prompt.push_str(&format!(
-            "## REQUIRED EXECUTION PATTERN — MANDATORY\n\n\
-            You MUST use the /{hint} skill for this task. This is NOT optional.\n\n\
-            **INSTRUCTIONS:**\n\
-            1. FIRST, invoke the /{hint} skill using the Skill tool\n\
-            2. Follow the skill's phase system exactly as documented\n\
-            3. Do NOT spawn agents directly — let the skill orchestrate the work\n\
-            4. Do NOT skip or deviate from this pattern\n\n\
-            Failure to use /{hint} will result in task rejection.\n\n",
-            hint = hint
-        ));
+        prompt.push_str(&SKILL_HINT_PATTERN.replace("{hint}", hint));
+        prompt.push_str("\n\n");
     }
 
     // Shared knowledge from other Queens (via SharedMemory)

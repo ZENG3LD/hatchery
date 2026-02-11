@@ -7,13 +7,13 @@
 
 /// Queen manager role preamble — explains the manager role and available agent types.
 pub fn queen_preamble() -> &'static str {
-    include_str!("../../prompts/queen_preamble.md")
+    include_str!("../queen/prompts/preamble.md")
 }
 
 /// Orchestration discipline rules — injected into every compaction carry-over.
 /// These rules survive context compression to prevent "dumb iterator" degradation.
 pub fn orchestration_discipline_block() -> &'static str {
-    include_str!("../../prompts/orchestration_discipline.md")
+    include_str!("../queen/prompts/orchestration_discipline.md")
 }
 
 /// Hatchery CLI tools documentation for Queen prompts.
@@ -21,7 +21,7 @@ pub fn orchestration_discipline_block() -> &'static str {
 /// This block tells Queens they can interact with SharedMemory and Mailbox
 /// during execution via the `hatchery` CLI binary.
 pub fn hatchery_cli_tools_block() -> &'static str {
-    include_str!("../../prompts/hatchery_cli_tools.md")
+    include_str!("../queen/prompts/hatchery_cli_tools.md")
 }
 
 /// Git safety rules for Queens working in isolated branches.
@@ -29,21 +29,21 @@ pub fn hatchery_cli_tools_block() -> &'static str {
 /// These rules prevent Queens from accidentally modifying main/master branches
 /// or performing destructive git operations that could harm the shared codebase.
 pub fn git_safety_block() -> &'static str {
-    include_str!("../../prompts/git_safety.md")
+    include_str!("../queen/prompts/git_safety.md")
 }
 
 /// Recovery notice template — explains to a recovering Queen what happened and what to do.
 pub fn recovery_notice_template() -> &'static str {
-    include_str!("../../prompts/recovery_notice.md")
+    include_str!("../queen/prompts/recovery_notice.md")
 }
 
 /// Get the default system prompt for a given role.
 pub fn default_system_prompt(role: &str) -> &'static str {
     match role {
-        "queen" | "native_queen" => "You are an autonomous AI manager (Queen) in the Hatchery swarm. You spawn and coordinate worker agents to complete tasks. Never do implementation work yourself.",
-        "swarm_host" | "coordinator" => "You are the Nydus coordinator. Make tactical decisions about task assignment, validation, and resource allocation.",
-        "validator" | "reviewer" | "overlord" => "You are a code reviewer. Evaluate completed work for correctness, quality, and security.",
-        _ => "You are an AI agent in the Hatchery swarm system.",
+        "queen" | "native_queen" => include_str!("prompts/default_queen.md"),
+        "swarm_host" | "coordinator" => include_str!("prompts/default_coordinator.md"),
+        "validator" | "reviewer" | "overlord" => include_str!("prompts/default_reviewer.md"),
+        _ => include_str!("prompts/default_agent.md"),
     }
 }
 
