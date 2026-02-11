@@ -1266,6 +1266,15 @@ impl Nydus {
                                 files_modified: vec![],
                             };
                             self.task_dag.complete(task_id, dag_result);
+
+                            // Update PRD checkbox
+                            if let Some(ref prd_path) = self.config.prd_path {
+                                if let Err(e) = crate::prd::mark_task_done(prd_path, task_id) {
+                                    eprintln!("[Nydus] Warning: Failed to update PRD checkbox for {}: {}", task_id, e);
+                                } else {
+                                    eprintln!("[Nydus] PRD checkbox marked done for task {}", task_id);
+                                }
+                            }
                         }
                         Err(e) => {
                             // Failed to run cargo check (command not found, etc.)
@@ -1279,6 +1288,15 @@ impl Nydus {
                                 files_modified: vec![],
                             };
                             self.task_dag.complete(task_id, dag_result);
+
+                            // Update PRD checkbox
+                            if let Some(ref prd_path) = self.config.prd_path {
+                                if let Err(e) = crate::prd::mark_task_done(prd_path, task_id) {
+                                    eprintln!("[Nydus] Warning: Failed to update PRD checkbox for {}: {}", task_id, e);
+                                } else {
+                                    eprintln!("[Nydus] PRD checkbox marked done for task {}", task_id);
+                                }
+                            }
                         }
                     }
 
@@ -1378,6 +1396,15 @@ impl Nydus {
                         files_modified: vec![],
                     };
                     self.task_dag.complete(task_id, dag_result);
+
+                    // Update PRD checkbox
+                    if let Some(ref prd_path) = self.config.prd_path {
+                        if let Err(e) = crate::prd::mark_task_done(prd_path, task_id) {
+                            eprintln!("[Nydus] Warning: Failed to update PRD checkbox for {}: {}", task_id, e);
+                        } else {
+                            eprintln!("[Nydus] PRD checkbox marked done for task {}", task_id);
+                        }
+                    }
                 }
                 Err(e) => {
                     eprintln!("[Nydus] Merge failed for {}: {}", queen_id.0, e);
