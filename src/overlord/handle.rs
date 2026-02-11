@@ -55,41 +55,15 @@ impl OverlordHandle {
             "## Verification Command\n\nNo verification command specified for this task.\n\n".to_string()
         };
 
-        // Build review prompt with instructions
-        let review_description = format!(
-            "## Review Request\n\n\
-            **Queen**: {queen_id}\n\
-            **Task**: {task_id}\n\
-            **Branch**: {branch_name}\n\
-            **Worktree**: {worktree_path}\n\n\
-            ## Task Description\n\n\
-            {task_description}\n\n\
-            {verify_section}\
-            ## Instructions\n\n\
-            1. Run `git diff main..HEAD` in the worktree path to see only the Queen's changes vs main\n\
-            2. Run `cargo check --workspace` to verify compilation\n\
-            3. **Run the verification command** (if specified) to validate task completion\n\
-            4. Review the diff against the task description — does it actually implement what was requested?\n\
-            5. Respond with your verdict\n\n\
-            ## Approval Criteria\n\n\
-            - Code MUST compile (cargo check passes)\n\
-            - **Verification command MUST pass** (if specified)\n\
-            - Changes must match the task description — stub code or placeholder implementations are NOT acceptable\n\
-            - Code must follow existing patterns and be correct\n\n\
-            ## Response Format\n\n\
-            You MUST end your response with exactly one of:\n\n\
-            VERDICT: APPROVE\n\
-            <summary>Brief description of changes</summary>\n\n\
-            OR\n\n\
-            VERDICT: REJECT\n\
-            <reason>What's wrong and needs fixing</reason>",
-            queen_id = queen_id.0,
-            task_id = task_id,
-            branch_name = branch_name,
-            worktree_path = worktree_path.display(),
-            task_description = task_description,
-            verify_section = verify_section,
-        );
+        // Build review prompt with instructions using template
+        const REVIEW_TEMPLATE: &str = include_str!("prompts/review_task.md");
+        let review_description = REVIEW_TEMPLATE
+            .replace("{queen_id}", &queen_id.0)
+            .replace("{task_id}", &task_id)
+            .replace("{branch_name}", &branch_name)
+            .replace("{worktree_path}", &worktree_path.display().to_string())
+            .replace("{task_description}", task_description)
+            .replace("{verify_section}", &verify_section);
 
         let task = Task {
             id: TaskId(format!("review-{}-{}", queen_id.0, task_id)),
