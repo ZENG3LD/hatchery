@@ -24,6 +24,7 @@ use crate::core::shared_memory::SharedMemory;
 use crate::safety::worktree::{WorktreeManager, MergeResult, SyncResult};
 use crate::queen::recovery::{SessionTracker, RecoveryManager, RecoveryConfig};
 use crate::nydus::tick::HeuristicTick;
+use crate::swarm_pool::{SwarmPool, SwarmPoolConfig, SwarmPoolAction};
 
 /// Configuration for Nydus.
 #[derive(Debug, Clone)]
@@ -88,6 +89,8 @@ pub struct Nydus {
     actor_tasks: HashMap<QueenId, JoinHandle<()>>,
     /// Task dependency graph
     task_dag: TaskDag,
+    /// SwarmPool for spawn heuristics (zerg rush, elastic pool, retry policy)
+    swarm_pool: SwarmPool,
     /// Event bus (replaces SwarmMailbox for hot path)
     event_bus: EventBus,
     /// KEEP: SwarmMailbox for outbox to Operator (backward compat)
@@ -310,11 +313,22 @@ impl Nydus {
         // Create wakeup notify for instant Queen completion handling
         let wakeup_notify = Arc::new(Notify::new());
 
+        // Build SwarmPoolConfig from NydusConfig
+        let swarm_pool_config = SwarmPoolConfig {
+            min_queens: config.min_queens,
+            max_queens: config.max_queens,
+            zerg_rush_threshold: config.zerg_rush_min_bottleneck,
+            zerg_rush_queens: config.zerg_rush_max_queens,
+            max_retries_before_escalate: 1, // First decline → retry, second decline → escalate
+        };
+        let swarm_pool = SwarmPool::new(swarm_pool_config);
+
         Ok(Self {
             id,
             handles: HashMap::new(),
             actor_tasks: HashMap::new(),
             task_dag: TaskDag::new(),
+            swarm_pool,
             event_bus,
             mailbox,
             memory,
@@ -1267,6 +1281,9 @@ impl Nydus {
                             };
                             self.task_dag.complete(task_id, dag_result);
 
+                            // Reset decline counts in SwarmPool
+                            self.swarm_pool.on_task_completed(task_id);
+
                             // Update PRD checkbox
                             if let Some(ref prd_path) = self.config.prd_path {
                                 if let Err(e) = crate::prd::mark_task_done(prd_path, task_id) {
@@ -1288,6 +1305,9 @@ impl Nydus {
                                 files_modified: vec![],
                             };
                             self.task_dag.complete(task_id, dag_result);
+
+                            // Reset decline counts in SwarmPool
+                            self.swarm_pool.on_task_completed(task_id);
 
                             // Update PRD checkbox
                             if let Some(ref prd_path) = self.config.prd_path {
@@ -1437,47 +1457,49 @@ impl Nydus {
         // Remove from in_review
         self.in_review.remove(task_id);
 
-        const MAX_RETRIES: usize = 3;
+        // Ask SwarmPool what to do with this decline
+        let action = self.swarm_pool.on_decline(task_id, reason);
 
-        let retry_count = self.task_dag.get(task_id)
-            .map(|t| t.retry_count)
-            .unwrap_or(0);
-
-        if retry_count >= MAX_RETRIES {
-            eprintln!(
-                "[Nydus] Task {} rejected {} times, escalating to operator",
-                task_id, retry_count
-            );
-            // Send escalation (existing code)
-            let rejection_msg = SwarmMessage {
-                id: uuid::Uuid::new_v4().to_string(),
-                from: AgentId::Overlord(OverlordId("overlord-0".to_string())),
-                to: AgentId::Operator,
-                msg_type: MessageType::Escalation,
-                payload: serde_json::json!({
-                    "queen_id": queen_id.0,
-                    "task_id": task_id,
-                    "status": "rejected_by_overlord_max_retries",
-                    "reason": reason,
-                    "retry_count": retry_count,
-                }),
-                timestamp: Utc::now(),
-                correlation_id: None,
-                visibility: Visibility::default_internal(),
-            };
-            self.mailbox.lock().send(rejection_msg);
-        } else {
-            // Requeue with feedback
-            let requeued = self.task_dag.requeue_with_feedback(task_id, reason.to_string());
-            if requeued {
+        match action {
+            SwarmPoolAction::RetryTask { task_id } => {
+                // Requeue with feedback
+                let requeued = self.task_dag.requeue_with_feedback(&task_id, reason.to_string());
+                if requeued {
+                    let retry_count = self.task_dag.get(&task_id)
+                        .map(|t| t.retry_count)
+                        .unwrap_or(0);
+                    eprintln!(
+                        "[Nydus] Task {} rejected (attempt {}), requeued with feedback: {}",
+                        task_id, retry_count, reason
+                    );
+                    self.try_schedule().await?;
+                } else {
+                    eprintln!("[Nydus] Failed to requeue task {}, escalating", task_id);
+                    // Fallback escalation
+                    let rejection_msg = SwarmMessage {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        from: AgentId::Overlord(OverlordId("overlord-0".to_string())),
+                        to: AgentId::Operator,
+                        msg_type: MessageType::Escalation,
+                        payload: serde_json::json!({
+                            "queen_id": queen_id.0,
+                            "task_id": task_id,
+                            "status": "rejected_requeue_failed",
+                            "reason": reason,
+                        }),
+                        timestamp: Utc::now(),
+                        correlation_id: None,
+                        visibility: Visibility::default_internal(),
+                    };
+                    self.mailbox.lock().send(rejection_msg);
+                }
+            }
+            SwarmPoolAction::EscalateToOvermind { task_id, decline_count, reasons } => {
                 eprintln!(
-                    "[Nydus] Task {} rejected (attempt {}/{}), requeued with feedback: {}",
-                    task_id, retry_count + 1, MAX_RETRIES, reason
+                    "[Nydus] Task {} escalated after {} declines",
+                    task_id, decline_count
                 );
-                self.try_schedule().await?;
-            } else {
-                eprintln!("[Nydus] Failed to requeue task {}, escalating", task_id);
-                // Fallback escalation
+                // Send escalation message
                 let rejection_msg = SwarmMessage {
                     id: uuid::Uuid::new_v4().to_string(),
                     from: AgentId::Overlord(OverlordId("overlord-0".to_string())),
@@ -1486,14 +1508,24 @@ impl Nydus {
                     payload: serde_json::json!({
                         "queen_id": queen_id.0,
                         "task_id": task_id,
-                        "status": "rejected_requeue_failed",
-                        "reason": reason,
+                        "status": "escalated_to_overmind",
+                        "decline_count": decline_count,
+                        "reasons": reasons,
                     }),
                     timestamp: Utc::now(),
                     correlation_id: None,
                     visibility: Visibility::default_internal(),
                 };
                 self.mailbox.lock().send(rejection_msg);
+
+                // For now, fall back to requeue (Overmind wiring in Phase 5)
+                if let Some(last_reason) = reasons.last() {
+                    self.task_dag.requeue_with_feedback(&task_id, last_reason.clone());
+                    self.try_schedule().await?;
+                }
+            }
+            _ => {
+                // Other actions not expected in this context
             }
         }
 
@@ -1758,61 +1790,31 @@ impl Nydus {
         eprintln!("[Nydus] ELASTIC POOL: Queen {} removed from pool (current size: {})", queen_id.0, self.total_queens());
     }
 
-    /// Check if conditions are right for zerg rush.
-    ///
-    /// Simplified condition: if bottlenecks exist, zerg rush them.
-    fn should_zerg_rush(&self) -> bool {
-        if !self.config.zerg_rush_enabled {
-            return false;
-        }
-
-        let bottlenecks = self.task_dag.bottleneck_tasks(self.config.zerg_rush_min_bottleneck);
-        !bottlenecks.is_empty()
-    }
-
-    /// Plan zerg rush assignment for the TOP bottleneck.
-    ///
-    /// Returns (task_id, queen_ids) for the single bottleneck to zerg.
-    /// ALL idle queens are assigned to this one task.
-    /// Returns None if no bottlenecks exist.
-    async fn plan_zerg_rush(&mut self, idle_queens: &[QueenId]) -> Option<(String, Vec<QueenId>)> {
-        let bottlenecks = self.task_dag.bottleneck_tasks(self.config.zerg_rush_min_bottleneck);
-        if bottlenecks.is_empty() {
-            return None;
-        }
-
-        // Get the TOP bottleneck (highest blocks count) and clone data before mutable borrow
-        let task_id = bottlenecks[0].id.clone();
-        let blocks_count = bottlenecks[0].blocks.len();
-
-        // ALL idle queens go to this bottleneck
-        let mut queens_for_zerg: Vec<QueenId> = idle_queens.to_vec();
-
-        // Spawn additional queens if needed (up to max_zerg_queens)
-        let need_more = self.config.zerg_rush_max_queens.saturating_sub(queens_for_zerg.len());
-        let can_spawn = self.config.max_queens.saturating_sub(self.total_queens());
-        let to_spawn = need_more.min(can_spawn);
-
-        for _ in 0..to_spawn {
-            match self.spawn_queen().await {
-                Ok(new_queen) => {
-                    queens_for_zerg.push(new_queen);
+    /// Execute actions requested by SwarmPool heuristics.
+    /// Only handles SpawnQueens and KillQueen actions.
+    /// RetryTask, EscalateToOvermind, and ZergRush must be handled by the caller.
+    async fn execute_swarm_pool_actions_sync(&mut self, actions: &[SwarmPoolAction]) -> Result<()> {
+        for action in actions {
+            match action {
+                SwarmPoolAction::SpawnQueens(n) => {
+                    eprintln!("[Nydus] SWARM POOL: Spawning {} Queens", n);
+                    for _ in 0..*n {
+                        if let Err(e) = self.spawn_queen().await {
+                            eprintln!("[Nydus] SWARM POOL: Failed to spawn Queen: {}", e);
+                            break;
+                        }
+                    }
                 }
-                Err(e) => {
-                    eprintln!("[Nydus] ZERG RUSH: Failed to spawn additional Queen: {}", e);
-                    break;
+                SwarmPoolAction::KillQueen(id) => {
+                    eprintln!("[Nydus] SWARM POOL: Kill Queen {} requested (not yet implemented)", id.0);
+                    // TODO: Implement graceful Queen shutdown
+                }
+                _ => {
+                    // Skip non-sync actions (ZergRush, RetryTask, EscalateToOvermind handled by caller)
                 }
             }
         }
-
-        eprintln!(
-            "[Nydus] ZERG RUSH: Planning {} Queens for bottleneck task {} (blocks {} tasks)",
-            queens_for_zerg.len(),
-            task_id,
-            blocks_count
-        );
-
-        Some((task_id, queens_for_zerg))
+        Ok(())
     }
 
     /// Find ready tasks + idle queens, assign tasks.
@@ -1869,18 +1871,68 @@ impl Nydus {
 
         let mut assigned = 0;
 
-        // PHASE 1: Zerg Rush bottleneck tasks if conditions are right
-        if self.should_zerg_rush() {
-            if let Some((task_id, queen_ids)) = self.plan_zerg_rush(&idle_queens).await {
+        // PHASE 1: Ask SwarmPool for spawn decisions (zerg rush + elastic pool)
+        let ready_count = ready_tasks.len();
+        let active_count = self.handles.values().filter(|h| !matches!(h.status(), QueenStatus::Idle)).count();
+        let idle_count = idle_queens.len();
+
+        // Get bottleneck tasks for SwarmPool
+        let bottlenecks = self.task_dag.bottleneck_tasks(self.swarm_pool.config().zerg_rush_threshold);
+        let bottleneck_pairs: Vec<(String, usize)> = bottlenecks.iter()
+            .map(|task| (task.id.clone(), task.blocks.len()))
+            .collect();
+
+        let actions = self.swarm_pool.on_dag_change(ready_count, active_count, idle_count, bottleneck_pairs);
+
+        // Execute sync actions first (SpawnQueens only)
+        self.execute_swarm_pool_actions_sync(&actions).await?;
+
+        // Re-fetch idle queens after spawning
+        idle_queens = self.handles.iter()
+            .filter(|(_, handle)| matches!(handle.status(), QueenStatus::Idle))
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        // Handle ZergRush actions inline (need access to idle queens and assignment logic)
+        for action in actions {
+            if let SwarmPoolAction::ZergRush { task_id, num_queens } = action {
+                // Get idle queens for this zerg rush
+                let mut queens_for_zerg: Vec<QueenId> = idle_queens.iter()
+                    .take(num_queens)
+                    .cloned()
+                    .collect();
+
+                // Spawn additional queens if needed
+                let need_more = num_queens.saturating_sub(queens_for_zerg.len());
+                let can_spawn = self.config.max_queens.saturating_sub(self.total_queens());
+                let to_spawn = need_more.min(can_spawn);
+
+                for _ in 0..to_spawn {
+                    match self.spawn_queen().await {
+                        Ok(new_queen) => {
+                            queens_for_zerg.push(new_queen.clone());
+                            idle_queens.push(new_queen);
+                        }
+                        Err(e) => {
+                            eprintln!("[Nydus] ZERG RUSH: Failed to spawn additional Queen: {}", e);
+                            break;
+                        }
+                    }
+                }
+
+                if queens_for_zerg.is_empty() {
+                    continue;
+                }
+
                 eprintln!(
                     "[Nydus] ZERG RUSH: Assigning task {} to {} Queens: {:?}",
                     task_id,
-                    queen_ids.len(),
-                    queen_ids.iter().map(|q| &q.0).collect::<Vec<_>>()
+                    queens_for_zerg.len(),
+                    queens_for_zerg.iter().map(|q| &q.0).collect::<Vec<_>>()
                 );
 
                 // Mark as zerg rush in DAG
-                if !self.task_dag.assign_zerg(&task_id, queen_ids.clone()) {
+                if !self.task_dag.assign_zerg(&task_id, queens_for_zerg.clone()) {
                     eprintln!("[Nydus] Failed to assign zerg rush for task {}", task_id);
                     return Ok(assigned);
                 }
@@ -1919,7 +1971,7 @@ impl Nydus {
                 }
 
                 // Assign to all Queens in parallel
-                for queen_id in &queen_ids {
+                for queen_id in &queens_for_zerg {
                     let task = Task {
                         id: TaskId(task_id.clone()),
                         description: description.clone(),
@@ -1952,7 +2004,7 @@ impl Nydus {
                 }
 
                 // Remove assigned queens from idle pool
-                idle_queens.retain(|q| !queen_ids.contains(q));
+                idle_queens.retain(|q| !queens_for_zerg.contains(q));
             }
         }
 
@@ -2106,6 +2158,12 @@ impl Nydus {
 
         // Evict expired memory entries
         self.memory.evict_expired();
+
+        // Elastic pool maintenance: ensure min/max Queens
+        let active_count = self.handles.values().filter(|h| !matches!(h.status(), QueenStatus::Idle)).count();
+        let idle_count = self.handles.values().filter(|h| matches!(h.status(), QueenStatus::Idle)).count();
+        let actions = self.swarm_pool.maintenance(active_count, idle_count);
+        self.execute_swarm_pool_actions_sync(&actions).await?;
 
         // Deadlock detection: all Queens idle but tasks remain
         let all_idle = self.handles.values().all(|h| matches!(h.status(), QueenStatus::Idle));
