@@ -7,6 +7,7 @@ mod handle;
 mod spawn_overlord;
 pub mod parsers;
 pub mod code_checks;
+pub mod verdict;
 
 pub use handle::OverlordHandle;
 pub use spawn_overlord::{OverlordConfig, spawn_overlord};

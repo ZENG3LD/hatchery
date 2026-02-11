@@ -848,9 +848,48 @@ impl Nydus {
                                 (format!("Task {}", task_id.0), None)
                             };
 
-                            // Send review command to Overlord (now async)
-                            if let Some(ref overlord_handle) = self.overlord {
-                                match overlord_handle.review(
+                            // HYBRID REVIEW PIPELINE: Run deterministic checks first
+                            eprintln!("[Nydus] Running hybrid review pipeline for task {} from {}", task_id.0, queen_id.0);
+
+                            let duration_secs = duration_ms as f64 / 1000.0;
+                            match crate::overlord::verdict::run_hybrid_review(
+                                &worktree_path,
+                                "main",
+                                verify_cmd.as_deref(),
+                                &task_description,
+                                duration_secs,
+                                cost_usd,
+                                num_turns as usize,
+                            ).await {
+                                Ok(hybrid_result) => {
+                                    match hybrid_result.verdict {
+                                        crate::overlord::verdict::OverlordVerdict::Approve => {
+                                            // Auto-approve without LLM
+                                            eprintln!("[Nydus] Hybrid review APPROVED task {} (deterministic checks passed)", task_id.0);
+                                            self.handle_overlord_approve(&queen_id, &task_id.0, "Auto-approved by hybrid review (all checks passed)").await?;
+                                            review_sent = true;
+                                        }
+                                        crate::overlord::verdict::OverlordVerdict::Reject { reason } => {
+                                            // Auto-reject without LLM
+                                            eprintln!("[Nydus] Hybrid review REJECTED task {}: {}", task_id.0, reason);
+                                            self.handle_overlord_reject(&queen_id, &task_id.0, &reason).await?;
+                                            review_sent = true;
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("[Nydus] WARNING: Hybrid review pipeline failed: {}. Falling back to LLM review.", e);
+                                    // Fall through to LLM review on hybrid pipeline error
+                                }
+                            }
+
+                            // Only send to LLM Overlord if hybrid review didn't make a decision
+                            if !review_sent {
+                                eprintln!("[Nydus] Hybrid review ambiguous, sending task {} to LLM Overlord", task_id.0);
+
+                                // Send review command to Overlord (now async)
+                                if let Some(ref overlord_handle) = self.overlord {
+                                    match overlord_handle.review(
                                     queen_id.clone(),
                                     task_id.0.clone(),
                                     branch_name.clone(),
@@ -904,12 +943,13 @@ impl Nydus {
                                     }
                                 }
                             }
-                        } else {
-                            eprintln!("[Nydus] ERROR: No worktree path found for Queen {} — cannot send task {} to Overlord!", queen_id.0, task_id.0);
                         }
                     } else {
-                        eprintln!("[Nydus] ERROR: WorktreeManager is None — cannot send task {} to Overlord!", task_id.0);
+                        eprintln!("[Nydus] ERROR: No worktree path found for Queen {} — cannot send task {} to Overlord!", queen_id.0, task_id.0);
                     }
+                } else {
+                    eprintln!("[Nydus] ERROR: WorktreeManager is None — cannot send task {} to Overlord!", task_id.0);
+                }
 
                     // CRITICAL: If review was NOT sent, task is stuck in Validating forever.
                     // Fail it loudly so operator sees it and dependencies don't silently stall.
