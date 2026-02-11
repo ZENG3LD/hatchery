@@ -1,0 +1,42 @@
+//! Claude Code session parsing and processing
+//!
+//! This module contains Claude-specific types and parsing logic for handling
+//! Claude Code JSONL session files.
+//!
+//! Copied from zengeld-memory with database dependencies removed.
+
+pub mod context_extractor;
+pub mod error;
+pub mod events;
+pub mod parser;
+pub mod parser_v2;
+pub mod types;
+
+// Re-export error types
+pub use error::{ParseError, Result};
+
+// Re-export Claude-specific types
+pub use types::{
+    AgentActivity, AgentSummary, AgentTask, ContextSummary, ConversationEdge, Decision,
+    DecisionContext, EventIndexEntry, FileChange, SessionEvent as ClaudeSessionEvent,
+    SessionSegment, ToolActivity,
+};
+
+// Re-export typed event structures
+pub use events::{
+    AssistantMessage, AssistantMessageEvent, CompactMetadata, ContentBlock, EventMetadata,
+    FileHistorySnapshot, MessageContent, ProgressData, ProgressEvent, QueueOperationEvent,
+    SessionEvent, Snapshot, SystemEvent, TokenUsage, ToolUseResult, UserMessageEvent,
+};
+
+// Re-export context extraction types and extractor
+pub use context_extractor::{ContextExtractor, FileModification};
+
+// Re-export parser functions
+pub use parser::{extract_session_id, find_session_files, parse_jsonl_events};
+
+// Re-export parser_v2 types and functions
+pub use parser_v2::{
+    discover_segments, ImportStats, ParsedSegment, ParserConfig, SegmentBoundary, SegmentParser,
+    SegmentStats,
+};

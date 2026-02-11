@@ -32,6 +32,12 @@ regex = "1"
 # Efficient synchronization primitives
 parking_lot = "0.12"
 
+# Logging (for infestation_pit module)
+tracing = "0.1"
+
+# Cryptography (for content hashing in infestation_pit)
+sha2 = "0.10"
+
 # UUID generation for message IDs
 uuid = { version = "1", features = ["v4"] }
 
