@@ -1,0 +1,4 @@
+{"queen_id":"Q0","task_id":"T1","key":"task_result_T1","value":{"cost_usd":0.15,"duration_ms":5000,"num_turns":3,"output":"Done","quality_passed":true,"status":"completed"},"timestamp":"2026-02-08T14:08:21.886540100Z"}
+{"queen_id":"Q0","task_id":"T1","key":"task_result_T1","value":{"cost_usd":0.15,"duration_ms":5000,"num_turns":3,"output":"Done","quality_passed":true,"status":"completed"},"timestamp":"2026-02-08T14:10:52.260062300Z"}
+{"queen_id":"Q0","task_id":"T1","key":"task_result_T1","value":{"cost_usd":0.15,"duration_ms":5000,"num_turns":3,"output":"Done","quality_passed":true,"status":"completed"},"timestamp":"2026-02-08T14:14:20.181367800Z"}
+{"queen_id":"Q0","task_id":"T1","key":"task_result_T1","value":{"cost_usd":0.15,"duration_ms":5000,"num_turns":3,"output":"Done","quality_passed":true,"status":"completed"},"timestamp":"2026-02-08T14:15:08.968529100Z"}

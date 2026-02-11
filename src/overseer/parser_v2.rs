@@ -26,8 +26,8 @@
 //! # }
 //! ```
 
-use crate::infestation_pit::error::Result;
-use crate::infestation_pit::events::*;
+use crate::overseer::error::Result;
+use crate::overseer::events::*;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::fs::File;

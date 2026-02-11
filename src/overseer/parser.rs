@@ -6,8 +6,8 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use crate::infestation_pit::error::{ParseError, Result};
-use crate::infestation_pit::events::root::SessionEvent;
+use crate::overseer::error::{ParseError, Result};
+use crate::overseer::events::root::SessionEvent;
 
 // ============================================================================
 // Local Types (no dependency on crate::types)

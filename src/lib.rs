@@ -28,5 +28,5 @@ pub mod nydus;
 /// Git safety: attribution, worktree isolation
 pub mod safety;
 
-/// Infestation pit: Claude Code session parsers (from zengeld-memory)
-pub mod infestation_pit;
+/// Overseer: Claude Code session parsers (from zengeld-memory)
+pub mod overseer;

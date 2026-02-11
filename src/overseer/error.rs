@@ -1,4 +1,4 @@
-//! Error types for infestation_pit (Claude Code session parsing)
+//! Error types for overseer (Claude Code session parsing)
 
 use thiserror::Error;
 
