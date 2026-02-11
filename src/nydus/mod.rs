@@ -143,6 +143,8 @@ pub struct Nydus {
     default_model: String,
     /// Completion config for dynamically spawned Queens
     default_completion_config: CompletionConfig,
+    /// Tracks rate limit failures for graceful shutdown detection
+    rate_limit_window: Vec<std::time::Instant>,
 }
 
 /// Result of a single tick (schedule + poll cycle).
@@ -340,6 +342,7 @@ impl Nydus {
             next_queen_id: 3,  // Start at Q3, since we register Q0-Q2 initially
             default_model: "sonnet".to_string(),
             default_completion_config: CompletionConfig::default(),
+            rate_limit_window: Vec::new(),
         })
     }
 
@@ -978,6 +981,47 @@ impl Nydus {
                 queen_id, task_id, error, cost_usd, num_turns,
             } => {
                 self.tick_state.note_failure();
+
+                // Rate limit cascade detection
+                if error.contains("rate_limit") {
+                    let now = std::time::Instant::now();
+                    self.rate_limit_window.push(now);
+                    // Keep only events from last 60 seconds
+                    self.rate_limit_window.retain(|t| now.duration_since(*t) < std::time::Duration::from_secs(60));
+
+                    let count = self.rate_limit_window.len();
+                    eprintln!("[Nydus] RATE LIMIT: Queen {} hit rate limit ({} hits in last 60s)", queen_id.0, count);
+
+                    // If 2+ rate limit failures within 60s, it's a global rate limit — shut down
+                    if count >= 2 {
+                        eprintln!("[Nydus] RATE LIMIT CASCADE: {} Queens hit rate limit within 60s. Global rate limit detected.", count);
+                        eprintln!("[Nydus] Initiating graceful shutdown — retrying is pointless.");
+
+                        // Mark task as failed but with clear rate limit reason
+                        self.task_dag.fail(&task_id.0, format!("RATE_LIMIT: Global API rate limit hit. Swarm shutting down. Task can be resumed later."));
+
+                        // Send escalation
+                        let msg = SwarmMessage {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            from: AgentId::Nydus(self.id.clone()),
+                            to: AgentId::Operator,
+                            msg_type: MessageType::Escalation,
+                            payload: serde_json::json!({
+                                "type": "rate_limit_shutdown",
+                                "rate_limit_hits": count,
+                                "message": "Global API rate limit detected. All Queens affected. Swarm shutting down gracefully. Resume when rate limit resets."
+                            }),
+                            timestamp: chrono::Utc::now(),
+                            correlation_id: None,
+                            visibility: Visibility::default_internal(),
+                        };
+                        self.mailbox.lock().send(msg);
+
+                        // Trigger shutdown via the watch channel
+                        let _ = self.shutdown_tx.send(true);
+                        return Ok(());
+                    }
+                }
 
                 // Mark failed in DAG
                 self.task_dag.fail(&task_id.0, error.clone());
