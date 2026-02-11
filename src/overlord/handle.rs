@@ -1,38 +1,38 @@
-//! InfestorHandle: Cloneable handle for the Infestor actor.
+//! OverlordHandle: Cloneable handle for the Overlord actor.
 //!
-//! The Infestor is a StreamQueen with a reviewer system prompt. It wraps a QueenHandle
+//! The Overlord is a StreamQueen with a reviewer system prompt. It wraps a QueenHandle
 //! internally and provides a review() method that formats the review request as a task.
 
-use crate::core::types::{QueenId, InfestorId, Task, TaskContext, TaskId, TaskStatus};
+use crate::core::types::{QueenId, OverlordId, Task, TaskContext, TaskId, TaskStatus};
 use crate::queen::handle::QueenHandle;
 use std::path::PathBuf;
 use chrono::Utc;
 use std::collections::HashMap;
 
-/// Cloneable handle to communicate with an Infestor actor.
+/// Cloneable handle to communicate with an Overlord actor.
 ///
-/// The Infestor is a StreamQueen with a reviewer role. It reviews Queen-completed
+/// The Overlord is a StreamQueen with a reviewer role. It reviews Queen-completed
 /// tasks by examining diffs and running cargo check before merge decisions.
 #[derive(Clone)]
-pub struct InfestorHandle {
-    /// Unique identifier for this Infestor.
-    pub id: InfestorId,
+pub struct OverlordHandle {
+    /// Unique identifier for this Overlord.
+    pub id: OverlordId,
     /// Underlying Queen handle.
     queen_handle: QueenHandle,
 }
 
-impl InfestorHandle {
-    /// Create an InfestorHandle from a QueenHandle.
-    pub fn from_queen_handle(id: InfestorId, queen_handle: QueenHandle) -> Self {
+impl OverlordHandle {
+    /// Create an OverlordHandle from a QueenHandle.
+    pub fn from_queen_handle(id: OverlordId, queen_handle: QueenHandle) -> Self {
         Self { id, queen_handle }
     }
 
-    /// Send a review task to the Infestor.
+    /// Send a review task to the Overlord.
     ///
     /// Builds the diff + review prompt and sends as a normal task assignment.
     ///
     /// # Errors
-    /// Returns an error if the Infestor's command channel is closed.
+    /// Returns an error if the Overlord's command channel is closed.
     pub async fn review(
         &self,
         queen_id: QueenId,
@@ -114,20 +114,20 @@ impl InfestorHandle {
         self.queen_handle.assign(task, context).await
     }
 
-    /// Request graceful shutdown of this Infestor.
+    /// Request graceful shutdown of this Overlord.
     ///
     /// # Errors
-    /// Returns an error if the Infestor's command channel is closed.
+    /// Returns an error if the Overlord's command channel is closed.
     pub async fn shutdown(&self) -> Result<(), anyhow::Error> {
         self.queen_handle.shutdown().await
     }
 
-    /// Get the current status of this Infestor.
+    /// Get the current status of this Overlord.
     pub fn status(&self) -> crate::core::types::QueenStatus {
         self.queen_handle.status()
     }
 
-    /// Check if the Infestor subprocess is still alive.
+    /// Check if the Overlord subprocess is still alive.
     pub fn is_alive(&self) -> bool {
         self.queen_handle.is_alive()
     }

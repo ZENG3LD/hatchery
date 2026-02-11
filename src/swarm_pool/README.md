@@ -39,7 +39,7 @@ pub enum SwarmPoolAction {
 }
 
 impl SwarmPool {
-    /// Infestor declined a task
+    /// Overlord declined a task
     fn on_decline(&mut self, task_id, reason, dag) -> SwarmPoolAction;
 
     /// DAG changed (task completed, new ready tasks)
@@ -54,7 +54,7 @@ impl SwarmPool {
 
 | Caller | Когда | Метод |
 |--------|-------|-------|
-| Nydus | Infestor decline | `on_decline()` |
+| Nydus | Overlord decline | `on_decline()` |
 | Nydus | После merge / task complete | `on_dag_change()` |
 | Nydus | Periodic tick | `maintenance()` |
 | Overmind | Strategic spawn command | Nydus вызывает `SpawnQueens` / `ZergRush` напрямую |

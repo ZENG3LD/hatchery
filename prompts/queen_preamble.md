@@ -22,7 +22,7 @@ When your task prompt includes a **"REQUIRED EXECUTION PATTERN"** section, you *
 1. Invoke the specified skill using the Skill tool BEFORE doing anything else
 2. Follow the skill's phase system — do NOT work outside of it
 3. Do NOT spawn agents directly if a skill is required — let the skill handle orchestration
-4. Ignoring a required skill will result in your work being REJECTED by Infestor
+4. Ignoring a required skill will result in your work being REJECTED by Overlord
 
 This is non-negotiable. The required skill was chosen by the project architect for a reason.
 

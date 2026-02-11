@@ -16,7 +16,7 @@ For critical-path tasks (tasks with many items in their `blocks` list), assign m
 
 1. **Identify bottleneck tasks**: Tasks that have many downstream dependents (large `blocks` list)
 2. **Trigger condition**: When a bottleneck task becomes Ready AND there are more idle Queens than ready tasks
-3. **Winner takes all**: First Queen to complete gets their work reviewed by Infestor
+3. **Winner takes all**: First Queen to complete gets their work reviewed by Overlord
 4. **Losers stop**: All other Queens on that task are cancelled, worktrees synced, reassigned to new tasks
 5. **Normal tasks unaffected**: Non-bottleneck tasks still get 1:1 assignment
 
@@ -420,8 +420,8 @@ async fn handle_queen_event(&mut self, event: QueenEvent) -> Result<()> {
                     }
                 }
 
-                // Proceed with normal Infestor review for the winner
-                // ... existing Infestor review logic
+                // Proceed with normal Overlord review for the winner
+                // ... existing Overlord review logic
             } else {
                 // Normal task completion (not zerg rush)
                 // ... existing completion logic
@@ -466,15 +466,15 @@ impl Nydus {
 }
 ```
 
-### 5. Infestor Integration
+### 5. Overlord Integration
 
-The Infestor only reviews the FIRST completion (the winner). Subsequent completions from losers are ignored.
+The Overlord only reviews the FIRST completion (the winner). Subsequent completions from losers are ignored.
 
 Add tracking to prevent duplicate reviews:
 
 ```rust
 impl Nydus {
-    /// Track which tasks are currently under Infestor review.
+    /// Track which tasks are currently under Overlord review.
     /// Key: task_id, Value: queen_id of the winner being reviewed.
     in_review: HashMap<String, QueenId>,
 }
@@ -498,19 +498,19 @@ if self.task_dag.is_zerg_task(&task_id.0) {
     // ...
 }
 
-// In handle_infestor_approve / handle_infestor_reject:
+// In handle_overlord_approve / handle_overlord_reject:
 // Remove from in_review after decision
 self.in_review.remove(&task_id);
 ```
 
 ### 6. Edge Cases
 
-#### A. First Queen's work is REJECTED by Infestor
+#### A. First Queen's work is REJECTED by Overlord
 
-When Infestor rejects the winner's work:
+When Overlord rejects the winner's work:
 
 ```rust
-async fn handle_infestor_reject(&mut self, queen_id: &QueenId, task_id: &str, reason: &str) -> Result<()> {
+async fn handle_overlord_reject(&mut self, queen_id: &QueenId, task_id: &str, reason: &str) -> Result<()> {
     // Remove from in_review
     self.in_review.remove(task_id);
 
@@ -592,7 +592,7 @@ Use existing recovery logic — `recover_stuck_tasks` will reset the task to Rea
 After the winner's work is merged, sync all loser worktrees:
 
 ```rust
-async fn handle_infestor_approve(&mut self, queen_id: &QueenId, task_id: &str, summary: &str) -> Result<()> {
+async fn handle_overlord_approve(&mut self, queen_id: &QueenId, task_id: &str, summary: &str) -> Result<()> {
     // Remove from in_review
     self.in_review.remove(task_id);
 
@@ -649,8 +649,8 @@ async fn handle_infestor_approve(&mut self, queen_id: &QueenId, task_id: &str, s
 - [ ] Add `in_review` HashMap to Nydus
 - [ ] Update `handle_queen_event` for TaskCompleted with zerg detection
 - [ ] Implement `cancel_queen_task()` method
-- [ ] Update `handle_infestor_approve` to sync all worktrees
-- [ ] Update `handle_infestor_reject` to handle zerg rejection case
+- [ ] Update `handle_overlord_approve` to sync all worktrees
+- [ ] Update `handle_overlord_reject` to handle zerg rejection case
 - [ ] Handle TaskFailed for zerg tasks
 
 ### Phase 4: Edge Cases & Testing (2-3 hours)
@@ -723,22 +723,22 @@ Action:
   2. Get losers: [Q1, Q3]
   3. Cancel Q1 and Q3
   4. Sync Q1 and Q3 worktrees to main
-  5. Send task A to Infestor for review
+  5. Send task A to Overlord for review
 
 DAG:
   A (ZergRush, queens: [Q1, Q2, Q3], winner: Some(Q2))
 
 Queens:
   Q1: Cancelled, worktree synced, Idle
-  Q2: Waiting for Infestor review
+  Q2: Waiting for Overlord review
   Q3: Cancelled, worktree synced, Idle
   Q4: Still working on F
 ```
 
-### Infestor Approves Q2's Work
+### Overlord Approves Q2's Work
 
 ```
-Event: Infestor TaskCompleted with VERDICT: APPROVE
+Event: Overlord TaskCompleted with VERDICT: APPROVE
 Action:
   1. Merge Q2's branch to main
   2. Sync all worktrees (Q1, Q3, Q4) to new main

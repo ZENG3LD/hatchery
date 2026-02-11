@@ -88,7 +88,7 @@ pub struct DagTask {
     pub completed_at: Option<DateTime<Utc>>,
     /// Optional hint for which skill/pattern to use (e.g., "carousel", "ralph")
     pub skill_hint: Option<String>,
-    /// Number of times this task has been rejected by Infestor and requeued
+    /// Number of times this task has been rejected by Overlord and requeued
     pub retry_count: usize,
     /// Feedback from previous rejection(s), used to guide the Queen on retry
     pub rejection_feedback: Vec<String>,
@@ -303,7 +303,7 @@ impl TaskDag {
 
     /// Requeue a completed task back to Ready with rejection feedback.
     ///
-    /// Used when Infestor rejects a task — it goes back to Ready so a Queen can retry.
+    /// Used when Overlord rejects a task — it goes back to Ready so a Queen can retry.
     /// Returns true if successfully requeued.
     pub fn requeue_with_feedback(&mut self, task_id: &str, feedback: String) -> bool {
         if let Some(task) = self.tasks.get_mut(task_id) {
@@ -321,9 +321,9 @@ impl TaskDag {
         }
     }
 
-    /// Set a task's status to Validating (awaiting Infestor review).
+    /// Set a task's status to Validating (awaiting Overlord review).
     ///
-    /// Used when a Queen completes a task but before Infestor approves it.
+    /// Used when a Queen completes a task but before Overlord approves it.
     /// Returns true if task exists and was updated.
     pub fn set_validating(&mut self, task_id: &str) -> bool {
         if let Some(task) = self.tasks.get_mut(task_id) {

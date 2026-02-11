@@ -383,8 +383,12 @@ async fn handle_request(
                         let drained = mb.drain_outbox();
                         msgs = drained.iter().take(limit).map(swarm_message_to_json).collect();
                     }
-                    AgentId::Infestor(_) => {
-                        // Infestor doesn't have an inbox in current design
+                    AgentId::Overlord(_) => {
+                        // Overlord doesn't have an inbox in current design
+                        // Return empty list
+                    }
+                    AgentId::Overmind(_) => {
+                        // Overmind doesn't have an inbox in current design
                         // Return empty list
                     }
                 }
@@ -531,8 +535,8 @@ async fn handle_request(
                     "uptime_secs": uptime_secs,
                     "keep_alive": keep_alive,
                     "total_queen_cost_usd": costs.total_queen_cost_usd,
-                    "total_infestor_cost_usd": costs.total_infestor_cost_usd,
-                    "infestor_reviews_completed": costs.infestor_reviews_completed,
+                    "total_overlord_cost_usd": costs.total_overlord_cost_usd,
+                    "overlord_reviews_completed": costs.overlord_reviews_completed,
                 }),
             }
         }
@@ -568,7 +572,8 @@ fn swarm_message_to_json(msg: &SwarmMessage) -> serde_json::Value {
         AgentId::Nydus(nid) => format!("nydus:{}", nid.0),
         AgentId::Validator => "validator".to_string(),
         AgentId::Operator => "operator".to_string(),
-        AgentId::Infestor(iid) => format!("infestor:{}", iid.0),
+        AgentId::Overlord(iid) => format!("overlord:{}", iid.0),
+        AgentId::Overmind(oid) => format!("overmind:{}", oid.0),
     };
 
     let to_str = match &msg.to {
@@ -576,7 +581,8 @@ fn swarm_message_to_json(msg: &SwarmMessage) -> serde_json::Value {
         AgentId::Nydus(nid) => format!("nydus:{}", nid.0),
         AgentId::Validator => "validator".to_string(),
         AgentId::Operator => "operator".to_string(),
-        AgentId::Infestor(iid) => format!("infestor:{}", iid.0),
+        AgentId::Overlord(iid) => format!("overlord:{}", iid.0),
+        AgentId::Overmind(oid) => format!("overmind:{}", oid.0),
     };
 
     let msg_type_str = match &msg.msg_type {
@@ -667,8 +673,8 @@ mod tests {
         }));
         let cost_tracking = Arc::new(parking_lot::RwLock::new(crate::nydus::CostTracking {
             total_queen_cost_usd: 0.0,
-            total_infestor_cost_usd: 0.0,
-            infestor_reviews_completed: 0,
+            total_overlord_cost_usd: 0.0,
+            overlord_reviews_completed: 0,
         }));
         let port = start_ipc_listener(
             queen_snapshots.clone(),
@@ -733,8 +739,8 @@ mod tests {
         }));
         let cost_tracking = Arc::new(parking_lot::RwLock::new(crate::nydus::CostTracking {
             total_queen_cost_usd: 0.0,
-            total_infestor_cost_usd: 0.0,
-            infestor_reviews_completed: 0,
+            total_overlord_cost_usd: 0.0,
+            overlord_reviews_completed: 0,
         }));
         let port = start_ipc_listener(
             queen_snapshots.clone(),
@@ -822,8 +828,8 @@ mod tests {
         }));
         let cost_tracking = Arc::new(parking_lot::RwLock::new(crate::nydus::CostTracking {
             total_queen_cost_usd: 0.0,
-            total_infestor_cost_usd: 0.0,
-            infestor_reviews_completed: 0,
+            total_overlord_cost_usd: 0.0,
+            overlord_reviews_completed: 0,
         }));
         let port = start_ipc_listener(
             queen_snapshots.clone(),
@@ -900,8 +906,8 @@ mod tests {
         }));
         let cost_tracking = Arc::new(parking_lot::RwLock::new(crate::nydus::CostTracking {
             total_queen_cost_usd: 0.0,
-            total_infestor_cost_usd: 0.0,
-            infestor_reviews_completed: 0,
+            total_overlord_cost_usd: 0.0,
+            overlord_reviews_completed: 0,
         }));
         let port = start_ipc_listener(
             queen_snapshots.clone(),
@@ -967,8 +973,8 @@ mod tests {
         }));
         let cost_tracking = Arc::new(parking_lot::RwLock::new(crate::nydus::CostTracking {
             total_queen_cost_usd: 0.0,
-            total_infestor_cost_usd: 0.0,
-            infestor_reviews_completed: 0,
+            total_overlord_cost_usd: 0.0,
+            overlord_reviews_completed: 0,
         }));
         let port = start_ipc_listener(
             queen_snapshots.clone(),
@@ -1061,8 +1067,8 @@ mod tests {
         // Create cost tracking
         let cost_tracking = Arc::new(parking_lot::RwLock::new(crate::nydus::CostTracking {
             total_queen_cost_usd: 0.0,
-            total_infestor_cost_usd: 0.0,
-            infestor_reviews_completed: 0,
+            total_overlord_cost_usd: 0.0,
+            overlord_reviews_completed: 0,
         }));
 
         let (inject_tx, _inject_rx) = mpsc::channel(32);

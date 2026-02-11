@@ -40,11 +40,21 @@ impl Default for NydusId {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct WorkerId(pub String);
 
-/// Unique identifier for an Infestor agent.
+/// Unique identifier for an Overlord agent.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct InfestorId(pub String);
+pub struct OverlordId(pub String);
 
-impl std::fmt::Display for InfestorId {
+impl std::fmt::Display for OverlordId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Unique identifier for an Overmind agent.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct OvermindId(pub String);
+
+impl std::fmt::Display for OvermindId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -127,8 +137,10 @@ pub enum AgentId {
     Nydus(NydusId),
     /// A Queen worker agent
     Queen(QueenId),
-    /// An Infestor merge validator
-    Infestor(InfestorId),
+    /// An Overlord merge validator
+    Overlord(OverlordId),
+    /// An Overmind strategic coordinator
+    Overmind(OvermindId),
     /// The validator agent
     Validator,
     /// The human operator

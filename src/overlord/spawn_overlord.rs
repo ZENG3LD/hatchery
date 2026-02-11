@@ -1,10 +1,10 @@
-//! SpawnInfestor: Infestor as a StreamQueen with reviewer system prompt.
+//! SpawnOverlord: Overlord as a StreamQueen with reviewer system prompt.
 //!
-//! The Infestor is a long-lived Claude Code process (StreamQueen) that reviews
+//! The Overlord is a long-lived Claude Code process (StreamQueen) that reviews
 //! completed Queen work before merge. It receives review tasks via normal task
 //! assignment and returns results via TaskCompleted/TaskFailed events.
 
-use crate::core::types::{QueenId, InfestorId};
+use crate::core::types::{QueenId, OverlordId};
 use crate::queen::stream_queen::{self, StreamQueenConfig};
 use crate::queen::handle::QueenEvent;
 use crate::queen::completion::CompletionConfig;
@@ -13,10 +13,10 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Notify};
 use anyhow::Result;
 
-/// Configuration for Infestor.
+/// Configuration for Overlord.
 #[derive(Debug, Clone)]
-pub struct InfestorConfig {
-    pub id: InfestorId,
+pub struct OverlordConfig {
+    pub id: OverlordId,
     pub model: String,
     pub working_dir: PathBuf,
     pub wakeup_notify: Option<Arc<Notify>>,
@@ -25,10 +25,10 @@ pub struct InfestorConfig {
     pub setting_sources: Option<String>,
 }
 
-impl Default for InfestorConfig {
+impl Default for OverlordConfig {
     fn default() -> Self {
         Self {
-            id: InfestorId("infestor-0".to_string()),
+            id: OverlordId("overlord-0".to_string()),
             model: "sonnet".to_string(),
             working_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             wakeup_notify: None,
@@ -39,23 +39,23 @@ impl Default for InfestorConfig {
     }
 }
 
-/// Spawn an Infestor as a StreamQueen with reviewer system prompt.
+/// Spawn an Overlord as a StreamQueen with reviewer system prompt.
 ///
-/// Returns InfestorHandle, event receiver, and join handle.
+/// Returns OverlordHandle, event receiver, and join handle.
 ///
 /// # Errors
 /// Returns an error if the StreamQueen fails to spawn.
-pub fn spawn_infestor(
-    config: InfestorConfig,
+pub fn spawn_overlord(
+    config: OverlordConfig,
     shutdown_rx: tokio::sync::broadcast::Receiver<()>,
-) -> Result<(crate::infestor::handle::InfestorHandle, mpsc::Receiver<QueenEvent>, tokio::task::JoinHandle<()>)> {
+) -> Result<(crate::overlord::handle::OverlordHandle, mpsc::Receiver<QueenEvent>, tokio::task::JoinHandle<()>)> {
     let queen_id = QueenId(config.id.0.clone());
 
     // Build reviewer system prompt
     let system_prompt = Some(format!(
         "{}\n\n{}",
-        crate::core::prompts::default_system_prompt("infestor"),
-        crate::core::prompts::infestor_system_prompt(),
+        crate::core::prompts::default_system_prompt("overlord"),
+        crate::core::prompts::overlord_system_prompt(),
     ));
 
     let stream_config = StreamQueenConfig {
@@ -76,7 +76,7 @@ pub fn spawn_infestor(
     let (event_tx, event_rx) = mpsc::channel(64);
     let (queen_handle, join_handle) = stream_queen::spawn(stream_config, event_tx, shutdown_rx)?;
 
-    let infestor_handle = crate::infestor::handle::InfestorHandle::from_queen_handle(config.id, queen_handle);
+    let overlord_handle = crate::overlord::handle::OverlordHandle::from_queen_handle(config.id, queen_handle);
 
-    Ok((infestor_handle, event_rx, join_handle))
+    Ok((overlord_handle, event_rx, join_handle))
 }

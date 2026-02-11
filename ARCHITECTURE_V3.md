@@ -22,7 +22,7 @@ Hatchery CLI
   │     ├── Вызывается: автоматически по событиям ИЛИ по команде Overmind
   │     └── API: spawn_queens(n), zerg_rush(task_id, n), kill_queen(id)
   │
-  └── Infestor (ЦЕНЗОР — lightweight)
+  └── Overlord (ЦЕНЗОР — lightweight)
   │     ├── Phase 1: Rust parsers (diff, test results, code quality) — $0
   │     ├── Phase 2: Code checks (TODO/STUB/MOCK/empty work) — $0
   │     ├── Phase 3: если неоднозначно → LLM на structured data — ~$0.50
@@ -46,23 +46,23 @@ Hatchery CLI
 ```
 Queen completes task
   → Nydus получает TaskCompleted
-  → Nydus вызывает Infestor (parsers → code checks → maybe LLM)
-  → Infestor: MERGE
+  → Nydus вызывает Overlord (parsers → code checks → maybe LLM)
+  → Overlord: MERGE
   → Nydus: merge worktree, update PRD [x], recreate worktree
   → Nydus: try_schedule() → следующая задача
 ```
 
 ### Decline + Auto-Retry (SwarmPool)
 ```
-Queen completes → Infestor: DECLINE (стабы/TODO/тесты не прошли)
+Queen completes → Overlord: DECLINE (стабы/TODO/тесты не прошли)
   → Nydus передаёт decline в SwarmPool
   → SwarmPool: 1st decline → auto-retry (requeue task to any idle Queen)
-  → Queen переделывает → Infestor: MERGE → готово
+  → Queen переделывает → Overlord: MERGE → готово
 ```
 
 ### Repeated Decline → Overmind (эскалация)
 ```
-Queen completes → Infestor: DECLINE (2й раз по одной задаче)
+Queen completes → Overlord: DECLINE (2й раз по одной задаче)
   → SwarmPool: 2nd decline → escalate to Overmind
   → Overmind анализирует: rejection history, diff, task description
   → Overmind решает: ZERG_RUSH(task, 3) или REDECOMPOSE(task, subtasks)
@@ -73,7 +73,7 @@ Queen completes → Infestor: DECLINE (2й раз по одной задаче)
 ```
 Nydus: task_dag shows prd-1 blocks 5 other tasks
   → SwarmPool: bottleneck detected → auto zerg_rush(prd-1, 3)
-  → 3 Queens race → winner → Infestor → merge
+  → 3 Queens race → winner → Overlord → merge
 ```
 
 ## Nydus: что остаётся
@@ -126,7 +126,7 @@ pub enum SwarmPoolAction {
 }
 
 impl SwarmPool {
-    /// Called on Infestor DECLINE
+    /// Called on Overlord DECLINE
     pub fn on_decline(&mut self, task_id: &str, reason: &str, dag: &TaskDag) -> SwarmPoolAction;
 
     /// Called when DAG changes (new ready tasks, completions)
@@ -140,7 +140,7 @@ impl SwarmPool {
 SwarmPool — чистый Rust, без LLM. Детерминистические эвристики.
 Nydus вызывает SwarmPool и исполняет его SwarmPoolAction механически.
 
-## Infestor: Hybrid Pipeline
+## Overlord: Hybrid Pipeline
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -203,7 +203,7 @@ pub enum OvermindCommand {
 1. **Phase 0**: Types + module scaffolding (OvermindId, SwarmPool struct)
 2. **Phase 1**: Parsers + code checks (чистый Rust, unit tests)
 3. **Phase 2**: SwarmPool extraction (вынести zerg/elastic/retry из Nydus)
-4. **Phase 3**: Hybrid Infestor (swap review pipeline)
+4. **Phase 3**: Hybrid Overlord (swap review pipeline)
 5. **Phase 4**: Overmind core (events, handle, prompt, spawn)
 6. **Phase 5**: Wire Overmind → Nydus → SwarmPool
 7. **Phase 6**: CLI flags, tests, cleanup

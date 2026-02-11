@@ -19,8 +19,8 @@ pub mod core;
 /// Queen agents (L1): StreamQueen, SpawnQueen
 pub mod queen;
 
-/// Infestor: merge validator
-pub mod infestor;
+/// Overlord: merge validator
+pub mod overlord;
 
 /// Nydus coordinator (L2): task scheduling, validation, merging
 pub mod nydus;
@@ -30,3 +30,9 @@ pub mod safety;
 
 /// Overseer: Claude Code session parsers (from zengeld-memory)
 pub mod overseer;
+
+/// SwarmPool: deterministic spawn heuristics (zerg rush, elastic pool, retry)
+pub mod swarm_pool;
+
+/// Overmind: strategic LLM coordinator (escalation handler)
+pub mod overmind;

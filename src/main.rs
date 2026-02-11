@@ -270,7 +270,8 @@ fn format_agent_id(agent: &AgentId) -> String {
         AgentId::Nydus(id) => format!("Nydus({})", id.0),
         AgentId::Validator => "Validator".to_string(),
         AgentId::Operator => "Operator".to_string(),
-        AgentId::Infestor(id) => format!("Infestor({})", id.0),
+        AgentId::Overlord(id) => format!("Overlord({})", id.0),
+        AgentId::Overmind(id) => format!("Overmind({})", id.0),
     }
 }
 
@@ -532,12 +533,12 @@ async fn main() -> Result<()> {
                 )?;
             }
 
-            // After Queens registration, automatically register Infestor when git isolation is enabled
+            // After Queens registration, automatically register Overlord when git isolation is enabled
             if config.worktree_isolation {
-                if let Err(e) = nydus.register_infestor("sonnet") {
-                    eprintln!("[HATCHERY] Warning: Failed to register Infestor: {}", e);
+                if let Err(e) = nydus.register_overlord("sonnet") {
+                    eprintln!("[HATCHERY] Warning: Failed to register Overlord: {}", e);
                 } else {
-                    eprintln!("[HATCHERY] Infestor automatically registered (git isolation enabled)");
+                    eprintln!("[HATCHERY] Overlord automatically registered (git isolation enabled)");
                 }
             }
 
@@ -567,10 +568,10 @@ async fn main() -> Result<()> {
 
             let elapsed = start.elapsed().as_secs();
             let progress = nydus.progress();
-            let total_cost = progress.total_queen_cost_usd + progress.total_infestor_cost_usd;
-            println!("\n[HATCHERY] Result: {}/{} tasks complete in {}s (${:.2} queens + ${:.2} infestor = ${:.2} total)",
+            let total_cost = progress.total_queen_cost_usd + progress.total_overlord_cost_usd;
+            println!("\n[HATCHERY] Result: {}/{} tasks complete in {}s (${:.2} queens + ${:.2} overlord = ${:.2} total)",
                 progress.completed, progress.total_tasks, elapsed,
-                progress.total_queen_cost_usd, progress.total_infestor_cost_usd, total_cost);
+                progress.total_queen_cost_usd, progress.total_overlord_cost_usd, total_cost);
         }
 
         Commands::Status { prd, event_log } => {
@@ -924,8 +925,8 @@ async fn main() -> Result<()> {
             match ipc_call(IpcRequest::SwarmStatus)? {
                 IpcResponse::Ok { data } => {
                     let queen_cost = data["total_queen_cost_usd"].as_f64().unwrap_or(0.0);
-                    let infestor_cost = data["total_infestor_cost_usd"].as_f64().unwrap_or(0.0);
-                    let total_cost = queen_cost + infestor_cost;
+                    let overlord_cost = data["total_overlord_cost_usd"].as_f64().unwrap_or(0.0);
+                    let total_cost = queen_cost + overlord_cost;
 
                     println!("=== Swarm Status ===");
                     println!("Total tasks:    {}", data["total_tasks"].as_u64().unwrap_or(0));
@@ -935,7 +936,7 @@ async fn main() -> Result<()> {
                     println!("Queens alive:   {}", data["queens_alive"].as_u64().unwrap_or(0));
                     println!("Queens idle:    {}", data["queens_idle"].as_u64().unwrap_or(0));
                     println!("Queen cost:     ${:.2}", queen_cost);
-                    println!("Infestor cost:  ${:.2}", infestor_cost);
+                    println!("Overlord cost:  ${:.2}", overlord_cost);
                     println!("Total cost:     ${:.2}", total_cost);
                     println!("Uptime:         {}s", data["uptime_secs"].as_u64().unwrap_or(0));
                     println!("Keep-alive:     {}", data["keep_alive"].as_bool().unwrap_or(false));

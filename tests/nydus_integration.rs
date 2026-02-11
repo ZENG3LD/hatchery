@@ -83,7 +83,7 @@ async fn test_sequential_task_completion() {
 
     // Assign prd-1 to Q0
     // NOTE: In real scenario, QueenEvent::TaskCompleted would trigger transition to Validating,
-    // then Infestor approval would complete it. For this test, we directly simulate completion.
+    // then Overlord approval would complete it. For this test, we directly simulate completion.
     nydus.task_dag_mut().assign("prd-1", QueenId("Q0".to_string()));
     nydus.task_dag_mut().complete(
         "prd-1",
@@ -597,7 +597,7 @@ async fn test_dependency_chain_with_failure() {
         "prd-3 should stay blocked when dependency fails"
     );
 
-    // Requeue prd-2 with feedback (simulates Infestor rejection)
+    // Requeue prd-2 with feedback (simulates Overlord rejection)
     let success = nydus.task_dag_mut().requeue_with_feedback(
         "prd-2",
         "Fix compilation error in module X".to_string(),
@@ -634,14 +634,14 @@ async fn test_dependency_chain_with_failure() {
     assert_eq!(stats.ready, 1, "prd-3 should now be ready");
 }
 
-/// Test 8: Infestor review flow (Validating → Approved → Completed)
+/// Test 8: Overlord review flow (Validating → Approved → Completed)
 ///
 /// Tests that:
 /// - TaskCompleted puts task in Validating state
-/// - After Infestor approves, task transitions to Completed
+/// - After Overlord approves, task transitions to Completed
 /// - Dependent tasks become Ready only after final approval
 #[tokio::test]
-async fn test_infestor_review_flow() {
+async fn test_overlord_review_flow() {
     let config = NydusConfig {
         git_isolation: false, // Disable git isolation for simpler test
         ..Default::default()
@@ -690,12 +690,12 @@ async fn test_infestor_review_flow() {
     assert_eq!(stats.validating, 1);
     assert_eq!(stats.blocked, 1, "prd-2 should remain blocked until approval");
 
-    // Simulate Infestor approval: mark as completed
+    // Simulate Overlord approval: mark as completed
     nydus.task_dag_mut().complete(
         "prd-1",
         hatchery::core::task_dag::DagTaskResult {
             success: true,
-            output: "Approved by Infestor".to_string(),
+            output: "Approved by Overlord".to_string(),
             files_modified: vec!["file1.rs".to_string()],
         },
     );

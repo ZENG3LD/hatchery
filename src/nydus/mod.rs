@@ -125,17 +125,17 @@ pub struct Nydus {
     started_at: std::time::Instant,
     /// Notify handle for waking Nydus when a Queen completes a task
     wakeup_notify: Arc<Notify>,
-    /// Infestor handle for merge validation
-    infestor: Option<crate::infestor::InfestorHandle>,
-    /// Infestor event receiver (QueenEvent because Infestor is a StreamQueen)
-    infestor_event_rx: Option<tokio::sync::mpsc::Receiver<QueenEvent>>,
+    /// Overlord handle for merge validation
+    overlord: Option<crate::overlord::OverlordHandle>,
+    /// Overlord event receiver (QueenEvent because Overlord is a StreamQueen)
+    overlord_event_rx: Option<tokio::sync::mpsc::Receiver<QueenEvent>>,
     /// Total cost across all Queens
     total_queen_cost_usd: f64,
-    /// Total cost for Infestor reviews
-    total_infestor_cost_usd: f64,
-    /// Number of Infestor reviews completed
-    infestor_reviews_completed: u32,
-    /// Tasks currently under Infestor review (task_id -> winner queen_id)
+    /// Total cost for Overlord reviews
+    total_overlord_cost_usd: f64,
+    /// Number of Overlord reviews completed
+    overlord_reviews_completed: u32,
+    /// Tasks currently under Overlord review (task_id -> winner queen_id)
     in_review: HashMap<String, QueenId>,
     /// Next Queen ID counter for dynamic spawning
     next_queen_id: usize,
@@ -168,16 +168,16 @@ pub struct SwarmProgress {
     pub queens_active: usize,
     pub queens_idle: usize,
     pub total_queen_cost_usd: f64,
-    pub total_infestor_cost_usd: f64,
-    pub infestor_reviews_completed: u32,
+    pub total_overlord_cost_usd: f64,
+    pub overlord_reviews_completed: u32,
 }
 
-/// Cost tracking for Queens and Infestor.
+/// Cost tracking for Queens and Overlord.
 #[derive(Debug, Clone)]
 pub struct CostTracking {
     pub total_queen_cost_usd: f64,
-    pub total_infestor_cost_usd: f64,
-    pub infestor_reviews_completed: u32,
+    pub total_overlord_cost_usd: f64,
+    pub overlord_reviews_completed: u32,
 }
 
 /// Result of validated merge operation.
@@ -303,8 +303,8 @@ impl Nydus {
         // Initialize cost tracking with zero values
         let initial_cost_tracking = CostTracking {
             total_queen_cost_usd: 0.0,
-            total_infestor_cost_usd: 0.0,
-            infestor_reviews_completed: 0,
+            total_overlord_cost_usd: 0.0,
+            overlord_reviews_completed: 0,
         };
 
         // Create wakeup notify for instant Queen completion handling
@@ -333,11 +333,11 @@ impl Nydus {
             shutdown_rx,
             started_at: std::time::Instant::now(),
             wakeup_notify,
-            infestor: None,
-            infestor_event_rx: None,
+            overlord: None,
+            overlord_event_rx: None,
             total_queen_cost_usd: 0.0,
-            total_infestor_cost_usd: 0.0,
-            infestor_reviews_completed: 0,
+            total_overlord_cost_usd: 0.0,
+            overlord_reviews_completed: 0,
             in_review: HashMap::new(),
             next_queen_id: 3,  // Start at Q3, since we register Q0-Q2 initially
             default_model: "sonnet".to_string(),
@@ -357,17 +357,17 @@ impl Nydus {
         self.event_bus = EventBus::with_audit(128, event_log);
     }
 
-    /// Register an Infestor for merge validation.
+    /// Register an Overlord for merge validation.
     ///
-    /// This spawns an Infestor actor that reviews Queen-completed tasks before merging.
+    /// This spawns an Overlord actor that reviews Queen-completed tasks before merging.
     ///
     /// # Errors
-    /// Returns an error if the Infestor fails to spawn.
-    pub fn register_infestor(&mut self, model: &str) -> Result<()> {
-        use crate::infestor::{spawn_infestor, InfestorConfig};
+    /// Returns an error if the Overlord fails to spawn.
+    pub fn register_overlord(&mut self, model: &str) -> Result<()> {
+        use crate::overlord::{spawn_overlord, OverlordConfig};
 
-        let config = InfestorConfig {
-            id: InfestorId("infestor-0".to_string()),
+        let config = OverlordConfig {
+            id: OverlordId("overlord-0".to_string()),
             model: model.to_string(),
             working_dir: self.config.working_dir.clone(),
             wakeup_notify: Some(self.wakeup_notify.clone()),
@@ -377,12 +377,12 @@ impl Nydus {
         };
 
         let shutdown_rx = self.event_bus.shutdown_receiver();
-        let (handle, event_rx, _join_handle) = spawn_infestor(config, shutdown_rx)?;
+        let (handle, event_rx, _join_handle) = spawn_overlord(config, shutdown_rx)?;
 
-        self.infestor = Some(handle);
-        self.infestor_event_rx = Some(event_rx);
+        self.overlord = Some(handle);
+        self.overlord_event_rx = Some(event_rx);
 
-        eprintln!("[Nydus] Registered Infestor with model: {}", model);
+        eprintln!("[Nydus] Registered Overlord with model: {}", model);
         Ok(())
     }
 
@@ -437,8 +437,8 @@ impl Nydus {
     fn update_cost_tracking(&self) {
         let mut cost_lock = self.cost_tracking.write();
         cost_lock.total_queen_cost_usd = self.total_queen_cost_usd;
-        cost_lock.total_infestor_cost_usd = self.total_infestor_cost_usd;
-        cost_lock.infestor_reviews_completed = self.infestor_reviews_completed;
+        cost_lock.total_overlord_cost_usd = self.total_overlord_cost_usd;
+        cost_lock.overlord_reviews_completed = self.overlord_reviews_completed;
     }
 
     /// Register a Queen by spawning StreamQueen or SpawnQueen actor.
@@ -664,13 +664,13 @@ impl Nydus {
                     self.handle_message_delivery(msg_notification).await;
                 }
                 Some(event) = async {
-                    if let Some(ref mut rx) = self.infestor_event_rx {
+                    if let Some(ref mut rx) = self.overlord_event_rx {
                         rx.recv().await
                     } else {
                         std::future::pending().await
                     }
                 } => {
-                    self.handle_infestor_queen_event(event).await?;
+                    self.handle_overlord_queen_event(event).await?;
                 }
                 _ = self.wakeup_notify.notified() => {
                     // Queen completed a task, immediately try to schedule ready tasks
@@ -764,10 +764,10 @@ impl Nydus {
                         }
                     }
 
-                    // Continue with normal completion flow for winner (Infestor review, etc.)
+                    // Continue with normal completion flow for winner (Overlord review, etc.)
                 }
 
-                // Mark as validating (awaiting Infestor review), NOT completed yet
+                // Mark as validating (awaiting Overlord review), NOT completed yet
                 self.task_dag.set_validating(&task_id.0);
 
                 // Store in memory
@@ -807,8 +807,8 @@ impl Nydus {
                 };
                 self.mailbox.lock().send(completion_msg);
 
-                // Trigger Infestor review if available and git isolation is enabled
-                if self.config.git_isolation && self.infestor.is_some() {
+                // Trigger Overlord review if available and git isolation is enabled
+                if self.config.git_isolation && self.overlord.is_some() {
                     let mut review_sent = false;
 
                     // Get worktree info for review
@@ -823,7 +823,7 @@ impl Nydus {
                             let branch_name = format!("hatchery/{}", queen_id.0);
 
                             eprintln!(
-                                "[Nydus] Sending task {} from {} to Infestor for review",
+                                "[Nydus] Sending task {} from {} to Overlord for review",
                                 task_id.0, queen_id.0
                             );
 
@@ -834,9 +834,9 @@ impl Nydus {
                                 (format!("Task {}", task_id.0), None)
                             };
 
-                            // Send review command to Infestor (now async)
-                            if let Some(ref infestor_handle) = self.infestor {
-                                match infestor_handle.review(
+                            // Send review command to Overlord (now async)
+                            if let Some(ref overlord_handle) = self.overlord {
+                                match overlord_handle.review(
                                     queen_id.clone(),
                                     task_id.0.clone(),
                                     branch_name.clone(),
@@ -848,21 +848,21 @@ impl Nydus {
                                         review_sent = true;
                                     }
                                     Err(e) => {
-                                        eprintln!("[Nydus] ERROR: Failed to send review task to Infestor: {}", e);
+                                        eprintln!("[Nydus] ERROR: Failed to send review task to Overlord: {}", e);
 
                                         // Check if the error is due to a closed channel
                                         let error_msg = e.to_string();
                                         if error_msg.contains("Queen channel closed") {
-                                            eprintln!("[Nydus] Infestor channel closed. Attempting re-registration...");
+                                            eprintln!("[Nydus] Overlord channel closed. Attempting re-registration...");
 
-                                            // Try to re-register the Infestor
-                                            match self.register_infestor("sonnet") {
+                                            // Try to re-register the Overlord
+                                            match self.register_overlord("sonnet") {
                                                 Ok(_) => {
-                                                    eprintln!("[Nydus] Infestor re-registered successfully. Retrying review send...");
+                                                    eprintln!("[Nydus] Overlord re-registered successfully. Retrying review send...");
 
-                                                    // Retry the review send with the new Infestor
-                                                    if let Some(ref new_infestor_handle) = self.infestor {
-                                                        match new_infestor_handle.review(
+                                                    // Retry the review send with the new Overlord
+                                                    if let Some(ref new_overlord_handle) = self.overlord {
+                                                        match new_overlord_handle.review(
                                                             queen_id.clone(),
                                                             task_id.0.clone(),
                                                             branch_name,
@@ -872,18 +872,18 @@ impl Nydus {
                                                         ).await {
                                                             Ok(_) => {
                                                                 review_sent = true;
-                                                                eprintln!("[Nydus] Retry successful: Infestor review sent for task {}", task_id.0);
+                                                                eprintln!("[Nydus] Retry successful: Overlord review sent for task {}", task_id.0);
                                                             }
                                                             Err(e2) => {
                                                                 eprintln!("[Nydus] ERROR: Retry also failed: {}", e2);
                                                             }
                                                         }
                                                     } else {
-                                                        eprintln!("[Nydus] ERROR: Infestor handle is None after re-registration");
+                                                        eprintln!("[Nydus] ERROR: Overlord handle is None after re-registration");
                                                     }
                                                 }
                                                 Err(re_err) => {
-                                                    eprintln!("[Nydus] ERROR: Failed to re-register Infestor: {}", re_err);
+                                                    eprintln!("[Nydus] ERROR: Failed to re-register Overlord: {}", re_err);
                                                 }
                                             }
                                         }
@@ -891,17 +891,17 @@ impl Nydus {
                                 }
                             }
                         } else {
-                            eprintln!("[Nydus] ERROR: No worktree path found for Queen {} — cannot send task {} to Infestor!", queen_id.0, task_id.0);
+                            eprintln!("[Nydus] ERROR: No worktree path found for Queen {} — cannot send task {} to Overlord!", queen_id.0, task_id.0);
                         }
                     } else {
-                        eprintln!("[Nydus] ERROR: WorktreeManager is None — cannot send task {} to Infestor!", task_id.0);
+                        eprintln!("[Nydus] ERROR: WorktreeManager is None — cannot send task {} to Overlord!", task_id.0);
                     }
 
                     // CRITICAL: If review was NOT sent, task is stuck in Validating forever.
                     // Fail it loudly so operator sees it and dependencies don't silently stall.
                     if !review_sent {
-                        eprintln!("[Nydus] CRITICAL: Infestor review NOT sent for task {}! Failing task to prevent silent stall.", task_id.0);
-                        self.task_dag.fail(&task_id.0, "FAILED: Infestor review could not be sent (channel closed and retry failed)".to_string());
+                        eprintln!("[Nydus] CRITICAL: Overlord review NOT sent for task {}! Failing task to prevent silent stall.", task_id.0);
+                        self.task_dag.fail(&task_id.0, "FAILED: Overlord review could not be sent (channel closed and retry failed)".to_string());
 
                         // Send escalation to operator
                         let escalation_msg = SwarmMessage {
@@ -910,10 +910,10 @@ impl Nydus {
                             to: AgentId::Operator,
                             msg_type: MessageType::Escalation,
                             payload: serde_json::json!({
-                                "type": "infestor_review_failed",
+                                "type": "overlord_review_failed",
                                 "task_id": task_id.0,
                                 "queen_id": queen_id.0,
-                                "reason": "Infestor review could not be sent (channel closed, re-registration attempted, retry failed). Task failed."
+                                "reason": "Overlord review could not be sent (channel closed, re-registration attempted, retry failed). Task failed."
                             }),
                             timestamp: Utc::now(),
                             correlation_id: None,
@@ -923,7 +923,7 @@ impl Nydus {
                         self.try_schedule().await?;
                     }
                 } else if self.config.git_isolation {
-                    // No Infestor, fall back to old validation + merge flow
+                    // No Overlord, fall back to old validation + merge flow
                     if let Ok(merge_result) = self.validated_merge(&queen_id).await {
                         match merge_result {
                             ValidatedMergeResult::Merged { commit_sha } => {
@@ -1129,18 +1129,18 @@ impl Nydus {
         Ok(())
     }
 
-    /// Handle events from the Infestor (merge validator).
-    /// The Infestor is a StreamQueen, so events are QueenEvents.
-    async fn handle_infestor_queen_event(&mut self, event: QueenEvent) -> Result<()> {
+    /// Handle events from the Overlord (merge validator).
+    /// The Overlord is a StreamQueen, so events are QueenEvents.
+    async fn handle_overlord_queen_event(&mut self, event: QueenEvent) -> Result<()> {
         match event {
             QueenEvent::TaskCompleted { task_id, result_text, cost_usd, .. } => {
                 // Parse task_id to extract queen_id and original task_id
                 // task_id format: "review-Q0-prd-1"
                 let (queen_id, original_task_id) = parse_review_task_id(&task_id.0);
 
-                // Accumulate Infestor cost
-                self.total_infestor_cost_usd += cost_usd;
-                self.infestor_reviews_completed += 1;
+                // Accumulate Overlord cost
+                self.total_overlord_cost_usd += cost_usd;
+                self.overlord_reviews_completed += 1;
                 self.update_cost_tracking();
 
                 // Parse verdict from result_text
@@ -1148,32 +1148,32 @@ impl Nydus {
                     let summary = extract_tag(&result_text, "summary")
                         .unwrap_or_else(|| "Approved".to_string());
                     eprintln!(
-                        "[Nydus] Infestor APPROVED merge for {} task {} (${:.2}): {}",
+                        "[Nydus] Overlord APPROVED merge for {} task {} (${:.2}): {}",
                         queen_id.0, original_task_id, cost_usd, summary
                     );
-                    self.handle_infestor_approve(&queen_id, &original_task_id, &summary).await?;
+                    self.handle_overlord_approve(&queen_id, &original_task_id, &summary).await?;
                 } else if result_text.contains("VERDICT: REJECT") {
                     let reason = extract_tag(&result_text, "reason")
                         .unwrap_or_else(|| "Rejected without details".to_string());
                     eprintln!(
-                        "[Nydus] Infestor REJECTED merge for {} task {} (${:.2}): {}",
+                        "[Nydus] Overlord REJECTED merge for {} task {} (${:.2}): {}",
                         queen_id.0, original_task_id, cost_usd, reason
                     );
-                    self.handle_infestor_reject(&queen_id, &original_task_id, &reason).await?;
+                    self.handle_overlord_reject(&queen_id, &original_task_id, &reason).await?;
                 } else {
                     // No clear verdict — REJECT (do not auto-approve)
-                    eprintln!("[Nydus] Infestor did not provide clear verdict (${:.2}), rejecting", cost_usd);
-                    self.handle_infestor_reject(&queen_id, &original_task_id, "No clear verdict from Infestor review").await?;
+                    eprintln!("[Nydus] Overlord did not provide clear verdict (${:.2}), rejecting", cost_usd);
+                    self.handle_overlord_reject(&queen_id, &original_task_id, "No clear verdict from Overlord review").await?;
                 }
             }
             QueenEvent::TaskFailed { task_id, error, .. } => {
                 // Review failed — REJECT or escalate (do NOT auto-approve failed reviews)
                 let (queen_id, original_task_id) = parse_review_task_id(&task_id.0);
-                eprintln!("[Nydus] Infestor review process failed, rejecting task: {}", error);
-                self.handle_infestor_reject(&queen_id, &original_task_id, &format!("Review process failed: {}", error)).await?;
+                eprintln!("[Nydus] Overlord review process failed, rejecting task: {}", error);
+                self.handle_overlord_reject(&queen_id, &original_task_id, &format!("Review process failed: {}", error)).await?;
             }
             QueenEvent::ProcessDied { exit_code, .. } => {
-                eprintln!("[Nydus] Infestor process died: exit_code={:?}", exit_code);
+                eprintln!("[Nydus] Overlord process died: exit_code={:?}", exit_code);
 
                 // Send process death notification
                 let death_msg = SwarmMessage {
@@ -1182,7 +1182,7 @@ impl Nydus {
                     to: AgentId::Operator,
                     msg_type: MessageType::Escalation,
                     payload: serde_json::json!({
-                        "agent": "infestor",
+                        "agent": "overlord",
                         "status": "process_died",
                         "exit_code": exit_code,
                     }),
@@ -1200,8 +1200,8 @@ impl Nydus {
         Ok(())
     }
 
-    /// Handle Infestor approval — merge the Queen's worktree.
-    async fn handle_infestor_approve(
+    /// Handle Overlord approval — merge the Queen's worktree.
+    async fn handle_overlord_approve(
         &mut self,
         queen_id: &QueenId,
         task_id: &str,
@@ -1303,7 +1303,7 @@ impl Nydus {
                     // Send approval message to operator
                     let approval_msg = SwarmMessage {
                         id: uuid::Uuid::new_v4().to_string(),
-                        from: AgentId::Infestor(InfestorId("infestor-0".to_string())),
+                        from: AgentId::Overlord(OverlordId("overlord-0".to_string())),
                         to: AgentId::Operator,
                         msg_type: MessageType::Custom("MergeApproved".to_string()),
                         payload: serde_json::json!({
@@ -1355,7 +1355,7 @@ impl Nydus {
 
                     // Requeue task with conflict feedback so Queen can retry with context
                     let feedback = format!(
-                        "Merge conflict detected in {} files after Infestor approval.\n\
+                        "Merge conflict detected in {} files after Overlord approval.\n\
                          Conflicted files: {:?}\n\
                          The Queen's worktree was reset (merge --abort). \
                          Please resolve conflicts with the latest main branch before re-submitting.",
@@ -1392,7 +1392,7 @@ impl Nydus {
                     // Still mark as complete — the work was done, just nothing to merge
                     let dag_result = crate::core::task_dag::DagTaskResult {
                         success: true,
-                        output: "Completed with no merge changes (approved by Infestor)".to_string(),
+                        output: "Completed with no merge changes (approved by Overlord)".to_string(),
                         files_modified: vec![],
                     };
                     self.task_dag.complete(task_id, dag_result);
@@ -1427,8 +1427,8 @@ impl Nydus {
         Ok(())
     }
 
-    /// Handle Infestor rejection — requeue with feedback or escalate.
-    async fn handle_infestor_reject(
+    /// Handle Overlord rejection — requeue with feedback or escalate.
+    async fn handle_overlord_reject(
         &mut self,
         queen_id: &QueenId,
         task_id: &str,
@@ -1451,13 +1451,13 @@ impl Nydus {
             // Send escalation (existing code)
             let rejection_msg = SwarmMessage {
                 id: uuid::Uuid::new_v4().to_string(),
-                from: AgentId::Infestor(InfestorId("infestor-0".to_string())),
+                from: AgentId::Overlord(OverlordId("overlord-0".to_string())),
                 to: AgentId::Operator,
                 msg_type: MessageType::Escalation,
                 payload: serde_json::json!({
                     "queen_id": queen_id.0,
                     "task_id": task_id,
-                    "status": "rejected_by_infestor_max_retries",
+                    "status": "rejected_by_overlord_max_retries",
                     "reason": reason,
                     "retry_count": retry_count,
                 }),
@@ -1480,7 +1480,7 @@ impl Nydus {
                 // Fallback escalation
                 let rejection_msg = SwarmMessage {
                     id: uuid::Uuid::new_v4().to_string(),
-                    from: AgentId::Infestor(InfestorId("infestor-0".to_string())),
+                    from: AgentId::Overlord(OverlordId("overlord-0".to_string())),
                     to: AgentId::Operator,
                     msg_type: MessageType::Escalation,
                     payload: serde_json::json!({
@@ -1619,7 +1619,8 @@ impl Nydus {
                                 AgentId::Nydus(sid) => sid.0.clone(),
                                 AgentId::Validator => "Validator".to_string(),
                                 AgentId::Operator => "Operator".to_string(),
-                                AgentId::Infestor(iid) => iid.0.clone(),
+                                AgentId::Overlord(iid) => iid.0.clone(),
+                                AgentId::Overmind(oid) => oid.0.clone(),
                             };
                             format!("[{}] {}: {}", author_str, e.key, e.value)
                         })
@@ -1859,7 +1860,8 @@ impl Nydus {
                     AgentId::Nydus(sid) => sid.0.clone(),
                     AgentId::Validator => "Validator".to_string(),
                     AgentId::Operator => "Operator".to_string(),
-                    AgentId::Infestor(iid) => iid.0.clone(),
+                    AgentId::Overlord(iid) => iid.0.clone(),
+                    AgentId::Overmind(oid) => oid.0.clone(),
                 };
                 format!("[{}] {}: {}", author_str, e.key, e.value)
             })
@@ -2274,7 +2276,8 @@ impl Nydus {
                     AgentId::Nydus(sid) => sid.0.clone(),
                     AgentId::Validator => "Validator".to_string(),
                     AgentId::Operator => "Operator".to_string(),
-                    AgentId::Infestor(iid) => iid.0.clone(),
+                    AgentId::Overlord(iid) => iid.0.clone(),
+                    AgentId::Overmind(oid) => oid.0.clone(),
                 };
                 format!("[{}] {}: {}", author_str, e.key, e.value)
             })
@@ -2349,8 +2352,8 @@ impl Nydus {
             queens_active,
             queens_idle,
             total_queen_cost_usd: self.total_queen_cost_usd,
-            total_infestor_cost_usd: self.total_infestor_cost_usd,
-            infestor_reviews_completed: self.infestor_reviews_completed,
+            total_overlord_cost_usd: self.total_overlord_cost_usd,
+            overlord_reviews_completed: self.overlord_reviews_completed,
         }
     }
 
@@ -2684,7 +2687,7 @@ mod tests {
 
         host.handle_event(event).await.unwrap();
 
-        // Task should be in Validating status (awaiting Infestor review), not completed
+        // Task should be in Validating status (awaiting Overlord review), not completed
         let stats = host.task_dag.stats();
         assert_eq!(stats.validating, 1);
         assert_eq!(stats.completed, 0);

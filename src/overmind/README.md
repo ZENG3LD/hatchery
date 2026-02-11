@@ -10,14 +10,14 @@ Overmind — LLM-координатор (StreamQueen), который прини
 |---------|---------------|---------------------|
 | 2й decline на задачу | SwarmPool → EscalateToOvermind | Retry с новыми инструкциями / Zerg Rush / Re-decompose |
 | Deadlock | Nydus periodic_maintenance | Анализ: что заблокировано, как разрешить |
-| Merge conflict | Nydus handle_infestor_approve | Стратегия: requeue / re-decompose / manual |
+| Merge conflict | Nydus handle_overlord_approve | Стратегия: requeue / re-decompose / manual |
 | Queen recovery failed | Nydus recovery_manager | Решение: respawn / fail task / shutdown |
 
 ## Чего НЕ делает
 
 - Не делает рутинный scheduling (→ Nydus)
 - Не спавнит Queens напрямую (→ через SwarmPool)
-- Не ревьюит код (→ Infestor)
+- Не ревьюит код (→ Overlord)
 - Не принимает решений при 1м decline (→ SwarmPool auto-retry)
 
 ## API

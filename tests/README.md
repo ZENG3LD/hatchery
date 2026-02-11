@@ -19,7 +19,7 @@ Comprehensive integration tests covering 10 scenarios based on real bugs from pr
 | **test_dead_queen_recovery** | Queen dies with assigned task | Dead Queen detected; task recovered to Ready state; can be reassigned |
 | **test_verify_scan_bonus_completion** | Post-merge verify scan | Tasks with same verify command get bonus completion when one satisfies both |
 | **test_dependency_chain_with_failure** | prd-1 → prd-2 → prd-3 with prd-2 failing | Failed task keeps dependents blocked; requeue works; retry succeeds |
-| **test_infestor_review_flow** | Validating → Approved → Completed | TaskCompleted puts task in Validating; approval completes it; deps unblock only after approval |
+| **test_overlord_review_flow** | Validating → Approved → Completed | TaskCompleted puts task in Validating; approval completes it; deps unblock only after approval |
 | **test_parallel_independent_tasks** | 3 independent tasks complete simultaneously | Multiple Queens work without conflicts; all tasks complete successfully |
 | **test_diamond_dependency** | Diamond pattern (A → B/C, B/C → D) | D only becomes Ready when BOTH B and C complete |
 
@@ -34,7 +34,7 @@ These tests validate fixes for real production issues:
 5. **Dead Queen Recovery** - Stuck tasks recovered when Queen subprocess dies
 6. **Verify Scan Bonus** - Post-merge scan detects bonus completions via verify commands
 7. **Dependency Chain Failures** - Failed tasks properly block dependents; requeue works
-8. **Infestor Workflow** - Validating state prevents premature dependency unblocking
+8. **Overlord Workflow** - Validating state prevents premature dependency unblocking
 
 ## Running Tests
 
