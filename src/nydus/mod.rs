@@ -2430,6 +2430,35 @@ impl Nydus {
         &mut self.recovery_manager
     }
 
+    // ========================================================================
+    // Test-only accessors for integration tests
+    // ========================================================================
+
+    /// Get reference to the task DAG.
+    ///
+    /// **WARNING**: This is a test-only accessor. Do not use in production code.
+    /// It exposes internal state for integration testing.
+    pub fn task_dag(&self) -> &TaskDag {
+        &self.task_dag
+    }
+
+    /// Get mutable reference to the task DAG.
+    ///
+    /// **WARNING**: This is a test-only accessor. Do not use in production code.
+    /// It exposes internal state for integration testing.
+    pub fn task_dag_mut(&mut self) -> &mut TaskDag {
+        &mut self.task_dag
+    }
+
+    /// Register a Queen handle (simplified version for testing).
+    ///
+    /// **WARNING**: This is a test-only method. Use `register_queen_actor` in production.
+    /// This method bypasses the normal Queen spawning process and directly registers
+    /// a handle, which is useful for injecting mock Queens in tests.
+    pub fn register_queen(&mut self, queen_id: QueenId, handle: QueenHandle) {
+        self.handles.insert(queen_id, handle);
+    }
+
     /// Remove a dead Queen from the registry (before respawning).
     pub async fn unregister_queen(&mut self, queen_id: &QueenId) -> Option<QueenHandle> {
         self.mailbox.lock().unregister_queen(queen_id);
