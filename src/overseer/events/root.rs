@@ -46,6 +46,36 @@ use super::progress::{ProgressData, ProgressEvent};
 use super::system::SystemEvent;
 use super::tool_result::ToolUseResult;
 
+/// Tool use result metadata (for Task/subagent calls)
+///
+/// Present in main session tool_result records when a Task tool was used.
+/// Extractable via `UserEvent::extract_subagent_metadata()`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolUseResultMetadata {
+    /// Agent ID (7-char hex) - links to subagent file
+    #[serde(rename = "agentId")]
+    pub agent_id: Option<String>,
+
+    /// Total tokens used by subagent
+    #[serde(rename = "totalTokens")]
+    pub total_tokens: Option<u64>,
+
+    /// Total tool use count in subagent
+    #[serde(rename = "totalToolUseCount")]
+    pub total_tool_use_count: Option<u64>,
+
+    /// Total duration in milliseconds
+    #[serde(rename = "totalDurationMs")]
+    pub total_duration_ms: Option<u64>,
+
+    /// Whether subagent succeeded
+    pub success: Option<bool>,
+
+    /// Command name (if applicable)
+    #[serde(rename = "commandName")]
+    pub command_name: Option<String>,
+}
+
 /// Top-level session event discriminator
 ///
 /// All events in a Claude Code session JSONL file parse into one of these variants.
@@ -286,8 +316,16 @@ pub struct UserEvent {
     pub permission_mode: Option<String>,
 
     /// Tool result (if this is a tool result message)
+    ///
+    /// Stores raw JSON value. Can be:
+    /// - A typed tool result (with `type` field) - deserialize to `ToolUseResult`
+    /// - A metadata object (with `agentId` field) - deserialize to `ToolUseResultMetadata`
+    ///
+    /// Use helper methods:
+    /// - `try_parse_tool_result()` → `Option<ToolUseResult>`
+    /// - `extract_subagent_metadata()` → `Option<ToolUseResultMetadata>`
     #[serde(rename = "toolUseResult")]
-    pub tool_use_result: Option<ToolUseResult>,
+    pub tool_use_result: Option<JsonValue>,
 
     /// Links result back to assistant message that invoked tool
     #[serde(rename = "sourceToolAssistantUUID")]
@@ -308,6 +346,25 @@ impl UserEvent {
     /// Get timestamp
     pub fn timestamp(&self) -> DateTime<Utc> {
         self.metadata.timestamp
+    }
+
+    /// Try to parse tool_use_result as typed ToolUseResult
+    ///
+    /// Returns Some if the JSON has a `type` field and can be parsed.
+    pub fn try_parse_tool_result(&self) -> Option<ToolUseResult> {
+        self.tool_use_result
+            .as_ref()
+            .and_then(|json| serde_json::from_value(json.clone()).ok())
+    }
+
+    /// Extract subagent metadata from toolUseResult
+    ///
+    /// Returns metadata if this is a Task tool result with subagent info
+    /// (contains `agentId` field instead of `type` field).
+    pub fn extract_subagent_metadata(&self) -> Option<ToolUseResultMetadata> {
+        self.tool_use_result
+            .as_ref()
+            .and_then(|json| serde_json::from_value(json.clone()).ok())
     }
 
     /// Extract text content for FTS indexing
@@ -331,7 +388,7 @@ impl UserEvent {
         let mut paths = Vec::new();
 
         // Check tool use result
-        if let Some(result) = &self.tool_use_result {
+        if let Some(result) = self.try_parse_tool_result() {
             if let Some(path) = result.file_path() {
                 paths.push(path.to_string());
             }
@@ -785,5 +842,79 @@ mod tests {
         let event: SessionEvent = serde_json::from_str(json).unwrap();
         let text = event.extract_text_content();
         assert_eq!(text, Some("First line\nSecond line".to_string()));
+    }
+
+    #[test]
+    fn test_tool_use_result_metadata_deserialization() {
+        let json = r#"{
+            "type": "user",
+            "uuid": "user-uuid",
+            "parentUuid": "assistant-uuid",
+            "sessionId": "session-123",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "isSidechain": false,
+            "userType": "external",
+            "cwd": "/test",
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_123",
+                        "content": "Task completed"
+                    }
+                ]
+            },
+            "toolUseResult": {
+                "agentId": "a18af05",
+                "totalTokens": 20443,
+                "totalToolUseCount": 9,
+                "totalDurationMs": 38706,
+                "success": true
+            }
+        }"#;
+
+        let event: SessionEvent = serde_json::from_str(json).unwrap();
+        if let SessionEvent::User(user_event) = event {
+            let metadata = user_event.extract_subagent_metadata();
+            assert!(metadata.is_some());
+            let meta = metadata.unwrap();
+            assert_eq!(meta.agent_id, Some("a18af05".to_string()));
+            assert_eq!(meta.total_tokens, Some(20443));
+            assert_eq!(meta.total_tool_use_count, Some(9));
+            assert_eq!(meta.total_duration_ms, Some(38706));
+            assert_eq!(meta.success, Some(true));
+        } else {
+            panic!("Expected UserEvent");
+        }
+    }
+
+    #[test]
+    fn test_event_metadata_agent_id() {
+        let json = r#"{
+            "type": "user",
+            "uuid": "user-uuid",
+            "parentUuid": null,
+            "sessionId": "session-123",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "isSidechain": true,
+            "agentId": "a18af05",
+            "userType": "external",
+            "cwd": "/test",
+            "message": {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Subagent message"}
+                ]
+            }
+        }"#;
+
+        let event: SessionEvent = serde_json::from_str(json).unwrap();
+        if let SessionEvent::User(user_event) = event {
+            assert_eq!(user_event.metadata.agent_id, Some("a18af05".to_string()));
+            assert_eq!(user_event.metadata.is_sidechain, true);
+        } else {
+            panic!("Expected UserEvent");
+        }
     }
 }

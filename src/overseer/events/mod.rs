@@ -180,7 +180,7 @@ pub use metadata::EventMetadata;
 pub use progress::{ProgressData, ProgressEvent};
 pub use root::{
     AssistantMessage, CacheCreation, FileHistorySnapshot, QueueOperation, SessionEvent,
-    SessionSummary, Snapshot, TokenUsage,
+    SessionSummary, Snapshot, TokenUsage, ToolUseResultMetadata,
 };
 pub use system::{CompactMetadata, SystemEvent};
 pub use tool_result::ToolUseResult;

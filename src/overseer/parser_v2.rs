@@ -511,7 +511,7 @@ impl SegmentParser {
                     stats.user_message_count += 1;
 
                     // Extract tool results
-                    if let Some(tool_result) = &user_event.tool_use_result {
+                    if let Some(tool_result) = user_event.try_parse_tool_result() {
                         // Link result to tool invocation
                         if let Some(source_uuid) = &user_event.source_tool_assistant_uuid {
                             // Find matching tool invocation and update result

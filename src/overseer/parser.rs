@@ -8,6 +8,7 @@ use std::time::SystemTime;
 
 use crate::overseer::error::{ParseError, Result};
 use crate::overseer::events::root::SessionEvent;
+use crate::overseer::types::{SessionWithSubagents, SubagentSession};
 
 // ============================================================================
 // Local Types (no dependency on crate::types)
@@ -235,6 +236,139 @@ fn get_claude_data_dir() -> Result<std::path::PathBuf> {
         .ok_or_else(|| ParseError::Other("Cannot determine home directory".to_string()))
 }
 
+/// Find subagent JSONL files for a session
+///
+/// Discovers all subagent logs in the session's subagents directory.
+///
+/// # Directory Structure
+///
+/// ```text
+/// .claude/projects/<project>/<session-id>.jsonl          # Main session
+/// .claude/projects/<project>/<session-id>/subagents/     # Subagent directory
+///   ├── agent-a0179af.jsonl                              # Subagent 1
+///   ├── agent-a18af05.jsonl                              # Subagent 2
+///   └── ...
+/// ```
+///
+/// # Arguments
+///
+/// * `session_path` - Path to the main session JSONL file
+///
+/// # Returns
+///
+/// Vector of tuples: (agent_id, path_to_subagent_jsonl)
+pub fn find_subagent_files(session_path: &Path) -> Vec<(String, PathBuf)> {
+    // Session JSONL: .../projects/<project>/<session-id>.jsonl
+    // Subagents dir: .../projects/<project>/<session-id>/subagents/
+    let session_id = extract_session_id(session_path);
+    let parent = session_path.parent().unwrap_or_else(|| Path::new("."));
+    let subagents_dir = parent.join(&session_id).join("subagents");
+
+    if !subagents_dir.exists() {
+        return Vec::new();
+    }
+
+    let mut result = Vec::new();
+    if let Ok(entries) = fs::read_dir(&subagents_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |e| e == "jsonl") {
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    if let Some(agent_id) = stem.strip_prefix("agent-") {
+                        result.push((agent_id.to_string(), path));
+                    }
+                }
+            }
+        }
+    }
+    result
+}
+
+/// Parse session with all subagents linked
+///
+/// Parses the main session JSONL file and all associated subagent logs,
+/// linking them together via agent IDs and metadata.
+///
+/// # Arguments
+///
+/// * `session_path` - Path to the main session JSONL file
+///
+/// # Returns
+///
+/// Complete session with all subagents parsed and linked
+pub fn parse_session_with_subagents(session_path: &Path) -> Result<SessionWithSubagents> {
+    let session_id = extract_session_id(session_path);
+    let main_events = parse_jsonl_events(session_path)?;
+    let subagent_files = find_subagent_files(session_path);
+
+    let mut subagents = Vec::new();
+
+    // Build a map of agent_id -> metadata from main session tool results
+    let mut agent_metadata = std::collections::HashMap::new();
+    for event in &main_events {
+        if let SessionEvent::User(user_event) = event {
+            if let Some(metadata) = user_event.extract_subagent_metadata() {
+                if let Some(agent_id) = &metadata.agent_id {
+                    agent_metadata.insert(agent_id.clone(), metadata);
+                }
+            }
+        }
+    }
+
+    for (agent_id, subagent_path) in subagent_files {
+        let events = parse_jsonl_events(&subagent_path)?;
+
+        // Extract model from first assistant message
+        let model = events
+            .iter()
+            .find_map(|e| {
+                if let SessionEvent::Assistant(msg) = e {
+                    Some(msg.message.model.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+
+        // Get timestamps from first and last events
+        let spawn_timestamp = events.first().map(|e| e.timestamp().timestamp());
+        let complete_timestamp = events.last().map(|e| e.timestamp().timestamp());
+
+        // Get metadata from main session (if available)
+        let metadata = agent_metadata.get(&agent_id);
+        let total_tokens = metadata
+            .and_then(|m| m.total_tokens)
+            .unwrap_or(0);
+        let total_tool_use_count = metadata
+            .and_then(|m| m.total_tool_use_count)
+            .unwrap_or(0);
+        let total_duration_ms = metadata
+            .and_then(|m| m.total_duration_ms)
+            .unwrap_or(0);
+
+        subagents.push(SubagentSession {
+            agent_id,
+            session_id: session_id.clone(),
+            jsonl_path: subagent_path,
+            subagent_type: None, // TODO: extract from Task input
+            model,
+            spawn_timestamp,
+            complete_timestamp,
+            total_tokens,
+            total_tool_use_count,
+            total_duration_ms,
+            events,
+        });
+    }
+
+    Ok(SessionWithSubagents {
+        session_id,
+        jsonl_path: session_path.to_path_buf(),
+        events: main_events,
+        subagents,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,4 +435,24 @@ mod tests {
         assert_eq!(result, PathBuf::from("/custom/claude/path"));
         std::env::remove_var("CLAUDE_HOME");
     }
+
+    #[test]
+    fn test_find_subagent_files_empty() {
+        // Non-existent session should return empty vec
+        let nonexistent = PathBuf::from("/nonexistent/session.jsonl");
+        let subagents = find_subagent_files(&nonexistent);
+        assert_eq!(subagents.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_subagent_id_from_path() {
+        let path = PathBuf::from("agent-a18af05.jsonl");
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap();
+        let agent_id = stem.strip_prefix("agent-").unwrap();
+        assert_eq!(agent_id, "a18af05");
+    }
+
+    // NOTE: Real integration tests would require setting up a temp directory
+    // with mock session and subagent files. Skipping for now as the logic
+    // is straightforward directory traversal.
 }

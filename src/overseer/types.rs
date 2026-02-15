@@ -5,6 +5,70 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+
+// ============================================================================
+// Subagent Session Types
+// ============================================================================
+
+/// Parsed subagent session
+///
+/// Represents a complete subagent session (Task tool execution) with all
+/// events, metadata, and linked to parent session.
+#[derive(Debug, Clone)]
+pub struct SubagentSession {
+    /// Agent ID (7-char hex, e.g., "a18af05")
+    pub agent_id: String,
+
+    /// Parent session ID (same as main session)
+    pub session_id: String,
+
+    /// Path to subagent JSONL file
+    pub jsonl_path: PathBuf,
+
+    /// Subagent type (if extracted from Task input)
+    pub subagent_type: Option<String>,
+
+    /// Model used by subagent
+    pub model: String,
+
+    /// Spawn timestamp (Unix epoch)
+    pub spawn_timestamp: Option<i64>,
+
+    /// Complete timestamp (Unix epoch)
+    pub complete_timestamp: Option<i64>,
+
+    /// Total tokens from toolUseResult metadata
+    pub total_tokens: u64,
+
+    /// Total tool use count from toolUseResult metadata
+    pub total_tool_use_count: u64,
+
+    /// Total duration in milliseconds from toolUseResult metadata
+    pub total_duration_ms: u64,
+
+    /// All events from subagent JSONL
+    pub events: Vec<crate::overseer::events::root::SessionEvent>,
+}
+
+/// Main session with linked subagents
+///
+/// Combines a main session with all its subagent sessions,
+/// providing a complete view of the work performed.
+#[derive(Debug)]
+pub struct SessionWithSubagents {
+    /// Session ID
+    pub session_id: String,
+
+    /// Path to main session JSONL
+    pub jsonl_path: PathBuf,
+
+    /// All events from main session
+    pub events: Vec<crate::overseer::events::root::SessionEvent>,
+
+    /// Linked subagent sessions
+    pub subagents: Vec<SubagentSession>,
+}
 
 // ============================================================================
 // Session Segment Types

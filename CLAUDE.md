@@ -2,7 +2,7 @@
 
 ## Overview
 
-Multi-agent swarm orchestrator. Spawns Queens (Claude subprocesses), coordinates via Nydus scheduler, reviews via Infestor.
+Multi-agent swarm orchestrator. Spawns Queens (Claude subprocesses), coordinates via Nydus scheduler, reviews via Overlord.
 
 ## Language & Stack
 
@@ -25,9 +25,16 @@ hatchery/
 │   ├── queen/
 │   │   ├── handle.rs         # Queen handle (async interface)
 │   │   └── stream_queen.rs   # StreamQueen (long-lived subprocess)
-│   ├── infestor/
-│   │   ├── handle.rs         # Infestor review handle
-│   │   └── spawn_infestor.rs # Infestor spawning
+│   ├── overlord/
+│   │   ├── handle.rs         # Overlord review handle
+│   │   ├── parsers.rs        # Diff/test/quality parsers
+│   │   ├── code_checks.rs    # Deterministic verdict pipeline
+│   │   ├── verdict.rs        # Hybrid review orchestrator
+│   │   └── spawn_overlord.rs # Overlord spawning
+│   ├── swarm_pool/
+│   │   └── mod.rs            # Spawn heuristics (zerg rush, elastic pool, retry)
+│   ├── overseer/             # Claude Code session parsers
+│   ├── overmind/             # Strategic LLM coordinator (Phase 4+)
 │   └── safety/
 │       └── worktree.rs       # Git worktree isolation
 ```
@@ -46,16 +53,26 @@ cargo build --release
 
 **YOU ARE THE COORDINATOR, NOT THE WORKER.**
 
-### ALWAYS Delegate:
+### ALWAYS Delegate To Custom Agents (model: sonnet):
 
-| Task | Agent |
-|------|-------|
+| Task | Agent (`subagent_type`) |
+|------|------------------------|
 | Implement Rust code | `rust-implementer` |
 | Complex Rust questions | `rust-expert` |
 | Research APIs, docs | `research-agent` |
 | Other languages | `implementer` |
-| Codebase exploration | Built-in `Explore` |
-| Planning | Built-in `Plan` |
+| Codebase exploration | `explorer` |
+| Planning | `planner` |
+| Code review | `code-reviewer` |
+| Simple commands | `bash-runner` |
+
+### ЗАПРЕЩЕНО встроенные агенты:
+
+- ❌ `Explore`, `Plan`, `Bash`, `general-purpose` — наследуют Opus
+- ❌ `EnterPlanMode` — тратит Opus контекст
+- ❌ `Task` без `subagent_type` — дефолт Opus
+
+Все субагенты ТОЛЬКО из `.claude/agents/` — они все на `model: sonnet`.
 
 ### Parallel Agents
 
@@ -76,13 +93,11 @@ Task 3: rust-expert reviews architecture
 - You get results automatically when they finish
 - Background mode requires constant `sleep` and pollutes memory
 
-### NEVER Plan Directly — Delegate Planning
+### Your Role — ONLY Coordinate:
 
-**FORBIDDEN: `EnterPlanMode`!**
-
-- Do NOT enter plan mode yourself — it wastes expensive Opus context on codebase exploration
-- Instead send `Plan` or `Explore` subagents for research and planning
-- Your role: make decisions based on agent results, not explore yourself
+- Make decisions based on agent results, not explore yourself
+- Quick single-file reads when you know exact path — OK
+- Everything else → delegate to an agent from the table above
 
 ## Code Style
 

@@ -19,21 +19,25 @@ pub use error::{ParseError, Result};
 pub use types::{
     AgentActivity, AgentSummary, AgentTask, ContextSummary, ConversationEdge, Decision,
     DecisionContext, EventIndexEntry, FileChange, SessionEvent as ClaudeSessionEvent,
-    SessionSegment, ToolActivity,
+    SessionSegment, SessionWithSubagents, SubagentSession, ToolActivity,
 };
 
 // Re-export typed event structures
 pub use events::{
     AssistantMessage, AssistantMessageEvent, CompactMetadata, ContentBlock, EventMetadata,
     FileHistorySnapshot, MessageContent, ProgressData, ProgressEvent, QueueOperationEvent,
-    SessionEvent, Snapshot, SystemEvent, TokenUsage, ToolUseResult, UserMessageEvent,
+    SessionEvent, Snapshot, SystemEvent, TokenUsage, ToolUseResult, ToolUseResultMetadata,
+    UserMessageEvent,
 };
 
 // Re-export context extraction types and extractor
 pub use context_extractor::{ContextExtractor, FileModification};
 
 // Re-export parser functions
-pub use parser::{extract_session_id, find_session_files, parse_jsonl_events};
+pub use parser::{
+    extract_session_id, find_session_files, find_subagent_files, parse_jsonl_events,
+    parse_session_with_subagents,
+};
 
 // Re-export parser_v2 types and functions
 pub use parser_v2::{

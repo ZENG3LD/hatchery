@@ -283,7 +283,7 @@ fn extract_decision(user: &UserMessageEvent, assistant: &AssistantMessageEvent) 
 
 /// Extract file modification from user message with tool result
 fn extract_file_modification(event: &UserMessageEvent) -> Option<FileModification> {
-    let tool_result = event.tool_use_result.as_ref()?;
+    let tool_result = event.try_parse_tool_result()?;
 
     let (path, operation) = match tool_result {
         ToolUseResult::Create(create_result) => {

@@ -91,6 +91,13 @@ pub struct EventMetadata {
     /// Present in progress events when using agents.
     /// Examples: `"rust-implementer"`, `"research-agent"`
     pub slug: Option<String>,
+
+    /// Agent ID (7-char hex for subagents)
+    ///
+    /// Present in subagent JSONL events to identify which subagent.
+    /// Example: `"a18af05"`
+    #[serde(rename = "agentId")]
+    pub agent_id: Option<String>,
 }
 
 /// Logical parent UUID (for compact boundaries)
@@ -173,6 +180,7 @@ mod tests {
             version: Some("2.1.19".to_string()),
             git_branch: Some("main".to_string()),
             slug: None,
+            agent_id: None,
         };
 
         assert!(metadata.is_user_prompt());
@@ -193,6 +201,7 @@ mod tests {
             version: Some("2.1.19".to_string()),
             git_branch: Some("main".to_string()),
             slug: None,
+            agent_id: None,
         };
 
         assert!(!metadata.is_user_prompt());
@@ -212,8 +221,10 @@ mod tests {
             version: Some("2.1.19".to_string()),
             git_branch: Some("main".to_string()),
             slug: None,
+            agent_id: Some("a18af05".to_string()),
         };
 
         assert!(metadata.is_sidechain());
+        assert_eq!(metadata.agent_id, Some("a18af05".to_string()));
     }
 }
