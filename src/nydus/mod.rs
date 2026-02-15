@@ -662,17 +662,29 @@ impl Nydus {
         std::fs::write(&port_path, port.to_string())?;
         eprintln!("[Nydus] IPC listener started on port {}", port);
 
-        loop {
-            self.try_schedule().await?;
+        // Initial scheduling after DAG population
+        self.try_schedule().await?;
 
+        loop {
             let interval = self.tick_state.next_interval();
 
             tokio::select! {
                 Some(event) = self.event_bus.recv_event() => {
+                    // Check event type before handling (for event-driven maintenance)
+                    let needs_maintenance = matches!(event, QueenEvent::TaskCompleted { .. } | QueenEvent::TaskFailed { .. });
+
                     self.handle_event(event).await?;
+
+                    // Event-driven scheduling and maintenance
+                    self.try_schedule().await?;
+                    if needs_maintenance {
+                        self.periodic_maintenance().await?;
+                    }
                 }
                 Some(inject_req) = inject_rx.recv() => {
                     self.handle_inject(inject_req).await;
+                    // Event-driven scheduling after injection
+                    self.try_schedule().await?;
                 }
                 Some(msg_notification) = message_delivery_rx.recv() => {
                     self.handle_message_delivery(msg_notification).await;
@@ -689,8 +701,11 @@ impl Nydus {
                 _ = self.wakeup_notify.notified() => {
                     // Queen completed a task, immediately try to schedule ready tasks
                     self.try_schedule().await?;
+                    // Wakeup-driven maintenance
+                    self.periodic_maintenance().await?;
                 }
                 _ = tokio::time::sleep(interval) => {
+                    // Timer-based fallback maintenance
                     self.periodic_maintenance().await?;
                 }
                 _ = self.shutdown_rx.changed() => {

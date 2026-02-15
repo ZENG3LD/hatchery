@@ -534,7 +534,14 @@ async fn main() -> Result<()> {
             }
 
             // After Queens registration, automatically register Overlord when git isolation is enabled
-            if config.worktree_isolation {
+            // Can be skipped via HATCHERY_SKIP_OVERLORD=1 or HATCHERY_SKIP_OVERLORD=true
+            let skip_overlord = std::env::var("HATCHERY_SKIP_OVERLORD")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+
+            if skip_overlord {
+                eprintln!("[HATCHERY] Overlord registration skipped (HATCHERY_SKIP_OVERLORD set)");
+            } else if config.worktree_isolation {
                 if let Err(e) = nydus.register_overlord("sonnet") {
                     eprintln!("[HATCHERY] Warning: Failed to register Overlord: {}", e);
                 } else {

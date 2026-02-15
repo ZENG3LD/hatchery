@@ -14,9 +14,9 @@ use std::time::{Duration, Instant};
 /// When nothing is happening, ticks slow down to save resources.
 #[derive(Debug)]
 pub struct HeuristicTick {
-    /// Minimum interval (floor). Default: 100ms
+    /// Minimum interval (floor). Default: 10ms
     min_interval: Duration,
-    /// Maximum interval (ceiling / fallback). Default: 5s
+    /// Maximum interval (ceiling / fallback). Default: 500ms
     max_interval: Duration,
     /// Current computed interval
     current_interval: Duration,
@@ -33,7 +33,7 @@ pub struct HeuristicTick {
 impl HeuristicTick {
     /// Create with default parameters.
     pub fn new() -> Self {
-        Self::with_bounds(Duration::from_millis(100), Duration::from_secs(5))
+        Self::with_bounds(Duration::from_millis(10), Duration::from_millis(500))
     }
 
     /// Create with custom min/max bounds.
@@ -41,7 +41,7 @@ impl HeuristicTick {
         Self {
             min_interval,
             max_interval,
-            current_interval: Duration::from_secs(1), // start at 1s
+            current_interval: min_interval, // start responsive
             last_meaningful_event: Instant::now(),
             events_since_tick: 0,
             completions_since_tick: 0,
@@ -75,15 +75,15 @@ impl HeuristicTick {
         if meaningful > 0 {
             // Tasks completing/failing — stay responsive
             self.current_interval = self.min_interval;
-        } else if idle_time > Duration::from_secs(30) {
+        } else if idle_time > Duration::from_secs(5) {
             // Long idle — back off to max
             self.current_interval = self.max_interval;
-        } else if idle_time > Duration::from_secs(10) {
-            // Medium idle — exponential backoff (double, capped)
-            self.current_interval = (self.current_interval * 2).min(self.max_interval);
+        } else if idle_time > Duration::from_secs(2) {
+            // Medium idle — linear backoff (+50ms increments, capped)
+            self.current_interval = (self.current_interval + Duration::from_millis(50)).min(self.max_interval);
         } else if self.events_since_tick > 0 {
             // Some activity but no completions — moderate interval
-            self.current_interval = Duration::from_secs(1);
+            self.current_interval = Duration::from_millis(50);
         }
         // else: keep current interval
 
@@ -119,7 +119,7 @@ mod tests {
     #[test]
     fn test_default_start_interval() {
         let tick = HeuristicTick::new();
-        assert_eq!(tick.current(), Duration::from_secs(1));
+        assert_eq!(tick.current(), Duration::from_millis(10));
     }
 
     #[test]
@@ -127,7 +127,7 @@ mod tests {
         let mut tick = HeuristicTick::new();
         tick.note_completion();
         let interval = tick.next_interval();
-        assert_eq!(interval, Duration::from_millis(100));
+        assert_eq!(interval, Duration::from_millis(10));
     }
 
     #[test]
@@ -135,7 +135,7 @@ mod tests {
         let mut tick = HeuristicTick::new();
         tick.note_failure();
         let interval = tick.next_interval();
-        assert_eq!(interval, Duration::from_millis(100));
+        assert_eq!(interval, Duration::from_millis(10));
     }
 
     #[test]
@@ -144,7 +144,7 @@ mod tests {
         tick.note_event();
         tick.note_event();
         let interval = tick.next_interval();
-        assert_eq!(interval, Duration::from_secs(1));
+        assert_eq!(interval, Duration::from_millis(50));
     }
 
     #[test]
@@ -152,8 +152,8 @@ mod tests {
         let mut tick = HeuristicTick::new();
         // No events at all, short idle time
         let interval = tick.next_interval();
-        // Should keep current (1s) since idle < 10s
-        assert_eq!(interval, Duration::from_secs(1));
+        // Should keep current (10ms) since idle < 2s
+        assert_eq!(interval, Duration::from_millis(10));
     }
 
     #[test]
@@ -165,9 +165,9 @@ mod tests {
         // After next_interval, counters should be reset
         // No events -> should keep current
         let interval = tick.next_interval();
-        // Since last_meaningful_event is recent, should stay at min (100ms)
-        // because idle_time < 10s and events_since_tick == 0
-        assert_eq!(interval, Duration::from_millis(100));
+        // Since last_meaningful_event is recent, should stay at min (10ms)
+        // because idle_time < 2s and events_since_tick == 0
+        assert_eq!(interval, Duration::from_millis(10));
     }
 
     #[test]

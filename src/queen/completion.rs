@@ -27,16 +27,24 @@ pub struct CompletionConfig {
 
     /// Working directory for quality gate commands.
     pub working_dir: Option<std::path::PathBuf>,
+
+    /// Skip quality gates entirely (set via HATCHERY_SKIP_QUALITY_GATES env var).
+    pub skip_quality_gates: bool,
 }
 
 impl Default for CompletionConfig {
     fn default() -> Self {
+        let skip_quality_gates = std::env::var("HATCHERY_SKIP_QUALITY_GATES")
+            .map(|v| v == "1" || v.to_lowercase() == "true")
+            .unwrap_or(false);
+
         Self {
             idle_timeout: Duration::from_secs(120),
             max_turns: None,
             max_budget_usd: None,
             quality_gates: Vec::new(),
             working_dir: None,
+            skip_quality_gates,
         }
     }
 }
@@ -129,7 +137,11 @@ impl CompletionDetector {
                         };
                     }
 
-                    let quality_passed = self.run_quality_gates();
+                    let quality_passed = if self.config.skip_quality_gates {
+                        true
+                    } else {
+                        self.run_quality_gates()
+                    };
                     CompletionVerdict::Success {
                         result_text: result_text.clone().unwrap_or_default(),
                         cost_usd: *cost_usd,
@@ -151,7 +163,11 @@ impl CompletionDetector {
             CompletionSignal::ProcessExit { code } => {
                 match code {
                     Some(0) => {
-                        let quality_passed = self.run_quality_gates();
+                        let quality_passed = if self.config.skip_quality_gates {
+                            true
+                        } else {
+                            self.run_quality_gates()
+                        };
                         CompletionVerdict::Success {
                             result_text: String::new(),
                             cost_usd: 0.0,
@@ -199,6 +215,10 @@ impl CompletionDetector {
 
     /// Run quality gate commands. Returns true if all pass (or if no gates configured).
     fn run_quality_gates(&self) -> bool {
+        if self.config.skip_quality_gates {
+            return true;
+        }
+
         if self.config.quality_gates.is_empty() {
             return true;
         }
