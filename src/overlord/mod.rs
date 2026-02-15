@@ -9,6 +9,7 @@ pub mod parsers;
 pub mod code_checks;
 pub mod verdict;
 pub mod ast_analyzer;
+pub mod task_relevance;
 
 pub use handle::OverlordHandle;
 pub use spawn_overlord::{OverlordConfig, spawn_overlord};

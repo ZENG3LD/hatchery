@@ -4,6 +4,7 @@
 //! and decide whether to auto-approve, auto-reject, or send to LLM review.
 
 use super::parsers::{DiffSummary, TestResults, QualityScan, SessionSummary};
+use super::task_relevance::analyze_task_relevance;
 
 /// Deterministic verdict from code checks
 #[derive(Debug, Clone, PartialEq)]
@@ -103,6 +104,34 @@ pub fn run_code_checks(
                 ),
             };
         }
+    }
+
+    // Check 3.7: Task relevance analysis
+    // Only apply this check when combined with other very suspicious signals
+    let relevance = analyze_task_relevance(task_description, diff, quality);
+
+    // Hard reject only if ALL of:
+    // 1. Very low relevance (< 0.2)
+    // 2. Already above stub threshold (would be rejected by Check 3 anyway if > 0.5)
+    // 3. Has suspicious AST functions (indicating stub implementations)
+    let has_ast_stubs = quality
+        .ast_report
+        .as_ref()
+        .map(|ast| ast.suspicious_count > 1)
+        .unwrap_or(false);
+
+    if has_ast_stubs
+        && quality.stub_ratio > 0.35
+        && relevance.task_keywords.len() >= 2
+        && relevance.relevance_score < 0.2
+    {
+        return CodeCheckVerdict::HardReject {
+            reason: format!(
+                "low code quality + task relevance mismatch: score {:.2}, missing keywords: [{}]",
+                relevance.relevance_score,
+                relevance.missing_keywords.join(", ")
+            ),
+        };
     }
 
     // Check 4: All clean
