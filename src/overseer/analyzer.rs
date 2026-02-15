@@ -1,6 +1,6 @@
-//! Metadata-first JSONL parser (Version 2)
+//! Metadata-first JSONL analyzer
 //!
-//! This module implements a two-pass parser that extracts rich metadata
+//! This module implements a two-pass analyzer that extracts rich metadata
 //! from Claude Code session JSONL files:
 //!
 //! **Pass 1: Segment Discovery**
@@ -16,7 +16,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use zengeld_memory_core::sources::claude::parser_v2::{discover_segments, SegmentParser};
+//! use hatchery::overseer::analyzer::{discover_segments, SegmentParser};
 //! use std::path::Path;
 //!
 //! # async fn example() -> Result<(), Box<dyn std::error::Error>> {
@@ -106,70 +106,15 @@ pub struct SegmentBoundary {
 }
 
 // ============================================================================
-// Extracted Metadata Structures
+// Extracted Metadata Structures (re-exported from types module)
 // ============================================================================
+// NOTE: These types are now imported from crate::overseer::types to avoid duplication.
+// The types in types.rs are the canonical definitions with full database support.
 
-/// Agent activity extracted from progress events
-#[derive(Debug, Clone)]
-#[derive(Default)]
-pub struct AgentActivity {
-    pub agent_id: String,
-    pub agent_slug: Option<String>,
-    pub prompt: String,
-    pub spawn_timestamp: i64,
-    pub spawn_uuid: String,
-    pub parent_tool_use_id: Option<String>,
-    pub result_uuid: Option<String>,
-    pub result_timestamp: Option<i64>,
-    pub success: Option<bool>,
-    pub error_message: Option<String>,
-    pub subagent_file: Option<String>,
-}
-
-
-/// Tool activity extracted from tool_use events
-#[derive(Debug, Clone)]
-#[derive(Default)]
-pub struct ToolActivity {
-    pub tool_use_id: String,
-    pub tool_name: String,
-    pub invocation_timestamp: i64,
-    pub invocation_uuid: String,
-    pub result_timestamp: Option<i64>,
-    pub result_uuid: Option<String>,
-    pub duration_ms: Option<i64>,
-    pub parameters: String, // JSON
-    pub result_type: Option<String>,
-    pub result_summary: Option<String>,
-    pub file_path: Option<String>,
-    pub operation_type: Option<String>,
-}
-
-
-/// File change extracted from tool results
-#[derive(Debug, Clone)]
-#[derive(Default)]
-pub struct FileChange {
-    pub file_path: String,
-    pub operation: String,
-    pub timestamp: i64,
-    pub message_uuid: String,
-    pub previous_content_hash: Option<String>,
-    pub new_content_hash: Option<String>,
-    pub size_bytes: Option<i64>,
-}
-
-
-/// Conversation edge for graph construction
-#[derive(Debug, Clone)]
-pub struct ConversationEdge {
-    pub uuid: String,
-    pub parent_uuid: Option<String>,
-    pub logical_parent_uuid: Option<String>,
-    pub event_type: String,
-    pub timestamp: i64,
-    pub is_sidechain: bool,
-}
+use crate::overseer::types::{
+    AgentActivity as TypesAgentActivity, ConversationEdge as TypesConversationEdge,
+    FileChange as TypesFileChange, ToolActivity as TypesToolActivity,
+};
 
 /// Segment statistics
 #[derive(Debug, Clone, Default)]
@@ -190,10 +135,10 @@ pub struct SegmentStats {
 pub struct ParsedSegment {
     pub boundary: SegmentBoundary,
     pub stats: SegmentStats,
-    pub agents: Vec<AgentActivity>,
-    pub tools: Vec<ToolActivity>,
-    pub files: Vec<FileChange>,
-    pub edges: Vec<ConversationEdge>,
+    pub agents: Vec<TypesAgentActivity>,
+    pub tools: Vec<TypesToolActivity>,
+    pub files: Vec<TypesFileChange>,
+    pub edges: Vec<TypesConversationEdge>,
 }
 
 /// Import statistics
@@ -449,7 +394,7 @@ impl SegmentParser {
 
         // Segment accumulators
         let mut agents = Vec::new();
-        let mut tools: HashMap<String, ToolActivity> = HashMap::new();
+        let mut tools: HashMap<String, TypesToolActivity> = HashMap::new();
         let mut files = Vec::new();
         let mut edges = Vec::new();
 
@@ -488,7 +433,7 @@ impl SegmentParser {
 
             // Add to conversation graph
             if let Some(uuid) = event.uuid() {
-                edges.push(ConversationEdge {
+                edges.push(TypesConversationEdge {
                     uuid: uuid.to_string(),
                     parent_uuid: event.parent_uuid().map(String::from),
                     logical_parent_uuid: None, // Extracted from system events
@@ -500,6 +445,8 @@ impl SegmentParser {
                         _ => "other".to_string(),
                     },
                     timestamp: event.timestamp().timestamp(),
+                    session_id: String::new(), // Will be filled by caller
+                    segment_id: None,
                     is_sidechain: event.metadata().map(|m| m.is_sidechain).unwrap_or(false),
                 });
             }
@@ -531,7 +478,11 @@ impl SegmentParser {
 
                         // Extract file changes
                         if let Some(file_path) = tool_result.file_path() {
-                            files.push(FileChange {
+                            files.push(TypesFileChange {
+                                id: None,
+                                session_id: String::new(), // Will be filled by caller
+                                segment_id: 0, // Will be filled by caller
+                                tool_activity_id: None,
                                 file_path: file_path.to_string(),
                                 operation: if tool_result.is_create() {
                                     "create"
@@ -543,7 +494,9 @@ impl SegmentParser {
                                 .to_string(),
                                 timestamp: user_event.timestamp().timestamp(),
                                 message_uuid: user_event.uuid().to_string(),
-                                ..Default::default()
+                                previous_content_hash: None,
+                                new_content_hash: None,
+                                size_bytes: None,
                             });
                         }
                     }
@@ -568,13 +521,22 @@ impl SegmentParser {
 
                             tools.insert(
                                 tool_id.to_string(),
-                                ToolActivity {
+                                TypesToolActivity {
+                                    id: None,
+                                    session_id: String::new(), // Will be filled by caller
+                                    segment_id: 0, // Will be filled by caller
                                     tool_use_id: tool_id.to_string(),
                                     tool_name: tool_name.to_string(),
                                     invocation_timestamp: assistant_event.timestamp().timestamp(),
                                     invocation_uuid: assistant_event.uuid().to_string(),
-                                    parameters: serde_json::to_string(params).unwrap_or_default(),
-                                    ..Default::default()
+                                    result_timestamp: None,
+                                    result_uuid: None,
+                                    duration_ms: None,
+                                    parameters: Some(serde_json::to_string(params).unwrap_or_default()),
+                                    result_type: None,
+                                    result_summary: None,
+                                    file_path: None,
+                                    operation_type: None,
                                 },
                             );
                         }
@@ -584,14 +546,24 @@ impl SegmentParser {
                 SessionEvent::Progress(progress_event) => {
                     // Extract agent progress
                     if let ProgressData::AgentProgress(agent_data) = &progress_event.data {
-                        agents.push(AgentActivity {
+                        agents.push(TypesAgentActivity {
+                            id: None,
+                            session_id: String::new(), // Will be filled by caller
+                            segment_id: 0, // Will be filled by caller
                             agent_id: agent_data.agent_id.clone(),
                             agent_slug: progress_event.metadata.slug.clone(),
                             prompt: agent_data.prompt.clone(),
                             spawn_timestamp: progress_event.timestamp().timestamp(),
                             spawn_uuid: progress_event.uuid().to_string(),
                             parent_tool_use_id: progress_event.parent_tool_use_id.clone(),
-                            ..Default::default()
+                            result_uuid: None,
+                            result_timestamp: None,
+                            success: None,
+                            error_message: None,
+                            subagent_file: None,
+                            total_input_tokens: None,
+                            total_output_tokens: None,
+                            estimated_cost_usd: None,
                         });
                     }
                 }
@@ -617,12 +589,18 @@ impl SegmentParser {
                             f.file_path == *file_path
                                 && f.timestamp == timestamp.timestamp()
                         }) {
-                            files.push(FileChange {
+                            files.push(TypesFileChange {
+                                id: None,
+                                session_id: String::new(), // Will be filled by caller
+                                segment_id: 0, // Will be filled by caller
+                                tool_activity_id: None,
                                 file_path: file_path.clone(),
                                 operation: "snapshot".to_string(),
                                 timestamp: timestamp.timestamp(),
                                 message_uuid: snapshot.message_id.clone(),
-                                ..Default::default()
+                                previous_content_hash: None,
+                                new_content_hash: None,
+                                size_bytes: None,
                             });
                         }
                     }

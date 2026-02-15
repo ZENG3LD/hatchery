@@ -5,11 +5,11 @@
 //!
 //! Copied from zengeld-memory with database dependencies removed.
 
+pub mod analyzer;
 pub mod context_extractor;
+pub mod discovery;
 pub mod error;
 pub mod events;
-pub mod parser;
-pub mod parser_v2;
 pub mod types;
 
 // Re-export error types
@@ -18,8 +18,8 @@ pub use error::{ParseError, Result};
 // Re-export Claude-specific types
 pub use types::{
     AgentActivity, AgentSummary, AgentTask, ContextSummary, ConversationEdge, Decision,
-    DecisionContext, EventIndexEntry, FileChange, SessionEvent as ClaudeSessionEvent,
-    SessionSegment, SessionWithSubagents, SubagentSession, ToolActivity,
+    DecisionContext, FileChange, SessionSegment, SessionWithSubagents, SubagentSession,
+    ToolActivity,
 };
 
 // Re-export typed event structures
@@ -33,14 +33,14 @@ pub use events::{
 // Re-export context extraction types and extractor
 pub use context_extractor::{ContextExtractor, FileModification};
 
-// Re-export parser functions
-pub use parser::{
+// Re-export discovery functions
+pub use discovery::{
     extract_session_id, find_session_files, find_subagent_files, parse_jsonl_events,
     parse_session_with_subagents,
 };
 
-// Re-export parser_v2 types and functions
-pub use parser_v2::{
+// Re-export analyzer types and functions
+pub use analyzer::{
     discover_segments, ImportStats, ParsedSegment, ParserConfig, SegmentBoundary, SegmentParser,
     SegmentStats,
 };

@@ -100,52 +100,6 @@ pub struct EventMetadata {
     pub agent_id: Option<String>,
 }
 
-/// Logical parent UUID (for compact boundaries)
-///
-/// Compact boundaries have both:
-/// - `parent_uuid` - points to the compact boundary system message
-/// - `logical_parent_uuid` - points to the last real message before compaction
-///
-/// This preserves conversation flow while marking compaction points.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogicalParentMetadata {
-    /// Logical parent UUID (preserves conversation flow across compaction)
-    #[serde(rename = "logicalParentUuid")]
-    pub logical_parent_uuid: Option<String>,
-}
-
-/// Tool use linking metadata
-///
-/// Present in progress events to link progress updates back to the
-/// tool invocation that triggered them.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolUseMetadata {
-    /// Tool use ID that triggered this progress
-    ///
-    /// Links back to `ContentBlock::ToolUse.id` in assistant message
-    #[serde(rename = "toolUseID")]
-    pub tool_use_id: Option<String>,
-
-    /// Parent tool use ID (for nested tool invocations)
-    ///
-    /// Used when agents spawn sub-agents or tools invoke other tools
-    #[serde(rename = "parentToolUseID")]
-    pub parent_tool_use_id: Option<String>,
-}
-
-/// Source tool assistant linking
-///
-/// Present in user messages that are tool results, linking back to the
-/// assistant message that invoked the tool.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SourceToolMetadata {
-    /// UUID of assistant message that invoked this tool
-    ///
-    /// Links `user` (tool result) → `assistant` (tool invocation)
-    #[serde(rename = "sourceToolAssistantUUID")]
-    pub source_tool_assistant_uuid: Option<String>,
-}
-
 impl EventMetadata {
     /// Check if this is a human user prompt (vs tool result)
     pub fn is_user_prompt(&self) -> bool {

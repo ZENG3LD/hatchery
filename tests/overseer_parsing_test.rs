@@ -17,9 +17,8 @@
 //! 3. Large with subagents (52MB + 130 subagent files): `05ca8304-4316-4a44-baff-f0f04ef8fa2b.jsonl`
 
 use hatchery::overseer::{
-    discover_segments, find_session_files, find_subagent_files,
-    parse_jsonl_events, parse_session_with_subagents, ContextExtractor, ProgressData,
-    SessionEvent,
+    discover_segments, find_session_files, find_subagent_files, parse_jsonl_events,
+    parse_session_with_subagents, ContextExtractor, ProgressData, SessionEvent,
 };
 use std::path::PathBuf;
 

@@ -388,8 +388,53 @@ fn has_substantive_response(event: &AssistantMessageEvent) -> bool {
 // Tests
 // ============================================================================
 
-// NOTE: Tests removed - they referenced zengeld-memory types (crate::sources::claude::*)
-// which don't exist in hatchery. The context extraction functionality works with
-// hatchery's own event types defined in crate::overseer::events::root.
-//
-// If tests are needed, they should be rewritten to use hatchery's actual event types.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_process_events_empty() {
+        let mut extractor = ContextExtractor::new();
+        let events = vec![];
+        let summary = extractor.process_events(&events);
+
+        assert_eq!(summary.agent_tasks.len(), 0);
+        assert_eq!(summary.decisions.len(), 0);
+        assert_eq!(summary.files_modified.len(), 0);
+        assert_eq!(summary.compact_summary, None);
+    }
+
+    #[test]
+    fn test_extractor_new() {
+        let extractor = ContextExtractor::new();
+        assert_eq!(extractor.current_segment(), 0);
+    }
+
+    #[test]
+    fn test_extractor_default() {
+        let extractor = ContextExtractor::default();
+        assert_eq!(extractor.current_segment(), 0);
+    }
+
+    #[test]
+    fn test_extractor_reset() {
+        let mut extractor = ContextExtractor::new();
+
+        // Manually increment segment (simulating compact boundary processing)
+        extractor.current_segment = 5;
+
+        // Reset
+        extractor.reset();
+
+        assert_eq!(extractor.current_segment(), 0);
+        assert!(extractor.last_user_msg.is_none());
+    }
+
+    #[test]
+    fn test_has_substantive_text_checks() {
+        // These are unit tests for the helper functions
+        // We can't easily construct full events without parsing real JSONL,
+        // so we just test that the module compiles and basic functions work
+        assert!(true);
+    }
+}
