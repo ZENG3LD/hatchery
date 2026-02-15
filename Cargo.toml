@@ -44,6 +44,9 @@ uuid = { version = "1", features = ["v4"] }
 # Async trait support for V2 Queen trait
 async-trait = "0.1"
 
+# AST parsing for code quality analysis
+syn = { version = "2", features = ["full", "visit", "extra-traits"] }
+
 # Directory paths (home dir for session recovery)
 dirs = "5"
 
