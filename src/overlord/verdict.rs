@@ -155,11 +155,12 @@ pub async fn run_hybrid_review(
         CodeCheckVerdict::HardReject { reason } => OverlordVerdict::Reject {
             reason: reason.clone(),
         },
-        CodeCheckVerdict::NeedsReview { .. } => {
-            // For now, treat NeedsReview as Reject
-            // Phase 3.2 will add LLM forwarding for this case
+        CodeCheckVerdict::NeedsReview { report } => {
+            // Default: reject with report summary. Queen reads the reason and fixes.
+            // LLM Overlord review is NOT triggered automatically —
+            // only Overmind can explicitly request LLM review via escalation.
             OverlordVerdict::Reject {
-                reason: "ambiguous, needs manual review".to_string(),
+                reason: format!("needs review: {}", report.quality_summary),
             }
         }
     };

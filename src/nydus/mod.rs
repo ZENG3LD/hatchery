@@ -834,8 +834,6 @@ impl Nydus {
                             queen_id.0, known_queens
                         );
                         if let Some(worktree_path) = worktree_mgr.get_worktree_path(&queen_id) {
-                            let branch_name = format!("hatchery/{}", queen_id.0);
-
                             eprintln!(
                                 "[Nydus] Sending task {} from {} to Overlord for review",
                                 task_id.0, queen_id.0
@@ -878,72 +876,12 @@ impl Nydus {
                                     }
                                 }
                                 Err(e) => {
-                                    eprintln!("[Nydus] WARNING: Hybrid review pipeline failed: {}. Falling back to LLM review.", e);
-                                    // Fall through to LLM review on hybrid pipeline error
+                                    eprintln!("[Nydus] Hybrid review pipeline failed: {}. Rejecting task.", e);
+                                    let reason = format!("Hybrid review pipeline error: {}", e);
+                                    self.handle_overlord_reject(&queen_id, &task_id.0, &reason).await?;
+                                    review_sent = true;
                                 }
                             }
-
-                            // Only send to LLM Overlord if hybrid review didn't make a decision
-                            if !review_sent {
-                                eprintln!("[Nydus] Hybrid review ambiguous, sending task {} to LLM Overlord", task_id.0);
-
-                                // Send review command to Overlord (now async)
-                                if let Some(ref overlord_handle) = self.overlord {
-                                    match overlord_handle.review(
-                                    queen_id.clone(),
-                                    task_id.0.clone(),
-                                    branch_name.clone(),
-                                    worktree_path.clone(),
-                                    &task_description,
-                                    verify_cmd.as_deref(),
-                                ).await {
-                                    Ok(_) => {
-                                        review_sent = true;
-                                    }
-                                    Err(e) => {
-                                        eprintln!("[Nydus] ERROR: Failed to send review task to Overlord: {}", e);
-
-                                        // Check if the error is due to a closed channel
-                                        let error_msg = e.to_string();
-                                        if error_msg.contains("Queen channel closed") {
-                                            eprintln!("[Nydus] Overlord channel closed. Attempting re-registration...");
-
-                                            // Try to re-register the Overlord
-                                            match self.register_overlord("sonnet") {
-                                                Ok(_) => {
-                                                    eprintln!("[Nydus] Overlord re-registered successfully. Retrying review send...");
-
-                                                    // Retry the review send with the new Overlord
-                                                    if let Some(ref new_overlord_handle) = self.overlord {
-                                                        match new_overlord_handle.review(
-                                                            queen_id.clone(),
-                                                            task_id.0.clone(),
-                                                            branch_name,
-                                                            worktree_path.clone(),
-                                                            &task_description,
-                                                            verify_cmd.as_deref(),
-                                                        ).await {
-                                                            Ok(_) => {
-                                                                review_sent = true;
-                                                                eprintln!("[Nydus] Retry successful: Overlord review sent for task {}", task_id.0);
-                                                            }
-                                                            Err(e2) => {
-                                                                eprintln!("[Nydus] ERROR: Retry also failed: {}", e2);
-                                                            }
-                                                        }
-                                                    } else {
-                                                        eprintln!("[Nydus] ERROR: Overlord handle is None after re-registration");
-                                                    }
-                                                }
-                                                Err(re_err) => {
-                                                    eprintln!("[Nydus] ERROR: Failed to re-register Overlord: {}", re_err);
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
                     } else {
                         eprintln!("[Nydus] ERROR: No worktree path found for Queen {} — cannot send task {} to Overlord!", queen_id.0, task_id.0);
                     }
@@ -954,8 +892,8 @@ impl Nydus {
                     // CRITICAL: If review was NOT sent, task is stuck in Validating forever.
                     // Fail it loudly so operator sees it and dependencies don't silently stall.
                     if !review_sent {
-                        eprintln!("[Nydus] CRITICAL: Overlord review NOT sent for task {}! Failing task to prevent silent stall.", task_id.0);
-                        self.task_dag.fail(&task_id.0, "FAILED: Overlord review could not be sent (channel closed and retry failed)".to_string());
+                        eprintln!("[Nydus] CRITICAL: Hybrid review NOT completed for task {}! Failing task to prevent silent stall.", task_id.0);
+                        self.task_dag.fail(&task_id.0, "FAILED: Hybrid review pipeline did not complete (no Accept/Reject verdict)".to_string());
 
                         // Send escalation to operator
                         let escalation_msg = SwarmMessage {
@@ -964,10 +902,10 @@ impl Nydus {
                             to: AgentId::Operator,
                             msg_type: MessageType::Escalation,
                             payload: serde_json::json!({
-                                "type": "overlord_review_failed",
+                                "type": "hybrid_review_incomplete",
                                 "task_id": task_id.0,
                                 "queen_id": queen_id.0,
-                                "reason": "Overlord review could not be sent (channel closed, re-registration attempted, retry failed). Task failed."
+                                "reason": "Hybrid review pipeline did not complete (no Accept/Reject verdict). Task failed."
                             }),
                             timestamp: Utc::now(),
                             correlation_id: None,
