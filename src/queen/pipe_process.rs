@@ -143,6 +143,15 @@ impl PipeProcess {
             cmd.env(key, value);
         }
 
+        // Suppress SSH passphrase GUI prompts for subprocess isolation.
+        // Claude Code performs SSH operations on startup (plugin marketplace, git remote checks).
+        // These are unnecessary for Queen subprocesses and cause blocking GUI popups on Windows.
+        // Local git operations (status, diff, log) remain fully functional.
+        cmd.env("GIT_TERMINAL_PROMPT", "0");
+        cmd.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=1");
+        cmd.env("SSH_ASKPASS", "");
+        cmd.env("SSH_ASKPASS_REQUIRE", "never");
+
         eprintln!("[PipeProcess] Spawning with prompt file: {}", prompt_file.display());
 
         let mut child = cmd.spawn()?;
@@ -735,6 +744,15 @@ pub fn build_stream_command(
     for (k, v) in envs {
         cmd.env(k, v);
     }
+
+    // Suppress SSH passphrase GUI prompts for subprocess isolation.
+    // Claude Code performs SSH operations on startup (plugin marketplace, git remote checks).
+    // These are unnecessary for Queen subprocesses and cause blocking GUI popups on Windows.
+    // Local git operations (status, diff, log) remain fully functional.
+    cmd.env("GIT_TERMINAL_PROMPT", "0");
+    cmd.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=1");
+    cmd.env("SSH_ASKPASS", "");
+    cmd.env("SSH_ASKPASS_REQUIRE", "never");
 
     // Configure pipes
     cmd.stdin(Stdio::piped());
