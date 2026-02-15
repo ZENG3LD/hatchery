@@ -79,6 +79,32 @@ pub fn run_code_checks(
         };
     }
 
+    // Check 3.5: AST quality analysis (for Rust files)
+    if let Some(ast_report) = &quality.ast_report {
+        // Hard reject if overall score is very low
+        if ast_report.total_functions > 0 && ast_report.overall_score < 0.2 {
+            return CodeCheckVerdict::HardReject {
+                reason: format!(
+                    "AST analysis: low quality code (score {:.2}), {}/{} functions are suspicious",
+                    ast_report.overall_score,
+                    ast_report.suspicious_count,
+                    ast_report.total_functions
+                ),
+            };
+        }
+
+        // Hard reject if majority of functions are suspicious
+        if ast_report.total_functions > 2 && ast_report.suspicious_count > ast_report.total_functions / 2 {
+            return CodeCheckVerdict::HardReject {
+                reason: format!(
+                    "AST analysis: {}/{} functions are stubs/empty (suspicious)",
+                    ast_report.suspicious_count,
+                    ast_report.total_functions
+                ),
+            };
+        }
+    }
+
     // Check 4: All clean
     let tests_pass = tests.map(|t| t.failed == 0).unwrap_or(true);
     if quality.total_hits == 0 && tests_pass {
@@ -179,6 +205,14 @@ fn format_quality_summary(quality: &QualityScan) -> String {
         }
     }
 
+    // If there's an AST report, append a summary
+    if let Some(ast) = &quality.ast_report {
+        lines.push(format!(
+            "AST Score: {:.2} ({} functions, {} suspicious)",
+            ast.overall_score, ast.total_functions, ast.suspicious_count
+        ));
+    }
+
     lines.join("\n")
 }
 
@@ -268,6 +302,7 @@ mod tests {
             hits: hit_vec,
             total_hits: hits,
             stub_ratio,
+            ast_report: None,
         }
     }
 
@@ -479,6 +514,7 @@ mod tests {
             ],
             total_hits: 2,
             stub_ratio: 0.2,
+            ast_report: None,
         };
 
         let summary = format_quality_summary(&quality);
@@ -746,7 +782,11 @@ mod tests {
             CodeCheckVerdict::NeedsReview { .. } => {
                 // Mock in production code is suspicious
             }
-            _ => panic!("Expected NeedsReview for mock in prod, got {:?}", verdict),
+            CodeCheckVerdict::HardReject { reason } => {
+                // AST analysis might catch this as low-quality stub
+                assert!(reason.contains("AST") || reason.contains("quality"));
+            }
+            _ => panic!("Expected NeedsReview or HardReject for mock in prod, got {:?}", verdict),
         }
     }
 
@@ -932,7 +972,11 @@ mod tests {
             CodeCheckVerdict::NeedsReview { .. } => {
                 // Suspicious pattern caught
             }
-            _ => panic!("Expected NeedsReview for useless function, got {:?}", verdict),
+            CodeCheckVerdict::HardReject { reason } => {
+                // AST analysis might catch this as low-quality stub
+                assert!(reason.contains("AST") || reason.contains("quality"));
+            }
+            _ => panic!("Expected NeedsReview or HardReject for useless function, got {:?}", verdict),
         }
     }
 
@@ -953,5 +997,89 @@ mod tests {
         // No quality issues, should be AllClear
         assert_eq!(quality.total_hits, 0);
         assert_eq!(verdict, CodeCheckVerdict::AllClear);
+    }
+
+    #[test]
+    fn test_scenario_ast_catches_multiple_stubs() {
+        // Multiple stub functions - AST should catch them
+        let diff_content = make_diff_str("src/api.rs", &[
+            "pub fn get_user(id: u32) -> User {",
+            "    Default::default()",
+            "}",
+            "",
+            "pub fn create_user(name: &str) -> User {",
+            "    let _ = name;",
+            "    Default::default()",
+            "}",
+            "",
+            "pub fn delete_user(id: u32) -> bool {",
+            "    let _ = id;",
+            "    false",
+            "}",
+        ]);
+
+        let numstat = make_numstat(&[("src/api.rs", 13, 0)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, None, &quality, &session, "Implement API");
+
+        // Should be caught by AST analysis (3 functions, all suspicious)
+        match verdict {
+            CodeCheckVerdict::HardReject { reason } => {
+                assert!(reason.contains("AST") || reason.contains("stubs"));
+            }
+            _ => panic!("Expected HardReject for stub functions, got {:?}", verdict),
+        }
+
+        // Verify AST report exists and detected the issues
+        if let Some(ast) = &quality.ast_report {
+            assert_eq!(ast.total_functions, 3, "Should analyze 3 functions");
+            assert!(ast.suspicious_count >= 2, "At least 2 functions should be suspicious");
+            assert!(ast.overall_score < 0.3, "Overall score should be low");
+        } else {
+            panic!("AST report should exist for Rust file");
+        }
+    }
+
+    #[test]
+    fn test_scenario_ast_accepts_quality_code() {
+        // Real implementation - AST should score high
+        let diff_content = make_diff_str("src/validator.rs", &[
+            "pub fn validate_email(email: &str) -> Result<(), String> {",
+            "    if email.is_empty() {",
+            "        return Err(\"Email cannot be empty\".to_string());",
+            "    }",
+            "    if !email.contains('@') {",
+            "        return Err(\"Email must contain @\".to_string());",
+            "    }",
+            "    let parts: Vec<&str> = email.split('@').collect();",
+            "    if parts.len() != 2 {",
+            "        return Err(\"Invalid email format\".to_string());",
+            "    }",
+            "    if parts[0].is_empty() || parts[1].is_empty() {",
+            "        return Err(\"Email parts cannot be empty\".to_string());",
+            "    }",
+            "    Ok(())",
+            "}",
+        ]);
+
+        let numstat = make_numstat(&[("src/validator.rs", 16, 0)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, None, &quality, &session, "Add email validator");
+
+        // Should be AllClear - no quality hits, good AST score
+        assert_eq!(verdict, CodeCheckVerdict::AllClear);
+
+        // Verify AST report shows good quality
+        if let Some(ast) = &quality.ast_report {
+            assert_eq!(ast.total_functions, 1);
+            assert!(ast.overall_score > 0.7, "Real code should score high, got {:.2}", ast.overall_score);
+            assert_eq!(ast.suspicious_count, 0, "No functions should be suspicious");
+        }
     }
 }

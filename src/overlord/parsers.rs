@@ -3,6 +3,7 @@
 //! Phase 1 of the Overlord pipeline: parse raw tool outputs into structured data.
 
 use regex::Regex;
+use super::ast_analyzer::AstQualityReport;
 
 /// Summary of git diff changes
 #[derive(Debug, Clone, PartialEq)]
@@ -132,6 +133,7 @@ pub struct QualityScan {
     pub hits: Vec<QualityHit>,
     pub total_hits: usize,
     pub stub_ratio: f64,
+    pub ast_report: Option<AstQualityReport>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -313,11 +315,93 @@ pub fn scan_code_quality(diff_output: &str) -> QualityScan {
         0.0
     };
 
+    // AST analysis for Rust files
+    let ast_report = extract_and_analyze_rust_files(diff_output);
+
     QualityScan {
         hits,
         total_hits,
         stub_ratio,
+        ast_report,
     }
+}
+
+/// Extract Rust file content from diff and run AST analysis.
+/// Returns combined report if any .rs files found and parsed successfully.
+fn extract_and_analyze_rust_files(diff_output: &str) -> Option<AstQualityReport> {
+    use super::ast_analyzer::analyze_file;
+    use std::collections::HashMap;
+
+    let mut file_contents: HashMap<String, String> = HashMap::new();
+    let mut current_file = String::new();
+    let mut current_content = String::new();
+
+    let file_header_re = Regex::new(r"^\+\+\+ b/(.+)$").unwrap();
+
+    for line in diff_output.lines() {
+        // Detect file header
+        if let Some(cap) = file_header_re.captures(line) {
+            // Save previous file if it was a .rs file
+            if current_file.ends_with(".rs") && !current_content.is_empty() {
+                file_contents.insert(current_file.clone(), current_content.clone());
+            }
+
+            current_file = cap.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+            current_content.clear();
+            continue;
+        }
+
+        // Skip diff metadata
+        if line.starts_with("---") || line.starts_with("diff --git") || line.starts_with("@@") {
+            continue;
+        }
+
+        // Reconstruct file content: context lines + added lines
+        if line.starts_with('+') && !line.starts_with("+++") {
+            // Added line - remove '+' prefix
+            current_content.push_str(&line[1..]);
+            current_content.push('\n');
+        } else if !line.starts_with('-') && !line.starts_with('\\') {
+            // Context line (no prefix or space prefix)
+            current_content.push_str(line);
+            current_content.push('\n');
+        }
+        // Skip removed lines (-)
+    }
+
+    // Save last file if it was .rs
+    if current_file.ends_with(".rs") && !current_content.is_empty() {
+        file_contents.insert(current_file, current_content);
+    }
+
+    // Analyze all collected Rust files
+    if file_contents.is_empty() {
+        return None;
+    }
+
+    let mut all_functions = Vec::new();
+
+    for (_filename, content) in file_contents.iter() {
+        if let Some(report) = analyze_file(content) {
+            all_functions.extend(report.functions);
+        }
+    }
+
+    if all_functions.is_empty() {
+        return None;
+    }
+
+    // Compute combined metrics
+    let total_functions = all_functions.len();
+    let overall_score = all_functions.iter().map(|f| f.score).sum::<f64>() / total_functions as f64;
+    let suspicious_count = all_functions.iter().filter(|f| f.score < 0.3).count();
+
+    Some(AstQualityReport {
+        functions: all_functions,
+        overall_score,
+        total_functions,
+        suspicious_count,
+    })
 }
 
 /// Session summary from Queen event data

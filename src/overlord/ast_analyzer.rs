@@ -722,6 +722,39 @@ mod tests {
     }
 
     #[test]
+    fn test_analyze_real_hatchery_code() {
+        // Read a real file from hatchery source
+        let source = include_str!("parsers.rs");
+        let report = analyze_file(source).unwrap();
+
+        // parsers.rs has many real functions — should score well
+        assert!(report.total_functions >= 5, "Expected >=5 functions in parsers.rs, got {}", report.total_functions);
+        assert!(report.overall_score > 0.5, "Expected overall score > 0.5 for parsers.rs, got {:.2}", report.overall_score);
+        assert!(report.suspicious_count < report.total_functions / 2,
+            "Too many suspicious functions in parsers.rs: {}/{}", report.suspicious_count, report.total_functions);
+
+        // Print detailed report for manual inspection
+        for func in &report.functions {
+            eprintln!("  {}: score={:.2}, params={}/{}, stmts={}, calls={}, issues={:?}",
+                func.name, func.score, func.metrics.params_used, func.metrics.param_count,
+                func.metrics.statement_count, func.metrics.function_call_count, func.issues);
+        }
+    }
+
+    #[test]
+    fn test_analyze_real_code_checks() {
+        let source = include_str!("code_checks.rs");
+        let report = analyze_file(source).unwrap();
+
+        assert!(report.total_functions > 3);
+        assert!(report.overall_score > 0.4);
+
+        for func in &report.functions {
+            eprintln!("  {}: score={:.2}, issues={:?}", func.name, func.score, func.issues);
+        }
+    }
+
+    #[test]
     fn test_todo_macro_detected() {
         let source = r#"
             fn stub() { todo!() }
