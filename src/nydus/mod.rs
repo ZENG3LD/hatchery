@@ -10,6 +10,7 @@ use anyhow::{Result, anyhow};
 use chrono::Utc;
 use tokio::task::JoinHandle;
 use tokio::sync::Notify;
+use futures::future::join_all;
 
 use crate::core::types::*;
 use crate::queen::handle::{QueenHandle, QueenEvent};
@@ -100,6 +101,8 @@ pub struct Nydus {
     memory: SharedMemory,
     /// Git isolation manager (optional)
     worktree_mgr: Option<WorktreeManager>,
+    /// Worktree path cache (queen_id -> worktree_path)
+    worktree_cache: HashMap<QueenId, PathBuf>,
     /// Validator for completed work
     validator: Option<Validator>,
     /// Configuration
@@ -357,6 +360,7 @@ impl Nydus {
             default_model: "sonnet".to_string(),
             default_completion_config: CompletionConfig::default(),
             rate_limit_window: Vec::new(),
+            worktree_cache: HashMap::new(),
         })
     }
 
@@ -1964,6 +1968,9 @@ impl Nydus {
                 }
 
                 // Assign to all Queens in parallel
+                // Prepare assignment data first
+                let mut zerg_assignment_data = Vec::new();
+
                 for queen_id in &queens_for_zerg {
                     let task = Task {
                         id: TaskId(task_id.clone()),
@@ -1988,10 +1995,37 @@ impl Nydus {
                     };
 
                     if let Some(handle) = self.handles.get(queen_id) {
-                        if let Err(e) = handle.assign(task, task_context).await {
-                            eprintln!("[Nydus] Failed to assign zerg task {} to {}: {}", task_id, queen_id.0, e);
-                        } else {
+                        zerg_assignment_data.push((task, task_context, handle.clone(), queen_id.clone()));
+                    }
+                }
+
+                // Execute all zerg assignments in parallel
+                let zerg_futures: Vec<_> = zerg_assignment_data.iter()
+                    .map(|(task, task_context, handle, queen_id)| {
+                        let task = task.clone();
+                        let task_context = task_context.clone();
+                        let handle = handle.clone();
+                        let queen_id = queen_id.clone();
+                        let task_id_clone = task_id.clone();
+                        async move {
+                            match handle.assign(task, task_context).await {
+                                Ok(_) => Ok(()),
+                                Err(e) => Err((task_id_clone, queen_id, e)),
+                            }
+                        }
+                    })
+                    .collect();
+
+                let zerg_results = join_all(zerg_futures).await;
+
+                // Process zerg results
+                for result in zerg_results {
+                    match result {
+                        Ok(_) => {
                             assigned += 1;
+                        }
+                        Err((task_id, queen_id, e)) => {
+                            eprintln!("[Nydus] Failed to assign zerg task {} to {}: {}", task_id, queen_id.0, e);
                         }
                     }
                 }
@@ -2056,6 +2090,9 @@ impl Nydus {
             .collect();
 
         // Now assign tasks (no borrow conflict)
+        // Prepare all assignment data first (DAG updates + task/context building)
+        let mut assignment_data = Vec::new();
+
         for (task_id, mut description, priority, blocked_by, created_at, skill_hint, queen_id) in assignments {
             // CRITICAL: Mark as assigned in DAG FIRST to prevent double-assignment race
             // If another try_schedule() runs before handle.assign() completes,
@@ -2106,19 +2143,46 @@ impl Nydus {
                 rejection_feedback,
             };
 
+            // Clone handle if present
             if let Some(handle) = self.handles.get(&queen_id) {
-                if let Err(e) = handle.assign(task, task_context).await {
-                    eprintln!("[Nydus] Failed to assign task {} to {}: {}", task_id, queen_id.0, e);
-                    // Rollback DAG assignment on failure
-                    self.task_dag.unassign(&task_id);
-                    continue;
-                }
-
-                assigned += 1;
+                assignment_data.push((task_id, task, task_context, handle.clone(), queen_id));
             } else {
                 // Queen handle missing — rollback DAG assignment
                 eprintln!("[Nydus] No handle for queen {}, cannot assign task {}", queen_id.0, task_id);
                 self.task_dag.unassign(&task_id);
+            }
+        }
+
+        // Execute all assignments in parallel
+        let assignment_futures: Vec<_> = assignment_data.iter()
+            .map(|(task_id, task, task_context, handle, queen_id)| {
+                let task_id = task_id.clone();
+                let task = task.clone();
+                let task_context = task_context.clone();
+                let handle = handle.clone();
+                let queen_id = queen_id.clone();
+                async move {
+                    match handle.assign(task, task_context).await {
+                        Ok(_) => Ok((task_id, queen_id)),
+                        Err(e) => Err((task_id, queen_id, e)),
+                    }
+                }
+            })
+            .collect();
+
+        let results = join_all(assignment_futures).await;
+
+        // Process results and rollback failures
+        for result in results {
+            match result {
+                Ok((_task_id, _queen_id)) => {
+                    assigned += 1;
+                }
+                Err((task_id, queen_id, e)) => {
+                    eprintln!("[Nydus] Failed to assign task {} to {}: {}", task_id, queen_id.0, e);
+                    // Rollback DAG assignment on failure
+                    self.task_dag.unassign(&task_id);
+                }
             }
         }
 

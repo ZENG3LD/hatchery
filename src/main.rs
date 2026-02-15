@@ -393,9 +393,14 @@ async fn populate_dag(
         .map_err(|e| anyhow::anyhow!("Failed to read PRD {}: {}", prd_path.display(), e))?;
 
     if llm_decompose {
+        let llm_start = Instant::now();
         eprintln!("[HATCHERY] LLM decomposition enabled, calling Claude CLI...");
+        eprintln!("[HATCHERY] (this may take 10-30s for Claude to analyze the PRD)");
+
         match dag_generator::decompose_prd(&prd_content, working_dir).await {
             Ok(tasks) => {
+                let llm_elapsed = llm_start.elapsed();
+                eprintln!("[HATCHERY] LLM decomposition completed in {:.1}s", llm_elapsed.as_secs_f64());
                 eprintln!("[HATCHERY] LLM generated {} tasks with dependencies", tasks.len());
                 for gt in &tasks {
                     let deps: Vec<String> = gt.dependencies
@@ -419,15 +424,19 @@ async fn populate_dag(
                 return Ok(());
             }
             Err(e) => {
-                eprintln!("[HATCHERY] LLM decomposition failed: {}. Falling back to checkbox parsing.", e);
+                let llm_elapsed = llm_start.elapsed();
+                eprintln!("[HATCHERY] LLM decomposition failed after {:.1}s: {}. Falling back to checkbox parsing.", llm_elapsed.as_secs_f64(), e);
             }
         }
     }
 
     // Fallback: regex-based checkbox parsing (original behavior)
+    let checkbox_start = Instant::now();
     let prd_tasks = prd::parse_prd_content(&prd_content)?;
+    let checkbox_elapsed = checkbox_start.elapsed();
     let (done, total) = prd::progress(&prd_tasks);
-    eprintln!("[HATCHERY] PRD: {}/{} tasks (checkbox mode, {}/{} done)", total - done, total, done, total);
+    eprintln!("[HATCHERY] PRD: {}/{} tasks (checkbox mode, {}/{} done, parsed in {:.1}ms)",
+        total - done, total, done, total, checkbox_elapsed.as_secs_f64() * 1000.0);
 
     for task in &prd_tasks {
         if !task.done {
@@ -524,14 +533,24 @@ async fn main() -> Result<()> {
             };
 
             // Register initial Queen actors (min_queens = 3)
+            // Note: Queens spawn in parallel — subprocess starts in background,
+            // registration just sets up channels/handles (fast, <10ms per queen).
+            let queen_spawn_start = Instant::now();
             for i in 0..3 {
                 let queen_id = QueenId(format!("Q{}", i));
+                let queen_reg_start = Instant::now();
                 nydus.register_queen_actor(
-                    queen_id,
+                    queen_id.clone(),
                     "sonnet".to_string(),
                     completion_config.clone(),
                 )?;
+                let queen_reg_elapsed = queen_reg_start.elapsed();
+                eprintln!("[HATCHERY] Registered {} in {:.1}ms (subprocess initializing in background)",
+                    queen_id.0, queen_reg_elapsed.as_secs_f64() * 1000.0);
             }
+            let queen_spawn_total = queen_spawn_start.elapsed();
+            eprintln!("[HATCHERY] All queens registered in {:.1}ms (subprocesses initializing in parallel)",
+                queen_spawn_total.as_secs_f64() * 1000.0);
 
             // After Queens registration, automatically register Overlord when git isolation is enabled
             // Can be skipped via HATCHERY_SKIP_OVERLORD=1 or HATCHERY_SKIP_OVERLORD=true
