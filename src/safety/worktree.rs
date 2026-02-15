@@ -599,10 +599,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_path_buf();
 
-        // Init git repo
+        // Init git repo with isolation from global config
         git_cmd(&path, &["init"]).unwrap();
         git_cmd(&path, &["config", "user.email", "test@test.com"]).unwrap();
         git_cmd(&path, &["config", "user.name", "Test"]).unwrap();
+        // Disable credential helper to prevent GitHub CLI auth prompts during tests
+        git_cmd(&path, &["config", "--local", "credential.helper", ""]).unwrap();
 
         // Create initial commit
         fs::write(path.join("README.md"), "# Test").unwrap();
