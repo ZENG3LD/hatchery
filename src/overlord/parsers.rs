@@ -150,6 +150,9 @@ pub enum QualityHitKind {
     Unimplemented,
     Placeholder,
     EmptyFunction,
+    DefaultReturn,
+    PanicMacro,
+    HardcodedValue,
 }
 
 /// Scan diff content for quality issues
@@ -245,6 +248,51 @@ pub fn scan_code_quality(diff_output: &str) -> QualityScan {
                     file: current_file.clone(),
                     line: current_line,
                     kind: QualityHitKind::EmptyFunction,
+                    text: content.trim().to_string(),
+                });
+            }
+
+            // Default returns (weaker signal than todo!() but still suspicious)
+            // Pattern: return Default::default(), return 0, return "", etc.
+            let trimmed = content.trim();
+            if trimmed.contains("return Default::default()")
+                || trimmed.contains("return String::new()")
+                || trimmed.contains("return Vec::new()")
+                || trimmed.contains("return HashMap::new()")
+                || trimmed == "return 0;"
+                || trimmed == "return \"\";"
+                || trimmed == "return false;"
+                || trimmed == "return None;"
+                || trimmed == "return vec![];"
+                || trimmed == "return Ok(());"
+            {
+                hits.push(QualityHit {
+                    file: current_file.clone(),
+                    line: current_line,
+                    kind: QualityHitKind::DefaultReturn,
+                    text: content.trim().to_string(),
+                });
+            }
+
+            // Panic macros (panic!(), unreachable!() in non-test code)
+            if !is_test_file && (content.contains("panic!(") || content.contains("unreachable!()")) {
+                hits.push(QualityHit {
+                    file: current_file.clone(),
+                    line: current_line,
+                    kind: QualityHitKind::PanicMacro,
+                    text: content.trim().to_string(),
+                });
+            }
+
+            // Hardcoded literal returns (excluding 0, 1, true, false)
+            // Pattern: return 42, return "hardcoded string"
+            let hardcoded_int_re = Regex::new(r#"return\s+([2-9]\d+|[1-9]\d*[0-9])\s*;"#).unwrap();
+            let hardcoded_str_re = Regex::new(r#"return\s+"[^"]+"\s*;"#).unwrap();
+            if hardcoded_int_re.is_match(trimmed) || hardcoded_str_re.is_match(trimmed) {
+                hits.push(QualityHit {
+                    file: current_file.clone(),
+                    line: current_line,
+                    kind: QualityHitKind::HardcodedValue,
                     text: content.trim().to_string(),
                 });
             }
@@ -472,5 +520,65 @@ test result: FAILED. 8 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out
         assert_eq!(summary.total_turns, 15);
         assert_eq!(summary.tools_used, tools);
         assert_eq!(summary.files_changed, 3);
+    }
+
+    #[test]
+    fn test_scan_quality_default_return() {
+        let diff = r#"
++++ b/src/lib.rs
+@@ -1,3 +1,5 @@
++fn get_value() -> u32 {
++    return Default::default();
++}
+"#;
+        let result = scan_code_quality(diff);
+
+        assert!(result.total_hits >= 1);
+        assert!(result.hits.iter().any(|h| matches!(h.kind, QualityHitKind::DefaultReturn)));
+    }
+
+    #[test]
+    fn test_scan_quality_panic_macro() {
+        let diff = r#"
++++ b/src/lib.rs
+@@ -1,3 +1,5 @@
++fn not_implemented() {
++    panic!("not implemented yet")
++}
+"#;
+        let result = scan_code_quality(diff);
+
+        assert!(result.total_hits >= 1);
+        assert!(result.hits.iter().any(|h| matches!(h.kind, QualityHitKind::PanicMacro)));
+    }
+
+    #[test]
+    fn test_scan_quality_hardcoded_value() {
+        let diff = r#"
++++ b/src/lib.rs
+@@ -1,3 +1,5 @@
++fn magic_number() -> u32 {
++    return 42;
++}
+"#;
+        let result = scan_code_quality(diff);
+
+        assert!(result.total_hits >= 1);
+        assert!(result.hits.iter().any(|h| matches!(h.kind, QualityHitKind::HardcodedValue)));
+    }
+
+    #[test]
+    fn test_scan_quality_panic_in_test_file_allowed() {
+        let diff = r#"
++++ b/tests/integration_test.rs
+@@ -1,3 +1,5 @@
++fn helper() {
++    panic!("expected panic in test")
++}
+"#;
+        let result = scan_code_quality(diff);
+
+        // Panic in test file should NOT trigger PanicMacro hit
+        assert!(!result.hits.iter().any(|h| matches!(h.kind, QualityHitKind::PanicMacro)));
     }
 }

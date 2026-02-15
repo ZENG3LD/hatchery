@@ -200,8 +200,29 @@ fn format_session_summary(session: &SessionSummary) -> String {
 mod tests {
     use super::*;
     use crate::overlord::parsers::{
-        ChangedFile, QualityHit, QualityHitKind,
+        ChangedFile, QualityHit, QualityHitKind, parse_diff_summary, scan_code_quality,
     };
+
+    // Helper to build realistic diff strings
+    fn make_diff_str(filename: &str, added_lines: &[&str]) -> String {
+        let n = added_lines.len();
+        let mut diff = format!(
+            "diff --git a/{f} b/{f}\n--- a/{f}\n+++ b/{f}\n@@ -1,0 +1,{n} @@\n",
+            f = filename, n = n
+        );
+        for line in added_lines {
+            diff.push_str(&format!("+{}\n", line));
+        }
+        diff
+    }
+
+    // Helper to build numstat output
+    fn make_numstat(files: &[(&str, usize, usize)]) -> String {
+        files.iter()
+            .map(|(name, added, removed)| format!("{}\t{}\t{}", added, removed, name))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 
     fn make_diff(added: usize, removed: usize) -> DiffSummary {
         DiffSummary {
@@ -464,5 +485,473 @@ mod tests {
         assert!(summary.contains("2 hits"));
         assert!(summary.contains("20.0%"));
         assert!(summary.contains("src/lib.rs"));
+    }
+
+    // ============================================================================
+    // SCENARIO TESTS - Real-world situations a Queen might produce
+    // ============================================================================
+
+    // GROUP A: Clear rejections (HardReject expected)
+
+    #[test]
+    fn test_scenario_all_todo_stubs() {
+        // Queen wrote 20 lines, all are TODOs and todo!()
+        let diff_content = make_diff_str("src/feature.rs", &[
+            "// TODO: implement this",
+            "fn process() {",
+            "    todo!()",
+            "}",
+            "// TODO: add validation",
+            "fn validate() {",
+            "    todo!()",
+            "}",
+            "// TODO: implement handler",
+            "fn handle() {",
+            "    todo!()",
+            "}",
+            "// TODO: add tests",
+            "fn test_feature() {",
+            "    todo!()",
+            "}",
+            "// TODO: document this",
+            "// STUB: replace later",
+            "fn stub_fn() {}",
+            "// TODO: finish implementation",
+        ]);
+
+        let numstat = make_numstat(&[("src/feature.rs", 20, 0)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, None, &quality, &session, "Implement feature");
+
+        match verdict {
+            CodeCheckVerdict::HardReject { reason } => {
+                assert!(reason.contains("mostly stubs") || reason.contains("TODO"));
+            }
+            _ => panic!("Expected HardReject for all TODOs, got {:?}", verdict),
+        }
+    }
+
+    #[test]
+    fn test_scenario_empty_commit() {
+        // Queen committed nothing (0 added, 0 removed)
+        let diff = make_diff(0, 0);
+        let quality = make_quality(0, 0);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, None, &quality, &session, "Fix bug");
+
+        match verdict {
+            CodeCheckVerdict::HardReject { reason } => {
+                assert!(reason.contains("empty work"));
+            }
+            _ => panic!("Expected HardReject for empty commit, got {:?}", verdict),
+        }
+    }
+
+    #[test]
+    fn test_scenario_tests_failing() {
+        // Queen wrote code but 3 tests fail
+        let diff_content = make_diff_str("src/lib.rs", &[
+            "pub fn calculate(x: u32) -> u32 {",
+            "    x * 2",
+            "}",
+        ]);
+
+        let numstat = make_numstat(&[("src/lib.rs", 3, 0)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let tests = make_tests(5, 3, vec![
+            "test_calculate_zero".to_string(),
+            "test_calculate_negative".to_string(),
+            "test_calculate_overflow".to_string(),
+        ]);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, Some(&tests), &quality, &session, "Implement calculate");
+
+        match verdict {
+            CodeCheckVerdict::HardReject { reason } => {
+                assert!(reason.contains("tests failed"));
+                assert!(reason.contains("3 failures"));
+            }
+            _ => panic!("Expected HardReject for failing tests, got {:?}", verdict),
+        }
+    }
+
+    #[test]
+    fn test_scenario_unimplemented_functions() {
+        // 5 functions, all unimplemented!()
+        let diff_content = make_diff_str("src/api.rs", &[
+            "fn get_user() { unimplemented!() }",
+            "fn create_user() { unimplemented!() }",
+            "fn update_user() { unimplemented!() }",
+            "fn delete_user() { unimplemented!() }",
+            "fn list_users() { unimplemented!() }",
+        ]);
+
+        let numstat = make_numstat(&[("src/api.rs", 5, 0)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, None, &quality, &session, "Implement API");
+
+        match verdict {
+            CodeCheckVerdict::HardReject { reason } => {
+                assert!(reason.contains("mostly stubs") || reason.contains("TODO"));
+            }
+            _ => panic!("Expected HardReject for all unimplemented, got {:?}", verdict),
+        }
+    }
+
+    #[test]
+    fn test_scenario_panic_everywhere() {
+        // Multiple panic!() calls in production code
+        let diff_content = make_diff_str("src/handler.rs", &[
+            "fn handle_request() {",
+            "    panic!(\"not implemented\")",
+            "}",
+            "fn process_data() {",
+            "    panic!(\"TODO\")",
+            "}",
+            "fn validate_input() {",
+            "    panic!(\"implement this\")",
+            "}",
+        ]);
+
+        let numstat = make_numstat(&[("src/handler.rs", 9, 0)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, None, &quality, &session, "Add handler");
+
+        // High stub_ratio due to multiple panic hits
+        match verdict {
+            CodeCheckVerdict::HardReject { .. } | CodeCheckVerdict::NeedsReview { .. } => {
+                // Either is acceptable - depends on stub_ratio calculation
+            }
+            CodeCheckVerdict::AllClear => panic!("Expected rejection for panic everywhere"),
+        }
+    }
+
+    // GROUP B: Ambiguous cases (NeedsReview expected)
+
+    #[test]
+    fn test_scenario_mixed_real_and_stubs() {
+        // 80 lines real code + 5 TODOs (stub_ratio < 0.5 but > 0)
+        let mut lines = vec![
+            "// Real implementation",
+            "pub struct Config {",
+            "    pub api_key: String,",
+            "    pub endpoint: String,",
+            "}",
+            "impl Config {",
+            "    pub fn new(key: String, endpoint: String) -> Self {",
+            "        Config { api_key: key, endpoint }",
+            "    }",
+            "    pub fn validate(&self) -> Result<(), String> {",
+            "        if self.api_key.is_empty() {",
+            "            return Err(\"API key required\".to_string());",
+            "        }",
+            "        Ok(())",
+            "    }",
+            "}",
+            "pub fn process(config: &Config) -> Result<String, String> {",
+            "    config.validate()?;",
+            "    // TODO: implement actual API call",
+            "    Ok(String::new())",
+            "}",
+        ];
+        // Pad with real code to reach 85 lines total
+        for _ in 0..64 {
+            lines.push("    // More implementation");
+        }
+        lines.push("// TODO: add rate limiting");
+        lines.push("// TODO: add retry logic");
+        lines.push("// TODO: add metrics");
+        lines.push("// TODO: add logging");
+
+        let diff_content = make_diff_str("src/client.rs", &lines);
+        let numstat = make_numstat(&[("src/client.rs", 85, 0)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, None, &quality, &session, "Implement client");
+
+        match verdict {
+            CodeCheckVerdict::NeedsReview { .. } => {
+                // Expected: some TODOs but not overwhelming
+            }
+            _ => panic!("Expected NeedsReview for mixed content, got {:?}", verdict),
+        }
+    }
+
+    #[test]
+    fn test_scenario_single_todo_in_large_change() {
+        // 200 lines added, 1 TODO comment
+        let mut lines = vec![];
+        for _ in 0..199 {
+            lines.push("    let x = process_data();");
+        }
+        lines.push("    // TODO: optimize this loop");
+
+        let diff_content = make_diff_str("src/processor.rs", &lines);
+        let numstat = make_numstat(&[("src/processor.rs", 200, 0)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, None, &quality, &session, "Optimize processor");
+
+        match verdict {
+            CodeCheckVerdict::NeedsReview { .. } => {
+                // Single TODO in 200 lines is minor but worth review
+            }
+            _ => panic!("Expected NeedsReview for single TODO, got {:?}", verdict),
+        }
+    }
+
+    #[test]
+    fn test_scenario_mock_in_production_code() {
+        // Real implementation but references "mock" in non-test file
+        let diff_content = make_diff_str("src/api_client.rs", &[
+            "pub struct ApiClient {",
+            "    endpoint: String,",
+            "    // Using mock client for now",
+            "    mock_mode: bool,",
+            "}",
+            "impl ApiClient {",
+            "    pub fn new(endpoint: String) -> Self {",
+            "        ApiClient {",
+            "            endpoint,",
+            "            mock_mode: true,",
+            "        }",
+            "    }",
+            "}",
+        ]);
+
+        let numstat = make_numstat(&[("src/api_client.rs", 13, 0)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, None, &quality, &session, "Add API client");
+
+        match verdict {
+            CodeCheckVerdict::NeedsReview { .. } => {
+                // Mock in production code is suspicious
+            }
+            _ => panic!("Expected NeedsReview for mock in prod, got {:?}", verdict),
+        }
+    }
+
+    // GROUP C: Clean pass (AllClear expected)
+
+    #[test]
+    fn test_scenario_clean_implementation() {
+        // 50 lines of real code, no markers, tests pass
+        let diff_content = make_diff_str("src/calculator.rs", &[
+            "pub fn add(a: u32, b: u32) -> u32 {",
+            "    a.checked_add(b).unwrap_or(u32::MAX)",
+            "}",
+            "pub fn subtract(a: u32, b: u32) -> u32 {",
+            "    a.saturating_sub(b)",
+            "}",
+            "pub fn multiply(a: u32, b: u32) -> u32 {",
+            "    a.checked_mul(b).unwrap_or(u32::MAX)",
+            "}",
+            "pub fn divide(a: u32, b: u32) -> Result<u32, String> {",
+            "    if b == 0 {",
+            "        return Err(\"Division by zero\".to_string());",
+            "    }",
+            "    Ok(a / b)",
+            "}",
+        ]);
+
+        let numstat = make_numstat(&[("src/calculator.rs", 15, 0)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let tests = make_tests(8, 0, vec![]);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, Some(&tests), &quality, &session, "Add calculator");
+
+        assert_eq!(verdict, CodeCheckVerdict::AllClear);
+    }
+
+    #[test]
+    fn test_scenario_small_bugfix() {
+        // 2 lines changed, no markers, clean
+        let diff_content = make_diff_str("src/validator.rs", &[
+            "    if value < 0 {",
+            "        return Err(\"Value must be positive\".to_string());",
+        ]);
+
+        let numstat = make_numstat(&[("src/validator.rs", 2, 2)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, None, &quality, &session, "Fix validation");
+
+        assert_eq!(verdict, CodeCheckVerdict::AllClear);
+    }
+
+    #[test]
+    fn test_scenario_todo_in_test_file() {
+        // TODO in test file should be ignored for stub detection
+        let diff_content = make_diff_str("tests/integration_test.rs", &[
+            "#[test]",
+            "fn test_feature() {",
+            "    // TODO: add more test cases",
+            "    assert_eq!(1 + 1, 2);",
+            "}",
+        ]);
+
+        let numstat = make_numstat(&[("tests/integration_test.rs", 5, 0)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, None, &quality, &session, "Add test");
+
+        // TODOs in test files still get detected but shouldn't trigger harsh rejection
+        match verdict {
+            CodeCheckVerdict::AllClear | CodeCheckVerdict::NeedsReview { .. } => {
+                // Both acceptable for test files with TODOs
+            }
+            CodeCheckVerdict::HardReject { .. } => {
+                panic!("Should not hard reject TODOs in test files");
+            }
+        }
+    }
+
+    #[test]
+    fn test_scenario_mock_in_test_file() {
+        // "mock" in test file is fine
+        let diff_content = make_diff_str("tests/api_test.rs", &[
+            "fn setup_mock_server() {",
+            "    let mock = MockServer::start();",
+            "    mock.expect_get(\"/api/users\");",
+            "}",
+        ]);
+
+        let numstat = make_numstat(&[("tests/api_test.rs", 4, 0)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, None, &quality, &session, "Add mock test");
+
+        // Mock in test file should NOT be flagged
+        assert_eq!(quality.total_hits, 0, "Mock in test file should not be flagged");
+        assert_eq!(verdict, CodeCheckVerdict::AllClear);
+    }
+
+    // GROUP D: Edge cases (the hard ones)
+
+    #[test]
+    fn test_scenario_default_return_only() {
+        // Function that just returns Default::default()
+        let diff_content = make_diff_str("src/builder.rs", &[
+            "pub fn build() -> Config {",
+            "    return Default::default();",
+            "}",
+        ]);
+
+        let numstat = make_numstat(&[("src/builder.rs", 3, 0)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, None, &quality, &session, "Add builder");
+
+        // Should trigger DefaultReturn quality hit
+        assert!(quality.hits.iter().any(|h| matches!(h.kind, QualityHitKind::DefaultReturn)));
+
+        match verdict {
+            CodeCheckVerdict::NeedsReview { .. } => {
+                // Expected: suspicious but not hard reject
+            }
+            _ => panic!("Expected NeedsReview for default return, got {:?}", verdict),
+        }
+    }
+
+    #[test]
+    fn test_scenario_empty_function_body() {
+        // fn process() {} - already detected by EmptyFunction
+        let diff_content = make_diff_str("src/handler.rs", &[
+            "fn process() {}",
+            "fn validate() { }",
+        ]);
+
+        let numstat = make_numstat(&[("src/handler.rs", 2, 0)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, None, &quality, &session, "Add handlers");
+
+        // Should detect EmptyFunction
+        assert!(quality.hits.iter().any(|h| matches!(h.kind, QualityHitKind::EmptyFunction)));
+
+        match verdict {
+            CodeCheckVerdict::HardReject { .. } | CodeCheckVerdict::NeedsReview { .. } => {
+                // Either is acceptable
+            }
+            CodeCheckVerdict::AllClear => panic!("Empty functions should not be AllClear"),
+        }
+    }
+
+    #[test]
+    fn test_scenario_formal_but_useless() {
+        // Passes cargo check but function body is just `let _ = input; return 0;`
+        let diff_content = make_diff_str("src/processor.rs", &[
+            "pub fn process(input: &str) -> u32 {",
+            "    let _ = input;",
+            "    return 0;",
+            "}",
+        ]);
+
+        let numstat = make_numstat(&[("src/processor.rs", 4, 0)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, None, &quality, &session, "Add processor");
+
+        // Should trigger DefaultReturn for `return 0;`
+        assert!(quality.hits.iter().any(|h| matches!(h.kind, QualityHitKind::DefaultReturn)));
+
+        match verdict {
+            CodeCheckVerdict::NeedsReview { .. } => {
+                // Suspicious pattern caught
+            }
+            _ => panic!("Expected NeedsReview for useless function, got {:?}", verdict),
+        }
+    }
+
+    #[test]
+    fn test_scenario_one_line_real_fix() {
+        // Legitimate 1-line fix. Must be AllClear, not confused with "small = suspicious"
+        let diff_content = make_diff_str("src/utils.rs", &[
+            "    if input.is_empty() { return Err(\"Empty input\".to_string()); }",
+        ]);
+
+        let numstat = make_numstat(&[("src/utils.rs", 1, 0)]);
+        let diff = parse_diff_summary(&numstat);
+        let quality = scan_code_quality(&diff_content);
+        let session = make_session();
+
+        let verdict = run_code_checks(&diff, None, &quality, &session, "Fix validation");
+
+        // No quality issues, should be AllClear
+        assert_eq!(quality.total_hits, 0);
+        assert_eq!(verdict, CodeCheckVerdict::AllClear);
     }
 }
