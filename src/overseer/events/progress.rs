@@ -297,11 +297,12 @@ pub struct BashProgressData {
     #[serde(rename = "totalLines")]
     pub total_lines: u64,
 
-    /// Triggering message
-    pub message: JsonValue,
+    /// Triggering message (optional)
+    #[serde(default)]
+    pub message: Option<JsonValue>,
 
-    /// Complete conversation history (HUGE!)
-    #[serde(rename = "normalizedMessages")]
+    /// Complete conversation history (HUGE, optional)
+    #[serde(rename = "normalizedMessages", default)]
     pub normalized_messages: Vec<NormalizedMessage>,
 }
 
@@ -321,11 +322,12 @@ pub struct HookProgressData {
     /// Hook command being executed
     pub command: String,
 
-    /// Triggering message
-    pub message: JsonValue,
+    /// Triggering message (optional)
+    #[serde(default)]
+    pub message: Option<JsonValue>,
 
-    /// Complete conversation history
-    #[serde(rename = "normalizedMessages")]
+    /// Complete conversation history (optional)
+    #[serde(rename = "normalizedMessages", default)]
     pub normalized_messages: Vec<NormalizedMessage>,
 }
 
@@ -341,11 +343,12 @@ pub struct AgentProgressData {
     /// Agent task/prompt
     pub prompt: String,
 
-    /// Triggering message
-    pub message: JsonValue,
+    /// Triggering message (optional)
+    #[serde(default)]
+    pub message: Option<JsonValue>,
 
-    /// Complete conversation history
-    #[serde(rename = "normalizedMessages")]
+    /// Complete conversation history (optional)
+    #[serde(rename = "normalizedMessages", default)]
     pub normalized_messages: Vec<NormalizedMessage>,
 }
 

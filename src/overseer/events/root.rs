@@ -255,7 +255,7 @@ impl SessionEvent {
             Self::Assistant(e) => e.metadata.timestamp,
             Self::Progress(e) => e.metadata.timestamp,
             Self::System(e) => e.timestamp,
-            Self::FileSnapshot(e) => e.timestamp,
+            Self::FileSnapshot(e) => e.timestamp.unwrap_or(e.snapshot.timestamp),
             Self::QueueOperation(e) => e.timestamp,
             Self::Summary(e) => e.timestamp,
             Self::Unknown => Utc::now(),
@@ -599,8 +599,9 @@ pub struct FileHistorySnapshot {
     #[serde(rename = "isSnapshotUpdate")]
     pub is_snapshot_update: bool,
 
-    /// Snapshot timestamp
-    pub timestamp: DateTime<Utc>,
+    /// Snapshot timestamp (optional at top level, falls back to snapshot.timestamp)
+    #[serde(default)]
+    pub timestamp: Option<DateTime<Utc>>,
 }
 
 /// Snapshot data
@@ -610,9 +611,9 @@ pub struct Snapshot {
     #[serde(rename = "messageId")]
     pub message_id: String,
 
-    /// Map of file path → backup content
+    /// Map of file path → backup info (can be string or object depending on version)
     #[serde(rename = "trackedFileBackups")]
-    pub tracked_file_backups: HashMap<String, String>,
+    pub tracked_file_backups: HashMap<String, serde_json::Value>,
 
     /// Snapshot timestamp
     pub timestamp: DateTime<Utc>,

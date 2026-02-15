@@ -38,13 +38,46 @@ use serde_json::Value as JsonValue;
 ///   ]
 /// }
 /// ```
+///
+/// Note: The `content` field can be either:
+/// - A plain string (common in subagent first messages)
+/// - An array of content blocks (normal messages)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageContent {
     /// Role: "user" or "assistant"
     pub role: String,
 
     /// Content blocks (text, tool use, tool results, etc.)
+    ///
+    /// Accepts both string (wrapped as a single Text block) and array of blocks.
+    #[serde(deserialize_with = "deserialize_content")]
     pub content: Vec<ContentBlock>,
+}
+
+/// Custom deserializer for content field that handles both string and array variants
+fn deserialize_content<'de, D>(deserializer: D) -> Result<Vec<ContentBlock>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::{self, Deserialize as _};
+    use serde_json::Value;
+
+    let value = Value::deserialize(deserializer)?;
+
+    match value {
+        // String variant: wrap in a single Text content block
+        Value::String(text) => Ok(vec![ContentBlock::Text(TextBlock { text })]),
+
+        // Array variant: deserialize as Vec<ContentBlock>
+        Value::Array(_) => {
+            serde_json::from_value(value).map_err(de::Error::custom)
+        }
+
+        // Invalid type
+        _ => Err(de::Error::custom(
+            "content must be either a string or an array of content blocks"
+        )),
+    }
 }
 
 /// Content block discriminator
@@ -262,9 +295,12 @@ pub struct ToolUseBlock {
 /// # Content Types
 ///
 /// Content can be:
-/// - String: simple text output
+/// - String: simple text output (`"cargo build completed"`)
 /// - Object with `type` field: structured result (see `tool_result` module)
-/// - Array: multiple result items
+/// - Array: multiple result items (array of content blocks)
+///
+/// Note: When `content` is an array, it can contain content blocks like:
+/// `[{"type": "text", "text": "output text"}]`
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolResultBlock {
     /// Links back to tool use that generated this result
@@ -276,7 +312,10 @@ pub struct ToolResultBlock {
     /// Can be:
     /// - String: simple output (`"cargo build completed"`)
     /// - Object: structured result with `type` field (see `ToolUseResult`)
-    /// - Array: multiple result items
+    /// - Array: multiple result items (content blocks or arbitrary items)
+    ///
+    /// This field uses JsonValue to accommodate all variants.
+    /// No custom deserializer needed - JsonValue handles all JSON types.
     pub content: JsonValue,
 
     /// Structured tool use result (for file operations)
@@ -587,5 +626,117 @@ mod tests {
             message.content[0].as_thinking(),
             Some("I need to analyze this carefully...")
         );
+    }
+
+    #[test]
+    fn test_message_content_string_variant() {
+        // Test that content can be a plain string (common in subagent first messages)
+        let json = r#"{
+            "role": "user",
+            "content": "This is a simple text prompt"
+        }"#;
+
+        let message: MessageContent = serde_json::from_str(json).unwrap();
+        assert_eq!(message.role, "user");
+        assert_eq!(message.content.len(), 1);
+
+        // Should be wrapped in a Text content block
+        assert!(matches!(message.content[0], ContentBlock::Text(_)));
+        assert_eq!(message.content[0].as_text(), Some("This is a simple text prompt"));
+    }
+
+    #[test]
+    fn test_tool_result_content_string_variant() {
+        // Tool result content can also be a plain string
+        let json = r#"{
+            "type": "tool_result",
+            "tool_use_id": "toolu_abc123",
+            "content": "Task completed successfully"
+        }"#;
+
+        let block: ContentBlock = serde_json::from_str(json).unwrap();
+        assert!(matches!(block, ContentBlock::ToolResult(_)));
+
+        if let ContentBlock::ToolResult(result) = block {
+            assert_eq!(result.tool_use_id, "toolu_abc123");
+            assert_eq!(result.content, "Task completed successfully");
+        }
+    }
+
+    #[test]
+    fn test_tool_result_content_array_variant() {
+        // Tool result content can also be an array of content blocks
+        let json = r#"{
+            "type": "tool_result",
+            "tool_use_id": "toolu_abc123",
+            "content": [
+                {"type": "text", "text": "First output"},
+                {"type": "text", "text": "Second output"}
+            ]
+        }"#;
+
+        let block: ContentBlock = serde_json::from_str(json).unwrap();
+        assert!(matches!(block, ContentBlock::ToolResult(_)));
+
+        if let ContentBlock::ToolResult(result) = block {
+            assert_eq!(result.tool_use_id, "toolu_abc123");
+            // Content is stored as JsonValue, so it's an array
+            assert!(result.content.is_array());
+            let arr = result.content.as_array().unwrap();
+            assert_eq!(arr.len(), 2);
+        }
+    }
+
+    #[test]
+    fn test_subagent_message_with_string_content() {
+        // Test a realistic subagent first message with string content
+        // This is the exact scenario that was failing before the fix
+        let json = r#"{
+            "role": "user",
+            "content": "Research the KuCoin API. Docs: https://docs.kucoin.com. Follow prompts/01_research.md. Output: src/exchanges/kucoin/research/"
+        }"#;
+
+        let message: MessageContent = serde_json::from_str(json).unwrap();
+        assert_eq!(message.role, "user");
+        assert_eq!(message.content.len(), 1);
+
+        // Should be wrapped in a Text content block
+        match &message.content[0] {
+            ContentBlock::Text(text_block) => {
+                assert!(text_block.text.contains("Research the KuCoin API"));
+                assert!(text_block.text.contains("https://docs.kucoin.com"));
+            }
+            _ => panic!("Expected Text content block"),
+        }
+    }
+
+    #[test]
+    fn test_mixed_content_formats_in_session() {
+        // Test that we can parse both string and array content in the same session
+        let messages = vec![
+            // First message: string content (subagent task)
+            r#"{
+                "role": "user",
+                "content": "Implement feature X"
+            }"#,
+            // Second message: array content (normal message)
+            r#"{
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "I'll implement that feature"},
+                    {"type": "tool_use", "id": "tool-1", "name": "Write", "input": {}}
+                ]
+            }"#,
+            // Third message: string content again
+            r#"{
+                "role": "user",
+                "content": "Task completed"
+            }"#,
+        ];
+
+        for json in messages {
+            let message: Result<MessageContent, _> = serde_json::from_str(json);
+            assert!(message.is_ok(), "Failed to parse: {}", json);
+        }
     }
 }

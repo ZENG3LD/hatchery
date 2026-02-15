@@ -609,16 +609,18 @@ impl SegmentParser {
 
                 SessionEvent::FileSnapshot(snapshot) => {
                     // Extract file changes from snapshot
+                    // Use top-level timestamp or fall back to snapshot.timestamp
+                    let timestamp = snapshot.timestamp.unwrap_or(snapshot.snapshot.timestamp);
                     for file_path in snapshot.snapshot.tracked_file_backups.keys() {
                         // Check if we already have this file change
                         if !files.iter().any(|f| {
                             f.file_path == *file_path
-                                && f.timestamp == snapshot.timestamp.timestamp()
+                                && f.timestamp == timestamp.timestamp()
                         }) {
                             files.push(FileChange {
                                 file_path: file_path.clone(),
                                 operation: "snapshot".to_string(),
-                                timestamp: snapshot.timestamp.timestamp(),
+                                timestamp: timestamp.timestamp(),
                                 message_uuid: snapshot.message_id.clone(),
                                 ..Default::default()
                             });

@@ -170,17 +170,18 @@ pub fn parse_jsonl_events(session_path: &Path) -> Result<Vec<SessionEvent>> {
             continue;
         }
 
-        // Parse JSON
-        let event: SessionEvent = serde_json::from_str(&line).map_err(|e| {
-            ParseError::InvalidSession(format!(
-                "Failed to parse line {} from {:?}: {}",
-                line_num + 1,
-                session_path,
-                e
-            ))
-        })?;
-
-        events.push(event);
+        // Parse JSON — skip unparseable lines instead of failing
+        match serde_json::from_str::<SessionEvent>(&line) {
+            Ok(event) => events.push(event),
+            Err(e) => {
+                eprintln!(
+                    "[overseer] warning: skipping line {} from {:?}: {}",
+                    line_num + 1,
+                    session_path,
+                    e
+                );
+            }
+        }
     }
 
     tracing::debug!("Parsed {} events from {:?}", events.len(), session_path);
