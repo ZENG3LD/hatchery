@@ -85,7 +85,7 @@ pub enum QueenStatus {
 }
 
 /// Overall status of a task in the system.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TaskStatus {
     /// Task is blocked by dependencies
     Blocked,

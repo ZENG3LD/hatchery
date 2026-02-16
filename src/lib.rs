@@ -36,3 +36,27 @@ pub mod swarm_pool;
 
 /// Overmind: strategic LLM coordinator (escalation handler)
 pub mod overmind;
+
+/// Topology: defines how agents are organized and how tasks are assigned
+pub mod topology;
+
+/// Communication: agent message passing (Direct, Broadcast, Blackboard, MessageBus, Handoff, ContractNet, RippleEffect, Protocols)
+pub mod communication;
+
+/// Decomposition: task breakdown strategies (DAG, HTN, TDAG, Emergent, Role-based, Capability)
+pub mod decomposition;
+
+/// Resilience: failure handling, recovery, degradation, consensus, HITL, circuit breaker
+pub mod resilience;
+
+/// Scheduling: task execution scheduling (Event-driven, Timer-based, Hybrid, Load balancing, Priority, LLM realtime, Work stealing)
+pub mod scheduling;
+
+/// Memory: multiple memory implementations (SharedState, Conversation, MultiTier, Document, Isolated, Session, Collaborative, Ontology, RAG)
+pub mod memory;
+
+/// Scaling: dynamic agent pool management (SmallScale, MediumScale, LargeScale, VeryLargeScale, EdgeCloud, ElasticPool)
+pub mod scaling;
+
+/// Pipeline: composable orchestration workflows (builder, presets, runtime)
+pub mod pipeline;
