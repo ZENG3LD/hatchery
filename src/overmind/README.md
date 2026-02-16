@@ -1,5 +1,34 @@
 # Overmind — Strategic Coordinator
 
+## Integration with V4 Modular Architecture
+
+**Overmind is now dual-mode**: it works as a standalone strategic coordinator (classic mode) AND as a composable `Resilience` module in the new pipeline architecture.
+
+### Classic Mode (V3, unchanged)
+Overmind is an LLM-powered StreamQueen that handles escalations from SwarmPool. Nydus routes events to Overmind, which returns strategic commands.
+
+### Pipeline Mode (V4, new)
+Overmind functionality is available as `OvermindResilience` — a resilience module that makes strategic decisions via LLM. Integrate via:
+
+```rust
+use hatchery::pipeline::PipelineBuilder;
+use hatchery::resilience::OvermindResilience;
+
+let pipeline = PipelineBuilder::new()
+    .resilience(OvermindResilience::new(config))
+    .build()?;
+```
+
+Or use a preset that includes Overmind-style resilience:
+```rust
+use hatchery::pipeline::presets::consensus_preset;
+let pipeline = consensus_preset().build()?;
+```
+
+The core strategic logic (analyze escalation, decide on recovery action) remains identical across both modes.
+
+---
+
 ## Роль
 
 Overmind — LLM-координатор (StreamQueen), который принимает стратегические решения когда эвристики SwarmPool недостаточно.
@@ -58,3 +87,39 @@ src/overmind/
 
 ~$0.50-2.00 за активацию. 1-5 активаций за типичную swarm сессию.
 Total: $1-10 за весь ран (vs $0 сейчас, но с лучшими решениями).
+
+## V4 Модульная Архитектура
+
+В V4 Overmind доступен в двух режимах:
+
+### 1. Classic Mode (Integrated)
+Standalone component, вызывается Nydus через event bus. Используется как раньше:
+```rust
+let nydus = Nydus::new(config.with_overmind(true)).await?;
+nydus.run().await?;
+```
+
+### 2. Pipeline Mode (Composable)
+Overmind как resilience module. Интегрируется через `PipelineBuilder`:
+```rust
+let pipeline = PipelineBuilder::new()
+    .resilience(OvermindResilience::new(config))
+    .build()?;
+```
+
+Логика Overmind идентична в обоих режимах — меняется только способ интеграции.
+
+### Когда использовать Pipeline Mode?
+
+- Нужна кастомная композиция модулей (например, Overmind + RAG memory + P2P topology)
+- Хотите hot-swap resilience стратегии в рантайме
+- Интеграция с external systems через Protocols (MCP/A2A)
+- Тестирование альтернативных resilience подходов (A/B testing)
+
+### Когда использовать Classic Mode?
+
+- Простая setup — один вызов Nydus
+- Уже работает, не нужны изменения
+- Все компоненты (Nydus + Queen + Overlord + Overmind + SwarmPool) в одном integrated mode
+
+See `../../ARCHITECTURE_V4.md` for full details on modular architecture.
