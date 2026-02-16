@@ -60,3 +60,18 @@ pub mod scaling;
 
 /// Pipeline: composable orchestration workflows (builder, presets, runtime)
 pub mod pipeline;
+
+/// Agent backend: how agents are spawned and managed (Queen is one implementation)
+pub mod agent_backend;
+
+/// Validation: how task output is validated before merge (Overlord is one implementation)
+pub mod validation;
+
+/// Session parsing: how agent session logs are parsed (Overseer/Claude Code is one implementation)
+pub mod session_parser;
+
+/// Isolation: how agents get isolated workspaces (git worktree is one implementation)
+pub mod isolation;
+
+/// Strategic advisor: strategic decisions for complex failure scenarios (Overmind is one implementation)
+pub mod strategic;

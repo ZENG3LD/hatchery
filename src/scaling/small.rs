@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn test_max_agents_limit() {
-        let mut scaling = SmallScaleScaling::new(3, 5).unwrap();
+        let mut scaling = SmallScaleScaling::new(SmallScaleConfig::new(3, 5)).unwrap();
 
         // Already at 5 agents
         let metrics = make_metrics(5, 0, 20);

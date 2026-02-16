@@ -184,6 +184,31 @@ enum Commands {
 
     /// Get overall swarm status (tasks, queens, uptime).
     SwarmStatus,
+
+    /// Run a modular pipeline (V4 architecture).
+    Pipeline {
+        /// Path to the PRD markdown file.
+        prd: PathBuf,
+
+        /// Working directory for agents.
+        #[arg(long)]
+        dir: Option<PathBuf>,
+
+        /// Use a preset pipeline configuration.
+        #[arg(long, conflicts_with = "config")]
+        preset: Option<String>,
+
+        /// Path to a TOML pipeline configuration file.
+        #[arg(long, conflicts_with = "preset")]
+        config: Option<PathBuf>,
+
+        /// Show verbose output.
+        #[arg(short, long)]
+        verbose: bool,
+    },
+
+    /// List available pipeline presets.
+    ListPresets,
 }
 
 #[derive(Subcommand)]
@@ -972,6 +997,79 @@ async fn main() -> Result<()> {
                     std::process::exit(1);
                 }
             }
+        }
+
+        Commands::Pipeline { prd, dir, preset, config, verbose } => {
+            let working_dir = dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+
+            // Build pipeline from preset or config file
+            let pipeline = if let Some(preset_name) = preset {
+                eprintln!("[HATCHERY] Building pipeline from preset: {}", preset_name);
+                let config = hatchery::pipeline::PipelineConfig::from_preset(&preset_name)?;
+                config.into_builder()?.build()?
+            } else if let Some(config_path) = config {
+                eprintln!("[HATCHERY] Building pipeline from config: {}", config_path.display());
+                let config = hatchery::pipeline::PipelineConfig::from_file(&config_path)?;
+                config.into_builder()?.build()?
+            } else {
+                // Default to minimal preset
+                eprintln!("[HATCHERY] No preset or config specified, using 'minimal' preset");
+                let config = hatchery::pipeline::PipelineConfig::from_preset("minimal")?;
+                config.into_builder()?.build()?
+            };
+
+            // Display pipeline components
+            let components = pipeline.component_names();
+            eprintln!("[HATCHERY] Pipeline: {}", pipeline.name);
+            eprintln!("[HATCHERY]   Topology:      {}", components.topology);
+            eprintln!("[HATCHERY]   Decomposition: {}", components.decomposition);
+            eprintln!("[HATCHERY]   Communication: {}", components.communication);
+            eprintln!("[HATCHERY]   Memory:        {}", components.memory);
+            eprintln!("[HATCHERY]   Scheduling:    {}", components.scheduling);
+            eprintln!("[HATCHERY]   Resilience:    {}", components.resilience);
+            eprintln!("[HATCHERY]   Scaling:       {}", components.scaling);
+
+            // Parse PRD into tasks
+            let prd_content = std::fs::read_to_string(&prd)
+                .map_err(|e| anyhow::anyhow!("Failed to read PRD {}: {}", prd.display(), e))?;
+            let prd_tasks = prd::parse_prd_content(&prd_content)?;
+            let (done, total) = prd::progress(&prd_tasks);
+            eprintln!("[HATCHERY] PRD: {} tasks ({} done, {} remaining)", total, done, total - done);
+
+            // Pipeline mode is a composition framework — the actual execution
+            // requires connecting the pipeline components to an agent backend.
+            // For now, display the pipeline configuration and task summary.
+            //
+            // Full pipeline execution will be implemented when the PipelineOrchestrator
+            // connects Pipeline + AgentBackend + IsolationBackend + Validation + StrategicAdvisor.
+            eprintln!("[HATCHERY] Pipeline built successfully.");
+            eprintln!("[HATCHERY] Pipeline execution engine coming soon.");
+            eprintln!("[HATCHERY] Use 'hatchery spawn' for classic mode execution.");
+
+            println!("\nPipeline: {}", pipeline.name);
+            println!("{}", components.display());
+            println!("\nTasks from PRD:");
+            for task in &prd_tasks {
+                let marker = if task.done { "[x]" } else { "[ ]" };
+                println!("  {} prd-{}: {}", marker, task.id, task.description);
+            }
+
+            if verbose {
+                eprintln!("\n[DEBUG] Working directory: {}", working_dir.display());
+            }
+        }
+
+        Commands::ListPresets => {
+            println!("Available pipeline presets:");
+            println!();
+            println!("  carousel   — Structured multi-phase workflows (research → implement → test → debug)");
+            println!("  ralph      — Autonomous iterative tasks with PRD checkboxes");
+            println!("  blackboard — Exploratory research with agent self-selection");
+            println!("  consensus  — High-stakes decisions with multi-agent agreement");
+            println!("  swarm      — Embarrassingly parallel tasks with work stealing");
+            println!("  minimal    — Simple single-agent or small-team tasks");
+            println!();
+            println!("Usage: hatchery pipeline --preset <NAME> --prd <PRD_FILE>");
         }
     }
 

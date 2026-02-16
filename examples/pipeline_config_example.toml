@@ -1,0 +1,34 @@
+# Example pipeline configuration for Hatchery
+# This demonstrates the TOML-based pipeline configuration system
+
+[pipeline]
+name = "custom-workflow"
+description = "Custom pipeline for code review and testing"
+
+[topology]
+# Options: centralized, hierarchical, peer_to_peer, blackboard, graph_dag, conversational
+type = "centralized"
+
+[decomposition]
+# Options: dag, htn, tdag, emergent, role_based, capability
+type = "dag"
+
+[communication]
+# Options: direct, broadcast, blackboard, message_bus, handoff, contract_net, ripple_effect
+type = "message_bus"
+
+[memory]
+# Options: shared_state, conversation, multi_tier, document, isolated, session, collaborative, ontology, rag
+type = "multi_tier"
+
+[scheduling]
+# Options: event_driven, timer_based, hybrid, load_balancing, priority, llm_realtime, work_stealing
+type = "hybrid"
+
+[resilience]
+# Options: retry, recovery, degradation, consensus, hitl, circuit_breaker, failure_tracking
+type = "retry"
+
+[scaling]
+# Options: small, medium, large, very_large, edge_cloud, elastic_pool
+type = "small"
