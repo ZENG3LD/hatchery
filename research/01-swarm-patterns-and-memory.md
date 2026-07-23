@@ -757,7 +757,7 @@ Good fit. Blackboard = shared filesystem or SQLite. Agents = subprocesses pollin
 - [ ] Observability dashboard (TUI showing agent status)
 - [ ] SQLite upgrade (for queryable history)
 
-### Phase 4: Production Hardening
+### Phase 4: Production Readiness
 - [ ] Redis integration (optional, for high-frequency tasks)
 - [ ] Event sourcing (audit trail)
 - [ ] Failure recovery (retry logic, checkpointing)

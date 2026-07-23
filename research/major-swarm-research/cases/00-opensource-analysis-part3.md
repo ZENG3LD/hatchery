@@ -271,7 +271,7 @@ Comprehensive analysis of open source repositories, frameworks, and tools for mu
 - **Mini-SWE-agent**: 100-line agent that scores >74% on SWE-bench verified
 - **Academic provenance**: John Yang, Carlos E. Jimenez, Alexander Wettig, Kilian Lieret, Shunyu Yao, Karthik Narasimhan, Ofir Press
 - **State-of-the-art**: Top performance on SWE-bench benchmark
-- **Offensive cybersecurity**: Can also be used for finding vulnerabilities
+- **Vulnerability discovery**: Can also be used for finding vulnerabilities
 - **Competitive coding**: Applicable to coding challenges beyond GitHub issues
 - **Organization**: https://github.com/SWE-agent
 
