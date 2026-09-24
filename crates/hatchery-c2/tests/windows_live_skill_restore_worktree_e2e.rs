@@ -91,7 +91,7 @@ impl Provider {
 
     fn helper_name(self) -> &'static str {
         match self {
-            Self::Claude => "session-summary.exe",
+            Self::Claude => "claude-session-restore.exe",
             Self::Codex => "codex-session-restore.exe",
         }
     }
@@ -484,11 +484,11 @@ fn assert_installed_skills_match_canonical() {
     let skill_pairs = [
         (
             profile.join(".codex/skills/codex-restore-session/SKILL.md"),
-            workspace.join("codex-session-restore/skill/codex-restore-session/SKILL.md"),
+            workspace.join("session-restore/skills/codex/SKILL.md"),
         ),
         (
             profile.join(".claude/skills/restore-session/SKILL.md"),
-            workspace.join("claude-session-restore/skill/SKILL.md"),
+            workspace.join("session-restore/skills/claude/SKILL.md"),
         ),
     ];
     for (installed, canonical) in skill_pairs {
