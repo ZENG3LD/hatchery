@@ -1,0 +1,184 @@
+# hatchery — agent control plane, harness and TUI
+
+hatchery is the agent control plane: node (owns PTY/processes/workspaces/
+worktrees) + C2 (relay) + Harness (task kernel, SQLite SWC) + TUI. It is
+built on the `gate4agent` library — the transport core that spawns,
+streams, and resumes CLI coding-agent subprocesses over PTY/pipe/ACP/daemon
+transports — as a sibling repository at `..\gate4agent`, linked by path,
+not vendored. Agent mail is `mail4agent` (`:18301`), its own service: the
+harness holds no mailbox, and the TUI does not read mail4agent yet. Both
+clients speak ONLY the harness operator wire: `gate4agent-tui` against a
+durable harness, and `gate4agent-tui-light` against
+`hatchery-harness-light`, which it hosts in-process over c2 with no task
+kernel behind it. Neither app speaks c2 itself. Binary names, pipe names,
+`GATE4AGENT_*` env vars, and the `g4aho_` credential prefix are inherited
+unchanged from `gate4agent` — a later step renames these runtime
+identifiers to `hatchery-*`. Plans/handoffs/audits live in the owner's
+private workspace documentation tree, not in this repository.
+
+## Local endpoints & credentials
+
+- node pipe `\\.\pipe\gate4agent-node`, api `:18310`; primary c2 pipe
+  `\\.\pipe\gate4agent-c2`, api `:18320`; harness operator read `:18330`.
+- The harness does NOT share the primary c2. It connects through a SECOND
+  c2 instance of its own on pipe `\\.\pipe\gate4agent-c2-harness`, api
+  `:18321`, so a live stack is four processes: node, two c2, harness.
+  Bringing one up without that second instance fails at the harness with
+  "`--c2-endpoint` connect failed ... (os error 2)".
+- A c2 instance needs the per-node secret, not just `GATE4AGENT_C2_TOKEN`:
+  without `GATE4AGENT_NODE_TOKEN_<NORMALIZED_ID>` it refuses to start.
+  The normalized id is the `--node-id` uppercased with every non-alnum
+  character replaced by `_`.
+- Operator credential: `g4aho_` + 64 hex, env
+  `GATE4AGENT_HARNESS_OPERATOR_TOKEN`. Node/c2 secrets:
+  `GATE4AGENT_NODE_TOKEN`, `GATE4AGENT_NODE_TOKEN_<NORMALIZED_ID>`
+  (uppercase, non-alnum→`_`), `GATE4AGENT_C2_TOKEN`. Env-only, never argv.
+- Windows E2Es run only via
+  `..\gate4agent\target\release\windows-headless-supervisor.exe <ms> <ABS exe> --exact <fn>`
+  — that binary belongs to `gate4agent-testkit`, which stays in `gate4agent`,
+  not here.
+- `crates\hatchery-tui` is its own cargo workspace and depends on
+  `uzor-tui` from crates.io — every TUI build compiles the uzor
+  dependency tree, so it is a slow build from cold and a large target. It
+  also links `gate4agent-arcade`'s engine and `pet-bastion` game crates by
+  path (`..\gate4agent-arcade\...`, a further sibling repository) for the
+  status bar's pet overlay.
+
+## Running the live stack and the TUI
+
+Bring the four processes up in order — node, both c2, harness — then the
+TUI. Secrets live in the `gate4agent` repo, at
+`..\gate4agent\.run\p0-live-20260818\relaunch.env`, and are loaded into the
+environment; never pass them in argv. That relaunch env has not moved into
+`hatchery` — it stays there until the runtime-identifier rename.
+
+```powershell
+$H    = "C:\Users\VA PC\CODING\ML_TRADING\nemo\hatchery"
+$G    = "C:\Users\VA PC\CODING\ML_TRADING\nemo\gate4agent"
+$R    = Join-Path $G ".run\p0-live-20260818"
+$bin  = Join-Path $H "target\release"
+Get-Content (Join-Path $R "relaunch.env") | ForEach-Object {
+  if ($_ -match '^([A-Z0-9_]+)=(.*)$') { Set-Item -Path ("env:" + $matches[1]) -Value $matches[2] } }
+$env:GATE4AGENT_NODE_TOKEN_OPBOX_WINDOWS_X86_64_1D67E837F8FA = $env:GATE4AGENT_NODE_TOKEN
+```
+
+`Start-Process -ArgumentList` must get ONE quoted string, not an array.
+An array is joined with spaces and nothing is re-quoted, so every path
+holding a space is split — node reports `workspace 'gate4agent' root
+'C:\Users\VA' is invalid: path is not a directory` and exits.
+
+**node, both c2, and the harness are spawned headless** — pass
+`-WindowStyle Hidden` and redirect both streams to a log in `$R`. They are
+background services with nothing to show; a console window per process
+clutters the desktop the operator is actually working in, and their output
+belongs in a file you can read afterwards anyway. The TUI is the only one
+of the five that gets a window, and it gets it from `wt`.
+
+- node — `--node-id opbox-windows-x86-64-1d67e837f8fa`, one
+  `--workspace "<name>=<abs path>"` per repo, a matching
+  `--worktree-mode <name>=manual`, one
+  `--history-root "<provider>|<layout>|<abs root>"` per provider, then
+  `--endpoint \.\pipe\gate4agent-node --api-listen 127.0.0.1:18310`.
+- c2 (primary) — `--node opbox-windows-x86-64-1d67e837f8fa=\.\pipe\gate4agent-node
+  --api-listen 127.0.0.1:18320 --control-endpoint \.\pipe\gate4agent-c2`.
+- c2 (harness's own) — the same line with `:18321` and
+  `\.\pipe\gate4agent-c2-harness`.
+- harness — `--harness-db "$R\harness.sqlite3" --observation-db
+  "$R\observation.sqlite3" --c2-endpoint \.\pipe\gate4agent-c2-harness
+  --read-bind 127.0.0.1:18330`.
+
+Up means all four ports listening and node `/health` returning 200. c2's
+`/status` wants a credential, so a bare request coming back non-2xx is not
+by itself a failure — read `<name>.err.log` in `$R` before deciding.
+
+Build the TUI from INSIDE its own workspace. `cargo build -p hatchery-tui`
+at the repo root fails with `did not match any packages`, because
+`crates\hatchery-tui\Cargo.toml` declares its own `[workspace]`:
+
+```powershell
+cd (Join-Path $H "crates\hatchery-tui")
+cargo build --release --bin gate4agent-tui --bin gate4agent-tui-light
+```
+
+Launch it in Windows Terminal exactly like this, exe path quoted:
+
+```powershell
+$tui = Join-Path $H "crates\hatchery-tui\target\release\gate4agent-tui.exe"
+$q   = '"'
+Start-Process "$env:LOCALAPPDATA\Microsoft\WindowsApps\wt.exe" `
+  -ArgumentList "-w new --title G4A $q$tui$q --harness-operator 127.0.0.1:18330 --style gate"
+```
+
+### A monochrome TUI is `--style inherit`, not a broken renderer
+
+`--style` picks the palette, and `inherit` means "paint with whatever
+palette the host terminal has". On a terminal left at its stock palette
+that resolves to one foreground on one background for the ENTIRE app —
+borders, tabs, status fields, icons and PTY cells alike. It looks exactly
+like an app that lost its colours, and it is stored in `tui.conf`
+(`style=inherit`), so it survives restarts and follows you into every new
+window until something rewrites it.
+
+`gate` is the app's own palette and is now the default. Launch with
+`--style gate`, or press Ctrl+T to cycle, if a session ever comes up
+colourless. Before hunting a colour bug anywhere else in the stack, read
+`%LOCALAPPDATA%\Gate4Agent\tui.conf` and check that line — a whole
+investigation into `TERM`, `COLORTERM`, `NO_COLOR`, the node's PTY
+environment and the vt100 bridge ended at that one setting.
+
+Separately, and genuinely: the node passes its own environment to every
+PTY child, so a `NO_COLOR=1` in whatever shell launched the node reaches
+the provider CLI and turns its output monochrome for real. Agent harnesses
+commonly set it. Clear it before starting the node.
+
+**Do not add flags to that line.** `--size` and `--pos` are window options
+accepted only BEFORE `-w`; placed after it, `wt` reads the tail as the
+command to run, opens a window titled `Error` and starts nothing. They are
+not options of `new-tab` at all. Want a bigger window — resize it by hand.
+
+`wt` exits 0 whether or not it started anything, and `MainWindowTitle` is a
+property of the PROCESS while a single `WindowsTerminal` process hosts every
+window — so an unrelated window's title gets read back and believed. Verify
+a launch by the thing you launched: `Get-Process gate4agent-tui`.
+
+### Screenshotting and driving the window
+
+**Capture with `PrintWindow(hwnd, dc, PW_RENDERFULLCONTENT /* 2 */)`, never
+`CopyFromScreen`.** `PrintWindow` asks the window to render itself, so it
+works while the window is behind others or partly off-screen, and it never
+steals focus from the operator. `CopyFromScreen` reads the desktop at the
+window's rect and returns whatever is on top of it — that is how a capture
+comes back showing an unrelated application and gets believed.
+
+Driving it with synthetic input needs two details, and it silently does
+nothing without either:
+
+- **Keys need a scan code.** `keybd_event(vk, 0, ...)` is ignored by
+  Windows Terminal; pass `MapVirtualKey(vk, 0)` as the scan byte.
+- **Clicks need `MOUSEEVENTF_VIRTUALDESK`.** With
+  `MOVE|ABSOLUTE` (`0x8001`) alone the normalized coordinates are read
+  against the PRIMARY monitor, so every click lands on the wrong screen the
+  moment the window is on a second one. Use `0xC001` and normalize against
+  `SM_XVIRTUALSCREEN`/`SM_CXVIRTUALSCREEN`.
+
+Screen coordinates for a click come from `GetWindowRect` plus the offset
+measured in the `PrintWindow` bitmap — the bitmap is that rect, so the two
+line up directly.
+
+## Build output
+
+**One target directory per workspace: the root `target/` and the TUI's
+own `crates\hatchery-tui\target\`. Never a directory per task, agent or
+scenario.** Each such directory is a FULL copy of the dependency build —
+seven of them had accumulated to 52 GB, and the machine was failing
+builds outright (`rustc` exiting `STATUS_STACK_BUFFER_OVERRUN`, the shell
+reporting the paging file too small) until they were cleaned.
+
+The practice they came from was documented here as avoiding Cargo's build
+lock on parallel runs. That trade is not worth taking: the lock makes a
+second build WAIT, which is the point of it — it never corrupts anything
+and never loses work. Waiting is cheap; tens of gigabytes and a compiler
+that cannot allocate are not.
+
+`.gitignore` matches `target*/` rather than `target/` as a safety net for
+directories that already exist, not as permission to create more.
