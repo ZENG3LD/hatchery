@@ -1,0 +1,16 @@
+[package]
+name = "hatchery-observation-api"
+version = "0.2.37"
+edition = "2021"
+description = "Read-only monitoring domain contract built from bounded gate4agent observation facts"
+publish = false
+
+[lib]
+name = "hatchery_observation_api"
+
+[dependencies]
+hatchery-node-protocol = { path = "../hatchery-node-protocol" }
+hatchery-observation-protocol = { path = "../hatchery-observation-protocol" }
+gate4agent-types = { path = "../../../gate4agent/crates/gate4agent-types" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"

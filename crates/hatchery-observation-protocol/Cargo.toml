@@ -1,0 +1,16 @@
+[package]
+name = "hatchery-observation-protocol"
+version = "0.2.37"
+edition = "2021"
+description = "Dependency-light, versioned observation wire contract for gate4agent provider-session monitoring"
+publish = false
+
+[lib]
+name = "hatchery_observation_protocol"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+serde_json = "1"

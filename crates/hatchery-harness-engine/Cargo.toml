@@ -1,0 +1,17 @@
+[package]
+name = "hatchery-harness-engine"
+version = "0.2.37"
+edition = "2021"
+description = "Pure, prepare-then-accept state machine for the gate4agent harness task/run/delivery kernel"
+publish = false
+
+[lib]
+name = "hatchery_harness_engine"
+
+[dependencies]
+hatchery-harness-protocol = { path = "../hatchery-harness-protocol" }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+serde_json = "1"

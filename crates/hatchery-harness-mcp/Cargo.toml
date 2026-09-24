@@ -1,0 +1,38 @@
+[package]
+name = "hatchery-harness-mcp"
+version = "0.2.37"
+edition = "2021"
+description = "MCP stdio adapter exposing the grant-filtered gate4agent harness read API to MCP clients"
+publish = false
+
+[lib]
+name = "hatchery_harness_mcp"
+
+[[bin]]
+name = "gate4agent-harness-mcp"
+path = "src/main.rs"
+
+[[bin]]
+name = "acp_fixture_agent"
+path = "src/bin/acp_fixture_agent.rs"
+
+[dependencies]
+hatchery-harness-client = { path = "../hatchery-harness-client" }
+hatchery-node-protocol = { path = "../hatchery-node-protocol" }
+hatchery-node-wire = { path = "../hatchery-node-wire" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[dev-dependencies]
+hatchery-c2 = { path = "../hatchery-c2" }
+hatchery-c2-client = { path = "../hatchery-c2-client" }
+hatchery-harness-engine = { path = "../hatchery-harness-engine" }
+hatchery-harness-protocol = { path = "../hatchery-harness-protocol" }
+hatchery-harness-service = { path = "../hatchery-harness-service" }
+hatchery-node = { path = "../hatchery-node", features = ["fixture"] }
+hatchery-observation-service = { path = "../hatchery-observation-service" }
+gate4agent-testkit = { path = "../../../gate4agent/crates/gate4agent-testkit" }
+gate4agent-types = { path = "../../../gate4agent/crates/gate4agent-types" }
+tokio = { version = "1", features = ["full"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

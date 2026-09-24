@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/hatchery-build-stamp",
+    "crates/hatchery-node-protocol",
+    "crates/hatchery-node-wire",
+    "crates/hatchery-node",
+    "crates/hatchery-c2-protocol",
+    "crates/hatchery-c2-client",
+    "crates/hatchery-c2",
+    "crates/hatchery-harness-protocol",
+    "crates/hatchery-harness-api",
+    "crates/hatchery-harness-engine",
+    "crates/hatchery-harness-delivery",
+    "crates/hatchery-harness-service",
+    "crates/hatchery-harness-light",
+    "crates/hatchery-harness-client",
+    "crates/hatchery-harness-mcp",
+    "crates/hatchery-observation-protocol",
+    "crates/hatchery-observation-api",
+    "crates/hatchery-observation-engine",
+    "crates/hatchery-observation-store",
+    "crates/hatchery-observation-service",
+]
+exclude = [
+    "crates/hatchery-tui",
+]

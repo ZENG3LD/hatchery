@@ -1,0 +1,34 @@
+[package]
+name = "hatchery-node-wire"
+version = "0.2.37"
+edition = "2021"
+description = "Reusable local wire client, transport, and authentication primitives for gate4agent nodes"
+publish = false
+
+[lib]
+name = "hatchery_node_wire"
+
+[dependencies]
+hatchery-node-protocol = { path = "../hatchery-node-protocol" }
+thiserror = "2"
+tokio = { version = "1", features = ["io-util", "net", "rt", "sync", "time"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+ring = "=0.17.14"
+
+[dev-dependencies]
+gate4agent-types = { path = "../../../gate4agent/crates/gate4agent-types" }
+tokio = { version = "1", features = ["macros", "net", "rt"] }
+
+[features]
+default = []
+fixture = []

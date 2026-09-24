@@ -1,1 +1,13 @@
-target/
+# Build output: one target per workspace (root, and the TUI's own nested
+# workspace). `target*/` is a safety net, not licence for more.
+target*/
+
+# Live-stack run directories (logs, per-run sqlite, tokens, screenshots)
+/.run/
+
+# The TUI icon bake tool's downloaded-SVG scratch caches (reproducible from
+# tools/bake_icons.py; the checked-in src/icons/*.rgba are the source of truth)
+crates/hatchery-tui/tools/.codicon-cache/
+crates/hatchery-tui/tools/.lucide-cache/
+__pycache__/
+*.pyc

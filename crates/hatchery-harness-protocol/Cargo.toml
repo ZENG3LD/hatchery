@@ -1,0 +1,16 @@
+[package]
+name = "hatchery-harness-protocol"
+version = "0.2.37"
+edition = "2021"
+description = "Bounded, privacy-minimized domain contract (tasks, runs, deliveries) for the gate4agent harness kernel"
+publish = false
+
+[lib]
+name = "hatchery_harness_protocol"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[dev-dependencies]
+serde_json = "1"
