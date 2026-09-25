@@ -19,7 +19,6 @@ gate4agent-handle = { path = "../../../gate4agent/crates/gate4agent-handle" }
 hatchery-node-protocol = { path = "../hatchery-node-protocol" }
 hatchery-node-wire = { path = "../hatchery-node-wire" }
 gate4agent-runtime-native = { path = "../../../gate4agent/crates/gate4agent-runtime-native" }
-gate4agent-shell-managed-hooks = { path = "../../../gate4agent/crates/gate4agent-shell-managed-hooks" }
 gate4agent-testkit = { path = "../../../gate4agent/crates/gate4agent-testkit", optional = true }
 gate4agent-types = { path = "../../../gate4agent/crates/gate4agent-types" }
 ring = "=0.17.14"

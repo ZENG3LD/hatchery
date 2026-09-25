@@ -163,7 +163,7 @@ use ring::digest::{digest, SHA256};
 use gate4agent_catalog::{builtin_registry, AgentRegistry};
 use gate4agent_handle::{EventSubscription, Gate4AgentHandle, PortDispatchError};
 use gate4agent_runtime_native::{
-    HookIngressConfig, NativeMcpServerLaunchOverlay, NativeInstanceLaunchOverlay,
+    NativeMcpServerLaunchOverlay, NativeInstanceLaunchOverlay,
     NativeLaunchEnvironmentOverlay,
     NativeHistoryConfig, NativeLaunchProfileControl, NativeRuntime, NativeRuntimeConfig,
     NativeSessionCatalogAuthority, NativeSessionCatalogError, NativeSessionPreviewError,
@@ -559,9 +559,14 @@ fn observation_error_detail(message: &str) -> String {
 
 fn observation_evidence(family: AdapterFamily) -> Option<ObservationEvidenceV1> {
     match family {
-        AdapterFamily::PtySemantic => Some(ObservationEvidenceV1::PtyHint),
-        AdapterFamily::Hook | AdapterFamily::ManagedHook => {
-            Some(ObservationEvidenceV1::ManagedHook)
+        // Lifecycle hooks are retired (owner ruling 2026-09-25): nothing
+        // produces an `AdapterFamily::Hook`/`ManagedHook`-sourced observation
+        // anymore. Both fall through to the same evidence a PTY-transport
+        // session otherwise reports; `ObservationEvidenceV1::ManagedHook`
+        // stays defined on the wire (schema/wire-compat, not a code-removal
+        // question) but this node stops producing it.
+        AdapterFamily::PtySemantic | AdapterFamily::Hook | AdapterFamily::ManagedHook => {
+            Some(ObservationEvidenceV1::PtyHint)
         }
         AdapterFamily::Pipe | AdapterFamily::OneShot | AdapterFamily::Acp => {
             Some(ObservationEvidenceV1::StructuredProvider)
@@ -2512,9 +2517,6 @@ impl NodeServer {
             spec.detection.command = format!("gate4agent-{provider_id}-context-fixture.cmd");
             spec.detection.aliases.clear();
             spec.capabilities.adapters.history = provider.capabilities.adapters.history.clone();
-            if monitored_provider {
-                spec.capabilities.adapters.hook = provider.capabilities.adapters.hook.clone();
-            }
             if provider_id == "codex" {
                 let script = spec.launch.fixed_args.pop().ok_or_else(|| {
                     NodeServerError::Registry("PTY fixture script is unavailable".to_owned())
@@ -3153,19 +3155,9 @@ try { $contextHash = ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadA
         shared.reconcile_managed_worktrees().await;
         shared.retire_unavailable_session_records().await;
         shared.reconcile_context_pack_exports().await;
-        // The loopback hook ingress still starts, but the node no longer
-        // writes provider Hook configuration anywhere. It used to install
-        // the fleet's hooks into each provider's GLOBAL config
-        // (~/.claude/settings.json, ~/.codex/hooks.json, Kimi's config.toml,
-        // Grok's hooks dir), so every CLI session on the machine -- not just
-        // the ones this node spawns -- started a process per hook event, and
-        // under load those timed out and broke the user's own CLIs. Sessions
-        // are observed through ACP where a provider has it; hooks are not the
-        // way to get what ACP gives.
-        runtime
-            .start_hook_ingress(HookIngressConfig::default())
-            .await
-            .map_err(|error| NodeServerError::HookIngressStartup(error.to_string()))?;
+        // Lifecycle hooks are retired (owner ruling 2026-09-25): the node
+        // observes sessions through ACP where a provider has it; there is no
+        // hook ingress.
         let endpoint = config.endpoint.clone();
         let call_home = config.call_home;
         let api_listen = config.api_listen;
@@ -3229,7 +3221,6 @@ try { $contextHash = ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadA
                 }
             }
         };
-        runtime.stop_hook_ingress().await;
         result
     }
 }
@@ -3381,11 +3372,6 @@ async fn drive_runtime_until_shutdown(
         // so "nothing" here means nothing OBSERVABLE left this iteration,
         // matching what a reader would assume from `drive_loop_iterations`'s
         // own field name, not that the tick itself was free of work.
-        *shared
-            .hook_ingress_outcomes
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
-            (runtime.hook_event_outcomes(), runtime.active_hook_routes());
         shared.drive_loop_iterations_total.fetch_add(1, Ordering::Relaxed);
         if tick_result.observations_applied == 0 && events_drained == 0 {
             shared.drive_loop_iterations_idle.fetch_add(1, Ordering::Relaxed);
@@ -3815,15 +3801,7 @@ struct NodeShared {
     /// `drive_runtime_until_shutdown` that increments these. Read twice
     /// and divide by the interval, same rule as `connections` above --
     /// `idle / total` is backlog item 5's "wake on work" number.
-    /// Latest read of the hook ingress's outcome counters plus its live
-    /// route count, refreshed once per drive-loop iteration alongside the
-    /// other profiles. Both are plain integers -- no percentile sort behind
-    /// them -- so unlike a profile snapshot this costs nothing to keep warm.
-    hook_ingress_outcomes: Mutex<(gate4agent_runtime_native::HookIngressEventOutcomes, usize)>,
-    /// Lifetime count of control commands the kernel refused. Read it
-    /// against the hook ingress's own dispatched total: events arriving and
-    /// commands being rejected at the same rate is a policy refusal, not a
-    /// delivery failure.
+    /// Lifetime count of control commands the kernel refused.
     rejected_commands_total: AtomicU64,
     /// The named reason behind a recent kernel rejection, by the
     /// `CommandId` `dispatch_bounded` handed back when it enqueued that
@@ -4191,7 +4169,6 @@ impl NodeShared {
             native_session_gauge: AtomicUsize::new(0),
             connection_loop_iterations: AtomicU64::new(0),
             connection_events_sent: AtomicU64::new(0),
-            hook_ingress_outcomes: Mutex::new(Default::default()),
             rejected_commands_total: AtomicU64::new(0),
             rejected_command_reasons: Mutex::new(BTreeMap::new()),
             drive_loop_iterations_total: AtomicU64::new(0),
@@ -17548,8 +17525,6 @@ pub enum NodeServerError {
     Registry(String),
     #[error("node provider contract manifest is invalid: {0}")]
     ProviderContractManifest(String),
-    #[error("node hook ingress startup failed: {0}")]
-    HookIngressStartup(String),
     #[error("named pipe I/O failed: {0}")]
     Io(#[from] io::Error),
     #[error("node HTTP observer failed: {0}")]
@@ -23791,10 +23766,10 @@ mod tests {
         let claude = AgentId::new("claude").unwrap();
         let standard_claude = standard.get(&claude).unwrap();
         let monitoring_claude = monitoring.get(&claude).unwrap();
-        assert_eq!(
-            monitoring_claude.capabilities.adapters.hook.as_ref().unwrap().id.as_str(),
-            "claude-code",
-        );
+        // Lifecycle hooks are retired (owner ruling 2026-09-25): neither the
+        // standard nor the monitoring fixture declares a hook adapter
+        // anymore.
+        assert!(monitoring_claude.capabilities.adapters.hook.is_none());
         assert_eq!(
             monitoring_claude.capabilities.adapters.history,
             standard_claude.capabilities.adapters.history,
@@ -23803,17 +23778,7 @@ mod tests {
         let codex = AgentId::new("codex").unwrap();
         let standard_codex = standard.get(&codex).unwrap();
         let monitoring_codex = monitoring.get(&codex).unwrap();
-        assert_eq!(
-            monitoring_codex
-                .capabilities
-                .adapters
-                .hook
-                .as_ref()
-                .unwrap()
-                .id
-                .as_str(),
-            "codex",
-        );
+        assert!(monitoring_codex.capabilities.adapters.hook.is_none());
         assert_eq!(
             monitoring_codex.capabilities.adapters.history,
             standard_codex.capabilities.adapters.history,
@@ -24290,8 +24255,6 @@ mod tests {
                 ("claude", AdapterFamily::PtySemantic, "claude-code", "gate4agent-adapter/v1"),
                 ("claude", AdapterFamily::Pipe, "claude-code", "gate4agent-adapter/v1"),
                 ("claude", AdapterFamily::Acp, "claude-code", "gate4agent-adapter/v1"),
-                ("claude", AdapterFamily::Hook, "claude-code", "gate4agent-adapter/v1"),
-                ("claude", AdapterFamily::ManagedHook, "claude", "gate4agent-managed-hooks/orca-d8629c4/v1"),
                 ("claude", AdapterFamily::OneShot, "claude", "gate4agent-inline/claude-code-2.1/v1"),
                 ("claude", AdapterFamily::History, "claude-code", "gate4agent-adapter/v1"),
                 ("claude", AdapterFamily::Resume, "claude-code", "gate4agent-adapter/v1"),
@@ -24299,22 +24262,16 @@ mod tests {
                 ("codex", AdapterFamily::PtySemantic, "codex", "gate4agent-adapter/v1"),
                 ("codex", AdapterFamily::Pipe, "codex", "gate4agent-adapter/v1"),
                 ("codex", AdapterFamily::Acp, "codex", "gate4agent-adapter/v1"),
-                ("codex", AdapterFamily::Hook, "codex", "gate4agent-adapter/v1"),
-                ("codex", AdapterFamily::ManagedHook, "codex", "gate4agent-managed-hooks/orca-d8629c4/v1"),
                 ("codex", AdapterFamily::OneShot, "codex", "gate4agent-inline/codex-cli-0.144/v1"),
                 ("codex", AdapterFamily::History, "codex", "gate4agent-adapter/v1"),
                 ("codex", AdapterFamily::Resume, "codex", "gate4agent-adapter/v1"),
                 ("codex", AdapterFamily::SessionOptions, "codex", "gate4agent-session-options/orca-d8629c4/v1"),
                 ("grok", AdapterFamily::Acp, "grok", "gate4agent-adapter/v1"),
-                ("grok", AdapterFamily::Hook, "grok", "gate4agent-adapter/v1"),
-                ("grok", AdapterFamily::ManagedHook, "grok", "gate4agent-managed-hooks/orca-d8629c4/v1"),
                 ("grok", AdapterFamily::History, "grok", "gate4agent-adapter/v1"),
                 ("grok", AdapterFamily::Resume, "grok", "gate4agent-adapter/v1"),
                 ("kimi", AdapterFamily::PtySemantic, "kimi", "gate4agent-adapter/v1"),
                 ("kimi", AdapterFamily::Pipe, "kimi", "gate4agent-adapter/v1"),
                 ("kimi", AdapterFamily::Acp, "kimi", "gate4agent-adapter/v1"),
-                ("kimi", AdapterFamily::Hook, "kimi", "gate4agent-adapter/v1"),
-                ("kimi", AdapterFamily::ManagedHook, "kimi", "gate4agent-managed-hooks/orca-d8629c4/v1"),
                 ("kimi", AdapterFamily::OneShot, "kimi", "gate4agent-inline/kimi-code-0.31/v1"),
                 ("kimi", AdapterFamily::History, "kimi", "gate4agent-adapter/v1"),
                 ("kimi", AdapterFamily::Resume, "kimi", "gate4agent-adapter/v1"),
