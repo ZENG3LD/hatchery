@@ -63,7 +63,6 @@ use crate::workspace_file_windows::{
     WORKSPACE_ENTRY_CREATE_CANCELED, WORKSPACE_ENTRY_CREATE_COMMITTING,
     WORKSPACE_ENTRY_CREATE_PENDING,
 };
-use crate::managed_hooks;
 use crate::platform;
 use crate::provider_runtime::{
     require_policy, ProviderRuntimeAdmissionError, ProviderRuntimeMonitor,
@@ -3154,31 +3153,19 @@ try { $contextHash = ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadA
         shared.reconcile_managed_worktrees().await;
         shared.retire_unavailable_session_records().await;
         shared.reconcile_context_pack_exports().await;
-        let hook_ingress_endpoint = runtime
+        // The loopback hook ingress still starts, but the node no longer
+        // writes provider Hook configuration anywhere. It used to install
+        // the fleet's hooks into each provider's GLOBAL config
+        // (~/.claude/settings.json, ~/.codex/hooks.json, Kimi's config.toml,
+        // Grok's hooks dir), so every CLI session on the machine -- not just
+        // the ones this node spawns -- started a process per hook event, and
+        // under load those timed out and broke the user's own CLIs. Sessions
+        // are observed through ACP where a provider has it; hooks are not the
+        // way to get what ACP gives.
+        runtime
             .start_hook_ingress(HookIngressConfig::default())
             .await
             .map_err(|error| NodeServerError::HookIngressStartup(error.to_string()))?;
-        // Installs the fleet's native provider Hook contract (Grok's
-        // hooks/gate4agent-status.json, Kimi's config.toml block, ...) so
-        // this loopback ingress actually receives events. This is an
-        // observability channel, not a dependency: every generated script
-        // reads GATE4AGENT_HOOK_URL/_TOKEN/_ROUTE from the environment at
-        // invocation time and exits 0 silently when any is missing, so it
-        // is safe to install once here and leave it behind across restarts
-        // -- a provider without it still spawns, still runs, still
-        // delivers prompts. A failure to install for one provider is
-        // logged and never stops another provider or fails node startup.
-        match active_registry() {
-            Ok(fleet) => {
-                if let Some(manager) = managed_hooks::resolve_manager_from_environment() {
-                    managed_hooks::install_fleet(&manager, fleet.iter(), &hook_ingress_endpoint);
-                }
-            }
-            Err(error) => tracing::warn!(
-                error = %error,
-                "failed to resolve the managed-hook fleet catalog; skipping managed provider hook installation"
-            ),
-        }
         let endpoint = config.endpoint.clone();
         let call_home = config.call_home;
         let api_listen = config.api_listen;
@@ -3243,14 +3230,6 @@ try { $contextHash = ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadA
             }
         };
         runtime.stop_hook_ingress().await;
-        // Only the published endpoint file goes -- it carries a live
-        // token. The provider Hook configuration and generated scripts
-        // stay installed: they are already inert without this file, so
-        // uninstalling them on every stop would churn the user's provider
-        // config for no gain.
-        if let Some(manager) = managed_hooks::resolve_manager_from_environment() {
-            managed_hooks::remove_published_endpoint(&manager);
-        }
         result
     }
 }

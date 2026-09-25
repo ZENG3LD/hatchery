@@ -31,7 +31,6 @@ mod workspace_file_unix;
 mod platform;
 mod provider_runtime;
 mod spawn_spec;
-mod managed_hooks;
 mod server;
 
 pub use server::{
