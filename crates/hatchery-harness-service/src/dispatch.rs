@@ -721,7 +721,7 @@ const DERIVED_LAUNCH_PLAN_HARNESS_MCP_SUFFIX: &str = "-harness-mcp";
 /// `kimi acp` announces zero ACP session modes and takes no approval flags
 /// at all (measured 2026-09-09) -- the harness-MCP door reaches it only
 /// over PTY, where the Node already lands the door's env
-/// (`GATE4AGENT_HARNESS_SESSION_ENDPOINT`/`..._TOKEN`/the helper program
+/// (`HATCHERY_HARNESS_SESSION_ENDPOINT`/`..._TOKEN`/the helper program
 /// path) in the child's environment for the provider's own MCP client to
 /// read.
 const DERIVED_LAUNCH_PLAN_HARNESS_MCP_PTY_SUFFIX: &str = "-harness-mcp-pty";

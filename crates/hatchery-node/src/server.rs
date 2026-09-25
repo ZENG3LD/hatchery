@@ -164,7 +164,7 @@ use ring::digest::{digest, SHA256};
 use gate4agent_catalog::{builtin_registry, AgentRegistry};
 use gate4agent_handle::{EventSubscription, Gate4AgentHandle, PortDispatchError};
 use gate4agent_runtime_native::{
-    HookIngressConfig, NativeHarnessMcpLaunchOverlay, NativeInstanceLaunchOverlay,
+    HookIngressConfig, NativeMcpServerLaunchOverlay, NativeInstanceLaunchOverlay,
     NativeLaunchEnvironmentOverlay,
     NativeHistoryConfig, NativeLaunchProfileControl, NativeRuntime, NativeRuntimeConfig,
     NativeSessionCatalogAuthority, NativeSessionCatalogError, NativeSessionPreviewError,
@@ -200,7 +200,6 @@ use gate4agent_types::{
     HISTORY_DISCOVERY_LIMIT_MAX, WORKING_DIRECTORY_MAX_BYTES,
 };
 use std::collections::{BTreeMap, VecDeque};
-#[cfg(feature = "fixture")]
 use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -241,6 +240,36 @@ const NODE_AGENT_STREAM_BROADCAST_CAPACITY: usize = 256;
 /// set without ever lagging the one subscriber that matters, the harness's
 /// own connection, the way sharing the durable `event_tx`'s bus could.
 const NODE_HARNESS_MCP_PROXY_BROADCAST_CAPACITY: usize = MAX_HARNESS_MCP_PENDING_CALLS_PER_NODE;
+/// Env keys this node installs into the harness-MCP overlay it hands
+/// `gate4agent-runtime-native::NativeMcpServerLaunchOverlay::new` -- this
+/// node's own names for a caller-generic door; `gate4agent-harness-mcp`
+/// mirrors these three literals (`hatchery-harness-mcp/src/lib.rs`), the
+/// same way `gate4agent-shell-native` used to mirror the library's own
+/// well-known keys before this door went generic.
+const HATCHERY_HARNESS_SESSION_ENDPOINT_ENV: &str = "HATCHERY_HARNESS_SESSION_ENDPOINT";
+const HATCHERY_HARNESS_SESSION_TOKEN_ENV: &str = "HATCHERY_HARNESS_SESSION_TOKEN";
+/// The argv-free way a PTY-launched provider (or, today, only the Windows
+/// E2E fixture standing in for one) learns which helper binary to spawn as
+/// its own MCP server subprocess: it reads this key back out of its own
+/// inherited process environment. See
+/// `hatchery-harness-mcp/tests/windows_harness_mcp_e2e.rs`'s
+/// `h3b_provider_fixture_child`.
+const HATCHERY_HARNESS_MCP_PROGRAM_ENV: &str = "HATCHERY_HARNESS_MCP_PROGRAM";
+/// Mirror of `gate4agent_harness_mcp::HARNESS_MCP_TRACE_ENV` (this crate
+/// does not depend on `gate4agent-harness-mcp`, so the literal is
+/// duplicated rather than imported).
+const HATCHERY_HARNESS_MCP_TRACE_ENV: &str = "HATCHERY_HARNESS_MCP_TRACE";
+/// This node-process opt-in: when this exact process has a non-empty
+/// `HATCHERY_HARNESS_MCP_TRACE_DIR`, [`harness_mcp_trace_env_entry`] adds a
+/// fourth environment entry naming a trace file under that directory.
+/// Unset, the overlay carries no trace entry at all.
+const HATCHERY_HARNESS_MCP_TRACE_DIR_ENV: &str = "HATCHERY_HARNESS_MCP_TRACE_DIR";
+/// Legacy H2 keys this node scrubs from a PTY child's environment whenever
+/// it installs an H3B overlay -- kept as their original literal names on
+/// purpose: they exist only to erase a stale value a peer built before H2
+/// retired, never to be read by anything this node constructs today.
+const LEGACY_GATE4AGENT_HARNESS_READ_ENDPOINT_ENV: &str = "GATE4AGENT_HARNESS_READ_ENDPOINT";
+const LEGACY_GATE4AGENT_HARNESS_READ_CREDENTIAL_ENV: &str = "GATE4AGENT_HARNESS_READ_CREDENTIAL";
 const NODE_CONNECTION_EVENT_BURST_MAX: usize = 16;
 const CONTROL_EVENT_SUBSCRIPTION_CAPACITY: usize = 1_024;
 const MAX_PREAUTH_CONNECTIONS: usize = 32;
@@ -3861,7 +3890,7 @@ impl Drop for NodeShared {
             let instances = registry.shutdown();
             if let Some(control) = self.native_launch_profile_control.as_ref() {
                 for instance_id in instances {
-                    control.clear_native_harness_mcp_launch_overlay(instance_id);
+                    control.clear_native_mcp_server_launch_overlay(instance_id);
                 }
             }
         }
@@ -3910,7 +3939,7 @@ impl NativeHarnessMcpOverlayGuard {
 impl Drop for NativeHarnessMcpOverlayGuard {
     fn drop(&mut self) {
         self.control
-            .clear_native_harness_mcp_launch_overlay(self.instance_id);
+            .clear_native_mcp_server_launch_overlay(self.instance_id);
     }
 }
 
@@ -7106,7 +7135,7 @@ impl NodeShared {
             let instances = registry.shutdown();
             if let Some(control) = self.native_launch_profile_control.as_ref() {
                 for instance_id in instances {
-                    control.clear_native_harness_mcp_launch_overlay(instance_id);
+                    control.clear_native_mcp_server_launch_overlay(instance_id);
                 }
             }
         }
@@ -9921,7 +9950,7 @@ impl NodeShared {
             let removed = bindings.remove(&address.session.instance_id);
             self.clear_terminal_frame_watermark(address);
             if let Some(control) = self.native_launch_profile_control.as_ref() {
-                control.clear_native_harness_mcp_launch_overlay(
+                control.clear_native_mcp_server_launch_overlay(
                     address.session.instance_id,
                 );
             }
@@ -10267,7 +10296,7 @@ impl NodeShared {
                 registry.revoke_session(&address);
             }
             if let Some(control) = self.native_launch_profile_control.as_ref() {
-                control.clear_native_harness_mcp_launch_overlay(
+                control.clear_native_mcp_server_launch_overlay(
                     address.session.instance_id,
                 );
             }
@@ -12305,7 +12334,7 @@ impl NodeShared {
         let mut harness_mcp_overlay = if let Some(prepared) = harness_mcp {
             // Slice A(ii) of gate4agent-arc-mailbox-and-task-layer: the door
             // exists for PTY (env vars) and ACP (`session/new.mcpServers`,
-            // `gate4agent-shell-native`'s `harness_mcp_acp_server`) alike --
+            // `gate4agent-shell-native`'s `mcp_server_acp_entry`) alike --
             // both read the identical overlay resolved below, one as child
             // environment, the other translated into one stdio MCP server
             // entry. `Inline`/`Pipe` stays refused: this arc's proof is ACP
@@ -12322,24 +12351,46 @@ impl NodeShared {
             let control = self.native_launch_profile_control.clone().ok_or_else(|| {
                 failure(NodeFailureCode::HarnessMcpUnavailable, "harness MCP launch control is unavailable")
             })?;
-            let overlay = NativeHarnessMcpLaunchOverlay::new(
+            let mut env_entries = vec![
+                (
+                    OsString::from(HATCHERY_HARNESS_SESSION_ENDPOINT_ENV),
+                    prepared.endpoint().as_os_str().to_os_string(),
+                ),
+                (
+                    OsString::from(HATCHERY_HARNESS_SESSION_TOKEN_ENV),
+                    prepared.token().expose().into(),
+                ),
+                (
+                    OsString::from(HATCHERY_HARNESS_MCP_PROGRAM_ENV),
+                    prepared.helper_program().as_os_str().to_os_string(),
+                ),
+            ];
+            if let Some(trace_entry) = harness_mcp_trace_env_entry() {
+                env_entries.push(trace_entry);
+            }
+            let overlay = NativeMcpServerLaunchOverlay::new(
                 provider.clone(),
-                prepared.endpoint().as_os_str().to_os_string(),
-                prepared.token().expose().into(),
+                "hatchery",
                 prepared.helper_program().as_os_str().to_os_string(),
+                vec![OsString::from("--session-proxy")],
+                env_entries,
+                vec![
+                    OsString::from(LEGACY_GATE4AGENT_HARNESS_READ_ENDPOINT_ENV),
+                    OsString::from(LEGACY_GATE4AGENT_HARNESS_READ_CREDENTIAL_ENV),
+                ],
             ).map_err(|_| failure(
                 NodeFailureCode::HarnessMcpUnavailable,
                 "harness MCP launch overlay is unavailable",
             ))?;
             control
-                .install_native_harness_mcp_launch_overlay(instance_id, overlay)
+                .install_native_mcp_server_launch_overlay(instance_id, overlay)
                 .map_err(|_| failure(
                     NodeFailureCode::HarnessMcpUnavailable,
                     "harness MCP launch overlay could not be installed",
                 ))?;
             // State-change line: the overlay is installed and will be read
             // back by the PTY child's environment or, for ACP,
-            // `gate4agent-shell-native`'s `harness_mcp_acp_server` at spawn
+            // `gate4agent-shell-native`'s `mcp_server_acp_entry` at spawn
             // time -- no secrets here, only which instance/provider/mode
             // now carries a harness-MCP door.
             tracing::info!(
@@ -15813,7 +15864,7 @@ async fn process_request_inner(shared: &NodeShared, connection_id: u64, role: Cl
             if let (Some(control), Some(instance_id)) =
                 (shared.native_launch_profile_control.as_ref(), instance_id)
             {
-                control.clear_native_harness_mcp_launch_overlay(instance_id);
+                control.clear_native_mcp_server_launch_overlay(instance_id);
             }
             Ok(NodeResponse::Aborted { reservation_id, activation_digest })
         }
@@ -17174,6 +17225,31 @@ fn harness_mcp_failure(error: HarnessMcpProxyError) -> NodeFailure {
         HarnessMcpProxyError::ResponseTooLarge => NodeFailureCode::ResponseTooLarge,
     };
     failure(code, "harness MCP proxy operation failed")
+}
+
+/// Numbers each harness-MCP overlay this process constructs, in
+/// construction order -- moved here from `gate4agent-runtime-native`
+/// (the trace opt-in is this node's own concern now, not the library's).
+/// Two overlays built back to back in one node process still get distinct
+/// trace files.
+static NEXT_HARNESS_MCP_TRACE_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+
+/// Builds the optional fourth environment entry naming a stdio trace file
+/// for one harness-MCP overlay, gated on this process having opted in via
+/// [`HATCHERY_HARNESS_MCP_TRACE_DIR_ENV`]. Returns `None` when the
+/// directory is unset, empty, or not valid Unicode. Never creates the
+/// directory; that is the operator's job.
+fn harness_mcp_trace_env_entry() -> Option<(OsString, OsString)> {
+    let trace_dir = std::env::var(HATCHERY_HARNESS_MCP_TRACE_DIR_ENV).ok()?;
+    if trace_dir.is_empty() {
+        return None;
+    }
+    let sequence = NEXT_HARNESS_MCP_TRACE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let path = std::path::Path::new(&trace_dir).join(format!("harness-mcp-{sequence}.trace"));
+    Some((
+        OsString::from(HATCHERY_HARNESS_MCP_TRACE_ENV),
+        path.into_os_string(),
+    ))
 }
 
 fn spawn_deadline_remaining(deadline: Instant) -> Result<Duration, NodeFailure> {

@@ -28,7 +28,7 @@ pub const HARNESS_MCP_CREDENTIAL_ENV: &str = "GATE4AGENT_HARNESS_READ_CREDENTIAL
 /// Names the file the helper appends a raw JSON-RPC stdio trace to, when
 /// set. Debugging-only: absent by default, and its absence changes nothing
 /// about the stdio loop's behaviour. See [`HarnessMcpStdioTrace`].
-pub const HARNESS_MCP_TRACE_ENV: &str = "G4A_HARNESS_MCP_TRACE";
+pub const HARNESS_MCP_TRACE_ENV: &str = "HATCHERY_HARNESS_MCP_TRACE";
 
 const JSONRPC_VERSION: &str = "2.0";
 const SERVER_NAME: &str = "gate4agent-harness-mcp";
@@ -648,10 +648,8 @@ pub fn client_from_env() -> Result<HarnessReadClient, HarnessMcpStartupError> {
     HarnessReadClient::new(endpoint, credential).map_err(|_| HarnessMcpStartupError::Configuration)
 }
 
-pub const HARNESS_SESSION_PROXY_ENDPOINT_ENV: &str =
-    "GATE4AGENT_HARNESS_SESSION_ENDPOINT";
-pub const HARNESS_SESSION_PROXY_TOKEN_ENV: &str =
-    "GATE4AGENT_HARNESS_SESSION_TOKEN";
+pub const HARNESS_SESSION_PROXY_ENDPOINT_ENV: &str = "HATCHERY_HARNESS_SESSION_ENDPOINT";
+pub const HARNESS_SESSION_PROXY_TOKEN_ENV: &str = "HATCHERY_HARNESS_SESSION_TOKEN";
 
 pub fn session_proxy_client_from_env(
 ) -> Result<LocalSessionHarnessMcpClient, HarnessMcpStartupError> {
@@ -810,17 +808,17 @@ struct RunFinishArgs {
 /// server-qualified id resolves to the bare id `tools/list` actually
 /// advertises and this module matches against everywhere else.
 ///
-/// We advertise the MCP server as `"gate4agent"` and bare tool ids (e.g.
+/// We advertise the MCP server as `"hatchery"` and bare tool ids (e.g.
 /// `g4a_context_get`). codex, kimi, and claude forward that bare id
 /// unchanged. grok's third-party CLI instead forwards a server-qualified
-/// name -- `gate4agent__g4a_context_get`, or `mcp__gate4agent__g4a_context_get`
+/// name -- `hatchery__g4a_context_get`, or `mcp__hatchery__g4a_context_get`
 /// -- which a strict-equality match against the bare id would reject with
 /// "method not found". The longer prefix is checked first so a name that
 /// happens to carry both is not left half-stripped; a name with neither
 /// prefix (the bare-id case) is returned unchanged.
 fn strip_server_prefix(name: &str) -> &str {
-    const MCP_QUALIFIED_PREFIX: &str = "mcp__gate4agent__";
-    const SERVER_QUALIFIED_PREFIX: &str = "gate4agent__";
+    const MCP_QUALIFIED_PREFIX: &str = "mcp__hatchery__";
+    const SERVER_QUALIFIED_PREFIX: &str = "hatchery__";
     name.strip_prefix(MCP_QUALIFIED_PREFIX)
         .or_else(|| name.strip_prefix(SERVER_QUALIFIED_PREFIX))
         .unwrap_or(name)
@@ -1412,15 +1410,15 @@ mod tests {
 
     #[test]
     fn strip_server_prefix_strips_the_longer_prefix_first_and_leaves_bare_names_alone() {
-        assert_eq!(strip_server_prefix("mcp__gate4agent__g4a_task_create"), "g4a_task_create");
-        assert_eq!(strip_server_prefix("gate4agent__g4a_context_get"), "g4a_context_get");
+        assert_eq!(strip_server_prefix("mcp__hatchery__g4a_task_create"), "g4a_task_create");
+        assert_eq!(strip_server_prefix("hatchery__g4a_context_get"), "g4a_context_get");
         assert_eq!(strip_server_prefix("g4a_context_get"), "g4a_context_get");
         assert_eq!(strip_server_prefix("foo__g4a_context_get"), "foo__g4a_context_get");
     }
 
     /// grok's third-party MCP client forwards a server-qualified tool name
     /// instead of the bare id `tools/list` advertises. `tools_call` must
-    /// strip a leading `gate4agent__` or `mcp__gate4agent__` before matching
+    /// strip a leading `hatchery__` or `mcp__hatchery__` before matching
     /// against `allowed_tool_ids`/`HARNESS_READ_TOOL_IDS`/
     /// `HARNESS_WRITE_TOOL_IDS` and before `parse_tool_call`, so both
     /// prefixed spellings resolve exactly like the bare id -- while a bare
@@ -1449,25 +1447,28 @@ mod tests {
         }));
         assert_eq!(bare["result"]["isError"], false);
 
-        // `gate4agent__g4a_context_get` resolves to `g4a_context_get` and is
+        // `hatchery__g4a_context_get` resolves to `g4a_context_get` and is
         // served identically to the bare call above.
         let server_qualified = request(&mut server, json!({
             "jsonrpc":"2.0","id":3,"method":"tools/call",
-            "params":{"name":"gate4agent__g4a_context_get","arguments":{}}
+            "params":{"name":"hatchery__g4a_context_get","arguments":{}}
         }));
         assert_eq!(server_qualified["result"]["isError"], false);
         let text = server_qualified["result"]["content"][0]["text"].as_str().unwrap();
         let response: Value = serde_json::from_str(text).unwrap();
         assert_eq!(response["kind"], "context");
 
-        // `mcp__gate4agent__g4a_task_create` resolves to `g4a_task_create`
+        // `mcp__hatchery__g4a_task_create` resolves to `g4a_task_create`
         // -- it clears the allow-list and tool-id checks and reaches the
         // backend (this fixture doesn't implement the call, so it comes
         // back as a business-level refusal, never a protocol-level
         // "method not found").
         let mcp_qualified = request(&mut server, json!({
             "jsonrpc":"2.0","id":4,"method":"tools/call",
-            "params":{"name":"mcp__gate4agent__g4a_task_create","arguments":{}}
+            "params":{
+                "name":"mcp__hatchery__g4a_task_create",
+                "arguments":{"title":"fixture title","body":"fixture body"}
+            }
         }));
         assert!(mcp_qualified.get("error").is_none());
         assert_eq!(mcp_qualified["result"]["isError"], true);

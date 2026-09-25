@@ -9,8 +9,8 @@ fn main() {
     let mut writer = stdout.lock();
     let argv = std::env::args_os().collect::<Vec<_>>();
     let arguments = argv.get(1..).unwrap_or(&[]);
-    // `G4A_HARNESS_MCP_TRACE` is a debugging aid only: absent (the default),
-    // it changes nothing below. See `HarnessMcpStdioTrace`.
+    // `HATCHERY_HARNESS_MCP_TRACE` is a debugging aid only: absent (the
+    // default), it changes nothing below. See `HarnessMcpStdioTrace`.
     let mut trace = hatchery_harness_mcp::HarnessMcpStdioTrace::open_from_env(&argv);
     let trace_handle: Option<&mut dyn HarnessMcpTrace> =
         trace.as_mut().map(|trace| trace as &mut dyn HarnessMcpTrace);

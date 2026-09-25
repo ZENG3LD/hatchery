@@ -497,8 +497,8 @@ async fn operator_started_derived_acp_harness_mcp_plan_mints_self_grant_and_arms
     // checked against the exact provider binding `harness_mcp_acp_server`
     // (`gate4agent-shell-native/src/lib.rs`) installs: name `"gate4agent"`,
     // `args: ["--session-proxy"]`, and an `env` array of `{name, value}`
-    // pairs carrying `GATE4AGENT_HARNESS_SESSION_ENDPOINT`/
-    // `GATE4AGENT_HARNESS_SESSION_TOKEN` -- never the token's own value.
+    // pairs carrying `HATCHERY_HARNESS_SESSION_ENDPOINT`/
+    // `HATCHERY_HARNESS_SESSION_TOKEN` -- never the token's own value.
     let captured_params = timeout(Duration::from_secs(15), async {
         loop {
             if let Ok(bytes) = std::fs::read(&capture_path) {
@@ -528,11 +528,11 @@ async fn operator_started_derived_acp_harness_mcp_plan_mints_self_grant_and_arms
         .filter_map(|entry| entry.get("name").and_then(Value::as_str))
         .collect();
     assert!(
-        env_names.contains(&"GATE4AGENT_HARNESS_SESSION_ENDPOINT"),
+        env_names.contains(&"HATCHERY_HARNESS_SESSION_ENDPOINT"),
         "harness-MCP env is missing the session endpoint key: {env_names:?}",
     );
     assert!(
-        env_names.contains(&"GATE4AGENT_HARNESS_SESSION_TOKEN"),
+        env_names.contains(&"HATCHERY_HARNESS_SESSION_TOKEN"),
         "harness-MCP env is missing the session token key: {env_names:?}",
     );
 

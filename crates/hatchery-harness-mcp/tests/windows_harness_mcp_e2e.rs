@@ -731,8 +731,8 @@ impl ProviderFixtureMcp {
         }
         let mut child = command
             .arg("--session-proxy")
-            .env("GATE4AGENT_HARNESS_SESSION_ENDPOINT", endpoint)
-            .env("GATE4AGENT_HARNESS_SESSION_TOKEN", token)
+            .env("HATCHERY_HARNESS_SESSION_ENDPOINT", endpoint)
+            .env("HATCHERY_HARNESS_SESSION_TOKEN", token)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -872,9 +872,9 @@ fn assert_fixture_read_unavailable(reply: &Value) {
 #[test]
 #[ignore]
 fn h3b_provider_fixture_child() {
-    let endpoint = std::env::var_os("GATE4AGENT_HARNESS_SESSION_ENDPOINT");
-    let token = std::env::var("GATE4AGENT_HARNESS_SESSION_TOKEN").ok();
-    let program = std::env::var_os("GATE4AGENT_HARNESS_MCP_PROGRAM");
+    let endpoint = std::env::var_os("HATCHERY_HARNESS_SESSION_ENDPOINT");
+    let token = std::env::var("HATCHERY_HARNESS_SESSION_TOKEN").ok();
+    let program = std::env::var_os("HATCHERY_HARNESS_MCP_PROGRAM");
     if endpoint.is_none() && token.is_none() && program.is_none() {
         write_fixture_marker("parent.ready", "ready");
         wait_fixture_marker_blocking("parent.stop");
