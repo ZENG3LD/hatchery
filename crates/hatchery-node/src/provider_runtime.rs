@@ -642,34 +642,6 @@ mod tests {
         );
     }
 
-    /// Grok declares a hook adapter and no PTY-semantic adapter, and has no
-    /// verified vendor terminal contract at all. It must admit hook-sourced
-    /// ingestion without ever being read as having verified PTY-parsing
-    /// semantics -- the pair is the whole point of splitting the two
-    /// capabilities, so both halves are asserted here.
-    #[test]
-    fn grok_admits_hook_semantics_without_semantic_readiness() {
-        let launcher = std::env::temp_dir().join(format!(
-            "gate4agent-grok-hook-semantics-runtime-monitor-{}{}",
-            std::process::id(),
-            std::env::consts::EXE_SUFFIX,
-        ));
-        std::fs::write(&launcher, b"fixture launcher identity").unwrap();
-        let mut spec = builtin_registry().get_by_id("grok").unwrap().clone();
-        assert!(spec.capabilities.adapters.hook.is_some());
-        assert!(spec.capabilities.transports.pty_adapter.is_none());
-        spec.launch.program = launcher.to_string_lossy().into_owned();
-        let catalog = AgentRegistry::new([spec]).unwrap();
-        let monitor = ProviderRuntimeMonitor::new(&catalog);
-
-        let (_, admitted) = monitor.evaluate(&AgentId::new("grok").unwrap());
-        let policy = admitted.unwrap();
-        assert!(policy.hook_semantics);
-        assert!(!policy.semantic_readiness);
-
-        std::fs::remove_file(&launcher).unwrap();
-    }
-
     #[test]
     fn pty_sidecar_admission_skips_version_probe_and_a_non_sidecar_provider_does_not() {
         let launcher = std::env::temp_dir().join(format!(

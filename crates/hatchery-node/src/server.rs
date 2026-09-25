@@ -17714,19 +17714,11 @@ mod observation_projection_tests {
                 .collect::<Vec<_>>(),
             vec!["claude", "codex", "grok", "kimi"],
         );
-        assert_eq!(
-            adapters
-                .iter()
-                .filter(|contract| contract.family == AdapterFamily::Hook)
-                .map(|contract| (contract.provider.as_str(), contract.adapter_id.as_str()))
-                .collect::<Vec<_>>(),
-            vec![
-                ("claude", "claude-code"),
-                ("codex", "codex"),
-                ("grok", "grok"),
-                ("kimi", "kimi"),
-            ],
-        );
+        // Lifecycle hooks are retired (2026-09-25): no fleet member declares
+        // a Hook or ManagedHook adapter any more.
+        assert!(adapters
+            .iter()
+            .all(|contract| !matches!(contract.family, AdapterFamily::Hook | AdapterFamily::ManagedHook)));
         for (adapter, subagents) in [
             ("claude-code", true),
             ("codex", false),
@@ -17859,29 +17851,6 @@ mod observation_projection_tests {
                 ..
             } if source_adapter == "claude-code"
         ));
-    }
-
-    #[test]
-    fn hook_stop_turn_completed_has_no_usage_observation() {
-        let completed = provider_control_event_at(
-            AdapterFamily::Hook,
-            "claude-code",
-            1,
-            ProviderEvent::TurnCompleted {
-                usage: TokenUsage::default(),
-                is_cumulative: false,
-            },
-        );
-        let projected = provider_observations(&completed);
-        let ObservationKindV1::SourceCapabilities { capabilities, .. } = &projected[0].kind else {
-            panic!("expected source capabilities");
-        };
-        assert!(!capabilities.usage);
-        assert_eq!(timeline_observations(&projected).len(), 1);
-        assert_eq!(projected[1].kind, ObservationKindV1::TurnCompleted);
-        assert!(!projected
-            .iter()
-            .any(|observation| matches!(observation.kind, ObservationKindV1::Usage { .. })));
     }
 
     #[test]
@@ -18596,210 +18565,6 @@ mod observation_projection_tests {
     }
 
     #[test]
-    fn observation_projection_is_private_categorical_and_capability_gated() {
-        assert!(baseline_capabilities().unwrap().iter().any(|capability| {
-            capability.as_str() == NODE_OBSERVATION_EVENTS_CAPABILITY
-        }));
-
-        let tool = provider_control_event(
-            AdapterFamily::Hook,
-            ProviderEvent::ToolStarted {
-                id: "private-tool-id".to_owned(),
-                name: "PowerShell command containing a private path".to_owned(),
-                input_json: r#"{"prompt":"secret","path":"C:\\private"}"#.to_owned(),
-                agent_id: Some("private-provider-agent".to_owned()),
-            },
-        );
-        let projected = provider_observations(&tool);
-        assert_eq!(projected.len(), 1);
-        let timeline = timeline_observations(&projected);
-        assert_eq!(timeline.len(), 1);
-        let tool_observation = (*timeline[0]).clone();
-        assert_eq!(tool_observation.source_sequence, 9);
-        assert_eq!(tool_observation.evidence, ObservationEvidenceV1::ManagedHook);
-        let ObservationKindV1::ToolStarted {
-            correlation_id,
-            class,
-        } = &tool_observation.kind
-        else {
-            panic!("expected tool start observation");
-        };
-        assert!(correlation_id.starts_with("tool-"));
-        assert_eq!(class, "Shell");
-        let tool_correlation = correlation_id.clone();
-        let completed = provider_control_event(
-            AdapterFamily::Hook,
-            ProviderEvent::ToolCompleted {
-                id: "private-tool-id".to_owned(),
-                output: "private output".to_owned(),
-                is_error: false,
-                duration_ms: Some(7),
-                agent_id: None,
-                non_execution_kind: None,
-            },
-        );
-        let completed = provider_observations(&completed);
-        let completed = timeline_observations(&completed);
-        let ObservationKindV1::ToolCompleted { correlation_id, .. } = &completed[0].kind
-        else {
-            panic!("expected tool completion observation");
-        };
-        assert_eq!(correlation_id, &tool_correlation);
-        let gated = project_event_without_observation(NodeEventEnvelope {
-            sequence: 1,
-            event: NodeEvent::Observation {
-                address: address(),
-                observation: tool_observation.clone(),
-            },
-        });
-        assert!(gated.is_none());
-        let safe = project_event_without_observation_workflow_detail(NodeEventEnvelope {
-            sequence: 2,
-            event: NodeEvent::Observation {
-                address: address(),
-                observation: tool_observation,
-            },
-        });
-        assert!(safe.is_some());
-        let detail = project_event_without_observation_workflow_detail(NodeEventEnvelope {
-            sequence: 3,
-            event: NodeEvent::Observation {
-                address: address(),
-                observation: ObservationV1 {
-                    source_sequence: 10,
-                    observed_at_unix_ms: Some(1),
-                    evidence: ObservationEvidenceV1::StructuredProvider,
-                    kind: ObservationKindV1::Error {
-                        detail: "provider-error".to_owned(),
-                    },
-                    truncated: false,
-                },
-            },
-        });
-        assert!(detail.is_none());
-        let wire = serde_json::to_string(&projected).unwrap();
-        for private in [
-            "private-tool-id",
-            "private-provider-agent",
-            "secret",
-            "C:\\\\private",
-            "PowerShell command containing a private path",
-        ] {
-            assert!(!wire.contains(private));
-        }
-
-        let subagent = provider_control_event(
-            AdapterFamily::OneShot,
-            ProviderEvent::SubagentStarted {
-                agent_id: "raw-provider-subagent-id".to_owned(),
-                agent_type: Some("research-agent-with-private-label".to_owned()),
-                description: Some("private task description".to_owned()),
-            },
-        );
-        let projected = provider_observations(&subagent);
-        let timeline = timeline_observations(&projected);
-        let ObservationKindV1::SubagentStarted {
-            correlation_id,
-            class,
-        } = &timeline[0].kind
-        else {
-            panic!("expected subagent observation");
-        };
-        assert!(correlation_id.starts_with("sub-"));
-        assert_ne!(correlation_id, "raw-provider-subagent-id");
-        assert_eq!(class, "Search");
-        let wire = serde_json::to_string(&projected).unwrap();
-        assert!(!wire.contains("raw-provider-subagent-id"));
-        assert!(!wire.contains("private task description"));
-        assert!(!wire.contains("research-agent-with-private-label"));
-
-        let same_source_local_id = ProviderEvent::SubagentStarted {
-            agent_id: "same-provider-local-id".to_owned(),
-            agent_type: Some("task".to_owned()),
-            description: None,
-        };
-        let managed = provider_observations(&provider_control_event(
-            AdapterFamily::Hook,
-            same_source_local_id.clone(),
-        ));
-        let structured = provider_observations(&provider_control_event(
-            AdapterFamily::OneShot,
-            same_source_local_id,
-        ));
-        let managed = timeline_observations(&managed);
-        let structured = timeline_observations(&structured);
-        let ObservationKindV1::SubagentStarted {
-            correlation_id: managed_correlation,
-            ..
-        } = &managed[0].kind
-        else {
-            panic!("expected managed subagent observation");
-        };
-        let ObservationKindV1::SubagentStarted {
-            correlation_id: structured_correlation,
-            ..
-        } = &structured[0].kind
-        else {
-            panic!("expected structured subagent observation");
-        };
-        assert_ne!(managed_correlation, structured_correlation);
-
-        let thinking = provider_control_event(
-            AdapterFamily::Pipe,
-            ProviderEvent::Thinking {
-                text: "private hidden reasoning canary".to_owned(),
-            },
-        );
-        let thinking = provider_observations(&thinking);
-        let timeline = timeline_observations(&thinking);
-        assert_eq!(timeline.len(), 1);
-        assert_eq!(timeline[0].kind, ObservationKindV1::Working);
-        assert!(!serde_json::to_string(&thinking)
-            .unwrap()
-            .contains("private hidden reasoning canary"));
-
-        let requested = provider_control_event(
-            AdapterFamily::Hook,
-            ProviderEvent::InteractionRequested {
-                request_id: Some("private-request".to_owned()),
-                interaction_kind: ProviderInteractionKind::Approval,
-                tool_name: "PowerShell".to_owned(),
-                title: None,
-                prompt: "private approval prompt".to_owned(),
-                options: Vec::new(),
-                agent_id: None,
-            },
-        );
-        let requested = provider_observations(&requested);
-        let requested = timeline_observations(&requested);
-        let ObservationKindV1::ApprovalRequested { correlation_id, .. } = &requested[0].kind
-        else {
-            panic!("expected approval request observation");
-        };
-        let interaction_correlation = correlation_id.clone();
-        let resolved = ControlEvent {
-            sequence: 42,
-            command_id: None,
-            instance_id: AgentInstanceId(7),
-            generation: SessionGeneration(3),
-            event: ControlEventKind::InteractionResolved {
-                interaction_id: gate4agent_types::ProviderInteractionId(8),
-                outcome: gate4agent_types::ProviderInteractionOutcome::Approved,
-            },
-        };
-        let resolved = provider_observations(&resolved);
-        let ObservationKindV1::InteractionResolved {
-            correlation_id,
-            outcome,
-        } = &resolved[0].kind
-        else {
-            panic!("expected interaction resolution observation");
-        };
-        assert_eq!(correlation_id, &interaction_correlation);
-        assert_eq!(*outcome, ObservationInteractionOutcomeV1::Approved);
-    }
-
-    #[test]
     fn pty_hint_never_projects_authoritative_completion() {
         let completed = provider_control_event(
             AdapterFamily::PtySemantic,
@@ -18851,22 +18616,6 @@ mod observation_projection_tests {
         let timeline = timeline_observations(&projected);
         assert_eq!(timeline[0].evidence, ObservationEvidenceV1::PtyHint);
         assert_eq!(timeline[0].kind, ObservationKindV1::Working);
-    }
-
-    #[test]
-    fn subagent_stop_without_provider_outcome_projects_unknown_success() {
-        let stopped = provider_control_event(
-            AdapterFamily::Hook,
-            ProviderEvent::SubagentStopped {
-                agent_id: "private-subagent-id".to_owned(),
-            },
-        );
-        let projected = provider_observations(&stopped);
-        let timeline = timeline_observations(&projected);
-        let ObservationKindV1::SubagentCompleted { success, .. } = &timeline[0].kind else {
-            panic!("expected subagent completion observation");
-        };
-        assert_eq!(*success, None);
     }
 
     #[test]
