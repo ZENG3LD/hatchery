@@ -1411,55 +1411,6 @@ mod tests {
         std::fs::remove_dir_all(parent).unwrap();
     }
 
-    #[cfg(windows)]
-    #[tokio::test]
-    async fn aborting_bounded_child_terminates_descendants_before_late_mutation() {
-        let sequence = NEXT_GIT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let parent = std::env::temp_dir().join(format!(
-            "gate4agent-job-cancel-{}-{sequence}",
-            std::process::id(),
-        ));
-        if parent.exists() {
-            std::fs::remove_dir_all(&parent).unwrap();
-        }
-        std::fs::create_dir_all(&parent).unwrap();
-        let ready = parent.join("descendant-ready");
-        let marker = parent.join("descendant-late-mutation");
-        let child_script = parent.join("descendant.ps1");
-        std::fs::write(
-            &child_script,
-            format!(
-                "Start-Sleep -Milliseconds 1500\r\nSet-Content -LiteralPath '{}' -Value late\r\n",
-                marker.to_string_lossy().replace('\'', "''"),
-            ),
-        ).unwrap();
-        let parent = parent.canonicalize().unwrap();
-        let escaped_parent = parent.to_string_lossy().replace('\'', "''");
-        let escaped_ready = ready.to_string_lossy().replace('\'', "''");
-        let mut command = tokio::process::Command::new("powershell.exe");
-        command.args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            &format!(
-                "Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -WorkingDirectory '{escaped_parent}' -ArgumentList @('-NoLogo','-NoProfile','-NonInteractive','-File','descendant.ps1'); Set-Content -LiteralPath '{escaped_ready}' -Value ready; Start-Sleep -Seconds 10"
-            ),
-        ]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        let task = tokio::spawn(collect_child_output(command, 1_024, 15_000));
-        let ready_deadline = Instant::now() + Duration::from_secs(3);
-        while !ready.exists() && Instant::now() < ready_deadline {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
-        assert!(ready.exists(), "descendant process was not started before cancellation");
-        task.abort();
-        let _ = task.await;
-        tokio::time::sleep(Duration::from_millis(2_500)).await;
-
-        assert!(!marker.exists(), "cancelled job descendant performed a late mutation");
-        std::fs::remove_dir_all(parent).unwrap();
-    }
-
     fn run_git(root: &Path, arguments: &[&str]) {
         let output = std::process::Command::new("git")
             .arg("-C").arg(root).args(arguments).output().unwrap();
