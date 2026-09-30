@@ -7,9 +7,9 @@ use hatchery_harness_protocol::{
     HarnessSessionIdentityV1, HarnessTaskId, HarnessTaskStateV1, HarnessTaskV1,
     HarnessWorktreeIntentV1, SessionGrantId,
 };
-use hatchery_c2_protocol::{C2ControlEventKind, C2NodeEvent, RoutedNodeEvent};
+use gate4agent_c2_protocol::{C2ControlEventKind, C2NodeEvent, RoutedNodeEvent};
 use gate4agent_catalog::{approval_level_resolution, ApprovalLevelResolution};
-use hatchery_node_protocol::{
+use gate4agent_node_protocol::{
     DeliveryComponentKindV2, DeliveryRelativePathV2, DeliveryScopeV2,
     HarnessMcpReservationId, NodeId, NodeIncarnationId, SessionMode, SpawnBundleId, SpawnBundleRevision,
     SpawnDeadlineMs, SpawnIdempotencyKey, SpawnOverride, SpawnOverrides, SpawnProfileId,
@@ -20,7 +20,7 @@ use hatchery_harness_delivery::{
 };
 use hatchery_harness_api::HarnessRuntimeNodeInventoryV1;
 use gate4agent_types::{AgentId, ApprovalLevel, TerminalSize};
-use hatchery_node_wire::local_hmac_sha256;
+use gate4agent_node_wire::local_hmac_sha256;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::PathBuf};
 use thiserror::Error;
@@ -1108,13 +1108,13 @@ pub enum HarnessDispatchError {
     #[error("launch plan contains an invalid provider")]
     InvalidProvider(#[from] gate4agent_types::AgentIdError),
     #[error("launch plan contains an invalid Node identifier")]
-    InvalidNodeIdentifier(#[from] hatchery_node_protocol::NodeIdentifierError),
+    InvalidNodeIdentifier(#[from] gate4agent_node_protocol::NodeIdentifierError),
     #[error("launch plan contains an invalid SpawnSpec identifier")]
-    InvalidSpawnIdentifier(#[from] hatchery_node_protocol::SpawnIdentifierError),
+    InvalidSpawnIdentifier(#[from] gate4agent_node_protocol::SpawnIdentifierError),
     #[error("launch plan contains an invalid spawn deadline")]
-    InvalidSpawnDeadline(#[from] hatchery_node_protocol::SpawnDeadlineError),
+    InvalidSpawnDeadline(#[from] gate4agent_node_protocol::SpawnDeadlineError),
     #[error("task body cannot be represented as a bounded spawn prompt")]
-    InvalidPrompt(#[from] hatchery_node_protocol::SpawnPromptError),
+    InvalidPrompt(#[from] gate4agent_node_protocol::SpawnPromptError),
     #[error("launch plan canonical encoding failed")]
     Serialize(#[from] serde_json::Error),
     #[error("launch identity digest failed")]

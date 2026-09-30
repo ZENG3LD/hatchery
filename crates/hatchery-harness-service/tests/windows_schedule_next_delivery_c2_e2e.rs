@@ -9,8 +9,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::C2Client;
+use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use gate4agent_c2_client::C2Client;
 use hatchery_harness_api::HarnessOperatorCredential;
 use hatchery_harness_client::{HarnessOperatorClient, HarnessOperatorClientError};
 use hatchery_harness_delivery::{
@@ -39,12 +39,12 @@ use hatchery_harness_service::{
     runtime::{start_harness_host_with_operator_and_catalogs, HarnessRuntimeCatalogs},
     HarnessService,
 };
-use hatchery_node::{
+use gate4agent_node::{
     protect_bundle_source_tree_fixture, NodeSecretReference, NodeSecretResolveError,
     NodeSecretResolver, NodeSecretValue, NodeServer, NodeServerConfig,
     SpawnProfileRegistry, WorkspaceConfig,
 };
-use hatchery_node::protocol::{
+use gate4agent_node::protocol::{
     DeliveryComponentKindV2, DeliveryRelativePathV2, DeliveryScopeV2, NodeId,
     SessionMode, SpawnBundleId, SpawnBundleRevision, SpawnProfileDefaults,
     SpawnProfileId, SpawnProfileRevision, WorkspaceId,
@@ -350,7 +350,7 @@ async fn wait_online(client: &C2Client, node_id: &NodeId) {
     timeout(Duration::from_secs(10), async {
         loop {
             if client.status().await.ok().and_then(|status| status.nodes.get(node_id)
-                .map(|node| node.transport == hatchery_c2_protocol::NodeTransportState::Online))
+                .map(|node| node.transport == gate4agent_c2_protocol::NodeTransportState::Online))
                 == Some(true) { break; }
             sleep(Duration::from_millis(20)).await;
         }

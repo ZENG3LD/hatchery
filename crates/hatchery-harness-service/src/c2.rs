@@ -1,10 +1,10 @@
-use hatchery_c2_client::{
+use gate4agent_c2_client::{
     connect_local_reconnecting, C2ControlError, C2LinkState, C2PendingRequest,
     C2ReconnectingEventReceiver, C2ReconnectingHandle,
 };
-use hatchery_c2_protocol::{
+use gate4agent_c2_protocol::{
     C2GitWorktreeSnapshot, C2ManagedSessionRecord, C2NodeEventEnvelope, C2NodeResponse,
-    C2NodeSnapshot, C2ObservationSupport, C2Topology, C2WorkspaceInspection, C2WorkspaceSnapshot,
+    C2NodeSnapshot, C2Topology, C2WorkspaceInspection, C2WorkspaceSnapshot,
     NodeRoute, NodeTransportState, RoutedNodeEvent,
 };
 use hatchery_harness_delivery::CompiledDeliveryBundleV2;
@@ -45,7 +45,7 @@ use hatchery_harness_api::{
     HARNESS_SESSION_RECORD_DISPLAY_NAME_MAX_BYTES,
     HARNESS_WORKSPACE_FILE_MAX_BYTES, HARNESS_WORKSPACE_TREE_ENTRIES_MAX,
 };
-use hatchery_node_protocol::{
+use gate4agent_node_protocol::{
     CapabilityId, DeliveryBlobChunkHexV1,
     DeliveryBlobDigestV1, DeliveryBundleManifestV2,
     DeliveryCommitReceiptV1, DeliveryStageId, HarnessMcpActivationDigest,
@@ -79,7 +79,8 @@ use hatchery_harness_protocol::{
     HarnessRunId, HarnessRunV1,
     HarnessSelectorV1, HarnessSessionBindingV1, HarnessSessionIdentityV1,
 };
-use hatchery_node_wire::local_hmac_sha256;
+use gate4agent_node_wire::local_hmac_sha256;
+use hatchery_observation_api::ObservationSupport;
 use gate4agent_types::{AgentId, AgentInstanceId, SessionGeneration, TerminalControl, TerminalSize};
 use thiserror::Error;
 use std::{collections::BTreeSet, sync::Arc, time::{Duration, Instant}};
@@ -165,13 +166,13 @@ impl HarnessC2TopologyReceiver {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HarnessObservationRoute {
     route: NodeRoute,
-    support: Option<C2ObservationSupport>,
+    support: Option<ObservationSupport>,
 }
 
 impl HarnessObservationRoute {
     pub fn route(&self) -> &NodeRoute { &self.route }
 
-    pub fn support(&self) -> Option<C2ObservationSupport> { self.support }
+    pub fn support(&self) -> Option<ObservationSupport> { self.support }
 }
 
 impl HarnessC2EventReceiver {
@@ -531,7 +532,7 @@ impl HarnessC2Adapter {
                     },
                 )),
             };
-            let context_id = hatchery_node_protocol::SpawnContextId::new(pack.id.as_str())
+            let context_id = gate4agent_node_protocol::SpawnContextId::new(pack.id.as_str())
                 .map_err(|_| HarnessC2Error::ContinuationAuthorityMismatch)?;
             let pending = match self.control.start_request(
                 route.clone(),
@@ -645,6 +646,7 @@ impl HarnessC2Adapter {
             reservation_id: durable.reservation_id.clone(),
             activation_digest: durable.activation_digest.clone(),
             spawn_spec: spawn_spec.clone(),
+            launch: crate::harness_mcp_launch(),
             expires_at_unix_ms: durable.expires_at_unix_ms,
         }).map_err(HarnessC2Error::HarnessMcpArmEnqueue)?;
         Ok(PendingHarnessMcpArm {
@@ -843,7 +845,7 @@ impl HarnessC2Adapter {
     pub async fn snapshot(&self, route: &NodeRoute) -> Result<C2NodeSnapshot, HarnessC2Error> {
         let routed = self
             .control
-            .request(route.clone(), hatchery_node_protocol::NodeRequest::Snapshot)
+            .request(route.clone(), gate4agent_node_protocol::NodeRequest::Snapshot)
             .await
             .map_err(HarnessC2Error::InventoryTransport)?;
         if routed.node_id != route.node_id
@@ -1485,7 +1487,7 @@ fn validate_harness_mcp_arm_response(
     expected_reservation_id: &HarnessMcpReservationId,
     expected_activation_digest: &HarnessMcpActivationDigest,
     expected_expires_at_unix_ms: u64,
-    routed: hatchery_c2_protocol::RoutedNodeResponse,
+    routed: gate4agent_c2_protocol::RoutedNodeResponse,
 ) -> Result<(), HarnessC2Error> {
     if routed.node_id != route.node_id
         || routed.incarnation_id != route.expected_incarnation_id
@@ -1661,7 +1663,7 @@ impl StagedDeliveryProof {
 
     pub(crate) fn node_id(&self) -> &NodeId { &self.route.node_id }
 
-    pub(crate) fn incarnation_id(&self) -> hatchery_node_protocol::NodeIncarnationId {
+    pub(crate) fn incarnation_id(&self) -> gate4agent_node_protocol::NodeIncarnationId {
         self.route.expected_incarnation_id
     }
 
@@ -1700,7 +1702,7 @@ fn delivery_failure_category(code: NodeFailureCode) -> DeliveryFailureCategory {
 
 fn delivery_stage_begin_matches(
     manifest: &DeliveryBundleManifestV2,
-    manifest_digest: &hatchery_node_protocol::DeliveryManifestDigestV2,
+    manifest_digest: &gate4agent_node_protocol::DeliveryManifestDigestV2,
     missing_blobs: &[DeliveryBlobDigestV1],
 ) -> bool {
     manifest_digest == &manifest.manifest_digest
@@ -1766,7 +1768,7 @@ fn observation_topology(topology: &C2Topology) -> Vec<HarnessObservationRoute> {
                 node_id: node.node_id.clone(),
                 expected_incarnation_id,
             },
-            support: node.observation_support,
+            support: Some(ObservationSupport::full()),
         })
     }).collect::<Vec<_>>();
     routes.sort_by(|left, right| left.route.node_id.as_str().cmp(right.route.node_id.as_str()));
@@ -1807,8 +1809,10 @@ impl HarnessObservationResync {
 
     pub fn snapshot(&self) -> &C2NodeSnapshot { &self.snapshot }
 
-    pub fn observation_support(&self) -> Option<C2ObservationSupport> {
-        self.snapshot.observation_support
+    /// A resync is the node's authoritative replay, and the harness derives its
+    /// observations from it, so the route it covers supports all of them.
+    pub fn observation_support(&self) -> Option<ObservationSupport> {
+        Some(ObservationSupport::full())
     }
 
     pub fn managed_inventory(&self) -> &[C2ManagedSessionRecord] {
@@ -1854,15 +1858,19 @@ fn build_observation_resync(
     {
         return Err(HarnessC2Error::InvalidObservationResync);
     }
-    if snapshot.observation_support.is_some_and(|support| !support.is_valid()) {
-        return Err(HarnessC2Error::InvalidObservationResync);
-    }
     let lifecycle_control_events = events.iter()
-        .filter(|event| matches!(event.event, hatchery_c2_protocol::C2NodeEvent::Control { .. }))
+        .filter(|event| matches!(event.event, gate4agent_c2_protocol::C2NodeEvent::Control { .. }))
         .cloned()
         .collect();
     let events = events.into_iter()
-        .filter(|event| event.event.requires_observation_events_capability())
+        .filter(|event| {
+            matches!(
+                event.event,
+                gate4agent_c2_protocol::C2NodeEvent::Control { .. }
+                    | gate4agent_c2_protocol::C2NodeEvent::AgentStream { .. }
+                    | gate4agent_c2_protocol::C2NodeEvent::SessionRecordHistorySummarized { .. }
+            )
+        })
         .collect();
     Ok(HarnessObservationResync {
         route: route.clone(),
@@ -1879,7 +1887,7 @@ fn build_observation_resync(
 pub enum SpawnDispatchOutcome {
     Accepted(AuthoritativeSpawnReceipt),
     Rejected {
-        code: hatchery_node_protocol::NodeFailureCode,
+        code: gate4agent_node_protocol::NodeFailureCode,
     },
     OutcomeUnknown {
         reason: SpawnOutcomeUnknownReason,
@@ -1890,7 +1898,7 @@ pub enum SpawnDispatchOutcome {
 pub(crate) enum ManagedWorktreeSpawnDispatchOutcome {
     Accepted(AuthoritativeManagedWorktreeSpawnReceipt),
     Rejected {
-        code: hatchery_node_protocol::NodeFailureCode,
+        code: gate4agent_node_protocol::NodeFailureCode,
     },
     OutcomeUnknown {
         reason: SpawnOutcomeUnknownReason,
@@ -2360,7 +2368,7 @@ impl PendingRunRead {
 fn run_read_response_route_matches(
     prepared: &PreparedRunRead,
     node_id: &NodeId,
-    incarnation_id: hatchery_node_protocol::NodeIncarnationId,
+    incarnation_id: gate4agent_node_protocol::NodeIncarnationId,
 ) -> bool {
     node_id == &prepared.route.node_id
         && incarnation_id == prepared.route.expected_incarnation_id
@@ -2642,7 +2650,7 @@ impl PendingNodeWorkspaceWrite {
 fn node_workspace_write_response_route_matches(
     prepared: &PreparedNodeWorkspaceWrite,
     node_id: &NodeId,
-    incarnation_id: hatchery_node_protocol::NodeIncarnationId,
+    incarnation_id: gate4agent_node_protocol::NodeIncarnationId,
 ) -> bool {
     node_id == &prepared.route.node_id
         && incarnation_id == prepared.route.expected_incarnation_id
@@ -3125,7 +3133,7 @@ pub enum SessionRecordMutationKind {
     SetTask {
         record_id: SessionRecordId,
         expected_revision: u64,
-        target: hatchery_node_protocol::SessionTaskTargetV1,
+        target: gate4agent_node_protocol::SessionTaskTargetV1,
     },
     Forget { record_id: SessionRecordId },
     IndexProvider {
@@ -3280,16 +3288,16 @@ impl PreparedSessionRecordMutation {
 /// build `SessionRecordMutationKind::SetTask`.
 pub fn session_task_target_from_api(
     target: &HarnessSessionTaskTargetV1,
-) -> Result<hatchery_node_protocol::SessionTaskTargetV1, HarnessC2Error> {
+) -> Result<gate4agent_node_protocol::SessionTaskTargetV1, HarnessC2Error> {
     Ok(match target {
-        HarnessSessionTaskTargetV1::New => hatchery_node_protocol::SessionTaskTargetV1::New,
+        HarnessSessionTaskTargetV1::New => gate4agent_node_protocol::SessionTaskTargetV1::New,
         HarnessSessionTaskTargetV1::Existing { task_id } => {
-            hatchery_node_protocol::SessionTaskTargetV1::Existing {
+            gate4agent_node_protocol::SessionTaskTargetV1::Existing {
                 task_id: task_id.parse()
                     .map_err(|_| HarnessC2Error::InvalidSessionRecordMutationRequest)?,
             }
         }
-        HarnessSessionTaskTargetV1::Clear => hatchery_node_protocol::SessionTaskTargetV1::Clear,
+        HarnessSessionTaskTargetV1::Clear => gate4agent_node_protocol::SessionTaskTargetV1::Clear,
     })
 }
 
@@ -3395,10 +3403,10 @@ pub fn correlate_session_record_mutation_response(
                         node_id: prepared.route.node_id.as_str().to_owned(),
                         incarnation_id: prepared.route.expected_incarnation_id.to_string(),
                         scope: match echoed.route.scope {
-                            hatchery_node_protocol::NativeSessionCatalogScope::Workspace => {
+                            gate4agent_node_protocol::NativeSessionCatalogScope::Workspace => {
                                 HarnessNativeSessionCatalogScopeV1::Workspace
                             }
-                            hatchery_node_protocol::NativeSessionCatalogScope::Unregistered => {
+                            gate4agent_node_protocol::NativeSessionCatalogScope::Unregistered => {
                                 HarnessNativeSessionCatalogScopeV1::Unregistered
                             }
                         },
@@ -3453,16 +3461,16 @@ fn project_c2_managed_session(
             SessionMode::Acp => HarnessRuntimeManagedModeV1::Acp,
         },
         state: match record.state {
-            hatchery_node_protocol::ManagedSessionState::IdentityPending => {
+            gate4agent_node_protocol::ManagedSessionState::IdentityPending => {
                 HarnessRuntimeManagedStateV1::IdentityPending
             }
-            hatchery_node_protocol::ManagedSessionState::Live => {
+            gate4agent_node_protocol::ManagedSessionState::Live => {
                 HarnessRuntimeManagedStateV1::Live
             }
-            hatchery_node_protocol::ManagedSessionState::Dormant => {
+            gate4agent_node_protocol::ManagedSessionState::Dormant => {
                 HarnessRuntimeManagedStateV1::Dormant
             }
-            hatchery_node_protocol::ManagedSessionState::Unavailable => {
+            gate4agent_node_protocol::ManagedSessionState::Unavailable => {
                 HarnessRuntimeManagedStateV1::Unavailable
             }
         },
@@ -3952,7 +3960,7 @@ pub fn correlate_resource_mutation_response(
 fn node_workspace_read_response_route_matches(
     prepared: &PreparedNodeWorkspaceRead,
     node_id: &NodeId,
-    incarnation_id: hatchery_node_protocol::NodeIncarnationId,
+    incarnation_id: gate4agent_node_protocol::NodeIncarnationId,
 ) -> bool {
     node_id == &prepared.route.node_id
         && incarnation_id == prepared.route.expected_incarnation_id
@@ -4061,7 +4069,7 @@ fn correlate_run_read_response(
 /// truncation marker onto the harness-api leaf type field-for-field. Every
 /// field is a plain count/bool, so this can never fail.
 fn project_workspace_inspection_truncation(
-    truncation: Option<hatchery_node_protocol::WorkspaceInspectionTruncationV1>,
+    truncation: Option<gate4agent_node_protocol::WorkspaceInspectionTruncationV1>,
 ) -> Option<HarnessWorkspaceInspectionTruncationV1> {
     truncation.map(|truncation| HarnessWorkspaceInspectionTruncationV1 {
         walk_time_budget_exceeded: truncation.walk_time_budget_exceeded,
@@ -4198,7 +4206,7 @@ fn project_repository_path(
 }
 
 fn project_git_status_entry(
-    entry: hatchery_node_protocol::GitStatusEntry,
+    entry: gate4agent_node_protocol::GitStatusEntry,
 ) -> Result<HarnessGitStatusEntryV1, HarnessC2Error> {
     Ok(HarnessGitStatusEntryV1 {
         index_status: project_git_status_code(&entry.index_status)?,
@@ -4227,7 +4235,7 @@ fn project_git_status_code(code: &str) -> Result<HarnessGitStatusCodeV1, Harness
 }
 
 fn project_git_commit(
-    commit: hatchery_node_protocol::GitCommitDetails,
+    commit: gate4agent_node_protocol::GitCommitDetails,
 ) -> Result<HarnessGitCommitV1, HarnessC2Error> {
     if commit.parents.len() > HARNESS_GIT_COMMIT_PARENTS_MAX {
         return Err(HarnessC2Error::RunReadProjection);
@@ -4685,13 +4693,13 @@ pub fn native_history_wire_selection(
 /// `pub`: see `native_history_wire_route`'s doc comment.
 pub fn native_history_wire_window(
     window: HarnessNativeSessionCatalogWindowV1,
-) -> hatchery_node_protocol::NativeSessionCatalogWindow {
+) -> gate4agent_node_protocol::NativeSessionCatalogWindow {
     match window {
         HarnessNativeSessionCatalogWindowV1::Recent => {
-            hatchery_node_protocol::NativeSessionCatalogWindow::Recent
+            gate4agent_node_protocol::NativeSessionCatalogWindow::Recent
         }
         HarnessNativeSessionCatalogWindowV1::Older => {
-            hatchery_node_protocol::NativeSessionCatalogWindow::Older
+            gate4agent_node_protocol::NativeSessionCatalogWindow::Older
         }
     }
 }
@@ -4775,7 +4783,7 @@ pub fn correlate_native_history_response(
 }
 
 fn project_native_history_entry(
-    entry: hatchery_node_protocol::NativeSessionCatalogEntry,
+    entry: gate4agent_node_protocol::NativeSessionCatalogEntry,
 ) -> HarnessNativeSessionCatalogEntryV1 {
     HarnessNativeSessionCatalogEntryV1 {
         selection_id: entry.selection_id,
@@ -4787,10 +4795,10 @@ fn project_native_history_entry(
         external_group: entry.external_group.map(|group| HarnessNativeSessionExternalGroupV1 {
             group_id: group.group_id,
             kind: match group.kind {
-                hatchery_node_protocol::NativeSessionExternalGroupKind::Project => {
+                gate4agent_node_protocol::NativeSessionExternalGroupKind::Project => {
                     HarnessNativeSessionExternalGroupKindV1::Project
                 }
-                hatchery_node_protocol::NativeSessionExternalGroupKind::Global => {
+                gate4agent_node_protocol::NativeSessionExternalGroupKind::Global => {
                     HarnessNativeSessionExternalGroupKindV1::Global
                 }
             },
@@ -4801,7 +4809,7 @@ fn project_native_history_entry(
 }
 
 fn project_native_history_summary(
-    summary: hatchery_node_protocol::NativeSessionCatalogSummary,
+    summary: gate4agent_node_protocol::NativeSessionCatalogSummary,
 ) -> HarnessNativeSessionCatalogSummaryV1 {
     HarnessNativeSessionCatalogSummaryV1 {
         catalog_revision: summary.catalog_revision,
@@ -4814,14 +4822,14 @@ fn project_native_history_summary(
 }
 
 fn project_native_history_page(
-    page: hatchery_node_protocol::NativeSessionCatalogPage,
+    page: gate4agent_node_protocol::NativeSessionCatalogPage,
 ) -> HarnessNativeSessionCatalogPageV1 {
     HarnessNativeSessionCatalogPageV1 {
         window: match page.window {
-            hatchery_node_protocol::NativeSessionCatalogWindow::Recent => {
+            gate4agent_node_protocol::NativeSessionCatalogWindow::Recent => {
                 HarnessNativeSessionCatalogWindowV1::Recent
             }
-            hatchery_node_protocol::NativeSessionCatalogWindow::Older => {
+            gate4agent_node_protocol::NativeSessionCatalogWindow::Older => {
                 HarnessNativeSessionCatalogWindowV1::Older
             }
         },
@@ -4834,7 +4842,7 @@ fn project_native_history_page(
 }
 
 fn project_native_history_preview(
-    preview: hatchery_node_protocol::NativeSessionPreview,
+    preview: gate4agent_node_protocol::NativeSessionPreview,
 ) -> HarnessNativeSessionPreviewV1 {
     HarnessNativeSessionPreviewV1 {
         title: preview.title,
@@ -4906,7 +4914,7 @@ impl PendingManagedWorktreeSpawnDispatch {
 
 fn correlate_spawn_response(
     correlation: SpawnResponseCorrelation,
-    routed: Result<hatchery_c2_protocol::RoutedNodeResponse, C2ControlError>,
+    routed: Result<gate4agent_c2_protocol::RoutedNodeResponse, C2ControlError>,
 ) -> Result<SpawnDispatchOutcome, HarnessC2Error> {
         let routed = match routed {
             Ok(response) => response,
@@ -4976,7 +4984,7 @@ fn correlate_spawn_response(
 
 fn correlate_managed_worktree_spawn_response(
     correlation: ManagedWorktreeSpawnResponseCorrelation,
-    routed: Result<hatchery_c2_protocol::RoutedNodeResponse, C2ControlError>,
+    routed: Result<gate4agent_c2_protocol::RoutedNodeResponse, C2ControlError>,
 ) -> Result<ManagedWorktreeSpawnDispatchOutcome, HarnessC2Error> {
     let routed = match routed {
         Ok(response) => response,
@@ -5317,13 +5325,13 @@ impl PreparedContinuationSpawnDispatch {
         continuation: &hatchery_harness_protocol::HarnessContinuationV1,
     ) -> Result<Self, HarnessC2Error> {
         let expected_bundle = ResolvedBundleReceipt {
-                id: hatchery_node_protocol::SpawnBundleId::new(
+                id: gate4agent_node_protocol::SpawnBundleId::new(
                     delivery.bundle.bundle_id.as_str(),
                 ).map_err(|_| HarnessC2Error::StagedDeliveryAuthorityMismatch)?,
-                revision: hatchery_node_protocol::SpawnBundleRevision::new(
+                revision: gate4agent_node_protocol::SpawnBundleRevision::new(
                     delivery.bundle.revision.as_str(),
                 ).map_err(|_| HarnessC2Error::StagedDeliveryAuthorityMismatch)?,
-                digest: hatchery_node_protocol::SpawnBundleDigest::new(
+                digest: gate4agent_node_protocol::SpawnBundleDigest::new(
                     delivery.bundle.digest.as_str(),
                 ).map_err(|_| HarnessC2Error::StagedDeliveryAuthorityMismatch)?,
             };
@@ -5491,7 +5499,7 @@ pub struct AcceptedSpawnBindingProof {
     spawn_spec_fingerprint: HarnessRequestDigest,
     idempotency_ref: HarnessIdempotencyRef,
     node_id: NodeId,
-    incarnation_id: hatchery_node_protocol::NodeIncarnationId,
+    incarnation_id: gate4agent_node_protocol::NodeIncarnationId,
     workspace_id: WorkspaceId,
     provider: AgentId,
     mode: SessionMode,
@@ -5559,7 +5567,7 @@ impl AcceptedSpawnBindingProof {
         &self.idempotency_ref
     }
 
-    pub(crate) fn incarnation_id(&self) -> hatchery_node_protocol::NodeIncarnationId {
+    pub(crate) fn incarnation_id(&self) -> gate4agent_node_protocol::NodeIncarnationId {
         self.incarnation_id
     }
 
@@ -5605,7 +5613,7 @@ pub(crate) fn accepted_spawn_binding_proof_for_test(
     spawn_spec_fingerprint: HarnessRequestDigest,
     idempotency_ref: HarnessIdempotencyRef,
     node_id: NodeId,
-    incarnation_id: hatchery_node_protocol::NodeIncarnationId,
+    incarnation_id: gate4agent_node_protocol::NodeIncarnationId,
     workspace_id: WorkspaceId,
     provider: AgentId,
     mode: SessionMode,
@@ -5664,7 +5672,7 @@ pub(crate) fn accepted_harness_mcp_spawn_binding_proof_for_test(
     spawn_spec_fingerprint: HarnessRequestDigest,
     idempotency_ref: HarnessIdempotencyRef,
     node_id: NodeId,
-    incarnation_id: hatchery_node_protocol::NodeIncarnationId,
+    incarnation_id: gate4agent_node_protocol::NodeIncarnationId,
     workspace_id: WorkspaceId,
     provider: AgentId,
     mode: SessionMode,
@@ -5995,7 +6003,7 @@ fn harness_binding_session(
     Ok(SessionAddress {
         workspace_id: WorkspaceId::new(binding.workspace_id.as_str())
             .map_err(|_| HarnessC2Error::ContinuationAuthorityMismatch)?,
-        session: hatchery_node_protocol::SessionKey {
+        session: gate4agent_node_protocol::SessionKey {
             instance_id: gate4agent_types::AgentInstanceId(active.instance_id),
             generation: gate4agent_types::SessionGeneration(active.generation),
         },
@@ -6063,17 +6071,17 @@ pub(crate) fn harness_context_to_node(
     context: &hatchery_harness_protocol::HarnessResolvedContextPackReceiptV1,
 ) -> Result<ResolvedContextPackReceipt, HarnessC2Error> {
     Ok(ResolvedContextPackReceipt {
-        id: hatchery_node_protocol::SpawnContextId::new(context.id.as_str())
+        id: gate4agent_node_protocol::SpawnContextId::new(context.id.as_str())
             .map_err(|_| HarnessC2Error::ContinuationAuthorityMismatch)?,
-        digest: hatchery_node_protocol::SpawnContextDigest::new(&context.digest)
+        digest: gate4agent_node_protocol::SpawnContextDigest::new(&context.digest)
             .map_err(|_| HarnessC2Error::ContinuationAuthorityMismatch)?,
-        lineage: hatchery_node_protocol::ContextPackLineageReceipt {
+        lineage: gate4agent_node_protocol::ContextPackLineageReceipt {
             source_node_id: NodeId::new(context.lineage.source_node_id.as_str())
                 .map_err(|_| HarnessC2Error::ContinuationAuthorityMismatch)?,
             source_session: SessionAddress {
                 workspace_id: WorkspaceId::new(context.lineage.source_workspace_id.as_str())
                     .map_err(|_| HarnessC2Error::ContinuationAuthorityMismatch)?,
-                session: hatchery_node_protocol::SessionKey {
+                session: gate4agent_node_protocol::SessionKey {
                     instance_id: gate4agent_types::AgentInstanceId(
                         context.lineage.source_instance_id,
                     ),
@@ -6135,14 +6143,14 @@ pub enum HarnessC2Error {
     IncarnationChanged { node_id: NodeId },
     #[error("C2 inventory request was rejected with {code:?}")]
     InventoryRejected {
-        code: hatchery_node_protocol::NodeFailureCode,
+        code: gate4agent_node_protocol::NodeFailureCode,
     },
     #[error("C2 returned an unexpected inventory response")]
     UnexpectedInventoryResponse,
     #[error("C2 observation resync transport failed: {0}")]
     ObservationTransport(C2ControlError),
     #[error("C2 observation resync was rejected with {code:?}")]
-    ObservationRejected { code: hatchery_node_protocol::NodeFailureCode },
+    ObservationRejected { code: gate4agent_node_protocol::NodeFailureCode },
     #[error("C2 returned an unexpected observation resync response")]
     UnexpectedObservationResponse,
     #[error("C2 returned an invalid observation resync authority")]
@@ -6188,7 +6196,7 @@ pub enum HarnessC2Error {
     #[error("SpawnSpec is not authorized by the exact durable staged delivery and dispatch context")]
     StagedDeliveryAuthorityMismatch,
     #[error("SpawnSpec profile {0} is unavailable in exact Node launch inventory")]
-    SpawnProfileUnavailable(hatchery_node_protocol::SpawnProfileId),
+    SpawnProfileUnavailable(gate4agent_node_protocol::SpawnProfileId),
     #[error("SpawnSpec profile preflight does not match the exact leased request")]
     SpawnProfileAuthorityMismatch,
     #[error("invalid durable operation identity: {0}")]
@@ -6415,8 +6423,8 @@ impl HarnessC2Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hatchery_c2_protocol::C2TopologyNode;
-    use hatchery_node_protocol::{
+    use gate4agent_c2_protocol::C2TopologyNode;
+    use gate4agent_node_protocol::{
         CapabilityId, ContextPackLineageReceipt, HostDirectoryEntry, NodeIncarnationId,
         ResolvedBundleReceipt, ResolvedContextPackReceipt,
         ManagedSessionState, ManagedWorktreeLeaseId, ManagedWorktreeRetention,
@@ -6445,11 +6453,6 @@ mod tests {
             agent_progress: Vec::new(),
             managed_worktrees: Vec::new(),
             launch_inventory: None,
-            observation_support: Some(C2ObservationSupport {
-                events: true,
-                managed_target: true,
-                workflow_detail: true,
-            }),
         }
     }
 
@@ -6457,18 +6460,16 @@ mod tests {
         node_id: &str,
         transport: NodeTransportState,
         incarnation: Option<NodeIncarnationId>,
-        support: Option<C2ObservationSupport>,
     ) -> C2TopologyNode {
         C2TopologyNode {
             node_id: NodeId::new(node_id).unwrap(),
             endpoint: format!(r"\\.\pipe\{node_id}"),
-            relay_route: hatchery_c2_protocol::C2RelayRoute::LocalIpc,
+            relay_route: gate4agent_c2_protocol::C2RelayRoute::LocalIpc,
             transport,
             current_incarnation_id: incarnation,
             provider_contracts: Vec::new(),
             provider_adapter_contracts: Vec::new(),
             provider_runtime_statuses: Default::default(),
-            observation_support: support,
         }
     }
 
@@ -6520,7 +6521,7 @@ mod tests {
         with_bundle: bool,
         with_context: bool,
         with_harness_mcp: bool,
-    ) -> (SpawnResponseCorrelation, hatchery_c2_protocol::RoutedNodeResponse) {
+    ) -> (SpawnResponseCorrelation, gate4agent_c2_protocol::RoutedNodeResponse) {
         let mut spec = explicit_spec();
         let bundle = with_bundle.then(|| ResolvedBundleReceipt {
             id: SpawnBundleId::new("bundle-specialized").unwrap(),
@@ -6629,7 +6630,7 @@ mod tests {
                 expected_environment_profile: None,
                 expected_proxy,
             },
-            hatchery_c2_protocol::RoutedNodeResponse {
+            gate4agent_c2_protocol::RoutedNodeResponse {
                 node_id: route.node_id,
                 incarnation_id: route.expected_incarnation_id,
                 response: Ok(response),
@@ -6693,7 +6694,7 @@ mod tests {
     ) -> (
         PreparedManagedWorktreeSpawnDispatch,
         ManagedWorktreeSpawnResponseCorrelation,
-        hatchery_c2_protocol::RoutedNodeResponse,
+        gate4agent_c2_protocol::RoutedNodeResponse,
     ) {
         let mut spec = explicit_spec();
         spec.target.worktree_id = None;
@@ -6768,11 +6769,11 @@ mod tests {
                 },
             },
         );
-        let routed = hatchery_c2_protocol::RoutedNodeResponse {
+        let routed = gate4agent_c2_protocol::RoutedNodeResponse {
             node_id: route.node_id,
             incarnation_id: route.expected_incarnation_id,
             response: Ok(C2NodeResponse::ManagedWorktreeSpawnAccepted {
-                receipt: hatchery_node_protocol::ManagedWorktreeSpawnReceipt {
+                receipt: gate4agent_node_protocol::ManagedWorktreeSpawnReceipt {
                     spawn,
                     lease,
                 },
@@ -6965,7 +6966,7 @@ mod tests {
             expected_environment_profile: None,
             expected_proxy: None,
         };
-        let routed = hatchery_c2_protocol::RoutedNodeResponse {
+        let routed = gate4agent_c2_protocol::RoutedNodeResponse {
             node_id: route.node_id,
             incarnation_id: route.expected_incarnation_id,
             response: Ok(C2NodeResponse::SpawnSpecAccepted { receipt }),
@@ -7084,7 +7085,7 @@ mod tests {
             "sha256:{}",
             "b".repeat(64),
         )).unwrap();
-        let exact = hatchery_c2_protocol::RoutedNodeResponse {
+        let exact = gate4agent_c2_protocol::RoutedNodeResponse {
             node_id: route.node_id.clone(),
             incarnation_id: route.expected_incarnation_id,
             response: Ok(C2NodeResponse::Armed {
@@ -7135,7 +7136,7 @@ mod tests {
 
     #[test]
     fn h3a_delivery_response_correlation_and_failure_categories_are_exact() {
-        use hatchery_node_protocol::{
+        use gate4agent_node_protocol::{
             DeliveryBlobReceiptV1, DeliveryComponentKindV2, DeliveryComponentV2,
             DeliveryManifestDigestV2, DeliveryRelativePathV2, DeliveryScopeV2,
             SpawnBundleDigest, SpawnBundleId, SpawnBundleRevision,
@@ -7696,7 +7697,7 @@ mod tests {
         assert_eq!(resync.managed_inventory(), &[]);
         assert_eq!(
             resync.observation_support(),
-            Some(C2ObservationSupport { events: true, managed_target: true, workflow_detail: true })
+            Some(ObservationSupport::full())
         );
     }
 
@@ -7708,7 +7709,7 @@ mod tests {
         };
         let control = |sequence, kind| C2NodeEventEnvelope {
             sequence,
-            event: hatchery_c2_protocol::C2NodeEvent::Control {
+            event: gate4agent_c2_protocol::C2NodeEvent::Control {
                 address: SessionAddress {
                     workspace_id: WorkspaceId::new("primary").unwrap(),
                     session: SessionKey {
@@ -7716,12 +7717,13 @@ mod tests {
                         generation: SessionGeneration(1),
                     },
                 },
-                event: hatchery_c2_protocol::C2ControlEvent {
+                event: gate4agent_c2_protocol::C2ControlEvent {
                     sequence,
                     command_id: None,
                     instance_id: AgentInstanceId(7),
                     generation: SessionGeneration(1),
                     event: kind,
+                    detail: None,
                 },
             },
         };
@@ -7732,16 +7734,16 @@ mod tests {
             5,
             observation_snapshot(&route.node_id),
             vec![
-                control(5, hatchery_c2_protocol::C2ControlEventKind::Running),
+                control(5, gate4agent_c2_protocol::C2ControlEventKind::Running),
                 C2NodeEventEnvelope {
                     sequence: 6,
-                    event: hatchery_c2_protocol::C2NodeEvent::WorkspaceRemoved {
+                    event: gate4agent_c2_protocol::C2NodeEvent::WorkspaceRemoved {
                         workspace_id: WorkspaceId::new("old").unwrap(),
                     },
                 },
                 control(
                     7,
-                    hatchery_c2_protocol::C2ControlEventKind::Exited {
+                    gate4agent_c2_protocol::C2ControlEventKind::Exited {
                         exit_code: Some(0),
                         forced: false,
                     },
@@ -7754,7 +7756,14 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![5, 7],
         );
-        assert!(resync.observation_events().is_empty());
+        // The same control events also feed the observation projection; the
+        // workspace removal between them feeds neither.
+        assert_eq!(
+            resync.observation_events().iter()
+                .map(|event| event.sequence)
+                .collect::<Vec<_>>(),
+            vec![5, 7],
+        );
     }
 
     #[test]
@@ -7802,7 +7811,7 @@ mod tests {
             request.clone(),
             C2NodeResponse::NativeSessionsCataloged {
                 route: wire_route.clone(),
-                entries: vec![hatchery_node_protocol::NativeSessionCatalogEntry {
+                entries: vec![gate4agent_node_protocol::NativeSessionCatalogEntry {
                     selection_id: "selection-a".to_owned(),
                     title: Some("Recovered session".to_owned()),
                     modified_at_unix_ms: Some(10),
@@ -7812,7 +7821,7 @@ mod tests {
                     external_group: None,
                     record_id: Some(SessionRecordId::new("record-a").unwrap()),
                 }],
-                summary: Some(hatchery_node_protocol::NativeSessionCatalogSummary {
+                summary: Some(gate4agent_node_protocol::NativeSessionCatalogSummary {
                     catalog_revision: 7,
                     recent_cutoff_unix_ms: 9,
                     recent_total_count: 1,
@@ -8030,22 +8039,22 @@ mod tests {
         let canary = "C:/secret-host-root/canary";
         let inspection = C2WorkspaceInspection {
             workspace_id: WorkspaceId::new("workspace-a").unwrap(),
-            entries: vec![hatchery_node_protocol::WorkspaceEntry {
+            entries: vec![gate4agent_node_protocol::WorkspaceEntry {
                 relative_path: RepositoryPath::utf8("src/lib.rs".to_owned()).unwrap(),
                 kind: WorkspaceEntryKind::File,
             }],
             tree_truncated: false,
-            git: hatchery_c2_protocol::C2GitSnapshot {
+            git: gate4agent_c2_protocol::C2GitSnapshot {
                 is_repository: true,
                 branch: Some("main".to_owned()),
                 status: vec![
-                    hatchery_node_protocol::GitStatusEntry {
+                    gate4agent_node_protocol::GitStatusEntry {
                         index_status: "M".to_owned(),
                         worktree_status: " ".to_owned(),
                         path: RepositoryPath::utf8("z-last.rs".to_owned()).unwrap(),
                         previous_path: None,
                     },
-                    hatchery_node_protocol::GitStatusEntry {
+                    gate4agent_node_protocol::GitStatusEntry {
                         index_status: "?".to_owned(),
                         worktree_status: "?".to_owned(),
                         path: RepositoryPath::utf8("a-first.rs".to_owned()).unwrap(),
@@ -8053,7 +8062,7 @@ mod tests {
                     },
                 ],
                 recent_commits: Vec::new(),
-                worktrees: vec![hatchery_c2_protocol::C2GitWorktreeSnapshot {
+                worktrees: vec![gate4agent_c2_protocol::C2GitWorktreeSnapshot {
                     path: OpaqueHostPath::utf8(canary.to_owned()).unwrap(),
                     head: "0".repeat(40),
                     branch: Some("main".to_owned()),
@@ -8232,12 +8241,12 @@ mod tests {
         let prepared = node_workspace_read_fixture(WorkspaceReadKind::InspectWorkspace);
         let inspection = C2WorkspaceInspection {
             workspace_id: WorkspaceId::new("workspace-a").unwrap(),
-            entries: vec![hatchery_node_protocol::WorkspaceEntry {
+            entries: vec![gate4agent_node_protocol::WorkspaceEntry {
                 relative_path: RepositoryPath::utf8("src/lib.rs".to_owned()).unwrap(),
                 kind: WorkspaceEntryKind::File,
             }],
             tree_truncated: false,
-            git: hatchery_c2_protocol::C2GitSnapshot {
+            git: gate4agent_c2_protocol::C2GitSnapshot {
                 is_repository: true,
                 branch: Some("main".to_owned()),
                 status: Vec::new(),
@@ -8267,7 +8276,7 @@ mod tests {
                 workspace_id: WorkspaceId::new("workspace-b").unwrap(),
                 entries: Vec::new(),
                 tree_truncated: false,
-                git: hatchery_c2_protocol::C2GitSnapshot {
+                git: gate4agent_c2_protocol::C2GitSnapshot {
                     is_repository: false,
                     branch: None,
                     status: Vec::new(),
@@ -8431,7 +8440,7 @@ mod tests {
         let create_directory = node_workspace_write_fixture(WorkspaceWriteKind::CreateDirectory {
             path: path.clone(),
         });
-        let entry = hatchery_node_protocol::WorkspaceEntry {
+        let entry = gate4agent_node_protocol::WorkspaceEntry {
             relative_path: path,
             kind: WorkspaceEntryKind::Directory,
         };
@@ -8554,21 +8563,10 @@ mod tests {
     fn observation_topology_is_online_incarnation_exact_canonical_and_deduped() {
         let incarnation_a = NodeIncarnationId::from_bytes([1; 16]);
         let incarnation_b = NodeIncarnationId::from_bytes([2; 16]);
-        let support_a = C2ObservationSupport {
-            events: true,
-            managed_target: false,
-            workflow_detail: true,
-        };
-        let support_b = C2ObservationSupport {
-            events: false,
-            managed_target: true,
-            workflow_detail: false,
-        };
         let duplicate_b = topology_node(
             "node-b",
             NodeTransportState::Online,
             Some(incarnation_b),
-            Some(support_b),
         );
         let topology = C2Topology {
             nodes: vec![
@@ -8577,25 +8575,21 @@ mod tests {
                     "node-offline",
                     NodeTransportState::Offline,
                     Some(NodeIncarnationId::from_bytes([3; 16])),
-                    Some(support_a),
                 ),
                 topology_node(
                     "node-a",
                     NodeTransportState::Online,
                     Some(incarnation_a),
-                    Some(support_a),
                 ),
                 topology_node(
                     "node-missing-incarnation",
                     NodeTransportState::Online,
                     None,
-                    Some(support_a),
                 ),
                 topology_node(
                     "node-parked",
                     NodeTransportState::Parked,
                     Some(NodeIncarnationId::from_bytes([4; 16])),
-                    None,
                 ),
                 duplicate_b,
             ],
@@ -8605,10 +8599,10 @@ mod tests {
         assert_eq!(routes.len(), 2);
         assert_eq!(routes[0].route().node_id.as_str(), "node-a");
         assert_eq!(routes[0].route().expected_incarnation_id, incarnation_a);
-        assert_eq!(routes[0].support(), Some(support_a));
+        assert_eq!(routes[0].support(), Some(ObservationSupport::full()));
         assert_eq!(routes[1].route().node_id.as_str(), "node-b");
         assert_eq!(routes[1].route().expected_incarnation_id, incarnation_b);
-        assert_eq!(routes[1].support(), Some(support_b));
+        assert_eq!(routes[1].support(), Some(ObservationSupport::full()));
     }
 
     /// Proves the actual defect fix: while the harness's own c2 link is

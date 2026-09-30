@@ -10,8 +10,8 @@ use std::{
     time::{Duration, Instant as StdInstant, SystemTime, UNIX_EPOCH},
 };
 
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::C2Client;
+use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use gate4agent_c2_client::C2Client;
 use hatchery_harness_engine::HarnessMutationV1;
 use hatchery_harness_client::{
     HarnessOperatorClient, HarnessOperatorCredential, HarnessReadClient,
@@ -47,7 +47,7 @@ use hatchery_harness_service::{
     },
     HarnessMcpReservationStateV1, HarnessService,
 };
-use hatchery_node::{
+use gate4agent_node::{
     protocol::{
         NodeId, ProviderRuntimeMode, SessionMode, SpawnProfileDefaults,
         SpawnProfileId, SpawnProfileRevision, WorkspaceId,
@@ -619,14 +619,14 @@ async fn wait_online(client: &C2Client, node_id: &NodeId) {
     timeout(Duration::from_secs(10), async {
         loop {
             if client.status().await.is_ok_and(|status| {
-                status.nodes[node_id].transport == hatchery_c2::protocol::NodeTransportState::Online
+                status.nodes[node_id].transport == gate4agent_c2::protocol::NodeTransportState::Online
             }) { return; }
             sleep(Duration::from_millis(20)).await;
         }
     }).await.expect("fixture node did not become online");
 }
 
-async fn wait_runtime(adapter: &HarnessC2Adapter, route: &hatchery_c2::protocol::NodeRoute) {
+async fn wait_runtime(adapter: &HarnessC2Adapter, route: &gate4agent_c2::protocol::NodeRoute) {
     timeout(Duration::from_secs(10), async {
         loop {
             if adapter.snapshot(route).await.unwrap().provider_runtime_statuses.iter().any(|status| {

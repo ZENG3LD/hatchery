@@ -20,7 +20,7 @@
 
 use std::time::Duration;
 
-use hatchery_c2_protocol::{C2NodeResponse, NodeRequest, NodeRoute};
+use gate4agent_c2_protocol::{C2NodeResponse, NodeRequest, NodeRoute};
 use hatchery_harness_api::{
     HarnessApprovalLevelV1, HarnessExecutionModeV1, HarnessGitDiffModeV1, HarnessGitObjectIdV1, HarnessHostPathV1,
     HarnessNativeSessionCatalogWindowV1, HarnessNativeSessionRouteV1,
@@ -39,14 +39,14 @@ use hatchery_harness_service::c2::{
     PreparedNodeWorkspaceWrite, PreparedResourceMutation, PreparedSessionRecordMutation,
     ResourceMutationKind, SessionRecordMutationKind, WorkspaceReadKind, WorkspaceWriteKind,
 };
-use hatchery_node_protocol::{
+use gate4agent_node_protocol::{
     GitDiffMode, GitDiffRequest, GitObjectId, NodeFailureCode, NodeId, NodeIncarnationId,
     OpaqueHostPath, RepositoryPath, SessionAddress, SessionKey, SessionMode, SessionRecordId,
     SpawnContextId, SpawnDeadlineMs, SpawnIdempotencyKey, SpawnOverride, SpawnOverrides,
     SpawnProfileId, SpawnRequiredCapabilities, SpawnSpec, SpawnTarget, WorkspaceFileRevision,
     WorkspaceId, CapabilityId, SPAWN_RUNTIME_RAW_PTY_LIFECYCLE,
 };
-use hatchery_node_wire::random_nonce;
+use gate4agent_node_wire::random_nonce;
 use gate4agent_types::{AgentId, AgentInstanceId, SessionGeneration, TerminalControl, TerminalSize};
 use tokio::time::timeout;
 

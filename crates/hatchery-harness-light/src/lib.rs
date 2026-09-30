@@ -38,8 +38,8 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use hatchery_c2_client::{C2ReconnectingEventReceiver, C2ReconnectingHandle};
-use hatchery_c2_protocol::C2Topology;
+use gate4agent_c2_client::{C2ReconnectingEventReceiver, C2ReconnectingHandle};
+use gate4agent_c2_protocol::C2Topology;
 use hatchery_harness_api::{
     HarnessOperatorApiError, HarnessOperatorCredential, HarnessOperatorEnvelopeV1,
     HarnessOperatorEventV1, HarnessOperatorHostErrorV1, HarnessOperatorReplyV1,
@@ -243,7 +243,7 @@ pub async fn start_harness_light(
     c2_token: &str,
 ) -> Result<HarnessLightRunning, HarnessLightError> {
     let (control, events) =
-        hatchery_c2_client::connect_local_reconnecting(c2_endpoint, c2_token).await
+        gate4agent_c2_client::connect_local_reconnecting(c2_endpoint, c2_token).await
             .map_err(HarnessLightError::C2Connect)?;
     let topology = control.subscribe_topology();
 

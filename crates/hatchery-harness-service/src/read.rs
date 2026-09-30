@@ -1329,7 +1329,7 @@ fn observation_evidence(evidence: SourceEvidenceV1) -> ObservationEvidenceV1 {
 
 fn monitor_feature_states(
     projection: Option<&SessionProjection>,
-    route_support: Option<Option<hatchery_c2_protocol::C2ObservationSupport>>,
+    route_support: Option<Option<hatchery_observation_api::ObservationSupport>>,
 ) -> MonitorFeatureStatesV1 {
     let Some(projection) = projection else {
         let state = match route_support {
@@ -1391,7 +1391,7 @@ fn monitor_feature_states(
 fn route_support_for_run(
     support: &ObservationSupportRegistry,
     run: &hatchery_harness_protocol::HarnessRunV1,
-) -> Option<Option<hatchery_c2_protocol::C2ObservationSupport>> {
+) -> Option<Option<hatchery_observation_api::ObservationSupport>> {
     let binding = run.binding.as_ref()?;
     let node_id = hatchery_observation_api::NodeId::new(binding.node_id.as_str()).ok()?;
     let incarnation_id = binding.node_incarnation.as_str().parse().ok()?;
@@ -1515,15 +1515,15 @@ mod tests {
             },
             received_at_ms: 1_000 + sequence,
             transport: ObservationTransport::C2,
-            payload: ObservationIngressPayload::Observation {
+            payload: ObservationIngressPayload::Observations {
                 address: managed_target(record_id),
-                observation: ObservationV1 {
+                observations: vec![ObservationV1 {
                     source_sequence: sequence,
                     observed_at_unix_ms: Some(2_000 + sequence),
                     evidence,
                     kind,
                     truncated: false,
-                },
+                }],
             },
         }).unwrap();
     }
@@ -2586,7 +2586,7 @@ mod tests {
         checkpoint.grants[0].read_permissions.tasks = HarnessEntityReadScopeV1::SelfOnly;
 
         let node_incarnation = HarnessSelectorV1::new(
-            hatchery_node_protocol::NodeIncarnationId::from_bytes([4; 16]).to_string(),
+            gate4agent_node_protocol::NodeIncarnationId::from_bytes([4; 16]).to_string(),
         ).unwrap();
 
         let stranger_task_id = HarnessTaskId::new(format!("htask_{}", "b".repeat(24))).unwrap();
@@ -3099,7 +3099,7 @@ mod tests {
             node_id: selector("node-a"),
             workspace_id: selector("workspace-a"),
             node_incarnation: selector(
-                &hatchery_node_protocol::NodeIncarnationId::from_bytes([4; 16]).to_string(),
+                &gate4agent_node_protocol::NodeIncarnationId::from_bytes([4; 16]).to_string(),
             ),
             record_id: selector("record-c"),
             instance_id: 7,

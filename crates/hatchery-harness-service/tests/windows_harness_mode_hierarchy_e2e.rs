@@ -9,9 +9,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use hatchery_c2::protocol::C2RelayFailureCode;
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::{connect_local, C2Client, C2ControlError};
+use gate4agent_c2::protocol::C2RelayFailureCode;
+use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use gate4agent_c2_client::{connect_local, C2Client, C2ControlError};
 use hatchery_harness_api::{
     HarnessExpectedExecutionSpecRevisionV1, HarnessLaunchAuthorityRefV1,
     HarnessNativeSessionCatalogScopeV1, HarnessNativeSessionPreviewRoleV1,
@@ -40,11 +40,11 @@ use hatchery_harness_service::{
     },
     HarnessService,
 };
-use hatchery_node::protocol::{
+use gate4agent_node::protocol::{
     NodeId, SessionMode, SpawnProfileDefaults, SpawnProfileId, SpawnProfileRevision,
     WorkspaceId,
 };
-use hatchery_node::{NodeServer, NodeServerConfig, SpawnProfileRegistry, WorkspaceConfig};
+use gate4agent_node::{NodeServer, NodeServerConfig, SpawnProfileRegistry, WorkspaceConfig};
 use hatchery_observation_service::ObservationService;
 use gate4agent_types::{AdapterId, AgentId, TerminalSize};
 use serde_json::{json, Value};
@@ -126,7 +126,7 @@ fn write_json_lines(path: &Path, values: &[Value]) {
     fs::write(path, bytes).unwrap();
 }
 
-fn history_fixture(root: &Path, workspace: &Path) -> hatchery_node::NativeHistoryConfig {
+fn history_fixture(root: &Path, workspace: &Path) -> gate4agent_node::NativeHistoryConfig {
     let projects = root.join("projects");
     write_json_lines(
         &projects.join("project").join("harness-history-fixture.jsonl"),
@@ -155,10 +155,10 @@ fn history_fixture(root: &Path, workspace: &Path) -> hatchery_node::NativeHistor
             }),
         ],
     );
-    hatchery_node::NativeHistoryConfig::new(vec![
-        hatchery_node::NativeHistoryRoot::new(
+    gate4agent_node::NativeHistoryConfig::new(vec![
+        gate4agent_node::NativeHistoryRoot::new(
             AdapterId::new("claude-code").unwrap(),
-            hatchery_node::HistorySourceLayout::SingleNdjson,
+            gate4agent_node::HistorySourceLayout::SingleNdjson,
             projects,
         ).unwrap(),
     ]).unwrap()
@@ -225,7 +225,7 @@ async fn wait_online(client: &C2Client, node_id: &NodeId) {
     timeout(Duration::from_secs(10), async {
         loop {
             if client.status().await.ok().and_then(|status| status.nodes.get(node_id)
-                .map(|node| node.transport == hatchery_c2::protocol::NodeTransportState::Online))
+                .map(|node| node.transport == gate4agent_c2::protocol::NodeTransportState::Online))
                 == Some(true)
             {
                 break;

@@ -14,21 +14,22 @@ crossterm = "0.28"
 gate4agent-arcade-engine = { path = "../../../gate4agent-arcade/engine", default-features = false, features = ["render"] }
 gate4agent-arcade-pet-bastion = { path = "../../../gate4agent-arcade/games/pet-bastion" }
 gate4agent-arcade-pet-bastion-render = { path = "../../../gate4agent-arcade/games/pet-bastion-render" }
-hatchery-build-stamp = { path = "../hatchery-build-stamp" }
-hatchery-c2-client = { path = "../hatchery-c2-client" }
-hatchery-c2-protocol = { path = "../hatchery-c2-protocol" }
+gate4agent-build-stamp = { path = "../../../gate4agent/crates/gate4agent-build-stamp" }
+gate4agent-c2-client = { path = "../../../gate4agent/crates/gate4agent-c2-client" }
+gate4agent-c2-protocol = { path = "../../../gate4agent/crates/gate4agent-c2-protocol" }
 hatchery-harness-client = { path = "../hatchery-harness-client" }
 hatchery-harness-light = { path = "../hatchery-harness-light" }
 hatchery-harness-protocol = { path = "../hatchery-harness-protocol" }
-hatchery-node-protocol = { path = "../hatchery-node-protocol" }
+gate4agent-node-protocol = { path = "../../../gate4agent/crates/gate4agent-node-protocol" }
 # `local_hmac_sha256`/`proofs_match`: the same constant-time credential-
 # digest primitives `gate4agent-harness-service`'s own operator-credential
 # authority uses (`HarnessOperatorCredentialAuthority`) -- `control_plane`
 # follows that exact precedent instead of hand-rolling a second comparison
 # scheme. In-tree sibling crate, no new external dependency.
-hatchery-node-wire = { path = "../hatchery-node-wire" }
+gate4agent-node-wire = { path = "../../../gate4agent/crates/gate4agent-node-wire" }
 hatchery-observation-api = { path = "../hatchery-observation-api" }
 hatchery-observation-engine = { path = "../hatchery-observation-engine" }
+hatchery-observation-protocol = { path = "../hatchery-observation-protocol" }
 hatchery-observation-service = { path = "../hatchery-observation-service" }
 gate4agent-types = { path = "../../../gate4agent/crates/gate4agent-types" }
 icy_sixel = "0.6"

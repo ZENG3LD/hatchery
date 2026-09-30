@@ -46,8 +46,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::C2Client;
+use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use gate4agent_c2_client::C2Client;
 use hatchery_harness_api::{
     HarnessExpectedExecutionSpecRevisionV1, HarnessMoveTaskRequestV1, HarnessOperatorCredential,
     HarnessOperatorMutationOutcomeV1, HarnessReplaceTaskExecutionSpecRequestV2,
@@ -72,10 +72,10 @@ use hatchery_harness_service::{
     runtime::{start_harness_host_with_operator_and_catalogs, HarnessRuntimeCatalogs},
     HarnessService,
 };
-use hatchery_node::protocol::{
+use gate4agent_node::protocol::{
     NodeId, SessionMode, SpawnProfileDefaults, SpawnProfileId, SpawnProfileRevision, WorkspaceId,
 };
-use hatchery_node::{NodeServer, NodeServerConfig, SpawnProfileRegistry, WorkspaceConfig};
+use gate4agent_node::{NodeServer, NodeServerConfig, SpawnProfileRegistry, WorkspaceConfig};
 use hatchery_observation_service::ObservationService;
 use gate4agent_types::{AgentId, TerminalSize};
 use tokio::time::{sleep, timeout};
@@ -308,7 +308,7 @@ async fn wait_online(client: &C2Client, node_id: &NodeId) {
                 .ok()
                 .and_then(|status| {
                     status.nodes.get(node_id).map(|node| {
-                        node.transport == hatchery_c2_protocol::NodeTransportState::Online
+                        node.transport == gate4agent_c2_protocol::NodeTransportState::Online
                             && node.cursor.is_some()
                     })
                 })

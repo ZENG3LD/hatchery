@@ -1,11 +1,18 @@
 # hatchery — agent control plane, harness and TUI
 
-hatchery is the agent control plane: node (owns PTY/processes/workspaces/
-worktrees) + C2 (relay) + Harness (task kernel, SQLite SWC) + TUI. It is
-built on the `gate4agent` library — the transport core that spawns,
-streams, and resumes CLI coding-agent subprocesses over PTY/pipe/ACP/daemon
-transports — as a sibling repository at `..\gate4agent`, linked by path,
-not vendored. Agent mail is `mail4agent` (`:18301`), its own service: the
+hatchery is the agent control plane's HQ: Harness (task kernel, SQLite SWC) +
+observation + TUI. It is built on `gate4agent` -- everything about providers:
+the library that spawns, streams, and resumes CLI coding-agent subprocesses
+over PTY/pipe/ACP/daemon transports, the node process (PTY/processes/
+workspaces/worktrees) and the C2 relay that reaches nodes on remote machines
+-- as a sibling repository at `..\gate4agent`, linked by path, not vendored.
+hatchery talks to the node and the C2 only through `gate4agent-node-protocol`
+and `gate4agent-c2-protocol`/`-c2-client`; outside tests it never links the
+node or C2 server crates. The observation vocabulary is hatchery's: the node
+publishes control events and the agent stream, and
+`hatchery_observation_engine::node_projection` derives `ObservationV1` from
+them (a C2 client that negotiated `control-detail-v1` receives the sanitized
+control detail that projection needs). Agent mail is `mail4agent` (`:18301`), its own service: the
 harness holds no mailbox, and the TUI does not read mail4agent yet. Both
 clients speak ONLY the harness operator wire: `gate4agent-tui` against a
 durable harness, and `gate4agent-tui-light` against

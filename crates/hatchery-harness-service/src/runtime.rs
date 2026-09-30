@@ -47,13 +47,13 @@ use crate::terminal::{
     HOST_TERMINAL_SUBSCRIBER_LIMIT, HOST_TERMINAL_SUBSCRIBER_QUEUE_CAPACITY,
 };
 use hatchery_harness_delivery::DeliveryCatalogV2;
-use hatchery_c2_protocol::{
-    C2ManagedSessionRecord, C2NodeEvent, C2ObservationSupport, C2SessionStatus,
+use gate4agent_c2_protocol::{
+    C2ManagedSessionRecord, C2NodeEvent, C2SessionStatus,
     NodeRoute, RoutedNodeEvent,
 };
 use hatchery_observation_api::{
     ManagedRecordLink, ManagedSessionKey, NodeCursor, NodeId, NodeIncarnationId,
-    ObservationGap, ObservationIngressEnvelope, ObservationIngressPayload,
+    ObservationGap, ObservationIngressEnvelope, ObservationIngressPayload, ObservationSupport,
     ObservationResyncBatch, ObservationTarget, ObservationTransport, RuntimeSessionKey,
 };
 use hatchery_observation_service::{ObservationService, ObservationServiceError};
@@ -114,8 +114,8 @@ use hatchery_harness_protocol::{
     HarnessTransferAuthorityRefV1,
     HarnessGrantTargetV1, SessionGrantV1,
 };
-use hatchery_node_wire::{local_hmac_sha256, proofs_match};
-use hatchery_node_protocol::{
+use gate4agent_node_wire::{local_hmac_sha256, proofs_match};
+use gate4agent_node_protocol::{
     HarnessMcpActivationDigest, HarnessMcpCallId, HarnessMcpContentTypeV1,
     HarnessMcpLocalReplyV1, HarnessMcpOpaquePayloadV1,
     HarnessMcpRejectReasonV1, HarnessMcpReplyChunkHexV1, HarnessMcpReservationId,
@@ -425,7 +425,7 @@ enum HostCommand {
     },
     HarnessMcpArmFinished {
         operation_id: HarnessOperationId,
-        spec: hatchery_node_protocol::SpawnSpec,
+        spec: gate4agent_node_protocol::SpawnSpec,
         profile: SpawnProfileRevisionProof,
         result: Result<ArmedHarnessMcpReservationProof, HarnessC2Error>,
     },
@@ -1548,14 +1548,14 @@ fn specialized_spawn_spec(
     harness: &HarnessService,
     _plan: &crate::dispatch::HarnessLaunchPlanV1,
     run_id: &hatchery_harness_protocol::HarnessRunId,
-    mut spec: hatchery_node_protocol::SpawnSpec,
-) -> Result<hatchery_node_protocol::SpawnSpec, HarnessRuntimeError> {
+    mut spec: gate4agent_node_protocol::SpawnSpec,
+) -> Result<gate4agent_node_protocol::SpawnSpec, HarnessRuntimeError> {
     if let Some(delivery) = harness.engine().delivery_for_run(run_id) {
         let stage = delivery.stage_receipt.as_ref()
             .ok_or(HarnessRuntimeError::DispatchPreparation(
                 "delivery has no stage receipt",
             ))?;
-        spec.overrides.bundle_id = hatchery_node_protocol::SpawnOverride::Set {
+        spec.overrides.bundle_id = gate4agent_node_protocol::SpawnOverride::Set {
             value: SpawnBundleId::new(stage.bundle.bundle_id.as_str())
                 .map_err(|_| HarnessRuntimeError::DispatchPreparation(
                     "stage receipt bundle id is not a valid spawn bundle id",
@@ -1567,7 +1567,7 @@ fn specialized_spawn_spec(
             .ok_or(HarnessRuntimeError::DispatchPreparation(
                 "continuation has no context",
             ))?;
-        spec.overrides.context_id = hatchery_node_protocol::SpawnOverride::Set {
+        spec.overrides.context_id = gate4agent_node_protocol::SpawnOverride::Set {
             value: SpawnContextId::new(context.id.as_str())
                 .map_err(|_| HarnessRuntimeError::DispatchPreparation(
                     "continuation context id is not a valid spawn context id",
@@ -2225,7 +2225,7 @@ fn dispatching_start_error_result(error: &HarnessRuntimeError) -> CoordinatorSpa
 fn harness_mcp_arm_finish_result(error: &HarnessC2Error) -> CoordinatorSpawnResult {
     match error {
         HarnessC2Error::HarnessMcpRejected { .. } => CoordinatorSpawnResult::Failed,
-        HarnessC2Error::HarnessMcpTransport(hatchery_c2_client::C2ControlError::Protocol(_)) => {
+        HarnessC2Error::HarnessMcpTransport(gate4agent_c2_client::C2ControlError::Protocol(_)) => {
             CoordinatorSpawnResult::Failed
         }
         _ => CoordinatorSpawnResult::OutcomeUnknown(Some(error.to_string())),
@@ -2775,7 +2775,7 @@ fn start_dispatch_preflight(
     commands: &mpsc::Sender<HostCommand>,
     intent: HarnessDispatchIntentV1,
 ) -> Result<(), HarnessRuntimeError> {
-    let node_id = hatchery_node_protocol::NodeId::new(intent.intent.node_id.as_str())
+    let node_id = gate4agent_node_protocol::NodeId::new(intent.intent.node_id.as_str())
         .map_err(|_| HarnessRuntimeError::DispatchPreparation(
             "dispatch intent node id is not a valid node id",
         ))?;
@@ -3167,7 +3167,7 @@ fn start_run_context_source_worker(
 fn map_run_context_source_error(error: HarnessC2Error) -> HarnessOperatorHostErrorV1 {
     match error {
         HarnessC2Error::RunContextSourceEnqueue(
-            hatchery_c2_client::C2ControlError::QueueFull,
+            gate4agent_c2_client::C2ControlError::QueueFull,
         ) => HarnessOperatorHostErrorV1::Busy,
         HarnessC2Error::RunContextSourceEnqueue(_)
         | HarnessC2Error::RunContextSourceTransport(_)
@@ -3215,7 +3215,7 @@ fn map_run_read_error(error: HarnessC2Error) -> HarnessOperatorHostErrorV1 {
     match error {
         HarnessC2Error::InvalidRunReadRequest => HarnessOperatorHostErrorV1::InvalidRequest,
         HarnessC2Error::RunReadUnbound => HarnessOperatorHostErrorV1::Conflict,
-        HarnessC2Error::RunReadEnqueue(hatchery_c2_client::C2ControlError::QueueFull) => {
+        HarnessC2Error::RunReadEnqueue(gate4agent_c2_client::C2ControlError::QueueFull) => {
             HarnessOperatorHostErrorV1::Busy
         }
         HarnessC2Error::RunReadEnqueue(_)
@@ -3284,7 +3284,7 @@ fn map_node_workspace_read_error(error: HarnessC2Error) -> HarnessOperatorHostEr
         HarnessC2Error::InvalidNodeWorkspaceReadRequest => {
             HarnessOperatorHostErrorV1::InvalidRequest
         }
-        HarnessC2Error::NodeWorkspaceReadEnqueue(hatchery_c2_client::C2ControlError::QueueFull) => {
+        HarnessC2Error::NodeWorkspaceReadEnqueue(gate4agent_c2_client::C2ControlError::QueueFull) => {
             HarnessOperatorHostErrorV1::Busy
         }
         HarnessC2Error::NodeWorkspaceReadEnqueue(_)
@@ -3357,7 +3357,7 @@ fn map_node_workspace_write_error(error: HarnessC2Error) -> HarnessOperatorHostE
         HarnessC2Error::InvalidNodeWorkspaceWriteRequest => {
             HarnessOperatorHostErrorV1::InvalidRequest
         }
-        HarnessC2Error::NodeWorkspaceWriteEnqueue(hatchery_c2_client::C2ControlError::QueueFull) => {
+        HarnessC2Error::NodeWorkspaceWriteEnqueue(gate4agent_c2_client::C2ControlError::QueueFull) => {
             HarnessOperatorHostErrorV1::Busy
         }
         HarnessC2Error::NodeWorkspaceWriteEnqueue(_)
@@ -3424,7 +3424,7 @@ fn map_session_spawn_error(error: HarnessC2Error) -> HarnessOperatorHostErrorV1 
         | HarnessC2Error::RelayReconnecting => HarnessOperatorHostErrorV1::Unavailable,
         HarnessC2Error::IncarnationChanged { .. } => HarnessOperatorHostErrorV1::Conflict,
         HarnessC2Error::SpawnProfileUnavailable(_) => HarnessOperatorHostErrorV1::NotFound,
-        HarnessC2Error::SpawnEnqueue(hatchery_c2_client::C2ControlError::QueueFull) => {
+        HarnessC2Error::SpawnEnqueue(gate4agent_c2_client::C2ControlError::QueueFull) => {
             HarnessOperatorHostErrorV1::Busy
         }
         HarnessC2Error::SpawnEnqueue(_) => HarnessOperatorHostErrorV1::Unavailable,
@@ -3516,7 +3516,7 @@ fn map_session_spawn_node_failure(
 fn map_session_control_error(error: HarnessC2Error) -> HarnessOperatorHostErrorV1 {
     match error {
         HarnessC2Error::InvalidSessionControlRequest => HarnessOperatorHostErrorV1::InvalidRequest,
-        HarnessC2Error::SessionControlEnqueue(hatchery_c2_client::C2ControlError::QueueFull) => {
+        HarnessC2Error::SessionControlEnqueue(gate4agent_c2_client::C2ControlError::QueueFull) => {
             HarnessOperatorHostErrorV1::Busy
         }
         HarnessC2Error::SessionControlEnqueue(_)
@@ -3573,7 +3573,7 @@ fn map_session_record_mutation_error(error: HarnessC2Error) -> HarnessOperatorHo
             HarnessOperatorHostErrorV1::InvalidRequest
         }
         HarnessC2Error::SessionRecordMutationEnqueue(
-            hatchery_c2_client::C2ControlError::QueueFull,
+            gate4agent_c2_client::C2ControlError::QueueFull,
         ) => HarnessOperatorHostErrorV1::Busy,
         HarnessC2Error::SessionRecordMutationEnqueue(_)
         | HarnessC2Error::SessionRecordMutationTransport(_)
@@ -3626,7 +3626,7 @@ fn map_host_directory_browse_error(error: HarnessC2Error) -> HarnessOperatorHost
             HarnessOperatorHostErrorV1::InvalidRequest
         }
         HarnessC2Error::HostDirectoryBrowseEnqueue(
-            hatchery_c2_client::C2ControlError::QueueFull,
+            gate4agent_c2_client::C2ControlError::QueueFull,
         ) => HarnessOperatorHostErrorV1::Busy,
         HarnessC2Error::HostDirectoryBrowseEnqueue(_)
         | HarnessC2Error::HostDirectoryBrowseTransport(_)
@@ -3682,7 +3682,7 @@ fn map_resource_mutation_error(error: HarnessC2Error) -> HarnessOperatorHostErro
     match error {
         HarnessC2Error::InvalidResourceMutationRequest => HarnessOperatorHostErrorV1::InvalidRequest,
         HarnessC2Error::ResourceMutationEnqueue(
-            hatchery_c2_client::C2ControlError::QueueFull,
+            gate4agent_c2_client::C2ControlError::QueueFull,
         ) => HarnessOperatorHostErrorV1::Busy,
         HarnessC2Error::ResourceMutationEnqueue(_)
         | HarnessC2Error::ResourceMutationTransport(_)
@@ -3744,7 +3744,7 @@ fn map_native_history_error(error: HarnessC2Error) -> HarnessOperatorHostErrorV1
             HarnessOperatorHostErrorV1::InvalidRequest
         }
         HarnessC2Error::NativeHistoryEnqueue(
-            hatchery_c2_client::C2ControlError::QueueFull,
+            gate4agent_c2_client::C2ControlError::QueueFull,
         ) => HarnessOperatorHostErrorV1::Busy,
         HarnessC2Error::NativeHistoryEnqueue(_)
         | HarnessC2Error::NativeHistoryTransport(_)
@@ -4589,7 +4589,7 @@ fn start_continuation_export_finish(
 fn start_harness_mcp_arm_finish(
     commands: mpsc::Sender<HostCommand>,
     operation_id: HarnessOperationId,
-    spec: hatchery_node_protocol::SpawnSpec,
+    spec: gate4agent_node_protocol::SpawnSpec,
     profile: SpawnProfileRevisionProof,
     pending: crate::c2::PendingHarnessMcpArm,
 ) {
@@ -6188,7 +6188,7 @@ pub async fn start_harness_host_with_operator_and_catalogs(
                                 )?;
                                 let expires_at_unix_ms = now.checked_add(
                                     plan.deadline_ms.min(
-                                        hatchery_node_protocol::MAX_HARNESS_MCP_RESERVATION_TTL_MS,
+                                        gate4agent_node_protocol::MAX_HARNESS_MCP_RESERVATION_TTL_MS,
                                     ),
                                 ).ok_or(HarnessRuntimeError::DispatchPreparation(
                                     "harness mcp reservation expiry overflowed u64",
@@ -7339,25 +7339,30 @@ pub async fn start_harness_host_with_operator_and_catalogs(
                                         // (`agent_stream.rs`) for why a resolved
                                         // prompt must leave the agent-stream seed set
                                         // regardless of which of the two caused it.
-                                        C2NodeEvent::Observation { address, observation } => {
-                                            if let hatchery_observation_protocol::ObservationKindV1::ApprovalResolved {
-                                                correlation_id, ..
-                                            }
-                                            | hatchery_observation_protocol::ObservationKindV1::QuestionResolved {
-                                                correlation_id, ..
-                                            }
-                                            | hatchery_observation_protocol::ObservationKindV1::InteractionResolved {
-                                                correlation_id, ..
-                                            } = &observation.kind
-                                            {
-                                                let key = RuntimeSessionKey {
-                                                    node_id: event.node_id.clone(),
-                                                    incarnation_id: event.cursor.incarnation_id,
-                                                    workspace_id: address.workspace_id.clone(),
-                                                    instance_id: address.session.instance_id,
-                                                    generation: address.session.generation,
-                                                };
-                                                agent_stream_subscribers.resolve_interaction(&key, correlation_id);
+                                        C2NodeEvent::Control { address, event: control } => {
+                                            let resolved = control.detail.as_ref()
+                                                .map(hatchery_observation_engine::node_projection::control_event_observations)
+                                                .unwrap_or_default();
+                                            for observation in &resolved {
+                                                if let hatchery_observation_protocol::ObservationKindV1::ApprovalResolved {
+                                                    correlation_id, ..
+                                                }
+                                                | hatchery_observation_protocol::ObservationKindV1::QuestionResolved {
+                                                    correlation_id, ..
+                                                }
+                                                | hatchery_observation_protocol::ObservationKindV1::InteractionResolved {
+                                                    correlation_id, ..
+                                                } = &observation.kind
+                                                {
+                                                    let key = RuntimeSessionKey {
+                                                        node_id: event.node_id.clone(),
+                                                        incarnation_id: event.cursor.incarnation_id,
+                                                        workspace_id: address.workspace_id.clone(),
+                                                        instance_id: address.session.instance_id,
+                                                        generation: address.session.generation,
+                                                    };
+                                                    agent_stream_subscribers.resolve_interaction(&key, correlation_id);
+                                                }
                                             }
                                         }
                                         C2NodeEvent::ResyncRequired { .. } => {
@@ -8234,10 +8239,10 @@ impl HarnessRuntimeInventoryCache {
                             profile.revision.as_str(),
                         ).ok()?,
                         retention: match profile.retention {
-                            hatchery_node_protocol::ManagedWorktreeRetention::RemoveWhenReleased => {
+                            gate4agent_node_protocol::ManagedWorktreeRetention::RemoveWhenReleased => {
                                 HarnessManagedWorktreeRetentionV1::RemoveWhenReleased
                             }
-                            hatchery_node_protocol::ManagedWorktreeRetention::Retain => {
+                            gate4agent_node_protocol::ManagedWorktreeRetention::Retain => {
                                 HarnessManagedWorktreeRetentionV1::Retain
                             }
                         },
@@ -8282,7 +8287,7 @@ impl HarnessRuntimeInventoryCache {
             observed_at_unix_ms,
             event_sequence: resync.event_sequence(),
             inventory: redact_runtime_inventory(
-                hatchery_c2_protocol::SlimNodeInventory::from_c2_snapshot(resync.snapshot()),
+                gate4agent_c2_protocol::SlimNodeInventory::from_c2_snapshot(resync.snapshot()),
             ),
         };
         let changed = self.nodes.get(&route.node_id) != Some(&node);
@@ -8687,7 +8692,7 @@ fn project_run_correlation(
 /// fanned out to every currently
 /// polling/subscribed peer with no per-recipient variation.
 pub fn redact_runtime_inventory(
-    inventory: hatchery_c2_protocol::SlimNodeInventory,
+    inventory: gate4agent_c2_protocol::SlimNodeInventory,
 ) -> HarnessRuntimeInventoryV1 {
     let enabled_providers = inventory.enabled_providers.into_iter()
         .map(|provider| provider.as_str().to_owned())
@@ -8704,22 +8709,22 @@ pub fn redact_runtime_inventory(
                 gate4agent_types::TransportKind::Acp => HarnessRuntimeTransportV1::Acp,
             },
             status: match session.status {
-                hatchery_c2_protocol::SlimSessionStatus::Registered => {
+                gate4agent_c2_protocol::SlimSessionStatus::Registered => {
                     HarnessRuntimeSessionStatusV1::Registered
                 }
-                hatchery_c2_protocol::SlimSessionStatus::Starting => {
+                gate4agent_c2_protocol::SlimSessionStatus::Starting => {
                     HarnessRuntimeSessionStatusV1::Starting
                 }
-                hatchery_c2_protocol::SlimSessionStatus::Running => {
+                gate4agent_c2_protocol::SlimSessionStatus::Running => {
                     HarnessRuntimeSessionStatusV1::Running
                 }
-                hatchery_c2_protocol::SlimSessionStatus::Stopping => {
+                gate4agent_c2_protocol::SlimSessionStatus::Stopping => {
                     HarnessRuntimeSessionStatusV1::Stopping
                 }
-                hatchery_c2_protocol::SlimSessionStatus::Exited => {
+                gate4agent_c2_protocol::SlimSessionStatus::Exited => {
                     HarnessRuntimeSessionStatusV1::Exited
                 }
-                hatchery_c2_protocol::SlimSessionStatus::Failed => {
+                gate4agent_c2_protocol::SlimSessionStatus::Failed => {
                     HarnessRuntimeSessionStatusV1::Failed
                 }
             },
@@ -8751,23 +8756,23 @@ pub fn redact_runtime_inventory(
             display_name_truncated: record.display_name_truncated,
             provider: record.provider.as_str().to_owned(),
             mode: match record.mode {
-                hatchery_node_protocol::SessionMode::Pty => HarnessRuntimeManagedModeV1::Pty,
-                hatchery_node_protocol::SessionMode::Inline => {
+                gate4agent_node_protocol::SessionMode::Pty => HarnessRuntimeManagedModeV1::Pty,
+                gate4agent_node_protocol::SessionMode::Inline => {
                     HarnessRuntimeManagedModeV1::Inline
                 }
-                hatchery_node_protocol::SessionMode::Acp => HarnessRuntimeManagedModeV1::Acp,
+                gate4agent_node_protocol::SessionMode::Acp => HarnessRuntimeManagedModeV1::Acp,
             },
             state: match record.state {
-                hatchery_node_protocol::ManagedSessionState::IdentityPending => {
+                gate4agent_node_protocol::ManagedSessionState::IdentityPending => {
                     HarnessRuntimeManagedStateV1::IdentityPending
                 }
-                hatchery_node_protocol::ManagedSessionState::Live => {
+                gate4agent_node_protocol::ManagedSessionState::Live => {
                     HarnessRuntimeManagedStateV1::Live
                 }
-                hatchery_node_protocol::ManagedSessionState::Dormant => {
+                gate4agent_node_protocol::ManagedSessionState::Dormant => {
                     HarnessRuntimeManagedStateV1::Dormant
                 }
-                hatchery_node_protocol::ManagedSessionState::Unavailable => {
+                gate4agent_node_protocol::ManagedSessionState::Unavailable => {
                     HarnessRuntimeManagedStateV1::Unavailable
                 }
             },
@@ -8842,7 +8847,7 @@ fn fill_managed_session_blocked_stats(
 }
 
 fn redact_launch_inventory(
-    inventory: hatchery_node_protocol::LaunchInventory,
+    inventory: gate4agent_node_protocol::LaunchInventory,
 ) -> HarnessRuntimeLaunchInventoryV1 {
     HarnessRuntimeLaunchInventoryV1 {
         spawn_profiles: inventory.spawn_profiles.map(|profiles| {
@@ -9799,7 +9804,7 @@ fn terminal_session_key(
             .map_err(|_| HarnessOperatorHostErrorV1::InvalidRequest)?,
         incarnation_id: session.incarnation_id.as_str().parse()
             .map_err(|_| HarnessOperatorHostErrorV1::InvalidRequest)?,
-        workspace_id: hatchery_node_protocol::WorkspaceId::new(session.workspace_id.as_str())
+        workspace_id: gate4agent_node_protocol::WorkspaceId::new(session.workspace_id.as_str())
             .map_err(|_| HarnessOperatorHostErrorV1::InvalidRequest)?,
         instance_id: gate4agent_types::AgentInstanceId(session.instance_id),
         generation: gate4agent_types::SessionGeneration(session.generation),
@@ -11064,7 +11069,7 @@ pub(crate) struct ObservationSupportRegistry {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct RouteObservationAuthority {
-    support: Option<C2ObservationSupport>,
+    support: Option<ObservationSupport>,
     healthy: bool,
     /// Whether the harness has successfully resynced this exact
     /// `(node_id, incarnation_id)` route at least once and the route is
@@ -11087,7 +11092,7 @@ impl ObservationSupportRegistry {
         &self,
         node_id: &NodeId,
         incarnation_id: NodeIncarnationId,
-    ) -> Option<Option<C2ObservationSupport>> {
+    ) -> Option<Option<ObservationSupport>> {
         self.routes.get(&(node_id.clone(), incarnation_id)).map(|route| route.support)
     }
 
@@ -11118,7 +11123,7 @@ impl ObservationSupportRegistry {
         &mut self,
         node_id: NodeId,
         incarnation_id: NodeIncarnationId,
-        support: Option<C2ObservationSupport>,
+        support: Option<ObservationSupport>,
     ) {
         self.routes.insert(
             (node_id, incarnation_id),
@@ -11577,11 +11582,11 @@ fn node_still_has_session(node: &HarnessRuntimeNodeInventoryV1, session: &Sessio
 
 struct HarnessMcpRelayPlan {
     route: NodeRoute,
-    reservation_id: hatchery_node_protocol::HarnessMcpReservationId,
-    activation_digest: hatchery_node_protocol::HarnessMcpActivationDigest,
-    record_id: hatchery_node_protocol::SessionRecordId,
-    session: hatchery_node_protocol::SessionAddress,
-    call_id: hatchery_node_protocol::HarnessMcpCallId,
+    reservation_id: gate4agent_node_protocol::HarnessMcpReservationId,
+    activation_digest: gate4agent_node_protocol::HarnessMcpActivationDigest,
+    record_id: gate4agent_node_protocol::SessionRecordId,
+    session: gate4agent_node_protocol::SessionAddress,
+    call_id: gate4agent_node_protocol::HarnessMcpCallId,
     deadline_unix_ms: u64,
     outcome: Result<Vec<u8>, HarnessMcpRejectReasonV1>,
 }
@@ -11865,11 +11870,11 @@ async fn relay_harness_mcp_read_call(
 async fn reject_harness_mcp_before_deadline(
     adapter: &HarnessC2Adapter,
     route: &NodeRoute,
-    reservation_id: &hatchery_node_protocol::HarnessMcpReservationId,
-    activation_digest: &hatchery_node_protocol::HarnessMcpActivationDigest,
-    record_id: &hatchery_node_protocol::SessionRecordId,
-    session: &hatchery_node_protocol::SessionAddress,
-    call_id: &hatchery_node_protocol::HarnessMcpCallId,
+    reservation_id: &gate4agent_node_protocol::HarnessMcpReservationId,
+    activation_digest: &gate4agent_node_protocol::HarnessMcpActivationDigest,
+    record_id: &gate4agent_node_protocol::SessionRecordId,
+    session: &gate4agent_node_protocol::SessionAddress,
+    call_id: &gate4agent_node_protocol::HarnessMcpCallId,
     reason: HarnessMcpRejectReasonV1,
     deadline_unix_ms: u64,
 ) {
@@ -12055,7 +12060,7 @@ fn apply_context_pack_receipt_for_record(
 fn apply_snapshot_context_pack_receipts(
     harness: &mut HarnessService,
     route: &NodeRoute,
-    snapshot: &hatchery_c2_protocol::C2NodeSnapshot,
+    snapshot: &gate4agent_c2_protocol::C2NodeSnapshot,
     received_at_ms: u64,
 ) -> Result<Vec<hatchery_harness_protocol::HarnessRunId>, HarnessRuntimeError> {
     if snapshot.node_id != route.node_id {
@@ -12263,8 +12268,8 @@ fn apply_snapshot_lifecycle(
     harness: &mut HarnessService,
     route: &NodeRoute,
     event_sequence: u64,
-    snapshot: &hatchery_c2_protocol::C2NodeSnapshot,
-    lifecycle_control_events: &[hatchery_c2_protocol::C2NodeEventEnvelope],
+    snapshot: &gate4agent_c2_protocol::C2NodeSnapshot,
+    lifecycle_control_events: &[gate4agent_c2_protocol::C2NodeEventEnvelope],
     received_at_ms: u64,
 ) -> Result<EngineTouch, HarnessRuntimeError> {
     if event_sequence == 0 {
@@ -12306,7 +12311,7 @@ fn apply_snapshot_lifecycle(
 fn replay_contains_exact_lifecycle(
     run: &hatchery_harness_protocol::HarnessRunV1,
     route: &NodeRoute,
-    events: &[hatchery_c2_protocol::C2NodeEventEnvelope],
+    events: &[gate4agent_c2_protocol::C2NodeEventEnvelope],
 ) -> bool {
     events.iter().any(|event| {
         exact_bound_control_lifecycle(
@@ -12326,7 +12331,7 @@ fn replay_contains_exact_lifecycle(
 fn exact_snapshot_lifecycle(
     run: &hatchery_harness_protocol::HarnessRunV1,
     route: &NodeRoute,
-    snapshot: &hatchery_c2_protocol::C2NodeSnapshot,
+    snapshot: &gate4agent_c2_protocol::C2NodeSnapshot,
 ) -> Option<(HarnessLifecycleEventKindV1, HarnessLifecycleProjectionV1)> {
     let binding = run.binding.as_ref()?;
     let HarnessSessionIdentityV1::Managed { record_id, active_session: Some(active) } =
@@ -12346,7 +12351,7 @@ fn exact_snapshot_lifecycle(
     });
     let record = records.next()?;
     if records.next().is_some()
-        || record.state != hatchery_node_protocol::ManagedSessionState::Live
+        || record.state != gate4agent_node_protocol::ManagedSessionState::Live
         || !snapshot_record_matches_binding(record, binding, active)
     {
         return None;
@@ -12394,7 +12399,7 @@ fn apply_replayed_lifecycle_events(
     harness: &mut HarnessService,
     route: &NodeRoute,
     eviction_gap_sequence: Option<u64>,
-    events: &[hatchery_c2_protocol::C2NodeEventEnvelope],
+    events: &[gate4agent_c2_protocol::C2NodeEventEnvelope],
     received_at_ms: u64,
 ) -> Result<EngineTouch, HarnessRuntimeError> {
     let mut touch = EngineTouch::default();
@@ -12511,7 +12516,7 @@ fn ensure_current_topology_binding(
     adapter: &HarnessC2Adapter,
     binding: &CredentialBindingV1,
 ) -> Result<(), HarnessRuntimeError> {
-    let node_id = hatchery_node_protocol::NodeId::new(binding.node_id.as_str())
+    let node_id = gate4agent_node_protocol::NodeId::new(binding.node_id.as_str())
         .map_err(|_| HarnessRuntimeError::CredentialBinding)?;
     let route = adapter.exact_route(&node_id)
         .map_err(|_| HarnessRuntimeError::CredentialBinding)?;
@@ -12548,24 +12553,58 @@ fn routed_event_to_ingress(
     }
     let RoutedNodeEvent { node_id, cursor, event } = routed;
     let payload = match event {
-        C2NodeEvent::Observation { address, observation } => ObservationIngressPayload::Observation {
-            address: ObservationTarget::Runtime { key: RuntimeSessionKey {
-                node_id: node_id.clone(),
-                incarnation_id: cursor.incarnation_id,
-                workspace_id: address.workspace_id,
-                instance_id: address.session.instance_id,
-                generation: address.session.generation,
-            } },
-            observation,
-        },
-        C2NodeEvent::ManagedObservation { record_id, observation } => {
-            ObservationIngressPayload::Observation {
+        // The harness derives its observations from the node's own events, so
+        // a control event, a blocked-action chunk and a history summary each
+        // become the observations they project to, applied atomically at the
+        // event cursor. An event that projects to nothing still advances the
+        // cursor, so ignoring its payload never opens a gap in the sequence.
+        C2NodeEvent::Control { address, event: control } => {
+            let observations = control.detail.as_ref()
+                .map(hatchery_observation_engine::node_projection::control_event_observations)
+                .unwrap_or_default();
+            if observations.is_empty() {
+                ObservationIngressPayload::CursorOnly
+            } else {
+                ObservationIngressPayload::Observations {
+                    address: ObservationTarget::Runtime { key: RuntimeSessionKey {
+                        node_id: node_id.clone(),
+                        incarnation_id: cursor.incarnation_id,
+                        workspace_id: address.workspace_id,
+                        instance_id: address.session.instance_id,
+                        generation: address.session.generation,
+                    } },
+                    observations,
+                }
+            }
+        }
+        C2NodeEvent::AgentStream { address, chunk } => {
+            match hatchery_observation_engine::node_projection::blocked_chunk_observation(&chunk) {
+                Some(observation) => ObservationIngressPayload::Observations {
+                    address: ObservationTarget::Runtime { key: RuntimeSessionKey {
+                        node_id: node_id.clone(),
+                        incarnation_id: cursor.incarnation_id,
+                        workspace_id: address.workspace_id,
+                        instance_id: address.session.instance_id,
+                        generation: address.session.generation,
+                    } },
+                    observations: vec![observation],
+                },
+                // Content, not an observation: an agent text and thinking
+                // carry no correlation ids and have their own subscription.
+                None => ObservationIngressPayload::CursorOnly,
+            }
+        }
+        C2NodeEvent::SessionRecordHistorySummarized { record_id, summary } => {
+            ObservationIngressPayload::Observations {
                 address: ObservationTarget::Managed { key: ManagedSessionKey {
                     node_id: node_id.clone(),
                     incarnation_id: cursor.incarnation_id,
                     record_id,
                 } },
-                observation,
+                observations: hatchery_observation_engine::node_projection::history_summary_observations(&summary)
+                    .into_iter()
+                    .filter(|observation| observation.validate().is_ok())
+                    .collect(),
             }
         }
         C2NodeEvent::HarnessMcpReadCall { .. } => {
@@ -12601,15 +12640,7 @@ fn routed_event_to_ingress(
                 sequence: oldest_available_sequence,
             } }
         }
-        C2NodeEvent::Control { .. }
-        | C2NodeEvent::TerminalFrame { .. }
-        // Content, not an observation -- the same reason `TerminalFrame`
-        // sits here. This path feeds the observation store, whose vocabulary
-        // is semantic telemetry with correlation ids; an agent's text and
-        // thinking carry none of that and have their own subscription. The
-        // event still advances the cursor, so ignoring its payload never
-        // opens a gap in the sequence.
-        | C2NodeEvent::AgentStream { .. }
+        C2NodeEvent::TerminalFrame { .. }
         | C2NodeEvent::ControllerChanged { .. }
         | C2NodeEvent::WorkspaceAdded { .. }
         | C2NodeEvent::WorkspaceRemoved { .. }
@@ -12686,12 +12717,12 @@ pub enum HarnessRuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hatchery_c2_protocol::{
+    use gate4agent_c2_protocol::{
         C2ControlEvent, C2ControlEventKind, C2ManagedSessionRecord,
-        C2NodeEventEnvelope, C2NodeSnapshot, C2ObservationSupport,
+        C2NodeEventEnvelope, C2NodeSnapshot,
         C2SessionSnapshot, C2SessionStatus, C2WorkspaceSnapshot,
     };
-    use hatchery_node_protocol::{
+    use gate4agent_node_protocol::{
         ContextPackLineageReceipt, ManagedSessionState, NodeCursor, OpaqueHostPath,
         ProviderRuntimeStatuses, ResolvedContextPackReceipt, SessionMode, SessionRecordId,
         SpawnContextDigest,
@@ -12722,7 +12753,7 @@ mod tests {
         AgentId, AgentInstanceId, ApprovalLevel, ProviderActivity, PtyScreenState, SessionGeneration,
         TerminalSize, TransportKind,
     };
-    use hatchery_c2_protocol::{SlimNodeInventory, SlimSession, SlimSessionStatus, SlimWorkspace};
+    use gate4agent_c2_protocol::{SlimNodeInventory, SlimSession, SlimSessionStatus, SlimWorkspace};
 
     fn database_path() -> PathBuf {
         let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
@@ -13607,7 +13638,7 @@ mod tests {
             provider: AgentId::new("profile-a").unwrap(),
             mode: SessionMode::Pty,
             state: ManagedSessionState::Dormant,
-            workspace_id: hatchery_node_protocol::WorkspaceId::new("workspace-a").unwrap(),
+            workspace_id: gate4agent_node_protocol::WorkspaceId::new("workspace-a").unwrap(),
             active_session: None,
             environment_profile: None,
             bundle: None,
@@ -14061,10 +14092,10 @@ mod tests {
             sequence,
             event: C2NodeEvent::Control {
                 address: SessionAddress {
-                    workspace_id: hatchery_node_protocol::WorkspaceId::new(
+                    workspace_id: gate4agent_node_protocol::WorkspaceId::new(
                         "workspace-a",
                     ).unwrap(),
-                    session: hatchery_node_protocol::SessionKey {
+                    session: gate4agent_node_protocol::SessionKey {
                         instance_id: gate4agent_types::AgentInstanceId(7),
                         generation: gate4agent_types::SessionGeneration(3),
                     },
@@ -14075,6 +14106,7 @@ mod tests {
                     instance_id: gate4agent_types::AgentInstanceId(7),
                     generation: gate4agent_types::SessionGeneration(3),
                     event: kind,
+                    detail: None,
                 },
             },
         }
@@ -14091,7 +14123,7 @@ mod tests {
                 enabled_providers: vec![AgentId::new("kimi").unwrap()],
                 provider_runtime_statuses: ProviderRuntimeStatuses::default(),
                 workspaces: vec![C2WorkspaceSnapshot {
-                    workspace_id: hatchery_node_protocol::WorkspaceId::new(
+                    workspace_id: gate4agent_node_protocol::WorkspaceId::new(
                         "workspace-a",
                     ).unwrap(),
                     canonical_root: OpaqueHostPath::utf8(
@@ -14122,7 +14154,7 @@ mod tests {
                     provider: AgentId::new("kimi").unwrap(),
                     mode: SessionMode::Pty,
                     state: record_state,
-                    workspace_id: hatchery_node_protocol::WorkspaceId::new(
+                    workspace_id: gate4agent_node_protocol::WorkspaceId::new(
                         "workspace-a",
                     ).unwrap(),
                     active_session: record_active_session,
@@ -14139,18 +14171,13 @@ mod tests {
                 agent_progress: Vec::new(),
                 managed_worktrees: Vec::new(),
                 launch_inventory: None,
-                observation_support: Some(C2ObservationSupport {
-                    events: true,
-                    managed_target: true,
-                    workflow_detail: false,
-                }),
         }
     }
 
     fn bound_session_address() -> SessionAddress {
         SessionAddress {
-            workspace_id: hatchery_node_protocol::WorkspaceId::new("workspace-a").unwrap(),
-            session: hatchery_node_protocol::SessionKey {
+            workspace_id: gate4agent_node_protocol::WorkspaceId::new("workspace-a").unwrap(),
+            session: gate4agent_node_protocol::SessionKey {
                 instance_id: AgentInstanceId(7),
                 generation: SessionGeneration(3),
             },
@@ -14181,7 +14208,7 @@ mod tests {
             input_pending: false,
             screen_state,
         };
-        let workspace_id = hatchery_node_protocol::WorkspaceId::new("workspace-a").unwrap();
+        let workspace_id = gate4agent_node_protocol::WorkspaceId::new("workspace-a").unwrap();
         let mut workspaces = std::collections::BTreeMap::new();
         workspaces.insert(workspace_id.clone(), SlimWorkspace {
             workspace_id: workspace_id.clone(),
@@ -14250,7 +14277,7 @@ mod tests {
             // `sample_runtime_node_inventory` stamps its incarnation as the
             // hex string "1" x 32, which is these bytes.
             incarnation_id: NodeIncarnationId::from_bytes([0x11; 16]),
-            workspace_id: hatchery_node_protocol::WorkspaceId::new("workspace-a").unwrap(),
+            workspace_id: gate4agent_node_protocol::WorkspaceId::new("workspace-a").unwrap(),
             instance_id: AgentInstanceId(7),
             generation: SessionGeneration(1),
         };
@@ -14384,7 +14411,7 @@ mod tests {
         support.replace(
             route.node_id.clone(),
             route.expected_incarnation_id,
-            Some(C2ObservationSupport {
+            Some(ObservationSupport {
                 events: true,
                 managed_target: true,
                 workflow_detail: false,
@@ -14411,7 +14438,7 @@ mod tests {
                 runtime: Some(RuntimeSessionKey {
                     node_id: route.node_id.clone(),
                     incarnation_id: route.expected_incarnation_id,
-                    workspace_id: hatchery_node_protocol::WorkspaceId::new(
+                    workspace_id: gate4agent_node_protocol::WorkspaceId::new(
                         "workspace-a",
                     ).unwrap(),
                     instance_id: AgentInstanceId(7),
@@ -14447,7 +14474,7 @@ mod tests {
         support.replace(
             route.node_id.clone(),
             route.expected_incarnation_id,
-            Some(C2ObservationSupport {
+            Some(ObservationSupport {
                 events: true,
                 managed_target: true,
                 workflow_detail: false,
@@ -14496,17 +14523,21 @@ mod tests {
             None,
         );
 
-        apply_routed_observation_event(
-            &mut observation,
-            RoutedNodeEvent {
-                node_id: route.node_id.clone(),
-                cursor: NodeCursor {
+        observation.apply_ingress(ObservationIngressEnvelope {
+            node_id: route.node_id.clone(),
+            cursor: NodeCursor {
                     incarnation_id: route.expected_incarnation_id,
                     sequence: 6,
                 },
-                event: C2NodeEvent::ManagedObservation {
+            received_at_ms: 1_234,
+            transport: ObservationTransport::C2,
+            payload: ObservationIngressPayload::Observations {
+                address: ObservationTarget::Managed { key: ManagedSessionKey {
+                    node_id: route.node_id.clone(),
+                    incarnation_id: route.expected_incarnation_id,
                     record_id: SessionRecordId::new("record-a").unwrap(),
-                    observation: ObservationV1 {
+                } },
+                observations: vec![ObservationV1 {
                         source_sequence: 99,
                         observed_at_unix_ms: Some(1_230),
                         evidence: ObservationEvidenceV1::HistoryProjection,
@@ -14517,11 +14548,9 @@ mod tests {
                             total_tokens: Some(700),
                         },
                         truncated: false,
-                    },
-                },
+                    }],
             },
-            1_234,
-        ).unwrap();
+        }).unwrap();
         assert_eq!(
             evaluate_pending_run_context_source(
                 &harness,
@@ -14535,7 +14564,7 @@ mod tests {
         support.replace(
             route.node_id.clone(),
             route.expected_incarnation_id,
-            Some(C2ObservationSupport {
+            Some(ObservationSupport {
                 events: true,
                 managed_target: true,
                 workflow_detail: false,
@@ -14603,7 +14632,7 @@ mod tests {
         support.replace(
             route.node_id.clone(),
             route.expected_incarnation_id,
-            Some(C2ObservationSupport {
+            Some(ObservationSupport {
                 events: true,
                 managed_target: true,
                 workflow_detail: false,
@@ -14630,7 +14659,7 @@ mod tests {
                 runtime: Some(RuntimeSessionKey {
                     node_id: route.node_id.clone(),
                     incarnation_id: route.expected_incarnation_id,
-                    workspace_id: hatchery_node_protocol::WorkspaceId::new(
+                    workspace_id: gate4agent_node_protocol::WorkspaceId::new(
                         "workspace-a",
                     ).unwrap(),
                     instance_id: AgentInstanceId(7),
@@ -14641,17 +14670,21 @@ mod tests {
             gaps: Vec::new(),
             events: Vec::new(),
         }).unwrap();
-        apply_routed_observation_event(
-            &mut observation,
-            RoutedNodeEvent {
-                node_id: route.node_id.clone(),
-                cursor: NodeCursor {
+        observation.apply_ingress(ObservationIngressEnvelope {
+            node_id: route.node_id.clone(),
+            cursor: NodeCursor {
                     incarnation_id: route.expected_incarnation_id,
                     sequence: 6,
                 },
-                event: C2NodeEvent::ManagedObservation {
+            received_at_ms: 1_234,
+            transport: ObservationTransport::C2,
+            payload: ObservationIngressPayload::Observations {
+                address: ObservationTarget::Managed { key: ManagedSessionKey {
+                    node_id: route.node_id.clone(),
+                    incarnation_id: route.expected_incarnation_id,
                     record_id: SessionRecordId::new("record-a").unwrap(),
-                    observation: ObservationV1 {
+                } },
+                observations: vec![ObservationV1 {
                         source_sequence: 99,
                         observed_at_unix_ms: Some(1_230),
                         evidence: ObservationEvidenceV1::HistoryProjection,
@@ -14662,11 +14695,9 @@ mod tests {
                             total_tokens: Some(700),
                         },
                         truncated: false,
-                    },
-                },
+                    }],
             },
-            1_234,
-        ).unwrap();
+        }).unwrap();
 
         let stored_run = harness.engine().run(&run_id).unwrap();
         let waiting_run = HarnessRunV1 {
@@ -14757,7 +14788,7 @@ mod tests {
         support.replace(
             route.node_id.clone(),
             route.expected_incarnation_id,
-            Some(C2ObservationSupport {
+            Some(ObservationSupport {
                 events: true,
                 managed_target: true,
                 workflow_detail: false,
@@ -14784,7 +14815,7 @@ mod tests {
                 runtime: Some(RuntimeSessionKey {
                     node_id: route.node_id.clone(),
                     incarnation_id: route.expected_incarnation_id,
-                    workspace_id: hatchery_node_protocol::WorkspaceId::new(
+                    workspace_id: gate4agent_node_protocol::WorkspaceId::new(
                         "workspace-a",
                     ).unwrap(),
                     instance_id: AgentInstanceId(7),
@@ -14798,27 +14829,29 @@ mod tests {
         // A non-history event still brings the projection to `Current`/
         // `Live` without ever populating `history` -- exactly what a live
         // ACP transport actually produces.
-        apply_routed_observation_event(
-            &mut observation,
-            RoutedNodeEvent {
-                node_id: route.node_id.clone(),
-                cursor: NodeCursor {
+        observation.apply_ingress(ObservationIngressEnvelope {
+            node_id: route.node_id.clone(),
+            cursor: NodeCursor {
                     incarnation_id: route.expected_incarnation_id,
                     sequence: 6,
                 },
-                event: C2NodeEvent::ManagedObservation {
+            received_at_ms: 1_234,
+            transport: ObservationTransport::C2,
+            payload: ObservationIngressPayload::Observations {
+                address: ObservationTarget::Managed { key: ManagedSessionKey {
+                    node_id: route.node_id.clone(),
+                    incarnation_id: route.expected_incarnation_id,
                     record_id: SessionRecordId::new("record-a").unwrap(),
-                    observation: ObservationV1 {
+                } },
+                observations: vec![ObservationV1 {
                         source_sequence: 99,
                         observed_at_unix_ms: Some(1_230),
                         evidence: ObservationEvidenceV1::StructuredProvider,
                         kind: ObservationKindV1::Ready,
                         truncated: false,
-                    },
-                },
+                    }],
             },
-            1_234,
-        ).unwrap();
+        }).unwrap();
 
         let run = harness.engine().run(&run_id).unwrap();
         let source = match context_source_option(
@@ -14994,19 +15027,19 @@ mod tests {
         let mismatched_bindings = [
             None,
             Some(SessionAddress {
-                workspace_id: hatchery_node_protocol::WorkspaceId::new("workspace-b")
+                workspace_id: gate4agent_node_protocol::WorkspaceId::new("workspace-b")
                     .unwrap(),
                 ..bound_session_address()
             }),
             Some(SessionAddress {
-                session: hatchery_node_protocol::SessionKey {
+                session: gate4agent_node_protocol::SessionKey {
                     instance_id: AgentInstanceId(8),
                     generation: SessionGeneration(3),
                 },
                 ..bound_session_address()
             }),
             Some(SessionAddress {
-                session: hatchery_node_protocol::SessionKey {
+                session: gate4agent_node_protocol::SessionKey {
                     instance_id: AgentInstanceId(7),
                     generation: SessionGeneration(4),
                 },
@@ -15465,7 +15498,7 @@ mod tests {
                 runtime: Some(RuntimeSessionKey {
                     node_id: route.node_id.clone(),
                     incarnation_id: route.expected_incarnation_id,
-                    workspace_id: hatchery_node_protocol::WorkspaceId::new(
+                    workspace_id: gate4agent_node_protocol::WorkspaceId::new(
                         "workspace-a",
                     ).unwrap(),
                     instance_id: AgentInstanceId(7),
@@ -15511,10 +15544,10 @@ mod tests {
             (
                 ManagedSessionState::Live,
                 Some(SessionAddress {
-                    workspace_id: hatchery_node_protocol::WorkspaceId::new(
+                    workspace_id: gate4agent_node_protocol::WorkspaceId::new(
                         "workspace-a",
                     ).unwrap(),
-                    session: hatchery_node_protocol::SessionKey {
+                    session: gate4agent_node_protocol::SessionKey {
                         instance_id: AgentInstanceId(8),
                         generation: SessionGeneration(3),
                     },
@@ -15648,7 +15681,7 @@ mod tests {
                     runtime: Some(RuntimeSessionKey {
                         node_id: NodeId::new("node-a").unwrap(),
                         incarnation_id,
-                        workspace_id: hatchery_node_protocol::WorkspaceId::new(
+                        workspace_id: gate4agent_node_protocol::WorkspaceId::new(
                             "workspace-a",
                         ).unwrap(),
                         instance_id: gate4agent_types::AgentInstanceId(7),
@@ -15666,24 +15699,26 @@ mod tests {
         let incarnation_id = NodeIncarnationId::from_bytes([3; 16]);
         let record_id = SessionRecordId::new("record-a").unwrap();
         let mut service = ObservationService::open(&path).unwrap();
-        apply_routed_observation_event(
-            &mut service,
-            RoutedNodeEvent {
-                node_id: node_id.clone(),
-                cursor: NodeCursor { incarnation_id, sequence: 1 },
-                event: C2NodeEvent::ManagedObservation {
+        service.apply_ingress(ObservationIngressEnvelope {
+            node_id: node_id.clone(),
+            cursor: NodeCursor { incarnation_id, sequence: 1 },
+            received_at_ms: 11,
+            transport: ObservationTransport::C2,
+            payload: ObservationIngressPayload::Observations {
+                address: ObservationTarget::Managed { key: ManagedSessionKey {
+                    node_id: node_id.clone(),
+                    incarnation_id: NodeCursor { incarnation_id, sequence: 1 }.incarnation_id,
                     record_id: record_id.clone(),
-                    observation: ObservationV1 {
+                } },
+                observations: vec![ObservationV1 {
                         source_sequence: 1,
                         observed_at_unix_ms: Some(10),
                         evidence: ObservationEvidenceV1::NodeLifecycle,
                         kind: ObservationKindV1::Ready,
                         truncated: false,
-                    },
-                },
+                    }],
             },
-            11,
-        ).unwrap();
+        }).unwrap();
         let target = ObservationTarget::Managed {
             key: ManagedSessionKey { node_id, incarnation_id, record_id },
         };
@@ -16094,8 +16129,8 @@ mod tests {
             expected_incarnation_id: NodeIncarnationId::from_bytes([7; 16]),
         };
         let active_session = SessionAddress {
-            workspace_id: hatchery_node_protocol::WorkspaceId::new("workspace-a").unwrap(),
-            session: hatchery_node_protocol::SessionKey {
+            workspace_id: gate4agent_node_protocol::WorkspaceId::new("workspace-a").unwrap(),
+            session: gate4agent_node_protocol::SessionKey {
                 instance_id: AgentInstanceId(7),
                 generation: SessionGeneration(3),
             },
@@ -16153,8 +16188,8 @@ mod tests {
             expected_incarnation_id: NodeIncarnationId::from_bytes([7; 16]),
         };
         let active_session = SessionAddress {
-            workspace_id: hatchery_node_protocol::WorkspaceId::new("workspace-a").unwrap(),
-            session: hatchery_node_protocol::SessionKey {
+            workspace_id: gate4agent_node_protocol::WorkspaceId::new("workspace-a").unwrap(),
+            session: gate4agent_node_protocol::SessionKey {
                 instance_id: AgentInstanceId(7),
                 generation: SessionGeneration(3),
             },
@@ -16173,17 +16208,24 @@ mod tests {
         let mut observation = ObservationService::open(&observation_path).unwrap();
         let record_id = SessionRecordId::new("record-a").unwrap();
         for (sequence, received_at_ms) in [(1, 1_000), (2, 2_000)] {
-            apply_routed_observation_event(
-                &mut observation,
-                RoutedNodeEvent {
-                    node_id: route.node_id.clone(),
-                    cursor: NodeCursor {
+            observation.apply_ingress(ObservationIngressEnvelope {
+            node_id: route.node_id.clone(),
+            cursor: NodeCursor {
                         incarnation_id: route.expected_incarnation_id,
                         sequence,
                     },
-                    event: C2NodeEvent::ManagedObservation {
-                        record_id: record_id.clone(),
-                        observation: ObservationV1 {
+            received_at_ms: received_at_ms,
+            transport: ObservationTransport::C2,
+            payload: ObservationIngressPayload::Observations {
+                address: ObservationTarget::Managed { key: ManagedSessionKey {
+                    node_id: route.node_id.clone(),
+                    incarnation_id: NodeCursor {
+                        incarnation_id: route.expected_incarnation_id,
+                        sequence,
+                    }.incarnation_id,
+                    record_id: record_id.clone(),
+                } },
+                observations: vec![ObservationV1 {
                             source_sequence: sequence,
                             observed_at_unix_ms: Some(received_at_ms),
                             evidence: ObservationEvidenceV1::ManagedHook,
@@ -16196,11 +16238,9 @@ mod tests {
                                 help: None,
                             },
                             truncated: false,
-                        },
-                    },
-                },
-                received_at_ms,
-            ).unwrap();
+                        }],
+            },
+        }).unwrap();
         }
 
         let mut page = cache.page(None, 1);
@@ -16352,7 +16392,7 @@ mod tests {
     fn specialized_delivery_failure_classifies_transport_as_unknown_and_local_as_failed() {
         assert_eq!(
             delivery_pre_dispatch_result(&HarnessC2Error::DeliveryTransport(
-                hatchery_c2_client::C2ControlError::Closed,
+                gate4agent_c2_client::C2ControlError::Closed,
             )),
             CoordinatorPreDispatchResult::OutcomeUnknown,
         );
@@ -16387,7 +16427,7 @@ mod tests {
         assert_eq!(
             dispatch_start_pre_dispatch_result(&HarnessRuntimeError::C2(
                 HarnessC2Error::ContextExportTransport(
-                    hatchery_c2_client::C2ControlError::Closed,
+                    gate4agent_c2_client::C2ControlError::Closed,
                 ),
             )),
             CoordinatorPreDispatchResult::OutcomeUnknown,
@@ -16521,7 +16561,7 @@ mod tests {
         assert!(matches!(
             dispatching_start_error_result(&HarnessRuntimeError::C2(
                 HarnessC2Error::HarnessMcpArmEnqueue(
-                    hatchery_c2_client::C2ControlError::QueueFull,
+                    gate4agent_c2_client::C2ControlError::QueueFull,
                 ),
             )),
             CoordinatorSpawnResult::Failed,
@@ -16529,7 +16569,7 @@ mod tests {
         assert!(matches!(
             dispatching_start_error_result(&HarnessRuntimeError::C2(
                 HarnessC2Error::SpawnEnqueue(
-                    hatchery_c2_client::C2ControlError::Closed,
+                    gate4agent_c2_client::C2ControlError::Closed,
                 ),
             )),
             CoordinatorSpawnResult::Failed,
@@ -16549,7 +16589,7 @@ mod tests {
         // not a genuine lost reply.
         assert!(matches!(
             harness_mcp_arm_finish_result(&HarnessC2Error::HarnessMcpTransport(
-                hatchery_c2_client::C2ControlError::Protocol(
+                gate4agent_c2_client::C2ControlError::Protocol(
                     "harness MCP read proxy capability was not negotiated".to_owned(),
                 ),
             )),
@@ -16557,15 +16597,15 @@ mod tests {
         ));
         assert!(matches!(
             harness_mcp_arm_finish_result(&HarnessC2Error::HarnessMcpTransport(
-                hatchery_c2_client::C2ControlError::Closed,
+                gate4agent_c2_client::C2ControlError::Closed,
             )),
             CoordinatorSpawnResult::OutcomeUnknown(_),
         ));
         // A named connection loss stays OutcomeUnknown and its cause
         // survives into the reason text `apply_spawn_result` logs.
         match harness_mcp_arm_finish_result(&HarnessC2Error::HarnessMcpTransport(
-            hatchery_c2_client::C2ControlError::ConnectionLost {
-                reason: hatchery_c2_client::C2ConnectionLossReason::PipeClosed,
+            gate4agent_c2_client::C2ControlError::ConnectionLost {
+                reason: gate4agent_c2_client::C2ConnectionLossReason::PipeClosed,
             },
         )) {
             CoordinatorSpawnResult::OutcomeUnknown(Some(reason)) => {
@@ -16672,19 +16712,19 @@ mod tests {
         assert!(workers.try_start());
         assert_eq!(
             map_native_history_error(HarnessC2Error::NativeHistoryEnqueue(
-                hatchery_c2_client::C2ControlError::QueueFull,
+                gate4agent_c2_client::C2ControlError::QueueFull,
             )),
             HarnessOperatorHostErrorV1::Busy,
         );
         assert_eq!(
             map_native_history_error(HarnessC2Error::NodeOffline(
-                hatchery_node_protocol::NodeId::new("node-a").unwrap(),
+                gate4agent_node_protocol::NodeId::new("node-a").unwrap(),
             )),
             HarnessOperatorHostErrorV1::Unavailable,
         );
         assert_eq!(
             map_native_history_error(HarnessC2Error::IncarnationChanged {
-                node_id: hatchery_node_protocol::NodeId::new("node-a").unwrap(),
+                node_id: gate4agent_node_protocol::NodeId::new("node-a").unwrap(),
             }),
             HarnessOperatorHostErrorV1::Conflict,
         );
@@ -16712,7 +16752,7 @@ mod tests {
         assert_eq!(HOST_RUN_READ_RESPONSE_DEADLINE, Duration::from_secs(12));
         assert_eq!(
             map_run_read_error(HarnessC2Error::RunReadEnqueue(
-                hatchery_c2_client::C2ControlError::QueueFull,
+                gate4agent_c2_client::C2ControlError::QueueFull,
             )),
             HarnessOperatorHostErrorV1::Busy,
         );
@@ -16759,7 +16799,7 @@ mod tests {
         );
         assert_eq!(
             map_node_workspace_read_error(HarnessC2Error::NodeWorkspaceReadEnqueue(
-                hatchery_c2_client::C2ControlError::QueueFull,
+                gate4agent_c2_client::C2ControlError::QueueFull,
             )),
             HarnessOperatorHostErrorV1::Busy,
         );
@@ -16773,7 +16813,7 @@ mod tests {
         );
         assert_eq!(
             map_node_workspace_read_error(HarnessC2Error::NodeOffline(
-                hatchery_node_protocol::NodeId::new("node-a").unwrap(),
+                gate4agent_node_protocol::NodeId::new("node-a").unwrap(),
             )),
             HarnessOperatorHostErrorV1::Unavailable,
         );
@@ -16817,7 +16857,7 @@ mod tests {
         );
         assert_eq!(
             map_node_workspace_write_error(HarnessC2Error::NodeWorkspaceWriteEnqueue(
-                hatchery_c2_client::C2ControlError::QueueFull,
+                gate4agent_c2_client::C2ControlError::QueueFull,
             )),
             HarnessOperatorHostErrorV1::Busy,
         );
@@ -16831,7 +16871,7 @@ mod tests {
         );
         assert_eq!(
             map_node_workspace_write_error(HarnessC2Error::NodeOffline(
-                hatchery_node_protocol::NodeId::new("node-a").unwrap(),
+                gate4agent_node_protocol::NodeId::new("node-a").unwrap(),
             )),
             HarnessOperatorHostErrorV1::Unavailable,
         );
@@ -16886,13 +16926,13 @@ mod tests {
 
         assert_eq!(
             map_session_spawn_error(HarnessC2Error::SpawnEnqueue(
-                hatchery_c2_client::C2ControlError::QueueFull,
+                gate4agent_c2_client::C2ControlError::QueueFull,
             )),
             HarnessOperatorHostErrorV1::Busy,
         );
         assert_eq!(
             map_session_spawn_error(HarnessC2Error::SpawnProfileUnavailable(
-                hatchery_node_protocol::SpawnProfileId::new("claude-default").unwrap(),
+                gate4agent_node_protocol::SpawnProfileId::new("claude-default").unwrap(),
             )),
             HarnessOperatorHostErrorV1::NotFound,
         );
@@ -16929,12 +16969,12 @@ mod tests {
         );
 
         let route = NodeRoute {
-            node_id: hatchery_node_protocol::NodeId::new("node-a").unwrap(),
+            node_id: gate4agent_node_protocol::NodeId::new("node-a").unwrap(),
             expected_incarnation_id: "1".repeat(32).parse().unwrap(),
         };
         let session = SessionAddress {
-            workspace_id: hatchery_node_protocol::WorkspaceId::new("workspace-a").unwrap(),
-            session: hatchery_node_protocol::SessionKey {
+            workspace_id: gate4agent_node_protocol::WorkspaceId::new("workspace-a").unwrap(),
+            session: gate4agent_node_protocol::SessionKey {
                 instance_id: gate4agent_types::AgentInstanceId(41),
                 generation: gate4agent_types::SessionGeneration(3),
             },
@@ -16977,7 +17017,7 @@ mod tests {
 
         assert_eq!(
             map_session_control_error(HarnessC2Error::SessionControlEnqueue(
-                hatchery_c2_client::C2ControlError::QueueFull,
+                gate4agent_c2_client::C2ControlError::QueueFull,
             )),
             HarnessOperatorHostErrorV1::Busy,
         );
@@ -17072,7 +17112,7 @@ mod tests {
 
     #[test]
     fn harness_mcp_worker_cap_saturation_enqueues_typed_rejection() {
-        use hatchery_node_protocol::{SessionKey, WorkspaceId};
+        use gate4agent_node_protocol::{SessionKey, WorkspaceId};
         use gate4agent_types::{AgentInstanceId, SessionGeneration};
 
         let (rejects, mut reject_rx) = mpsc::channel(
@@ -17316,14 +17356,14 @@ mod tests {
                 incarnation_id: route.expected_incarnation_id,
                 sequence: 6,
             },
-            event: C2NodeEvent::ManagedObservation {
+            event: C2NodeEvent::SessionRecordHistorySummarized {
                 record_id: SessionRecordId::new("record-a").unwrap(),
-                observation: ObservationV1 {
-                    source_sequence: 6,
-                    observed_at_unix_ms: Some(12),
-                    evidence: ObservationEvidenceV1::NodeLifecycle,
-                    kind: ObservationKindV1::Ready,
-                    truncated: false,
+                summary: gate4agent_node_protocol::SessionHistorySummaryV1 {
+                    message_count: 1,
+                    message_count_exact: true,
+                    completed_turn_count: None,
+                    total_tokens: None,
+                    modified_at_unix_ms: Some(6),
                 },
             },
         });
@@ -17434,7 +17474,7 @@ mod tests {
         let node_id = NodeId::new("node-a").unwrap();
         let incarnation_id = NodeIncarnationId::from_bytes([4; 16]);
         let record_id = SessionRecordId::new("record-a").unwrap();
-        let workspace_id = hatchery_node_protocol::WorkspaceId::new("workspace-a").unwrap();
+        let workspace_id = gate4agent_node_protocol::WorkspaceId::new("workspace-a").unwrap();
         let mut service = ObservationService::open(&path).unwrap();
         service.apply_ingress(ObservationIngressEnvelope {
             node_id: node_id.clone(),
@@ -17473,7 +17513,7 @@ mod tests {
         support.replace(
             NodeId::new("node-a").unwrap(),
             incarnation_id,
-            Some(C2ObservationSupport {
+            Some(ObservationSupport {
                 events: true,
                 managed_target: true,
                 workflow_detail: true,
@@ -17525,7 +17565,7 @@ mod tests {
         support.replace(
             NodeId::new("node-a").unwrap(),
             incarnation_id,
-            Some(C2ObservationSupport {
+            Some(ObservationSupport {
                 events: true,
                 managed_target: true,
                 workflow_detail: true,
@@ -17721,26 +17761,26 @@ mod tests {
             node_id: node_id.clone(),
             cursor: NodeCursor { incarnation_id, sequence: 999 },
             event: C2NodeEvent::HarnessMcpReadCall {
-                reservation_id: hatchery_node_protocol::HarnessMcpReservationId::new(
+                reservation_id: gate4agent_node_protocol::HarnessMcpReservationId::new(
                     format!("hmcpres_{:024x}", 1),
                 ).unwrap(),
-                activation_digest: hatchery_node_protocol::HarnessMcpActivationDigest::new(
+                activation_digest: gate4agent_node_protocol::HarnessMcpActivationDigest::new(
                     format!("sha256:{}", "b".repeat(64)),
                 ).unwrap(),
                 record_id: SessionRecordId::new("session-001").unwrap(),
-                session: hatchery_node_protocol::SessionAddress {
-                    workspace_id: hatchery_node_protocol::WorkspaceId::new("primary").unwrap(),
-                    session: hatchery_node_protocol::SessionKey {
+                session: gate4agent_node_protocol::SessionAddress {
+                    workspace_id: gate4agent_node_protocol::WorkspaceId::new("primary").unwrap(),
+                    session: gate4agent_node_protocol::SessionKey {
                         instance_id: AgentInstanceId(7),
                         generation: SessionGeneration(2),
                     },
                 },
-                call_id: hatchery_node_protocol::HarnessMcpCallId::new(
+                call_id: gate4agent_node_protocol::HarnessMcpCallId::new(
                     format!("hmcpcall_{:024x}", 1),
                 ).unwrap(),
-                request: hatchery_node_protocol::HarnessMcpOpaquePayloadV1 {
+                request: gate4agent_node_protocol::HarnessMcpOpaquePayloadV1 {
                     content_type:
-                        hatchery_node_protocol::HarnessMcpContentTypeV1::HarnessReadRequestJsonV1,
+                        gate4agent_node_protocol::HarnessMcpContentTypeV1::HarnessReadRequestJsonV1,
                     body: br#"{"kind":"context-get"}"#.to_vec(),
                 },
                 deadline_unix_ms: u64::MAX,

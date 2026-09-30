@@ -74,8 +74,8 @@ use std::{
     time::{Duration, Instant as StdInstant, SystemTime, UNIX_EPOCH},
 };
 
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::C2Client;
+use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use gate4agent_c2_client::C2Client;
 use hatchery_harness_client::{
     HarnessOperatorClient, HarnessOperatorCredential, HarnessOperatorMutationOutcomeV1,
     HarnessReplaceTaskExecutionSpecRequestV2, HarnessReviewedTaskLaunchSelectionV1,
@@ -98,7 +98,7 @@ use hatchery_harness_service::{
     runtime::{start_harness_host_with_operator_and_catalogs, HarnessRuntimeCatalogs},
     HarnessMcpReservationStateV1, HarnessService,
 };
-use hatchery_node::{
+use gate4agent_node::{
     protocol::{
         NodeId, SessionMode, SpawnProfileDefaults, SpawnProfileId, SpawnProfileRevision,
         WorkspaceId,
@@ -177,7 +177,7 @@ async fn wait_online(client: &C2Client, node_id: &NodeId) {
         loop {
             if client.status().await.is_ok_and(|status| {
                 status.nodes.get(node_id).is_some_and(|node| {
-                    node.transport == hatchery_c2::protocol::NodeTransportState::Online
+                    node.transport == gate4agent_c2::protocol::NodeTransportState::Online
                 })
             }) { return; }
             sleep(Duration::from_millis(20)).await;

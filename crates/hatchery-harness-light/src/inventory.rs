@@ -26,8 +26,8 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use hatchery_c2_client::C2ReconnectingHandle;
-use hatchery_c2_protocol::{
+use gate4agent_c2_client::C2ReconnectingHandle;
+use gate4agent_c2_protocol::{
     C2NodeEvent, C2Topology, NodeRoute, RoutedNodeEvent, SlimNodeInventory, NodeTransportState,
 };
 use hatchery_harness_api::{

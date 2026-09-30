@@ -1,5 +1,7 @@
 //! Bounded in-memory reducer for read-only session observations.
 
+pub mod node_projection;
+
 use hatchery_observation_api::{
     ManagedRecordLink, ManagedSessionKey, NodeCursor, NodeId, NodeIncarnationId,
     ObservationApiError, ObservationGap, ObservationIngressEnvelope, ObservationIngressPayload,
@@ -733,13 +735,36 @@ impl ObservationEngine {
         envelope: &ObservationIngressEnvelope,
     ) -> Result<(), ObservationEngineError> {
         match &envelope.payload {
-            ObservationIngressPayload::Observation {
+            ObservationIngressPayload::Observations {
                 address,
-                observation,
+                observations,
             } => {
-                let projection = self.ensure_projection(address.clone())?;
-                projection.mark_observed();
-                apply_observation(projection, envelope.cursor, envelope.received_at_ms, observation)?;
+                // A runtime session's observations also belong to every
+                // managed record linked to it, exactly as if the record's own
+                // stream had carried them.
+                let mut targets = vec![address.clone()];
+                if let ObservationTarget::Runtime { key } = address {
+                    targets.extend(
+                        self.managed_links
+                            .iter()
+                            .filter(|(_, runtime)| runtime.as_ref() == Some(key))
+                            .map(|(managed, _)| ObservationTarget::Managed {
+                                key: managed.clone(),
+                            }),
+                    );
+                }
+                for target in targets {
+                    let projection = self.ensure_projection(target)?;
+                    projection.mark_observed();
+                    for observation in observations {
+                        apply_observation(
+                            projection,
+                            envelope.cursor,
+                            envelope.received_at_ms,
+                            observation,
+                        )?;
+                    }
+                }
             }
             ObservationIngressPayload::ManagedRecordUpserted { link } => {
                 self.upsert_managed_link(link.clone())?;

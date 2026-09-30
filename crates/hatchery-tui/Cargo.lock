@@ -411,12 +411,66 @@ dependencies = [
 ]
 
 [[package]]
+name = "gate4agent-build-stamp"
+version = "0.1.0"
+
+[[package]]
+name = "gate4agent-c2-client"
+version = "0.2.37"
+dependencies = [
+ "gate4agent-c2-protocol",
+ "gate4agent-node-protocol",
+ "gate4agent-node-wire",
+ "gate4agent-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "gate4agent-c2-protocol"
+version = "0.2.37"
+dependencies = [
+ "gate4agent-build-stamp",
+ "gate4agent-node-protocol",
+ "gate4agent-types",
+ "serde",
+]
+
+[[package]]
 name = "gate4agent-catalog"
 version = "0.4.0"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "gate4agent-node-protocol"
+version = "0.2.37"
+dependencies = [
+ "gate4agent-build-stamp",
+ "gate4agent-types",
+ "ring",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "tokio",
+]
+
+[[package]]
+name = "gate4agent-node-wire"
+version = "0.2.37"
+dependencies = [
+ "gate4agent-node-protocol",
+ "libc",
+ "ring",
+ "thiserror 2.0.20",
+ "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -457,39 +511,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "hatchery-build-stamp"
-version = "0.1.0"
-
-[[package]]
-name = "hatchery-c2-client"
-version = "0.2.37"
-dependencies = [
- "gate4agent-types",
- "hatchery-c2-protocol",
- "hatchery-node-protocol",
- "hatchery-node-wire",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "hatchery-c2-protocol"
-version = "0.2.37"
-dependencies = [
- "gate4agent-types",
- "hatchery-build-stamp",
- "hatchery-node-protocol",
- "serde",
-]
-
-[[package]]
 name = "hatchery-harness-api"
 version = "0.2.37"
 dependencies = [
- "hatchery-build-stamp",
+ "gate4agent-build-stamp",
  "hatchery-harness-protocol",
  "serde",
  "thiserror 2.0.20",
@@ -509,7 +534,7 @@ dependencies = [
 name = "hatchery-harness-delivery"
 version = "0.2.37"
 dependencies = [
- "hatchery-node-protocol",
+ "gate4agent-node-protocol",
  "libc",
  "ring",
  "thiserror 2.0.20",
@@ -529,13 +554,13 @@ dependencies = [
 name = "hatchery-harness-light"
 version = "0.4.0"
 dependencies = [
+ "gate4agent-c2-client",
+ "gate4agent-c2-protocol",
+ "gate4agent-node-protocol",
+ "gate4agent-node-wire",
  "gate4agent-types",
- "hatchery-c2-client",
- "hatchery-c2-protocol",
  "hatchery-harness-api",
  "hatchery-harness-service",
- "hatchery-node-protocol",
- "hatchery-node-wire",
  "hatchery-observation-api",
  "serde_json",
  "thiserror 2.0.20",
@@ -555,16 +580,16 @@ dependencies = [
 name = "hatchery-harness-service"
 version = "0.2.37"
 dependencies = [
+ "gate4agent-c2-client",
+ "gate4agent-c2-protocol",
  "gate4agent-catalog",
+ "gate4agent-node-protocol",
+ "gate4agent-node-wire",
  "gate4agent-types",
- "hatchery-c2-client",
- "hatchery-c2-protocol",
  "hatchery-harness-api",
  "hatchery-harness-delivery",
  "hatchery-harness-engine",
  "hatchery-harness-protocol",
- "hatchery-node-protocol",
- "hatchery-node-wire",
  "hatchery-observation-api",
  "hatchery-observation-engine",
  "hatchery-observation-protocol",
@@ -579,37 +604,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "hatchery-node-protocol"
-version = "0.2.37"
-dependencies = [
- "gate4agent-types",
- "hatchery-build-stamp",
- "hatchery-observation-protocol",
- "ring",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "tokio",
-]
-
-[[package]]
-name = "hatchery-node-wire"
-version = "0.2.37"
-dependencies = [
- "hatchery-node-protocol",
- "libc",
- "ring",
- "thiserror 2.0.20",
- "tokio",
- "windows-sys 0.61.2",
-]
-
-[[package]]
 name = "hatchery-observation-api"
 version = "0.2.37"
 dependencies = [
+ "gate4agent-node-protocol",
  "gate4agent-types",
- "hatchery-node-protocol",
  "hatchery-observation-protocol",
  "serde",
  "thiserror 2.0.20",
@@ -619,6 +618,8 @@ dependencies = [
 name = "hatchery-observation-engine"
 version = "0.2.37"
 dependencies = [
+ "gate4agent-node-protocol",
+ "gate4agent-types",
  "hatchery-observation-api",
  "hatchery-observation-protocol",
  "serde",
@@ -664,17 +665,18 @@ dependencies = [
  "gate4agent-arcade-engine",
  "gate4agent-arcade-pet-bastion",
  "gate4agent-arcade-pet-bastion-render",
+ "gate4agent-build-stamp",
+ "gate4agent-c2-client",
+ "gate4agent-c2-protocol",
+ "gate4agent-node-protocol",
+ "gate4agent-node-wire",
  "gate4agent-types",
- "hatchery-build-stamp",
- "hatchery-c2-client",
- "hatchery-c2-protocol",
  "hatchery-harness-client",
  "hatchery-harness-light",
  "hatchery-harness-protocol",
- "hatchery-node-protocol",
- "hatchery-node-wire",
  "hatchery-observation-api",
  "hatchery-observation-engine",
+ "hatchery-observation-protocol",
  "hatchery-observation-service",
  "icy_sixel",
  "serde",

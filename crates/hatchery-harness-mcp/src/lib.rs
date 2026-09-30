@@ -13,10 +13,10 @@ use hatchery_harness_client::{
     HARNESS_READ_RESPONSE_MAX_BYTES,
     HARNESS_READ_TOOL_IDS, HARNESS_WRITE_TOOL_IDS,
 };
-use hatchery_node_protocol::{
+use gate4agent_node_protocol::{
     HarnessMcpContentTypeV1, HarnessMcpOpaquePayloadV1, HarnessMcpRejectReasonV1,
 };
-use hatchery_node_wire::{LocalSessionHarnessMcpClient, LocalSessionHarnessMcpError};
+use gate4agent_node_wire::{LocalSessionHarnessMcpClient, LocalSessionHarnessMcpError};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use thiserror::Error;
@@ -672,7 +672,7 @@ fn proxy_client_from_values(
     let endpoint = endpoint.filter(|value| !value.is_empty())
         .ok_or(HarnessMcpStartupError::Configuration)?;
     let token = token.ok_or(HarnessMcpStartupError::Configuration)?;
-    let token = hatchery_node_protocol::HarnessMcpLocalToken::new(token)
+    let token = gate4agent_node_protocol::HarnessMcpLocalToken::new(token)
         .map_err(|_| HarnessMcpStartupError::Configuration)?;
     LocalSessionHarnessMcpClient::new(
         std::path::PathBuf::from(endpoint),
@@ -1051,6 +1051,22 @@ pub enum HarnessMcpStartupError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The harness asks the node to name this helper program's door with these
+    /// exact variables; the helper reads them back. The two sides live in
+    /// different crates, so this pins them together.
+    #[test]
+    fn the_launch_description_the_harness_sends_matches_what_the_helper_reads() {
+        let launch = hatchery_harness_service::harness_mcp_launch();
+        assert_eq!(launch.endpoint_env, HARNESS_SESSION_PROXY_ENDPOINT_ENV);
+        assert_eq!(launch.token_env, HARNESS_SESSION_PROXY_TOKEN_ENV);
+        assert_eq!(
+            launch.trace.as_ref().map(|trace| trace.env.as_str()),
+            Some(HARNESS_MCP_TRACE_ENV),
+        );
+        assert!(launch.args.iter().any(|arg| arg == "--session-proxy"));
+    }
+
     use hatchery_harness_client::{
         CallerRunV1, HarnessExecutionModeV1, HarnessMonitoringVisibilityV1,
         HarnessReadPermissionsV1, HarnessResultDispositionV1, HarnessRevision,

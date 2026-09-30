@@ -16,13 +16,13 @@
 
 use std::sync::Arc;
 
-use hatchery_c2_protocol::{C2NodeEvent, C2Topology, NodeRoute, NodeTransportState, RoutedNodeEvent};
+use gate4agent_c2_protocol::{C2NodeEvent, C2Topology, NodeRoute, NodeTransportState, RoutedNodeEvent};
 use hatchery_harness_api::{
     HarnessOperatorHostErrorV1, HarnessOperatorReplyV1, HarnessOperatorResponseV1,
     HarnessRuntimeSessionAddressV1, HarnessRuntimeTerminalPageV1,
 };
 use hatchery_harness_service::terminal::{terminal_frame_to_wire, TerminalBufferRegistry};
-use hatchery_node_protocol::{NodeId, WorkspaceId};
+use gate4agent_node_protocol::{NodeId, WorkspaceId};
 use hatchery_observation_api::RuntimeSessionKey;
 use gate4agent_types::{AgentInstanceId, SessionGeneration};
 use tokio::sync::RwLock;
@@ -152,7 +152,7 @@ fn terminal_session_key(session: &HarnessRuntimeSessionAddressV1) -> Result<Runt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hatchery_node_protocol::NodeIncarnationId;
+    use gate4agent_node_protocol::NodeIncarnationId;
     use gate4agent_types::{
         PtyScreenState, TerminalFrame, TerminalMouseProtocolEncoding, TerminalSize,
     };
@@ -249,8 +249,8 @@ mod tests {
     /// `gate4agent-harness-service::runtime`'s own event-loop handling.
     #[tokio::test]
     async fn handle_event_ingests_frames_and_resync_required_invalidates_the_route() {
-        use hatchery_c2_protocol::NodeCursor;
-        use hatchery_node_protocol::{SessionAddress, SessionKey};
+        use gate4agent_c2_protocol::NodeCursor;
+        use gate4agent_node_protocol::{SessionAddress, SessionKey};
 
         let registry = new_shared();
         let key = sample_key("node-a", 'a');

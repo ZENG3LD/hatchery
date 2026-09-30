@@ -32,9 +32,9 @@ use gate4agent_arcade_pet_bastion::zone::{ZoneKind, ZonePolarity};
 use gate4agent_arcade_pet_bastion::RunOutcome as PetBastionRunOutcome;
 use gate4agent_arcade_pet_bastion_render::interp::{interpolated_dynamic_sprites, render_sim_time};
 use gate4agent_arcade_pet_bastion_render::{snapshot_to_surface, terrain_surface};
-use hatchery_c2_protocol::C2RelayRoute;
+use gate4agent_c2_protocol::C2RelayRoute;
 use hatchery_harness_protocol::HarnessRunGitFactsOutcomeV1;
-use hatchery_node_protocol::{
+use gate4agent_node_protocol::{
     GitSnapshot, ManagedWorktreeCleanupFailure, ManagedWorktreeLeaseSnapshot,
     ManagedWorktreeLeaseState, ManagedWorktreeRetention, ResolvedSpawnReceipt, SessionMode,
     WorkspaceEntryKind, WorkspaceInspection,
@@ -5394,7 +5394,7 @@ fn render_agent_list(
                 // marking it at all. Live state stays live state; the tally
                 // surfaces only in the secondary line below.
                 let (marker, color, state) = if record.state
-                    == hatchery_node_protocol::ManagedSessionState::Live
+                    == gate4agent_node_protocol::ManagedSessionState::Live
                 {
                     active
                         .map(|session| session_state(session, theme))
@@ -5402,7 +5402,7 @@ fn render_agent_list(
                 } else {
                     managed_session_state(record.state, theme)
                 };
-                let state = if record.mode == hatchery_node_protocol::SessionMode::Inline {
+                let state = if record.mode == gate4agent_node_protocol::SessionMode::Inline {
                     format!("{state} inline")
                 } else {
                     state.to_owned()
@@ -5579,13 +5579,13 @@ fn agent_progress_lines(app: &App, key: &AgentRowKey) -> [String; 3] {
             let Some(record) = app.find_managed_session(key) else {
                 return unavailable_agent_progress_lines("unavailable");
             };
-            if record.state == hatchery_node_protocol::ManagedSessionState::Dormant {
+            if record.state == gate4agent_node_protocol::ManagedSessionState::Dormant {
                 (None, "unavailable until resume")
             } else {
                 let progress = record.active_session.as_ref()
                     .and_then(|address| app.find_session(address))
                     .and_then(|session| session.progress.as_ref());
-                (progress, if record.state == hatchery_node_protocol::ManagedSessionState::Live {
+                (progress, if record.state == gate4agent_node_protocol::ManagedSessionState::Live {
                     "syncing"
                 } else {
                     "unavailable"
@@ -5603,10 +5603,10 @@ fn agent_progress_lines(app: &App, key: &AgentRowKey) -> [String; 3] {
         return unavailable_agent_progress_lines(unavailable);
     };
     let current = match progress.current {
-        hatchery_node_protocol::AgentProgressCurrentV1::Idle => "idle",
-        hatchery_node_protocol::AgentProgressCurrentV1::Working => "working",
-        hatchery_node_protocol::AgentProgressCurrentV1::WaitingForInput => "waiting for input",
-        hatchery_node_protocol::AgentProgressCurrentV1::Blocked => "blocked",
+        gate4agent_node_protocol::AgentProgressCurrentV1::Idle => "idle",
+        gate4agent_node_protocol::AgentProgressCurrentV1::Working => "working",
+        gate4agent_node_protocol::AgentProgressCurrentV1::WaitingForInput => "waiting for input",
+        gate4agent_node_protocol::AgentProgressCurrentV1::Blocked => "blocked",
     };
     let freshness = if progress.stale {
         "stale".to_owned()
@@ -5618,8 +5618,8 @@ fn agent_progress_lines(app: &App, key: &AgentRowKey) -> [String; 3] {
     let partial = if progress.truncated { " | partial" } else { "" };
     let attention = progress.attention.as_ref().map(|attention| {
         let kind = match attention.kind {
-            hatchery_node_protocol::AgentProgressAttentionKindV1::Approval => "approval",
-            hatchery_node_protocol::AgentProgressAttentionKindV1::Question => "question",
+            gate4agent_node_protocol::AgentProgressAttentionKindV1::Approval => "approval",
+            gate4agent_node_protocol::AgentProgressAttentionKindV1::Question => "question",
         };
         attention.tool_label.as_ref()
             .map(|tool| format!(" | attention {kind}: {tool}"))
@@ -6368,10 +6368,10 @@ fn render_native_session_menu(
 }
 
 fn managed_session_state(
-    state: hatchery_node_protocol::ManagedSessionState,
+    state: gate4agent_node_protocol::ManagedSessionState,
     theme: Theme,
 ) -> (&'static str, Color, &'static str) {
-    use hatchery_node_protocol::ManagedSessionState;
+    use gate4agent_node_protocol::ManagedSessionState;
     match state {
         ManagedSessionState::Live => ("*", theme.green, managed_state_label(state)),
         ManagedSessionState::IdentityPending => ("~", theme.yellow, managed_state_label(state)),
@@ -7457,7 +7457,7 @@ fn exact_context_window(snapshot: ContextOccupancySnapshot) -> Result<u64, &'sta
         return Err("usage accounting is not an exact current-window signal");
     }
     if snapshot.evidence
-        != hatchery_node_protocol::ObservationEvidenceV1::StructuredProvider
+        != hatchery_observation_protocol::ObservationEvidenceV1::StructuredProvider
     {
         return Err("exact current-window source is not structured provider evidence");
     }
@@ -7789,7 +7789,7 @@ fn session_monitor_lines(app: &App, monitor: &SessionMonitorView) -> Vec<String>
             ));
             let last = projection.timeline.back();
             let source_epoch = projection.timeline.iter()
-                .filter(|entry| matches!(entry.kind, hatchery_node_protocol::ObservationKindV1::SourceReset))
+                .filter(|entry| matches!(entry.kind, hatchery_observation_protocol::ObservationKindV1::SourceReset))
                 .count();
             lines.push(format!(
                 "Source: epoch {} | sequence {} | {}",
@@ -7803,7 +7803,7 @@ fn session_monitor_lines(app: &App, monitor: &SessionMonitorView) -> Vec<String>
             ));
             if let Some(last) = last {
                 lines.push(format!("Evidence: {}", observation_evidence_label(last.evidence)));
-                if last.evidence == hatchery_node_protocol::ObservationEvidenceV1::PtyHint {
+                if last.evidence == hatchery_observation_protocol::ObservationEvidenceV1::PtyHint {
                     lines.push("PTY hint is non-authoritative".to_owned());
                 }
             }
@@ -7813,13 +7813,13 @@ fn session_monitor_lines(app: &App, monitor: &SessionMonitorView) -> Vec<String>
             let current = projection.timeline.iter().rev()
                 .find(|entry| !matches!(
                     entry.kind,
-                    hatchery_node_protocol::ObservationKindV1::TodoSnapshot { .. }
-                        | hatchery_node_protocol::ObservationKindV1::Usage { .. }
-                        | hatchery_node_protocol::ObservationKindV1::ContextWindowUsage { .. }
-                        | hatchery_node_protocol::ObservationKindV1::FileChanged { .. }
-                        | hatchery_node_protocol::ObservationKindV1::Gap { .. }
-                        | hatchery_node_protocol::ObservationKindV1::SourceReset
-                        | hatchery_node_protocol::ObservationKindV1::Stale
+                    hatchery_observation_protocol::ObservationKindV1::TodoSnapshot { .. }
+                        | hatchery_observation_protocol::ObservationKindV1::Usage { .. }
+                        | hatchery_observation_protocol::ObservationKindV1::ContextWindowUsage { .. }
+                        | hatchery_observation_protocol::ObservationKindV1::FileChanged { .. }
+                        | hatchery_observation_protocol::ObservationKindV1::Gap { .. }
+                        | hatchery_observation_protocol::ObservationKindV1::SourceReset
+                        | hatchery_observation_protocol::ObservationKindV1::Stale
                 ));
             lines.push(format!(
                 "Current: {}",
@@ -7828,9 +7828,9 @@ fn session_monitor_lines(app: &App, monitor: &SessionMonitorView) -> Vec<String>
             ));
             if let Some(todo) = projection.todos.current.as_ref() {
                 let todos = &todo.items;
-                let pending = todos.iter().filter(|item| matches!(item.state, hatchery_node_protocol::ObservationTodoStateV1::Pending)).count();
-                let active = todos.iter().filter(|item| matches!(item.state, hatchery_node_protocol::ObservationTodoStateV1::InProgress)).count();
-                let completed = todos.iter().filter(|item| matches!(item.state, hatchery_node_protocol::ObservationTodoStateV1::Completed)).count();
+                let pending = todos.iter().filter(|item| matches!(item.state, hatchery_observation_protocol::ObservationTodoStateV1::Pending)).count();
+                let active = todos.iter().filter(|item| matches!(item.state, hatchery_observation_protocol::ObservationTodoStateV1::InProgress)).count();
+                let completed = todos.iter().filter(|item| matches!(item.state, hatchery_observation_protocol::ObservationTodoStateV1::Completed)).count();
                 let unknown = todos.len().saturating_sub(pending + active + completed);
                 lines.push(format!("Todo snapshot: {} items | pending {pending} | active {active} | completed {completed} | unknown {unknown}", todos.len()));
                 lines.push(format!("Todo complete: {}", todo.complete));
@@ -7996,7 +7996,7 @@ fn session_monitor_lines(app: &App, monitor: &SessionMonitorView) -> Vec<String>
 
 fn observation_capability_label(
     projection: &SessionProjection,
-    supported: impl Fn(hatchery_node_protocol::ObservationCapabilitiesV1) -> bool,
+    supported: impl Fn(hatchery_observation_protocol::ObservationCapabilitiesV1) -> bool,
 ) -> &'static str {
     if projection.source_capabilities.is_empty() {
         "not observed"
@@ -8055,27 +8055,27 @@ fn correlation_line(fact: &CorrelationProjection) -> String {
     format!("{class} | {state} | {}", observation_evidence_label(fact.evidence))
 }
 
-fn observation_evidence_label(evidence: hatchery_node_protocol::ObservationEvidenceV1) -> &'static str {
+fn observation_evidence_label(evidence: hatchery_observation_protocol::ObservationEvidenceV1) -> &'static str {
     match evidence {
-        hatchery_node_protocol::ObservationEvidenceV1::StructuredProvider => "structured provider",
-        hatchery_node_protocol::ObservationEvidenceV1::ManagedHook => "managed hook",
-        hatchery_node_protocol::ObservationEvidenceV1::NodeLifecycle => "node lifecycle",
-        hatchery_node_protocol::ObservationEvidenceV1::WorkspaceObservation => "workspace observation",
-        hatchery_node_protocol::ObservationEvidenceV1::PtyHint => "PTY hint",
-        hatchery_node_protocol::ObservationEvidenceV1::HistoryProjection => "history",
+        hatchery_observation_protocol::ObservationEvidenceV1::StructuredProvider => "structured provider",
+        hatchery_observation_protocol::ObservationEvidenceV1::ManagedHook => "managed hook",
+        hatchery_observation_protocol::ObservationEvidenceV1::NodeLifecycle => "node lifecycle",
+        hatchery_observation_protocol::ObservationEvidenceV1::WorkspaceObservation => "workspace observation",
+        hatchery_observation_protocol::ObservationEvidenceV1::PtyHint => "PTY hint",
+        hatchery_observation_protocol::ObservationEvidenceV1::HistoryProjection => "history",
     }
 }
 
 fn interaction_outcome_label(
-    outcome: hatchery_node_protocol::ObservationInteractionOutcomeV1,
+    outcome: hatchery_observation_protocol::ObservationInteractionOutcomeV1,
 ) -> &'static str {
     match outcome {
-        hatchery_node_protocol::ObservationInteractionOutcomeV1::Approved => "approved",
-        hatchery_node_protocol::ObservationInteractionOutcomeV1::Answered => "answered",
-        hatchery_node_protocol::ObservationInteractionOutcomeV1::Denied => "denied",
-        hatchery_node_protocol::ObservationInteractionOutcomeV1::Interrupted => "interrupted",
-        hatchery_node_protocol::ObservationInteractionOutcomeV1::TurnEnded => "turn ended",
-        hatchery_node_protocol::ObservationInteractionOutcomeV1::Superseded => "superseded",
+        hatchery_observation_protocol::ObservationInteractionOutcomeV1::Approved => "approved",
+        hatchery_observation_protocol::ObservationInteractionOutcomeV1::Answered => "answered",
+        hatchery_observation_protocol::ObservationInteractionOutcomeV1::Denied => "denied",
+        hatchery_observation_protocol::ObservationInteractionOutcomeV1::Interrupted => "interrupted",
+        hatchery_observation_protocol::ObservationInteractionOutcomeV1::TurnEnded => "turn ended",
+        hatchery_observation_protocol::ObservationInteractionOutcomeV1::Superseded => "superseded",
     }
 }
 
@@ -9247,7 +9247,7 @@ fn harness_monitor_section_lines(
         };
         for fact in &detail.file_facts {
             let path = fact.relative_path.as_ref()
-                .and_then(|path| hatchery_node_protocol::RepositoryPath::utf8(path.clone()).ok());
+                .and_then(|path| gate4agent_node_protocol::RepositoryPath::utf8(path.clone()).ok());
             let target = path.as_ref().and_then(|path| {
                 let (origin, workspace) = app.harness_workspace_for_run(&run)?;
                 workspace.entries.iter().any(|entry| {
@@ -11380,7 +11380,7 @@ fn render_agent_board_card(
     }
 }
 
-fn agent_board_progress_summary(progress: &hatchery_node_protocol::AgentProgressV1) -> String {
+fn agent_board_progress_summary(progress: &gate4agent_node_protocol::AgentProgressV1) -> String {
     let tool_classes = progress
         .active_tool_labels
         .iter()
@@ -11562,7 +11562,7 @@ fn git_surface_title(app: &App, key: &crate::app::WorkspaceGitTabKey) -> String 
         .or(tab.pending_diff.as_ref());
     if let Some(target) = target {
         use crate::app::WorkspaceGitDiffTarget;
-        let path_name = |path: &Option<hatchery_node_protocol::RepositoryPath>| {
+        let path_name = |path: &Option<gate4agent_node_protocol::RepositoryPath>| {
             path.as_ref()
                 .map(repository_path_file_name_display)
                 .unwrap_or_else(|| key.workspace_id.clone())
@@ -12600,7 +12600,7 @@ fn git_diff_stats(text: &str) -> GitDiffStats {
 fn git_diff_target_label(target: &crate::app::WorkspaceGitDiffTarget) -> String {
     use crate::app::WorkspaceGitDiffTarget;
 
-    let path_suffix = |path: &Option<hatchery_node_protocol::RepositoryPath>| {
+    let path_suffix = |path: &Option<gate4agent_node_protocol::RepositoryPath>| {
         path.as_ref()
             .map(|path| format!(" | {}", path.display_text()))
             .unwrap_or_default()
@@ -15517,7 +15517,7 @@ fn fill_rect(area: Rect, background: Color, buf: &mut TerminalBuffer) {
 }
 
 fn workspace_entry_dirty(
-    relative_path: &hatchery_node_protocol::RepositoryPath,
+    relative_path: &gate4agent_node_protocol::RepositoryPath,
     kind: WorkspaceEntryKind,
     git: &GitSnapshot,
 ) -> Option<bool> {
@@ -15819,7 +15819,7 @@ mod tests {
         SessionMonitorV1 as HarnessSessionMonitorV1, TimelineCategoryV1, TimelineEntryV1,
         TimelineStateV1, TodoFactV1, TodoStateV1,
     };
-    use hatchery_node_protocol::{
+    use gate4agent_node_protocol::{
         AgentProgressCurrentV1, AgentProgressUsageV1, AgentProgressV1,
         ContextPackLineageReceipt, GitCommitSummary, GitStatusEntry, GitWorktreeSnapshot,
         HistoryCandidateSummary, HostDirectoryEntry, ManagedSessionState, ManagedWorktreeLeaseId,
@@ -15846,12 +15846,12 @@ mod tests {
         SessionAddress, SessionView, SpawnDialog, WorkspaceView,
     };
 
-    fn host_path(value: impl Into<String>) -> hatchery_node_protocol::OpaqueHostPath {
-        hatchery_node_protocol::OpaqueHostPath::utf8(value.into()).unwrap()
+    fn host_path(value: impl Into<String>) -> gate4agent_node_protocol::OpaqueHostPath {
+        gate4agent_node_protocol::OpaqueHostPath::utf8(value.into()).unwrap()
     }
 
-    fn repository_path(value: impl Into<String>) -> hatchery_node_protocol::RepositoryPath {
-        hatchery_node_protocol::RepositoryPath::utf8(value.into()).unwrap()
+    fn repository_path(value: impl Into<String>) -> gate4agent_node_protocol::RepositoryPath {
+        gate4agent_node_protocol::RepositoryPath::utf8(value.into()).unwrap()
     }
 
     fn provider(value: &str) -> Provider {
@@ -18002,7 +18002,7 @@ mod tests {
             node_id: "node-a".to_owned(),
             incarnation_id: None,
             endpoint: "pipe".to_owned(),
-            relay_route: hatchery_c2_protocol::C2RelayRoute::Unknown,
+            relay_route: gate4agent_c2_protocol::C2RelayRoute::Unknown,
             connection: ConnectionState::Connected,
             controller_owned: true,
             event_sequence: 1,
@@ -18014,7 +18014,7 @@ mod tests {
                 label: "acme".to_owned(),
                 canonical_root: host_path(r"C:\work\acme"),
                 providers: vec![ProviderInventory { provider: provider("kimi"), enabled: true }],
-                worktree_service_mode: Some(hatchery_node_protocol::WorktreeServiceMode::Manual),
+                worktree_service_mode: Some(gate4agent_node_protocol::WorktreeServiceMode::Manual),
                 managed_worktree_profiles: None,
                 sessions: vec![SessionView {
                     address: address.clone(),
@@ -18100,7 +18100,7 @@ mod tests {
             unattributed_tokens: Some(10),
             used_tokens: 60,
             context_window,
-            evidence: hatchery_node_protocol::ObservationEvidenceV1::StructuredProvider,
+            evidence: hatchery_observation_protocol::ObservationEvidenceV1::StructuredProvider,
             provenance: ContextOccupancyProvenance::ExactCurrentWindow,
         }
     }
@@ -18316,11 +18316,11 @@ mod tests {
     #[test]
     fn activity_board_task_filter_renders_exact_header_and_never_zero_unassigned() {
         let mut app = agent_board_render_fixture();
-        let task_id: hatchery_node_protocol::TaskId =
+        let task_id: gate4agent_node_protocol::TaskId =
             "task-0123456789abcdef01234567".parse().unwrap();
         for node in app.nodes.iter_mut().take(2) {
             node.session_records[0].task_binding = Some(
-                hatchery_node_protocol::SessionTaskBindingV1 {
+                gate4agent_node_protocol::SessionTaskBindingV1 {
                     revision: 1,
                     task_id: Some(task_id.clone()),
                     changed_at_unix_ms: 1,
@@ -19985,7 +19985,7 @@ mod tests {
             display_name: "Chip session".to_owned(),
             provider: provider("codex"),
             mode: SessionMode::Pty,
-            state: hatchery_node_protocol::ManagedSessionState::Dormant,
+            state: gate4agent_node_protocol::ManagedSessionState::Dormant,
             workspace_id: "workspace-a".to_owned(),
             canonical_root: None,
             has_provider_session_identity: true,
@@ -21749,7 +21749,7 @@ mod tests {
             None,
         );
 
-        git.status[0].path = hatchery_node_protocol::RepositoryPath::unix_bytes(
+        git.status[0].path = gate4agent_node_protocol::RepositoryPath::unix_bytes(
             b"src/main.rs".to_vec(),
         ).unwrap();
         assert_eq!(
@@ -22153,7 +22153,7 @@ mod tests {
         app.rail_icons = RailIcons::Ascii;
         app.focus = Focus::Spawn;
         app.nodes[0].workspaces[0].worktree_service_mode =
-            Some(hatchery_node_protocol::WorktreeServiceMode::Managed);
+            Some(gate4agent_node_protocol::WorktreeServiceMode::Managed);
         app.spawn = Some(SpawnDialog {
             node_id: "node-a".to_owned(),
             workspace_id: "workspace-a".to_owned(),
@@ -25215,7 +25215,7 @@ mod tests {
             display_name: "Dormant agent".to_owned(),
             provider: gate4agent_types::AgentId::new("codex").unwrap(),
             mode: SessionMode::Pty,
-            state: hatchery_node_protocol::ManagedSessionState::Dormant,
+            state: gate4agent_node_protocol::ManagedSessionState::Dormant,
             workspace_id: "workspace-a".to_owned(),
             canonical_root: None,
             has_provider_session_identity: true,
@@ -25285,10 +25285,10 @@ mod tests {
 
     fn render_monitor_observation(
         source_sequence: u64,
-        evidence: hatchery_node_protocol::ObservationEvidenceV1,
-        kind: hatchery_node_protocol::ObservationKindV1,
-    ) -> hatchery_node_protocol::ObservationV1 {
-        hatchery_node_protocol::ObservationV1 {
+        evidence: hatchery_observation_protocol::ObservationEvidenceV1,
+        kind: hatchery_observation_protocol::ObservationKindV1,
+    ) -> hatchery_observation_protocol::ObservationV1 {
+        hatchery_observation_protocol::ObservationV1 {
             source_sequence,
             observed_at_unix_ms: Some(10_000 + source_sequence),
             evidence,
@@ -25300,7 +25300,7 @@ mod tests {
     fn apply_render_monitor_observation(
         app: &mut App,
         node_sequence: u64,
-        observation: hatchery_node_protocol::ObservationV1,
+        observation: hatchery_observation_protocol::ObservationV1,
     ) {
         let key = match app.surface.active_tab().cloned().unwrap() {
             SurfaceTab::SessionMonitor(key) => key,
@@ -25334,8 +25334,8 @@ mod tests {
             1,
             render_monitor_observation(
                 1,
-                hatchery_node_protocol::ObservationEvidenceV1::PtyHint,
-                hatchery_node_protocol::ObservationKindV1::Working,
+                hatchery_observation_protocol::ObservationEvidenceV1::PtyHint,
+                hatchery_observation_protocol::ObservationKindV1::Working,
             ),
         );
         let text = render_focused_monitor(&hint, 72, 12);
@@ -25385,8 +25385,8 @@ mod tests {
             1,
             render_monitor_observation(
                 1,
-                hatchery_node_protocol::ObservationEvidenceV1::StructuredProvider,
-                hatchery_node_protocol::ObservationKindV1::Working,
+                hatchery_observation_protocol::ObservationEvidenceV1::StructuredProvider,
+                hatchery_observation_protocol::ObservationKindV1::Working,
             ),
         );
         for section in [SessionMonitorSection::Workflow, SessionMonitorSection::FilesGit] {
@@ -25406,14 +25406,14 @@ mod tests {
             1,
             render_monitor_observation(
                 1,
-                hatchery_node_protocol::ObservationEvidenceV1::ManagedHook,
-                hatchery_node_protocol::ObservationKindV1::SourceCapabilities {
-                    source_family: hatchery_node_protocol::ObservationSourceFamilyV1::ManagedHook,
+                hatchery_observation_protocol::ObservationEvidenceV1::ManagedHook,
+                hatchery_observation_protocol::ObservationKindV1::SourceCapabilities {
+                    source_family: hatchery_observation_protocol::ObservationSourceFamilyV1::ManagedHook,
                     source_adapter: "codex".to_owned(),
-                    capabilities: hatchery_node_protocol::ObservationCapabilitiesV1 {
+                    capabilities: hatchery_observation_protocol::ObservationCapabilitiesV1 {
                         tools: true,
                         attention: true,
-                        ..hatchery_node_protocol::ObservationCapabilitiesV1::default()
+                        ..hatchery_observation_protocol::ObservationCapabilitiesV1::default()
                     },
                 },
             ),
@@ -25434,8 +25434,8 @@ mod tests {
             1,
             render_monitor_observation(
                 1,
-                hatchery_node_protocol::ObservationEvidenceV1::PtyHint,
-                hatchery_node_protocol::ObservationKindV1::Working,
+                hatchery_observation_protocol::ObservationEvidenceV1::PtyHint,
+                hatchery_observation_protocol::ObservationKindV1::Working,
             ),
         );
         waiting.session_monitors.values_mut().next().unwrap().section = SessionMonitorSection::Usage;
@@ -25452,8 +25452,8 @@ mod tests {
             1,
             render_monitor_observation(
                 1,
-                hatchery_node_protocol::ObservationEvidenceV1::StructuredProvider,
-                hatchery_node_protocol::ObservationKindV1::Usage {
+                hatchery_observation_protocol::ObservationEvidenceV1::StructuredProvider,
+                hatchery_observation_protocol::ObservationKindV1::Usage {
                     input_tokens: 10,
                     output_tokens: 5,
                     cache_read_tokens: 20,
@@ -25474,8 +25474,8 @@ mod tests {
             2,
             render_monitor_observation(
                 2,
-                hatchery_node_protocol::ObservationEvidenceV1::StructuredProvider,
-                hatchery_node_protocol::ObservationKindV1::ContextWindowUsage {
+                hatchery_observation_protocol::ObservationEvidenceV1::StructuredProvider,
+                hatchery_observation_protocol::ObservationKindV1::ContextWindowUsage {
                     uncached_input_tokens: Some(10),
                     cache_read_tokens: Some(20),
                     cache_write_tokens: Some(5),
@@ -25521,8 +25521,8 @@ mod tests {
             3,
             render_monitor_observation(
                 3,
-                hatchery_node_protocol::ObservationEvidenceV1::StructuredProvider,
-                hatchery_node_protocol::ObservationKindV1::ContextWindowUsage {
+                hatchery_observation_protocol::ObservationEvidenceV1::StructuredProvider,
+                hatchery_observation_protocol::ObservationKindV1::ContextWindowUsage {
                     uncached_input_tokens: Some(50),
                     cache_read_tokens: Some(30),
                     cache_write_tokens: Some(20),
@@ -25543,8 +25543,8 @@ mod tests {
             4,
             render_monitor_observation(
                 4,
-                hatchery_node_protocol::ObservationEvidenceV1::StructuredProvider,
-                hatchery_node_protocol::ObservationKindV1::Gap { missed: 1 },
+                hatchery_observation_protocol::ObservationEvidenceV1::StructuredProvider,
+                hatchery_observation_protocol::ObservationKindV1::Gap { missed: 1 },
             ),
         );
         let after_gap = render_focused_monitor(&app, 112, 20);
@@ -25560,8 +25560,8 @@ mod tests {
             1,
             render_monitor_observation(
                 1,
-                hatchery_node_protocol::ObservationEvidenceV1::StructuredProvider,
-                hatchery_node_protocol::ObservationKindV1::ContextWindowUsage {
+                hatchery_observation_protocol::ObservationEvidenceV1::StructuredProvider,
+                hatchery_observation_protocol::ObservationKindV1::ContextWindowUsage {
                     uncached_input_tokens: Some(10),
                     cache_read_tokens: Some(20),
                     cache_write_tokens: Some(5),
@@ -25589,11 +25589,11 @@ mod tests {
         }));
 
         for evidence in [
-            hatchery_node_protocol::ObservationEvidenceV1::ManagedHook,
-            hatchery_node_protocol::ObservationEvidenceV1::NodeLifecycle,
-            hatchery_node_protocol::ObservationEvidenceV1::WorkspaceObservation,
-            hatchery_node_protocol::ObservationEvidenceV1::HistoryProjection,
-            hatchery_node_protocol::ObservationEvidenceV1::PtyHint,
+            hatchery_observation_protocol::ObservationEvidenceV1::ManagedHook,
+            hatchery_observation_protocol::ObservationEvidenceV1::NodeLifecycle,
+            hatchery_observation_protocol::ObservationEvidenceV1::WorkspaceObservation,
+            hatchery_observation_protocol::ObservationEvidenceV1::HistoryProjection,
+            hatchery_observation_protocol::ObservationEvidenceV1::PtyHint,
         ] {
             let mut invalid = valid.clone();
             invalid
@@ -25636,13 +25636,13 @@ mod tests {
             1,
             render_monitor_observation(
                 1,
-                hatchery_node_protocol::ObservationEvidenceV1::HistoryProjection,
-                hatchery_node_protocol::ObservationKindV1::SourceCapabilities {
-                    source_family: hatchery_node_protocol::ObservationSourceFamilyV1::History,
+                hatchery_observation_protocol::ObservationEvidenceV1::HistoryProjection,
+                hatchery_observation_protocol::ObservationKindV1::SourceCapabilities {
+                    source_family: hatchery_observation_protocol::ObservationSourceFamilyV1::History,
                     source_adapter: "native-history".to_owned(),
-                    capabilities: hatchery_node_protocol::ObservationCapabilitiesV1 {
+                    capabilities: hatchery_observation_protocol::ObservationCapabilitiesV1 {
                         history_summary: true,
-                        ..hatchery_node_protocol::ObservationCapabilitiesV1::default()
+                        ..hatchery_observation_protocol::ObservationCapabilitiesV1::default()
                     },
                 },
             ),
@@ -25652,8 +25652,8 @@ mod tests {
             2,
             render_monitor_observation(
                 1,
-                hatchery_node_protocol::ObservationEvidenceV1::HistoryProjection,
-                hatchery_node_protocol::ObservationKindV1::HistorySnapshot {
+                hatchery_observation_protocol::ObservationEvidenceV1::HistoryProjection,
+                hatchery_observation_protocol::ObservationKindV1::HistorySnapshot {
                     message_count: 17,
                     message_count_exact: false,
                     completed_turn_count: Some(4),
@@ -25674,8 +25674,8 @@ mod tests {
             3,
             render_monitor_observation(
                 2,
-                hatchery_node_protocol::ObservationEvidenceV1::HistoryProjection,
-                hatchery_node_protocol::ObservationKindV1::HistorySnapshot {
+                hatchery_observation_protocol::ObservationEvidenceV1::HistoryProjection,
+                hatchery_observation_protocol::ObservationKindV1::HistorySnapshot {
                     message_count: 17,
                     message_count_exact: true,
                     completed_turn_count: Some(4),
@@ -25862,8 +25862,8 @@ mod tests {
             1,
             render_monitor_observation(
                 1,
-                hatchery_node_protocol::ObservationEvidenceV1::StructuredProvider,
-                hatchery_node_protocol::ObservationKindV1::ToolStarted {
+                hatchery_observation_protocol::ObservationEvidenceV1::StructuredProvider,
+                hatchery_observation_protocol::ObservationKindV1::ToolStarted {
                     correlation_id: sentinel.to_owned(),
                     class: "shell".to_owned(),
                 },
@@ -25879,8 +25879,8 @@ mod tests {
             2,
             render_monitor_observation(
                 2,
-                hatchery_node_protocol::ObservationEvidenceV1::StructuredProvider,
-                hatchery_node_protocol::ObservationKindV1::Error {
+                hatchery_observation_protocol::ObservationEvidenceV1::StructuredProvider,
+                hatchery_observation_protocol::ObservationKindV1::Error {
                     detail: "provider-tool-error".to_owned(),
                 },
             ),
@@ -25890,13 +25890,13 @@ mod tests {
             3,
             render_monitor_observation(
                 3,
-                hatchery_node_protocol::ObservationEvidenceV1::StructuredProvider,
-                hatchery_node_protocol::ObservationKindV1::TodoSnapshot {
+                hatchery_observation_protocol::ObservationEvidenceV1::StructuredProvider,
+                hatchery_observation_protocol::ObservationKindV1::TodoSnapshot {
                     revision: 1,
-                    items: vec![hatchery_node_protocol::ObservationTodoItemV1 {
+                    items: vec![hatchery_observation_protocol::ObservationTodoItemV1 {
                         id: None,
                         text: sentinel.to_owned(),
-                        state: hatchery_node_protocol::ObservationTodoStateV1::Pending,
+                        state: hatchery_observation_protocol::ObservationTodoStateV1::Pending,
                     }],
                     complete: false,
                 },

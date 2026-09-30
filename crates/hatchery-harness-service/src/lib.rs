@@ -46,8 +46,9 @@ use hatchery_harness_protocol::{
     SessionGrantId, HARNESS_RESULTS_MAX,
 };
 use hatchery_harness_delivery::{CompiledDeliveryBundleV2, DeliveryCatalogV2};
-use hatchery_node_protocol::{
-    HarnessMcpActivationDigest, HarnessMcpReservationId, ResolvedHarnessMcpProxyReceiptV1,
+use gate4agent_node_protocol::{
+    HarnessMcpActivationDigest, HarnessMcpLaunchTraceV1, HarnessMcpLaunchV1,
+    HarnessMcpReservationId, ResolvedHarnessMcpProxyReceiptV1,
     ManagedWorktreeLeaseId, NodeId, NodeIncarnationId,
     SessionAddress, SessionMode, SessionRecordId, SpawnOverride, SpawnSpec,
     MAX_HARNESS_MCP_RESERVATION_TTL_MS,
@@ -2351,7 +2352,7 @@ impl HarnessService {
     pub fn expire_unbound_continuation_on_incarnation_change(
         &mut self,
         continuation_ref: &HarnessContinuationRef,
-        current_route: &hatchery_c2_protocol::NodeRoute,
+        current_route: &gate4agent_c2_protocol::NodeRoute,
         now_unix_ms: u64,
     ) -> Result<HarnessApplyOutcome, HarnessServiceError> {
         self.ensure_healthy()?;
@@ -2479,8 +2480,8 @@ impl HarnessService {
                 "continuation lease does not match exact exported authority",
             ));
         }
-        let route = hatchery_c2_protocol::NodeRoute {
-            node_id: hatchery_node_protocol::NodeId::new(context.node_id.as_str())
+        let route = gate4agent_c2_protocol::NodeRoute {
+            node_id: gate4agent_node_protocol::NodeId::new(context.node_id.as_str())
                 .map_err(|_| HarnessServiceError::InvalidDispatchContext(
                     "continuation lease has invalid Node id",
                 ))?,
@@ -2646,8 +2647,8 @@ impl HarnessService {
             &spec,
             &fingerprint,
         )?;
-        let route = hatchery_c2_protocol::NodeRoute {
-            node_id: hatchery_node_protocol::NodeId::new(context.node_id.as_str())
+        let route = gate4agent_c2_protocol::NodeRoute {
+            node_id: gate4agent_node_protocol::NodeId::new(context.node_id.as_str())
                 .map_err(|_| HarnessServiceError::InvalidDispatchContext(
                     "ordinary spawn lease has invalid Node id",
                 ))?,
@@ -2972,7 +2973,7 @@ impl HarnessService {
     pub(crate) fn issue_delivery_staging_lease(
         &self,
         delivery_ref: &HarnessDeliveryRef,
-        route: hatchery_c2_protocol::NodeRoute,
+        route: gate4agent_c2_protocol::NodeRoute,
         compiled: CompiledDeliveryBundleV2,
     ) -> Result<c2::PreparedDeliveryStageLease, HarnessServiceError> {
         self.ensure_healthy()?;
@@ -3038,7 +3039,7 @@ impl HarnessService {
                 "delivery staging lease is not authorized by current exact grant and run",
             ));
         }
-        let workspace_id = hatchery_node_protocol::WorkspaceId::new(
+        let workspace_id = gate4agent_node_protocol::WorkspaceId::new(
             run.intent.workspace_id.as_str(),
         ).map_err(|_| HarnessServiceError::InvalidStagedDeliveryProof(
             "delivery staging lease has invalid workspace id",
@@ -4418,8 +4419,8 @@ impl HarnessService {
             &spec,
             &fingerprint,
         )?;
-        let route = hatchery_c2_protocol::NodeRoute {
-            node_id: hatchery_node_protocol::NodeId::new(context.node_id.as_str())
+        let route = gate4agent_c2_protocol::NodeRoute {
+            node_id: gate4agent_node_protocol::NodeId::new(context.node_id.as_str())
                 .map_err(|_| HarnessServiceError::HarnessMcpArmRouteInvalid {
                     operation_id: current.operation_id.clone(),
                     field: "node_id",
@@ -4502,7 +4503,7 @@ impl HarnessService {
     pub async fn revoke_and_abort_harness_mcp_reservation(
         &mut self,
         adapter: &c2::HarnessC2Adapter,
-        route: &hatchery_c2_protocol::NodeRoute,
+        route: &gate4agent_c2_protocol::NodeRoute,
         reservation_id: &HarnessMcpReservationId,
         revoked_at_unix_ms: u64,
     ) -> Result<(), HarnessServiceError> {
@@ -4540,12 +4541,12 @@ impl HarnessService {
             reservation.record_id.as_ref()
                 .ok_or(HarnessServiceError::HarnessMcpProofMismatch)?.as_str(),
         ).map_err(|_| HarnessServiceError::HarnessMcpProofMismatch)?;
-        let workspace_id = hatchery_node_protocol::WorkspaceId::new(
+        let workspace_id = gate4agent_node_protocol::WorkspaceId::new(
             reservation.workspace_id.as_str(),
         ).map_err(|_| HarnessServiceError::HarnessMcpProofMismatch)?;
         let session = SessionAddress {
             workspace_id,
-            session: hatchery_node_protocol::SessionKey {
+            session: gate4agent_node_protocol::SessionKey {
                 instance_id: gate4agent_types::AgentInstanceId(
                     reservation.instance_id.ok_or(HarnessServiceError::HarnessMcpProofMismatch)?,
                 ),
@@ -4573,7 +4574,7 @@ impl HarnessService {
 
     pub(crate) fn authorize_harness_mcp_call(
         &self,
-        route: &hatchery_c2_protocol::NodeRoute,
+        route: &gate4agent_c2_protocol::NodeRoute,
         reservation_id: &HarnessMcpReservationId,
         activation_digest: &HarnessMcpActivationDigest,
         record_id: &SessionRecordId,
@@ -4630,7 +4631,7 @@ fn prepared_scheduled_spawn_dispatch(
     engine: &HarnessEngine,
     issued_launches: &BTreeMap<HarnessOperationId, HarnessTaskLaunchIssuanceV1>,
     plan: &dispatch::HarnessLaunchPlanV1,
-    route: hatchery_c2_protocol::NodeRoute,
+    route: gate4agent_c2_protocol::NodeRoute,
     operation: &HarnessOperationV1,
     spec: SpawnSpec,
     fingerprint: HarnessRequestDigest,
@@ -4689,18 +4690,18 @@ fn prepared_scheduled_spawn_dispatch(
                     "scheduled delivery authority does not match exact plan and grant",
                 ));
             }
-            let expected = hatchery_node_protocol::ResolvedBundleReceipt {
-                id: hatchery_node_protocol::SpawnBundleId::new(
+            let expected = gate4agent_node_protocol::ResolvedBundleReceipt {
+                id: gate4agent_node_protocol::SpawnBundleId::new(
                     delivery.bundle.bundle_id.as_str(),
                 ).map_err(|_| HarnessServiceError::InvalidDispatchContext(
                     "scheduled delivery bundle id is invalid",
                 ))?,
-                revision: hatchery_node_protocol::SpawnBundleRevision::new(
+                revision: gate4agent_node_protocol::SpawnBundleRevision::new(
                     delivery.bundle.revision.as_str(),
                 ).map_err(|_| HarnessServiceError::InvalidDispatchContext(
                     "scheduled delivery revision is invalid",
                 ))?,
-                digest: hatchery_node_protocol::SpawnBundleDigest::new(
+                digest: gate4agent_node_protocol::SpawnBundleDigest::new(
                     delivery.bundle.digest.as_str(),
                 ).map_err(|_| HarnessServiceError::InvalidDispatchContext(
                     "scheduled delivery digest is invalid",
@@ -5209,7 +5210,7 @@ pub fn mutation_request_digest(
     let mut canonical = mutation.clone();
     canonical.operation_mut().request_digest = HarnessRequestDigest::new("0".repeat(64))?;
     let encoded = serde_json::to_vec(&canonical)?;
-    let digest = hatchery_node_wire::local_hmac_sha256(DOMAIN, &encoded)
+    let digest = gate4agent_node_wire::local_hmac_sha256(DOMAIN, &encoded)
         .map_err(HarnessServiceError::MutationDigest)?;
     let mut hex = String::with_capacity(digest.len() * 2);
     for byte in digest {
@@ -5225,7 +5226,7 @@ fn operator_command_digest<T: Serialize>(
 ) -> Result<HarnessRequestDigest, HarnessServiceError> {
     const DOMAIN: &[u8] = b"gate4agent-harness-operator-request-v1";
     let encoded = serde_json::to_vec(&(kind, request))?;
-    let digest = hatchery_node_wire::local_hmac_sha256(DOMAIN, &encoded)
+    let digest = gate4agent_node_wire::local_hmac_sha256(DOMAIN, &encoded)
         .map_err(HarnessServiceError::MutationDigest)?;
     let mut hex = String::with_capacity(digest.len() * 2);
     for byte in digest {
@@ -5241,7 +5242,7 @@ fn scheduled_launch_digest(
     const DOMAIN: &[u8] = b"gate4agent-harness-scheduled-launch-ref-v2\0";
     scheduled.validate()?;
     let encoded = serde_json::to_vec(scheduled)?;
-    let digest = hatchery_node_wire::local_hmac_sha256(DOMAIN, &encoded)
+    let digest = gate4agent_node_wire::local_hmac_sha256(DOMAIN, &encoded)
         .map_err(HarnessServiceError::MutationDigest)?;
     let mut hex = String::with_capacity(digest.len() * 2);
     for byte in digest {
@@ -5255,7 +5256,7 @@ fn deterministic_execution_spec_id(
     task_id: &HarnessTaskId,
 ) -> Result<HarnessExecutionSpecId, HarnessServiceError> {
     task_id.validate()?;
-    let digest = hatchery_node_wire::local_hmac_sha256(
+    let digest = gate4agent_node_wire::local_hmac_sha256(
         HARNESS_EXECUTION_SPEC_ID_DOMAIN,
         task_id.as_str().as_bytes(),
     ).map_err(HarnessServiceError::MutationDigest)?;
@@ -5271,7 +5272,7 @@ pub(crate) fn deterministic_launch_issuance_id(
     task_id: &HarnessTaskId,
 ) -> Result<HarnessTaskLaunchIssuanceId, HarnessServiceError> {
     task_id.validate()?;
-    let digest = hatchery_node_wire::local_hmac_sha256(
+    let digest = gate4agent_node_wire::local_hmac_sha256(
         HARNESS_LAUNCH_ISSUANCE_ID_DOMAIN,
         task_id.as_str().as_bytes(),
     ).map_err(HarnessServiceError::MutationDigest)?;
@@ -5345,7 +5346,7 @@ fn hmac_request_digest<T: Serialize>(
     material: &T,
 ) -> Result<HarnessRequestDigest, HarnessServiceError> {
     let encoded = serde_json::to_vec(material)?;
-    let digest = hatchery_node_wire::local_hmac_sha256(domain, &encoded)
+    let digest = gate4agent_node_wire::local_hmac_sha256(domain, &encoded)
         .map_err(HarnessServiceError::MutationDigest)?;
     let mut hex = String::with_capacity(digest.len() * 2);
     for byte in digest {
@@ -5789,7 +5790,7 @@ fn derived_opaque_id<T>(
     material: &[u8],
     constructor: impl FnOnce(String) -> Result<T, HarnessValidationError>,
 ) -> Result<T, HarnessServiceError> {
-    let digest = hatchery_node_wire::local_hmac_sha256(domain, material)
+    let digest = gate4agent_node_wire::local_hmac_sha256(domain, material)
         .map_err(HarnessServiceError::MutationDigest)?;
     let mut nonce = String::with_capacity(24);
     for byte in &digest[..12] {
@@ -5971,6 +5972,32 @@ fn operator_request_records(
     }).collect()
 }
 
+/// How the harness asks a node to expose its MCP door to a session it spawns:
+/// the names are the harness's -- `hatchery-harness-mcp` reads the same three
+/// environment variables back and is started with the same argv, and its
+/// tests pin this function to its own constants.
+///
+/// The two `GATE4AGENT_HARNESS_READ_*` names are legacy keys from before the
+/// door was reservation-based; they are erased from the provider's environment
+/// so a stale value never outlives its contract.
+pub fn harness_mcp_launch() -> HarnessMcpLaunchV1 {
+    HarnessMcpLaunchV1 {
+        server_name: "hatchery".to_owned(),
+        args: vec!["--session-proxy".to_owned()],
+        endpoint_env: "HATCHERY_HARNESS_SESSION_ENDPOINT".to_owned(),
+        token_env: "HATCHERY_HARNESS_SESSION_TOKEN".to_owned(),
+        program_env: "HATCHERY_HARNESS_MCP_PROGRAM".to_owned(),
+        trace: Some(HarnessMcpLaunchTraceV1 {
+            env: "HATCHERY_HARNESS_MCP_TRACE".to_owned(),
+            dir_env: "HATCHERY_HARNESS_MCP_TRACE_DIR".to_owned(),
+        }),
+        scrub_env: vec![
+            "GATE4AGENT_HARNESS_READ_ENDPOINT".to_owned(),
+            "GATE4AGENT_HARNESS_READ_CREDENTIAL".to_owned(),
+        ],
+    }
+}
+
 pub fn harness_mcp_activation_digest(
     reservation_id: &HarnessMcpReservationId,
     grant_id: &SessionGrantId,
@@ -6014,7 +6041,7 @@ pub fn harness_mcp_activation_digest(
         idempotency_ref: &context.idempotency_ref,
         expires_at_unix_ms,
     })?;
-    let digest = hatchery_node_wire::local_hmac_sha256(DOMAIN, &encoded)
+    let digest = gate4agent_node_wire::local_hmac_sha256(DOMAIN, &encoded)
         .map_err(HarnessServiceError::MutationDigest)?;
     let mut value = String::from("sha256:");
     for byte in digest {
@@ -6904,12 +6931,12 @@ fn continuation_source_session(
         )),
     };
     Ok(SessionAddress {
-        workspace_id: hatchery_node_protocol::WorkspaceId::new(
+        workspace_id: gate4agent_node_protocol::WorkspaceId::new(
             continuation.source_binding.workspace_id.as_str(),
         ).map_err(|_| HarnessServiceError::InvalidContinuationProof(
             "source workspace is invalid",
         ))?,
-        session: hatchery_node_protocol::SessionKey {
+        session: gate4agent_node_protocol::SessionKey {
             instance_id: gate4agent_types::AgentInstanceId(active.instance_id),
             generation: gate4agent_types::SessionGeneration(active.generation),
         },
@@ -6921,7 +6948,7 @@ fn continuation_source_session(
 /// which already calls this function internally -- pure node-receipt-to-wire
 /// projection, no task-kernel/SQLite dependency.
 pub fn context_receipt_from_node(
-    context: &hatchery_node_protocol::ResolvedContextPackReceipt,
+    context: &gate4agent_node_protocol::ResolvedContextPackReceipt,
 ) -> Result<HarnessResolvedContextPackReceiptV1, HarnessServiceError> {
     let receipt = HarnessResolvedContextPackReceiptV1 {
         id: HarnessSelectorV1::new(context.id.as_str())?,
@@ -7446,6 +7473,16 @@ pub enum HarnessServiceError {
 mod tests {
     use super::*;
     use hatchery_harness_engine::HarnessMutationV1;
+
+    #[test]
+    fn the_harness_mcp_launch_description_is_valid_and_names_the_harness_door() {
+        let launch = harness_mcp_launch();
+        launch.validate().expect("the harness launch description must satisfy the node bounds");
+        assert_eq!(launch.server_name, "hatchery");
+        assert_eq!(launch.args, vec!["--session-proxy".to_owned()]);
+        assert_eq!(launch, harness_mcp_launch());
+    }
+
     use hatchery_harness_delivery::{
         compile_reviewed_delivery_bundle_v2, ReviewedDeliverySourceV2,
     };
@@ -7468,7 +7505,7 @@ mod tests {
         HarnessTaskPermissionsV1, HarnessTaskStateV1, HarnessTaskV1,
         HarnessWorktreeIntentV1, SessionGrantId, SessionGrantStateV1, SessionGrantV1,
     };
-    use hatchery_node_protocol::{
+    use gate4agent_node_protocol::{
         CapabilityId, ContextPackLineageReceipt, DeliveryComponentKindV2,
         DeliveryScopeV2, NodeId, NodeIncarnationId,
         ResolvedBundleReceipt, ResolvedContextPackReceipt, SessionKey, SpawnBundleDigest,
@@ -8112,7 +8149,7 @@ mod tests {
                 worktree_id: None,
             },
             profile_id: SpawnProfileId::new("claude-default").unwrap(),
-            expected_profile_revision: hatchery_node_protocol::SpawnProfileRevision::new("r1")
+            expected_profile_revision: gate4agent_node_protocol::SpawnProfileRevision::new("r1")
                 .unwrap(),
             overrides: SpawnOverrides {
                 provider: SpawnOverride::Set {
@@ -10517,7 +10554,7 @@ mod tests {
         let mut spec = plan.spawn_spec(
             &intent,
             &current_task,
-            hatchery_node_protocol::SpawnProfileRevision::new("r1").unwrap(),
+            gate4agent_node_protocol::SpawnProfileRevision::new("r1").unwrap(),
         ).unwrap();
         spec.overrides.bundle_id = SpawnOverride::Set {
             value: SpawnBundleId::new("bundle.review-kit").unwrap(),
@@ -10717,7 +10754,7 @@ mod tests {
             operation, context, &spec, reservation_id.clone(), grant_id,
             HarnessRevision::new(1).unwrap(), 1_000,
         ).unwrap();
-        let route = hatchery_c2_protocol::NodeRoute {
+        let route = gate4agent_c2_protocol::NodeRoute {
             node_id: NodeId::new("node-a").unwrap(),
             expected_incarnation_id: NodeIncarnationId::from_bytes([7; 16]),
         };
@@ -10858,7 +10895,7 @@ mod tests {
             HarnessRevision::new(1).unwrap(),
             1_000,
         ).unwrap();
-        let route = hatchery_c2_protocol::NodeRoute {
+        let route = gate4agent_c2_protocol::NodeRoute {
             node_id: NodeId::new("node-a").unwrap(),
             expected_incarnation_id: NodeIncarnationId::from_bytes([7; 16]),
         };
@@ -11440,7 +11477,7 @@ mod tests {
             1_000,
         ).unwrap();
 
-        let route = hatchery_c2_protocol::NodeRoute {
+        let route = gate4agent_c2_protocol::NodeRoute {
             node_id: NodeId::new("node-a").unwrap(),
             expected_incarnation_id: NodeIncarnationId::from_bytes([7; 16]),
         };
@@ -11996,7 +12033,7 @@ mod tests {
             13,
         ).unwrap();
         revoke_grant(&mut service, &grant_id, '9', 21);
-        let route = hatchery_c2_protocol::NodeRoute {
+        let route = gate4agent_c2_protocol::NodeRoute {
             node_id: NodeId::new("node-a").unwrap(),
             expected_incarnation_id: NodeIncarnationId::from_bytes([7; 16]),
         };
@@ -12071,7 +12108,7 @@ mod tests {
             HarnessRevision::new(3).unwrap(),
             23,
         ).is_err());
-        let changed_route = hatchery_c2_protocol::NodeRoute {
+        let changed_route = gate4agent_c2_protocol::NodeRoute {
             node_id: NodeId::new("node-a").unwrap(),
             expected_incarnation_id: NodeIncarnationId::from_bytes([8; 16]),
         };
@@ -12148,7 +12185,7 @@ mod tests {
             WorkspaceId::new("workspace-a").unwrap(),
             AgentId::new("claude").unwrap(),
             SessionMode::Pty,
-            hatchery_node_protocol::SessionRecordId::new("record-a").unwrap(),
+            gate4agent_node_protocol::SessionRecordId::new("record-a").unwrap(),
             session.clone(),
             None,
             None,
@@ -12184,7 +12221,7 @@ mod tests {
             WorkspaceId::new("workspace-a").unwrap(),
             AgentId::new("claude").unwrap(),
             SessionMode::Pty,
-            hatchery_node_protocol::SessionRecordId::new("record-a").unwrap(),
+            gate4agent_node_protocol::SessionRecordId::new("record-a").unwrap(),
             session.clone(),
             None,
             None,
@@ -12206,7 +12243,7 @@ mod tests {
             WorkspaceId::new("workspace-a").unwrap(),
             AgentId::new("claude").unwrap(),
             SessionMode::Pty,
-            hatchery_node_protocol::SessionRecordId::new("record-a").unwrap(),
+            gate4agent_node_protocol::SessionRecordId::new("record-a").unwrap(),
             session,
             None,
             None,

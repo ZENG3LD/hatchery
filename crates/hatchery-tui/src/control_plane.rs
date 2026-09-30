@@ -31,7 +31,7 @@
 //! `HarnessOperatorCredential`'s own shape: a fixed `g4atc_` prefix plus 64
 //! lowercase-hex bytes. The configured secret is compared against a
 //! presented one via an HMAC-SHA256 digest and a constant-time comparison
-//! (`hatchery_node_wire::{local_hmac_sha256, proofs_match}`), the same
+//! (`gate4agent_node_wire::{local_hmac_sha256, proofs_match}`), the same
 //! primitives `gate4agent-harness-service`'s own
 //! `HarnessOperatorCredentialAuthority` uses -- not a second, hand-rolled
 //! comparison scheme.
@@ -84,7 +84,7 @@ use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use hatchery_build_stamp::BUILD_STAMP;
+use gate4agent_build_stamp::BUILD_STAMP;
 use gate4agent_types::{PtyScreenState, TERMINAL_INPUT_MAX_BYTES};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -117,7 +117,7 @@ const CONTROL_REQUEST_MAX_BYTES: usize = 64 * 1024;
 /// with headroom for JSON string escaping on top of the raw cell text.
 const CONTROL_RESPONSE_MAX_BYTES: usize = 4 * 1024 * 1024;
 /// Domain-separates this credential's HMAC digest from every other secret
-/// `hatchery_node_wire::local_hmac_sha256` is ever asked to sign in this
+/// `gate4agent_node_wire::local_hmac_sha256` is ever asked to sign in this
 /// process -- same purpose `OPERATOR_CREDENTIAL_DIGEST_DOMAIN` serves in
 /// `gate4agent-harness-service::runtime`.
 const CONTROL_CREDENTIAL_DIGEST_DOMAIN: &[u8] = b"gate4agent-tui-control-plane-credential-v1";
@@ -187,17 +187,17 @@ fn is_well_formed_credential(value: &str) -> bool {
 /// Holds only the configured secret's own HMAC digest, never the secret
 /// itself, past construction -- `verify` re-derives a presented
 /// credential's digest and compares in constant time via
-/// `hatchery_node_wire::proofs_match`, the exact scheme
+/// `gate4agent_node_wire::proofs_match`, the exact scheme
 /// `HarnessOperatorCredentialAuthority` (`gate4agent-harness-service`)
 /// already uses for the harness operator wire's own credential.
 #[derive(Clone, Copy)]
 struct ControlPlaneCredentialAuthority {
-    digest: [u8; hatchery_node_protocol::NODE_AUTH_PROOF_BYTES],
+    digest: [u8; gate4agent_node_protocol::NODE_AUTH_PROOF_BYTES],
 }
 
 impl ControlPlaneCredentialAuthority {
     fn new(credential: &ControlPlaneCredential) -> Result<Self, String> {
-        let digest = hatchery_node_wire::local_hmac_sha256(
+        let digest = gate4agent_node_wire::local_hmac_sha256(
             CONTROL_CREDENTIAL_DIGEST_DOMAIN,
             credential.expose().as_bytes(),
         ).map_err(|error| format!("control-plane credential digest failed: {error}"))?;
@@ -212,8 +212,8 @@ impl ControlPlaneCredentialAuthority {
         if !is_well_formed_credential(presented) {
             return false;
         }
-        match hatchery_node_wire::local_hmac_sha256(CONTROL_CREDENTIAL_DIGEST_DOMAIN, presented.as_bytes()) {
-            Ok(actual) => hatchery_node_wire::proofs_match(&actual, &self.digest),
+        match gate4agent_node_wire::local_hmac_sha256(CONTROL_CREDENTIAL_DIGEST_DOMAIN, presented.as_bytes()) {
+            Ok(actual) => gate4agent_node_wire::proofs_match(&actual, &self.digest),
             Err(_) => false,
         }
     }
@@ -1161,10 +1161,10 @@ fn capture_frame(app: &App) -> Result<ControlCapturedFrameV1, ControlErrorV1> {
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent};
-    use hatchery_c2_protocol::C2RelayRoute;
+    use gate4agent_c2_protocol::C2RelayRoute;
     use std::io::BufRead;
 
-    use hatchery_node_protocol::{NodeIncarnationId, OpaqueHostPath};
+    use gate4agent_node_protocol::{NodeIncarnationId, OpaqueHostPath};
     use gate4agent_types::{
         OperatorGateKind, OperatorGateState, PtyScreenState, TerminalMouseProtocolEncoding,
     };

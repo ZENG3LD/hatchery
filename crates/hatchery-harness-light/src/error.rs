@@ -11,12 +11,12 @@
 //! this is a deliberate, documented light-local reimplementation rather than
 //! a promotion).
 
-use hatchery_c2_client::C2ControlError;
+use gate4agent_c2_client::C2ControlError;
 use hatchery_harness_api::{
     HarnessOperatorApiError, HarnessOperatorHostErrorV1, HarnessRuntimeTransportV1,
 };
 use hatchery_harness_service::c2::HarnessC2Error;
-use hatchery_node_protocol::NodeFailureCode;
+use gate4agent_node_protocol::NodeFailureCode;
 use thiserror::Error;
 
 /// Top-level error `start_harness_light`/`HarnessLightRunning::shutdown` can

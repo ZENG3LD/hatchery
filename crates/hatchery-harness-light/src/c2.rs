@@ -13,9 +13,9 @@
 //! `HarnessC2Adapter::connect` itself wraps) and reimplements these two
 //! small, pure read-path helpers against it.
 
-use hatchery_c2_client::{C2LinkState, C2ReconnectingHandle};
-use hatchery_c2_protocol::{C2NodeResponse, C2NodeSnapshot, C2Topology, NodeRoute, NodeTransportState};
-use hatchery_node_protocol::{NodeId, NodeRequest};
+use gate4agent_c2_client::{C2LinkState, C2ReconnectingHandle};
+use gate4agent_c2_protocol::{C2NodeResponse, C2NodeSnapshot, C2Topology, NodeRoute, NodeTransportState};
+use gate4agent_node_protocol::{NodeId, NodeRequest};
 use tokio::sync::Mutex;
 
 use crate::error::LightRelayError;

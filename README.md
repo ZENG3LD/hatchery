@@ -14,9 +14,9 @@ mode.
 ## Layers
 
 One direction of wrapping: providers → node → c2 → harness → client app.
-Providers live in `gate4agent` (see [Built on](#built-on) below); node and
-everything above it is `hatchery-*` in this repository. Crate names below
-are prefixed `hatchery-` (e.g. `-node` = `hatchery-node`) unless noted.
+Providers, the node and the c2 live in `gate4agent` (see [Built on](#built-on)
+below); the harness, the observation side and the client app are `hatchery-*`
+in this repository. Crate names below are prefixed `hatchery-` unless noted.
 
 - **Providers** — blackbox vendor CLIs (Claude Code, Codex, Kimi, Grok,
   qwen-code) wrapped by the transport core in `gate4agent`: root crate
@@ -29,13 +29,16 @@ are prefixed `hatchery-` (e.g. `-node` = `hatchery-node`) unless noted.
 - **Observation** — read-only monitoring facts projected from provider
   sessions, never prompts/transcripts/credentials: `-observation-protocol`,
   `-observation-api`, `-observation-engine`, `-observation-store`,
-  `-observation-service`.
+  `-observation-service`. The node names no observation type: the projection
+  from the node's own control events, agent-stream `Blocked` chunks and
+  record history summaries is `hatchery_observation_engine::node_projection`.
 - **Node** — wraps providers on one machine: PTY/inline sessions, the file
-  browser, local git, worktrees: `-node-protocol`, `-node-wire`, `-node`
-  (bin `gate4agent-node`).
+  browser, local git, worktrees. `gate4agent`'s: `gate4agent-node-protocol`,
+  `gate4agent-node-wire`, `gate4agent-node` (bin `gate4agent-node`).
 - **C2** — relays any number of nodes to their clients and routes commands
-  (spawn, session control) down to nodes: `-c2-protocol`, `-c2-client`
-  (bin `gate4agent-c2ctl`), `-c2` (bin `gate4agent-c2`).
+  (spawn, session control) down to nodes. `gate4agent`'s:
+  `gate4agent-c2-protocol`, `gate4agent-c2-client` (bin `gate4agent-c2ctl`),
+  `gate4agent-c2` (bin `gate4agent-c2`).
 - **Harness** — the stateful backend behind one app-facing protocol: task
   kanban over SQLite, session extraction/continuation, delivery of
   skills/plugins/MCP config, an operator surface: `-harness-protocol`,
@@ -48,9 +51,10 @@ are prefixed `hatchery-` (e.g. `-node` = `hatchery-node`) unless noted.
   `gate4agent-tui` (against a durable harness) and `gate4agent-tui-light`
   (hosts `hatchery-harness-light` in-process). Neither app speaks c2
   itself.
-- **Build stamp** — `hatchery-build-stamp`: a git content-hash of this
-  repository's own working tree, carried by every wire handshake instead
-  of a hand-typed protocol version number.
+- **Build stamp** — `gate4agent-build-stamp` (in `gate4agent`): a git
+  content-hash of that repository's working tree, carried by every wire
+  handshake instead of a hand-typed protocol version number. hatchery's
+  binaries carry it through `gate4agent-node-protocol`.
 
 Binary, pipe, and env-var names above still carry the `gate4agent-`/
 `GATE4AGENT_` prefix inherited from the repository this stack was split

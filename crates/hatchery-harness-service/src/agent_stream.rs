@@ -68,7 +68,7 @@ use hatchery_harness_api::{
     HarnessOperatorAgentEventV1, HarnessProviderConfigChoiceV1, HarnessProviderConfigOptionKindV1,
     HarnessProviderConfigOptionV1, HarnessProviderInteractionKindV1, HarnessRuntimeSessionAddressV1,
 };
-use hatchery_node_protocol::{
+use gate4agent_node_protocol::{
     AgentStreamChunkKindV1, AgentStreamChunkV1, AgentStreamInteractionOptionV1,
     AgentStreamNamedIdV1, BlockAuthorityV1, ProviderConfigChoice, ProviderConfigOption,
     ProviderConfigOptionKind, ProviderInteractionKind,
@@ -170,15 +170,14 @@ fn map_provider_interaction_kind(kind: ProviderInteractionKind) -> HarnessProvid
 
 fn map_block_authority(authority: BlockAuthorityV1) -> HarnessBlockAuthorityV1 {
     match authority {
-        BlockAuthorityV1::HarnessGate => HarnessBlockAuthorityV1::HarnessGate,
-        BlockAuthorityV1::HarnessPolicy => HarnessBlockAuthorityV1::HarnessPolicy,
-        BlockAuthorityV1::HarnessDeadline => HarnessBlockAuthorityV1::HarnessDeadline,
+        BlockAuthorityV1::HostGate => HarnessBlockAuthorityV1::HarnessGate,
+        BlockAuthorityV1::HostPolicy => HarnessBlockAuthorityV1::HarnessPolicy,
+        BlockAuthorityV1::HostDeadline => HarnessBlockAuthorityV1::HarnessDeadline,
         BlockAuthorityV1::Operator => HarnessBlockAuthorityV1::Operator,
         BlockAuthorityV1::ProviderClassifier => HarnessBlockAuthorityV1::ProviderClassifier,
         BlockAuthorityV1::ProviderPermissionRule => HarnessBlockAuthorityV1::ProviderPermissionRule,
         BlockAuthorityV1::ProviderSandbox => HarnessBlockAuthorityV1::ProviderSandbox,
         BlockAuthorityV1::ProviderRefusal => HarnessBlockAuthorityV1::ProviderRefusal,
-        BlockAuthorityV1::ProviderHook => HarnessBlockAuthorityV1::ProviderHook,
         BlockAuthorityV1::UserRejected => HarnessBlockAuthorityV1::UserRejected,
         BlockAuthorityV1::ProviderQuota => HarnessBlockAuthorityV1::ProviderQuota,
         BlockAuthorityV1::Unknown => HarnessBlockAuthorityV1::Unknown,

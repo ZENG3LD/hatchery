@@ -1,6 +1,6 @@
 //! Pure, reviewed-source compiler for staged Gate4Agent delivery bundles.
 
-use hatchery_node_protocol::{
+use gate4agent_node_protocol::{
     DeliveryBlobDigestV1, DeliveryBlobReceiptV1, DeliveryBundleManifestV2,
     DeliveryComponentKindV2, DeliveryComponentV2, DeliveryManifestDigestV2,
     DeliveryRelativePathV2, DeliveryScopeV2, SpawnBundleDigest, SpawnBundleId,

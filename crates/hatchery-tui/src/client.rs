@@ -19,10 +19,10 @@ use crossterm::{
     style::Print,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use hatchery_c2_protocol::{
+use gate4agent_c2_protocol::{
     C2RelayRoute, C2SessionSnapshot, C2SessionStatus, C2WorkspaceSnapshot,
 };
-use hatchery_node_protocol::{
+use gate4agent_node_protocol::{
     AgentProgressV1, ContextPackLineageReceipt,
     GitCommitSummary,
     GitSnapshot, GitStatusEntry,
@@ -313,12 +313,12 @@ enum WorkerUpdate {
     SessionRecordHistoryRefreshed {
         node_id: String,
         record_id: String,
-        incarnation_id: hatchery_node_protocol::NodeIncarnationId,
+        incarnation_id: gate4agent_node_protocol::NodeIncarnationId,
     },
     SessionRecordHistoryRefreshFailed {
         node_id: String,
         record_id: String,
-        incarnation_id: hatchery_node_protocol::NodeIncarnationId,
+        incarnation_id: gate4agent_node_protocol::NodeIncarnationId,
         message: String,
     },
     SessionRecordRemoved { node_id: String, record_id: String },
@@ -613,7 +613,7 @@ enum WorkerUpdate {
 }
 
 enum WorkspaceSnapshotUpdate {
-    C2(hatchery_c2_protocol::C2WorkspaceSnapshot),
+    C2(gate4agent_c2_protocol::C2WorkspaceSnapshot),
 }
 
 /// The one piece of `C2ApplyState` (pre-cutover: c2 snapshot/event admission
@@ -4627,11 +4627,11 @@ fn project_harness_git_diff_target_from_response(
 /// Node-scoped sibling of `project_harness_workspace_inspection`: the
 /// response lands in the same direct-mode state (`workspace_inspections`)
 /// the direct-C2 `InspectWorkspace` reply fills, so it projects straight to
-/// `hatchery_node_protocol::WorkspaceInspection` rather than to a
+/// `gate4agent_node_protocol::WorkspaceInspection` rather than to a
 /// Harness-prefixed presentation type.
 fn project_harness_node_workspace_inspection(
     inspection: HarnessNodeWorkspaceInspectionV1,
-) -> Result<(String, hatchery_node_protocol::WorkspaceInspection), String> {
+) -> Result<(String, gate4agent_node_protocol::WorkspaceInspection), String> {
     let node_id = inspection.origin.node_id;
     let workspace_id = WorkspaceId::new(inspection.origin.workspace_id)
         .map_err(|error| format!("invalid Harness runtime workspace ID: {error}"))?;
@@ -4661,7 +4661,7 @@ fn project_harness_node_workspace_inspection(
         diagnostic: None,
     };
     let truncation = inspection.truncation.map(|truncation| {
-        hatchery_node_protocol::WorkspaceInspectionTruncationV1 {
+        gate4agent_node_protocol::WorkspaceInspectionTruncationV1 {
             walk_time_budget_exceeded: truncation.walk_time_budget_exceeded,
             walk_entry_cap_exceeded: truncation.walk_entry_cap_exceeded,
             git_time_budget_exceeded: truncation.git_time_budget_exceeded,
@@ -4669,7 +4669,7 @@ fn project_harness_node_workspace_inspection(
             elapsed_ms: truncation.elapsed_ms,
         }
     });
-    Ok((node_id, hatchery_node_protocol::WorkspaceInspection {
+    Ok((node_id, gate4agent_node_protocol::WorkspaceInspection {
         workspace_id,
         entries,
         tree_truncated: inspection.tree_truncated,
@@ -4683,7 +4683,7 @@ fn project_harness_node_workspace_inspection(
 /// direct-C2 `ReadWorkspaceFile` reply uses.
 fn project_harness_node_workspace_file(
     file: HarnessNodeWorkspaceFileV1,
-) -> Result<(String, hatchery_node_protocol::WorkspaceFileRead), String> {
+) -> Result<(String, gate4agent_node_protocol::WorkspaceFileRead), String> {
     let node_id = file.origin.node_id;
     let workspace_id = WorkspaceId::new(file.origin.workspace_id)
         .map_err(|error| format!("invalid Harness runtime workspace ID: {error}"))?;
@@ -4691,7 +4691,7 @@ fn project_harness_node_workspace_file(
         WorkspaceFileRevision::new(revision.as_str().to_owned())
             .map_err(|error| format!("invalid Harness runtime file revision: {error}"))
     }).transpose()?;
-    Ok((node_id, hatchery_node_protocol::WorkspaceFileRead {
+    Ok((node_id, gate4agent_node_protocol::WorkspaceFileRead {
         workspace_id,
         path: project_harness_path(file.path),
         content: project_harness_file_content(file.content),
@@ -4708,10 +4708,10 @@ fn project_harness_node_workspace_file(
 /// `project_harness_path` already is.
 fn project_harness_node_workspace_directory(
     directory: HarnessNodeWorkspaceDirectoryV1,
-) -> (String, String, hatchery_node_protocol::WorkspaceEntry) {
+) -> (String, String, gate4agent_node_protocol::WorkspaceEntry) {
     let node_id = directory.origin.node_id;
     let workspace_id = directory.origin.workspace_id;
-    let entry = hatchery_node_protocol::WorkspaceEntry {
+    let entry = gate4agent_node_protocol::WorkspaceEntry {
         relative_path: project_harness_path(directory.entry.relative_path),
         kind: match directory.entry.kind {
             HarnessWorkspaceEntryKindV1::File => WorkspaceEntryKind::File,
@@ -4949,7 +4949,7 @@ fn publish_harness_session_record_history_refresh(
     updates: &mpsc::Sender<WorkerUpdate>,
     nodes: Option<&[NodeView]>,
     node_id: String,
-    incarnation_id: hatchery_node_protocol::NodeIncarnationId,
+    incarnation_id: gate4agent_node_protocol::NodeIncarnationId,
     record_id: String,
     message_limit: u16,
 ) {
@@ -5731,7 +5731,7 @@ fn apply_update(app: &mut App, terminal: &mut TerminalWatermarks, update: Worker
                     .record_frame_age(frame.produced_at_unix_ms, received_at_unix_ms);
             }
             if let Ok(incarnation_id) =
-                session.incarnation_id.parse::<hatchery_node_protocol::NodeIncarnationId>()
+                session.incarnation_id.parse::<gate4agent_node_protocol::NodeIncarnationId>()
             {
                 let address = SessionAddress {
                     node_id: session.node_id,
@@ -5775,7 +5775,7 @@ fn apply_update(app: &mut App, terminal: &mut TerminalWatermarks, update: Worker
                 .map_or(0, |since| since.as_millis().min(u128::from(u64::MAX)) as u64);
             app.profiler.record_frame_age(frame.produced_at_unix_ms, received_at_unix_ms);
             if let Ok(incarnation_id) =
-                session.incarnation_id.parse::<hatchery_node_protocol::NodeIncarnationId>()
+                session.incarnation_id.parse::<gate4agent_node_protocol::NodeIncarnationId>()
             {
                 let address = session_address_from_harness(&session);
                 let frame_sequence = frame.sequence;
@@ -5862,19 +5862,19 @@ fn harness_native_session_route(
     })
 }
 
-/// Mirrors `hatchery_node_protocol::SessionTaskTargetV1` into its wire
+/// Mirrors `gate4agent_node_protocol::SessionTaskTargetV1` into its wire
 /// twin, the same duplication `map_terminal_control` (app.rs) uses for
 /// `TerminalControl` and for the same reason -- see
 /// `HarnessSessionTaskTargetV1`'s own doc comment.
 fn harness_session_task_target(
-    target: &hatchery_node_protocol::SessionTaskTargetV1,
+    target: &gate4agent_node_protocol::SessionTaskTargetV1,
 ) -> HarnessSessionTaskTargetV1 {
     match target {
-        hatchery_node_protocol::SessionTaskTargetV1::New => HarnessSessionTaskTargetV1::New,
-        hatchery_node_protocol::SessionTaskTargetV1::Existing { task_id } => {
+        gate4agent_node_protocol::SessionTaskTargetV1::New => HarnessSessionTaskTargetV1::New,
+        gate4agent_node_protocol::SessionTaskTargetV1::Existing { task_id } => {
             HarnessSessionTaskTargetV1::Existing { task_id: task_id.to_string() }
         }
-        hatchery_node_protocol::SessionTaskTargetV1::Clear => HarnessSessionTaskTargetV1::Clear,
+        gate4agent_node_protocol::SessionTaskTargetV1::Clear => HarnessSessionTaskTargetV1::Clear,
     }
 }
 
@@ -6358,7 +6358,7 @@ fn project_harness_operator_event(event: HarnessOperatorEventV1) -> Option<Worke
 
 fn harness_terminal_session_address(
     address: &SessionAddress,
-    incarnation_id: hatchery_node_protocol::NodeIncarnationId,
+    incarnation_id: gate4agent_node_protocol::NodeIncarnationId,
 ) -> HarnessRuntimeSessionAddressV1 {
     HarnessRuntimeSessionAddressV1 {
         node_id: address.node_id.clone(),
@@ -7125,13 +7125,13 @@ mod tests {
         RedactedWorktreeIntentV1, TaskCreatorCategoryV1,
         HarnessGitSummaryV1, HarnessNodeWorkspaceOriginV1, HarnessWorkspaceTreeEntryV1,
     };
-    use hatchery_node_protocol::{
+    use gate4agent_node_protocol::{
         LaunchInventory, OpaqueHostPath,
-        ObservationEvidenceV1,
         ResolvedBundleReceipt, SpawnBundleDigest, SpawnBundleId, SpawnBundleRevision,
         SpawnProfileId, SpawnProfileRevision,
         SpawnProfileSummary,
     };
+    use hatchery_observation_protocol::ObservationEvidenceV1;
     use crate::app::{
         ContextUsageSegment, ContextUsageSegmentHit, ControlSection, DragState, Focus, HitRegion, HitTarget, IconFamily, LaunchContextMode, LaunchField,
         HarnessTaskComposerField, HarnessTaskRef, LaunchTarget, OverlayId, PtyColorMode, SidebarPresentation, SpawnDialog,
@@ -7147,8 +7147,8 @@ mod tests {
         AgentId::new(value).unwrap()
     }
 
-    fn incarnation(byte: u8) -> hatchery_node_protocol::NodeIncarnationId {
-        hatchery_node_protocol::NodeIncarnationId::from_bytes([byte; 16])
+    fn incarnation(byte: u8) -> gate4agent_node_protocol::NodeIncarnationId {
+        gate4agent_node_protocol::NodeIncarnationId::from_bytes([byte; 16])
     }
 
     fn sixel_placement(icon: icons::IconId, x: u16, variant: icons::SixelVariant) -> SixelIconPlacement {
@@ -8730,7 +8730,7 @@ mod tests {
             display_name: "Queue retry".to_owned(),
             provider: provider("codex"),
             mode: SessionMode::Pty,
-            state: hatchery_node_protocol::ManagedSessionState::Dormant,
+            state: gate4agent_node_protocol::ManagedSessionState::Dormant,
             workspace_id: "workspace-a".to_owned(),
             canonical_root: None,
             has_provider_session_identity: true,
@@ -9477,7 +9477,7 @@ mod tests {
             &commands,
             AppAction::RefreshSessionRecordHistory {
                 node_id: "node-a".to_owned(),
-                node_incarnation_id: hatchery_node_protocol::NodeIncarnationId::from_bytes([9; 16]),
+                node_incarnation_id: gate4agent_node_protocol::NodeIncarnationId::from_bytes([9; 16]),
                 record_id: "record-a".to_owned(),
                 message_limit: 8,
             },

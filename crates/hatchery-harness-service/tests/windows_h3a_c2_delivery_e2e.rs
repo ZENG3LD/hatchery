@@ -4,18 +4,18 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::{connect_local, C2Client};
-use hatchery_c2_protocol::C2NodeResponse;
+use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use gate4agent_c2_client::{connect_local, C2Client};
+use gate4agent_c2_protocol::C2NodeResponse;
 use hatchery_harness_delivery::{
     compile_reviewed_delivery_bundle_v2, ReviewedDeliverySourceV2,
 };
-use hatchery_node::protocol::{
+use gate4agent_node::protocol::{
     DeliveryBlobChunkHexV1, DeliveryComponentKindV2, DeliveryRelativePathV2,
     DeliveryScopeV2, NodeFailureCode, NodeId, NodeRequest, SpawnBundleId,
     SpawnBundleRevision, WorkspaceId,
 };
-use hatchery_node::{
+use gate4agent_node::{
     protect_bundle_source_tree_fixture, NodeServer, NodeServerConfig, WorkspaceConfig,
 };
 use tokio::time::{sleep, timeout};
@@ -89,7 +89,7 @@ async fn wait_online(client: &C2Client, node_id: &NodeId) {
         loop {
             let status = client.status().await.unwrap();
             if status.nodes.get(node_id).is_some_and(|node| {
-                node.transport == hatchery_c2::protocol::NodeTransportState::Online
+                node.transport == gate4agent_c2::protocol::NodeTransportState::Online
                     && node.cursor.is_some()
             }) {
                 break;
@@ -224,7 +224,7 @@ async fn windows_c2_delivery_wire_rejects_invalid_chunks_and_abort_publishes_not
     let event_drain = tokio::spawn(async move {
         while events.recv().await.is_some() {}
     });
-    let route = hatchery_c2_protocol::NodeRoute {
+    let route = gate4agent_c2_protocol::NodeRoute {
         node_id: node_id.clone(),
         expected_incarnation_id: http.status().await.unwrap().nodes[&node_id]
             .cursor.as_ref().unwrap().incarnation_id,

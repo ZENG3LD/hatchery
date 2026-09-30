@@ -7,9 +7,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use hatchery_c2::protocol::{NodeId, NodeTransportState};
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::C2Client;
+use gate4agent_c2::protocol::{NodeId, NodeTransportState};
+use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use gate4agent_c2_client::C2Client;
 use hatchery_harness_api::HarnessOperatorCredential;
 use hatchery_harness_client::HarnessOperatorClient;
 use hatchery_harness_delivery::DeliveryCatalogV2;
@@ -35,14 +35,14 @@ use hatchery_harness_service::{
     },
     HarnessDispatchContextV1, HarnessService,
 };
-use hatchery_node::protocol::{
+use gate4agent_node::protocol::{
     CapabilityId, ProviderRuntimeMode, SessionMode,
     SpawnDeadlineMs, SpawnIdempotencyKey, SpawnOverride, SpawnOverrides,
     SpawnProfileDefaults, SpawnProfileId, SpawnProfileRevision,
     SpawnRequiredCapabilities, SpawnSpec, SpawnTarget, WorkspaceId,
     SPAWN_RUNTIME_RAW_PTY_LIFECYCLE,
 };
-use hatchery_node::{NodeServer, NodeServerConfig, SpawnProfileRegistry, WorkspaceConfig};
+use gate4agent_node::{NodeServer, NodeServerConfig, SpawnProfileRegistry, WorkspaceConfig};
 use hatchery_observation_api::{ManagedSessionKey, ObservationTarget};
 use hatchery_observation_service::ObservationService;
 use gate4agent_types::{AgentId, TerminalSize};
@@ -381,7 +381,7 @@ async fn connect_harness_adapter(
 
 async fn wait_fixture_runtime(
     harness: &HarnessC2Adapter,
-    route: &hatchery_c2::protocol::NodeRoute,
+    route: &gate4agent_c2::protocol::NodeRoute,
 ) {
     timeout(Duration::from_secs(10), async {
         loop {

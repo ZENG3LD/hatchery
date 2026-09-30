@@ -4,13 +4,12 @@ use std::fmt;
 use std::rc::Rc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use hatchery_c2_protocol::C2RelayRoute;
-use hatchery_node_protocol::{
+use gate4agent_c2_protocol::C2RelayRoute;
+use gate4agent_node_protocol::{
     AgentProgressCurrentV1, AgentProgressV1, GitSnapshot, GitWorktreeSnapshot, HostDirectoryEntry, HostDirectoryListing, LaunchInventory,
     ManagedSessionState, ManagedWorktreeLeaseSnapshot, ManagedWorktreeSpawnReceipt,
     NativeSessionCatalogPage,
     NodeIncarnationId, OpaqueHostPath, RepositoryPath,
-    ObservationEvidenceV1, ObservationInteractionOutcomeV1, ObservationKindV1,
     ResolvedBundleReceipt, ResolvedContextPackReceipt,
     ResolvedSpawnReceipt, SessionMode, SessionTaskBindingV1, SessionTaskTargetV1,
     SpawnBundleId, SpawnContextId, SpawnProfileId, TaskId,
@@ -19,6 +18,9 @@ use hatchery_node_protocol::{
     WorktreeProfileInventory,
     MAX_NODE_IDENTIFIER_BYTES, MAX_NODE_TEXT_BYTES, MAX_SESSION_DISPLAY_NAME_BYTES,
     MAX_WORKSPACE_ROOT_BYTES,
+};
+use hatchery_observation_protocol::{
+    ObservationEvidenceV1, ObservationInteractionOutcomeV1, ObservationKindV1,
 };
 use hatchery_observation_api::{
     AgentInstanceId as ObservationAgentInstanceId, NodeCursor as ObservationNodeCursor,
@@ -7176,7 +7178,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
         envelope: ObservationIngressEnvelope,
     ) -> SessionObservationIngressOutcome {
         let target = match &envelope.payload {
-            ObservationIngressPayload::Observation {
+            ObservationIngressPayload::Observations {
                 address: ObservationTarget::Runtime { key },
                 ..
             } => SessionMonitorTarget::Runtime {
@@ -7188,7 +7190,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
                 },
                 incarnation: key.incarnation_id,
             },
-            ObservationIngressPayload::Observation {
+            ObservationIngressPayload::Observations {
                 address: ObservationTarget::Managed { key },
                 ..
             } => SessionMonitorTarget::Managed {
@@ -7255,7 +7257,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
         incarnation_id: NodeIncarnationId,
         node_sequence: u64,
         address: SessionAddress,
-        observation: hatchery_node_protocol::ObservationV1,
+        observation: hatchery_observation_protocol::ObservationV1,
     ) -> bool {
         let Ok(target) = observation_target(&address, incarnation_id) else {
             return false;
@@ -7272,9 +7274,9 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
                 },
                 received_at_ms: node_sequence.max(1),
                 transport: hatchery_observation_api::ObservationTransport::DirectNode,
-                payload: ObservationIngressPayload::Observation {
+                payload: ObservationIngressPayload::Observations {
                     address: target,
-                    observation,
+                    observations: vec![observation],
                 },
             }),
             SessionObservationIngressOutcome::Applied
@@ -17899,7 +17901,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
     pub fn selected_managed_worktree_profile(
         &self,
         spawn: &SpawnDialog,
-    ) -> Option<hatchery_node_protocol::ManagedWorktreeProfileSummary> {
+    ) -> Option<gate4agent_node_protocol::ManagedWorktreeProfileSummary> {
         self.nodes
             .iter()
             .find(|node| node.node_id == spawn.node_id)?
@@ -17917,7 +17919,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
     pub fn selected_spawn_profile(
         &self,
         spawn: &SpawnDialog,
-    ) -> Option<hatchery_node_protocol::SpawnProfileSummary> {
+    ) -> Option<gate4agent_node_protocol::SpawnProfileSummary> {
         self.nodes
             .iter()
             .find(|node| node.node_id == spawn.node_id)?
@@ -19371,7 +19373,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
         &mut self,
         node_id: String,
         token: u64,
-        file: hatchery_node_protocol::WorkspaceFileRead,
+        file: gate4agent_node_protocol::WorkspaceFileRead,
     ) {
         let key = WorkspaceFileTabKey {
             node_id,
@@ -19385,7 +19387,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
             return;
         }
         match file.content {
-            hatchery_node_protocol::WorkspaceFileContent::Utf8 { text, .. } => {
+            gate4agent_node_protocol::WorkspaceFileContent::Utf8 { text, .. } => {
                 let revision = file.revision.map(|revision| revision.as_str().to_owned());
                 match TextEditor::new(text, revision) {
                     Ok(editor) => {
@@ -19403,10 +19405,10 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
                     }
                 }
             }
-            hatchery_node_protocol::WorkspaceFileContent::NonUtf8 { byte_len } => {
+            gate4agent_node_protocol::WorkspaceFileContent::NonUtf8 { byte_len } => {
                 tab.state = WorkspaceFileState::NonUtf8 { byte_len };
             }
-            hatchery_node_protocol::WorkspaceFileContent::TooLarge { limit_bytes } => {
+            gate4agent_node_protocol::WorkspaceFileContent::TooLarge { limit_bytes } => {
                 tab.state = WorkspaceFileState::TooLarge { limit_bytes };
             }
         }
@@ -19477,7 +19479,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
         token: u64,
         origin: HarnessRunOrigin,
         path: RepositoryPath,
-        content: hatchery_node_protocol::WorkspaceFileContent,
+        content: gate4agent_node_protocol::WorkspaceFileContent,
         revision: Option<String>,
     ) {
         let Some(tab) = self.harness_file_tabs.get_mut(key) else {
@@ -19503,7 +19505,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
             return;
         }
         match content {
-            hatchery_node_protocol::WorkspaceFileContent::Utf8 { text, .. } => {
+            gate4agent_node_protocol::WorkspaceFileContent::Utf8 { text, .. } => {
                 match TextEditor::new(text, revision) {
                     Ok(editor) => {
                         tab.editor = editor;
@@ -19520,10 +19522,10 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
                     }
                 }
             }
-            hatchery_node_protocol::WorkspaceFileContent::NonUtf8 { byte_len } => {
+            gate4agent_node_protocol::WorkspaceFileContent::NonUtf8 { byte_len } => {
                 tab.state = WorkspaceFileState::NonUtf8 { byte_len };
             }
-            hatchery_node_protocol::WorkspaceFileContent::TooLarge { limit_bytes } => {
+            gate4agent_node_protocol::WorkspaceFileContent::TooLarge { limit_bytes } => {
                 tab.state = WorkspaceFileState::TooLarge { limit_bytes };
             }
         }
@@ -19712,7 +19714,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
         &mut self,
         node_id: String,
         token: u64,
-        file: hatchery_node_protocol::WorkspaceFileRead,
+        file: gate4agent_node_protocol::WorkspaceFileRead,
     ) {
         let key = WorkspaceFileTabKey {
             node_id,
@@ -19725,7 +19727,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
         if tab.request_token != token {
             return;
         }
-        if let hatchery_node_protocol::WorkspaceFileContent::Utf8 { text, .. } = file.content {
+        if let gate4agent_node_protocol::WorkspaceFileContent::Utf8 { text, .. } = file.content {
             if text == tab.editor.text() {
                 tab.editor.mark_save_success(
                     file.revision.map(|revision| revision.as_str().to_owned()),
@@ -19758,7 +19760,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
         &mut self,
         node_id: String,
         token: u64,
-        file: hatchery_node_protocol::WorkspaceFileRead,
+        file: gate4agent_node_protocol::WorkspaceFileRead,
     ) -> AppAction {
         let Some(dialog) = self.create_workspace_entry.as_ref() else {
             return AppAction::None;
@@ -19774,7 +19776,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
             return AppAction::None;
         }
         let (text, byte_len) = match &file.content {
-            hatchery_node_protocol::WorkspaceFileContent::Utf8 { text, byte_len } => {
+            gate4agent_node_protocol::WorkspaceFileContent::Utf8 { text, byte_len } => {
                 (text.clone(), *byte_len)
             }
             _ => {
@@ -19855,7 +19857,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
         node_id: String,
         workspace_id: String,
         token: u64,
-        entry: hatchery_node_protocol::WorkspaceEntry,
+        entry: gate4agent_node_protocol::WorkspaceEntry,
     ) -> AppAction {
         let Some(dialog) = self.create_workspace_entry.as_ref() else {
             return AppAction::None;
@@ -22078,7 +22080,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
             })
             .filter(|path| !path.is_empty())
             .map(|path| format!("{path}/"))
-            .filter(|path| path.len() <= hatchery_node_protocol::MAX_REPOSITORY_PATH_BYTES)
+            .filter(|path| path.len() <= gate4agent_node_protocol::MAX_REPOSITORY_PATH_BYTES)
             .unwrap_or_default();
         self.create_workspace_entry = Some(CreateWorkspaceEntryDialog {
             node_id,
@@ -22119,7 +22121,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
             }
             UiKey::Char(ch) if !ch.is_control() => {
                 if dialog.path.len().saturating_add(ch.len_utf8())
-                    > hatchery_node_protocol::MAX_REPOSITORY_PATH_BYTES
+                    > gate4agent_node_protocol::MAX_REPOSITORY_PATH_BYTES
                 {
                     dialog.error = Some("repository path exceeds protocol limit".to_owned());
                 } else {
@@ -22176,7 +22178,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
         }
         if text.contains(['\r', '\n', '\0'])
             || dialog.path.len().saturating_add(text.len())
-                > hatchery_node_protocol::MAX_REPOSITORY_PATH_BYTES
+                > gate4agent_node_protocol::MAX_REPOSITORY_PATH_BYTES
         {
             dialog.error = Some("pasted repository path is invalid or too long".to_owned());
             return AppAction::None;
@@ -25298,7 +25300,7 @@ mod tests {
             Some(HarnessLaunchOptionsState::Ready(view)) if view.options == options,
         ));
     }
-    use hatchery_node_protocol::{
+    use gate4agent_node_protocol::{
         AgentProgressAttentionKindV1, AgentProgressAttentionV1, AgentProgressUsageV1,
         ContextPackLineageReceipt, GitCommitSummary, GitObjectId, GitSnapshot, GitStatusEntry,
         GitWorktreeSnapshot,
@@ -25307,8 +25309,8 @@ mod tests {
         SpawnBundleRevision, SpawnContextDigest, SpawnProfileRevision, SpawnProfileSummary,
         WorktreeProfileRevision, WorkspaceEntry, WorkspaceFileContent, WorkspaceFileRead,
         WorkspaceFileRevision,
-        ObservationTodoItemV1, ObservationV1,
     };
+    use hatchery_observation_protocol::{ObservationTodoItemV1, ObservationV1};
     use gate4agent_types::{AgentInstanceId, ProviderActivity, SessionGeneration};
     use hatchery_observation_api::ProjectionFreshness;
 
@@ -26859,7 +26861,7 @@ mod tests {
             window: NativeSessionCatalogWindow::Older,
             revision: 77,
             entries: vec![
-                hatchery_node_protocol::NativeSessionCatalogEntry {
+                gate4agent_node_protocol::NativeSessionCatalogEntry {
                     selection_id: "selection-recent".to_owned(),
                     title: Some("Recent duplicate".to_owned()),
                     modified_at_unix_ms: Some(20),
@@ -26869,7 +26871,7 @@ mod tests {
                     external_group: None,
                     record_id: None,
                 },
-                hatchery_node_protocol::NativeSessionCatalogEntry {
+                gate4agent_node_protocol::NativeSessionCatalogEntry {
                     selection_id: "selection-old".to_owned(),
                     title: Some("Older".to_owned()),
                     modified_at_unix_ms: Some(5),
@@ -27710,9 +27712,9 @@ mod tests {
             digest: SpawnContextDigest::new(format!("sha256:{}", "a".repeat(64))).unwrap(),
             lineage: ContextPackLineageReceipt {
                 source_node_id: NodeId::new("node-a").unwrap(),
-                source_session: hatchery_node_protocol::SessionAddress {
+                source_session: gate4agent_node_protocol::SessionAddress {
                     workspace_id: WorkspaceId::new("workspace-a").unwrap(),
-                    session: hatchery_node_protocol::SessionKey {
+                    session: gate4agent_node_protocol::SessionKey {
                         instance_id: AgentInstanceId(7),
                         generation: SessionGeneration(2),
                     },
@@ -33963,7 +33965,7 @@ mod tests {
                 items: vec![ObservationTodoItemV1 {
                     id: None,
                     text: "bounded task".to_owned(),
-                    state: hatchery_node_protocol::ObservationTodoStateV1::InProgress,
+                    state: hatchery_observation_protocol::ObservationTodoStateV1::InProgress,
                 }],
                 complete: false,
             }),
@@ -34095,7 +34097,7 @@ mod tests {
             8,
             key.origin.clone(),
             path.clone(),
-            hatchery_node_protocol::WorkspaceFileContent::Utf8 {
+            gate4agent_node_protocol::WorkspaceFileContent::Utf8 {
                 text: "stale".to_owned(),
                 byte_len: 5,
             },
@@ -34110,7 +34112,7 @@ mod tests {
             9,
             mismatched,
             path,
-            hatchery_node_protocol::WorkspaceFileContent::Utf8 {
+            gate4agent_node_protocol::WorkspaceFileContent::Utf8 {
                 text: "current".to_owned(),
                 byte_len: 7,
             },

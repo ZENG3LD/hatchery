@@ -13,7 +13,7 @@
 //! this is a straight promotion with no light-local reimplementation.
 
 use crate::runtime::OperatorRequestLogIdentity;
-use hatchery_c2_protocol::NodeRoute;
+use gate4agent_c2_protocol::NodeRoute;
 use hatchery_harness_api::{
     HarnessOperatorTerminalEventV1, HarnessRuntimeMouseProtocolEncodingV1,
     HarnessRuntimeSessionAddressV1, HarnessRuntimeTerminalFrameV1, HarnessRuntimeTerminalSizeV1,

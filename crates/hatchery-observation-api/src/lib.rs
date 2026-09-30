@@ -7,7 +7,7 @@ use hatchery_observation_protocol::{ObservationKindV1, ObservationV1};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-pub use hatchery_node_protocol::{
+pub use gate4agent_node_protocol::{
     NodeCursor, NodeId, NodeIncarnationId, SessionRecordId, WorkspaceId,
 };
 pub use gate4agent_types::{AgentInstanceId, SessionGeneration};
@@ -20,6 +20,9 @@ pub const FILES_PER_SESSION_MAX: usize = 128;
 pub const OWNED_PROCESSES_PER_SESSION_MAX: usize = 128;
 pub const INTERACTIONS_PER_SESSION_MAX: usize = 64;
 pub const INGRESS_BATCH_MAX: usize = 8_192;
+/// Most observations one node event may project to -- a lifecycle event mints
+/// a handful (source declaration plus its facts), never a stream.
+pub const OBSERVATIONS_PER_INGRESS_MAX: usize = 16;
 pub const CURSOR_JOURNAL_MAX: usize = 65_536;
 pub const NODE_ROUTES_MAX: usize = PROJECTIONS_MAX;
 pub const RETIRED_INCARNATIONS_MAX: usize = CURSOR_JOURNAL_MAX;
@@ -140,12 +143,35 @@ pub enum ObservationTransport {
     C2,
 }
 
+/// What one node route delivers to the observation pipeline.
+///
+/// The harness derives every observation from the node's own event stream
+/// (`hatchery_observation_engine::node_projection`), so an online route
+/// supports all of it; the type stays so a route's support is still recorded and
+/// read per route, and a route with nothing recorded stays "unknown".
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ObservationSupport {
+    pub events: bool,
+    pub managed_target: bool,
+    pub workflow_detail: bool,
+}
+
+impl ObservationSupport {
+    /// Full support: every projection the harness derives is available.
+    pub const fn full() -> Self {
+        Self { events: true, managed_target: true, workflow_detail: true }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum ObservationIngressPayload {
-    Observation {
+    /// The observations one node event projected to, applied atomically at the
+    /// event's cursor. An observation addressed to a runtime session also
+    /// reaches every managed record currently linked to it.
+    Observations {
         address: ObservationTarget,
-        observation: ObservationV1,
+        observations: Vec<ObservationV1>,
     },
     ManagedRecordUpserted {
         link: ManagedRecordLink,
@@ -166,14 +192,21 @@ impl ObservationIngressPayload {
         cursor: NodeCursor,
     ) -> Result<(), ObservationApiError> {
         match self {
-            Self::Observation {
+            Self::Observations {
                 address,
-                observation,
+                observations,
             } => {
                 address.validate_route(node_id, cursor.incarnation_id)?;
-                observation.validate().map_err(ObservationApiError::Observation)?;
-                if let ObservationKindV1::Error { detail } = &observation.kind {
-                    validate_error_category(detail)?;
+                validate_count(
+                    "observations per ingress",
+                    observations.len(),
+                    OBSERVATIONS_PER_INGRESS_MAX,
+                )?;
+                for observation in observations {
+                    observation.validate().map_err(ObservationApiError::Observation)?;
+                    if let ObservationKindV1::Error { detail } = &observation.kind {
+                        validate_error_category(detail)?;
+                    }
                 }
                 Ok(())
             }
@@ -465,17 +498,17 @@ mod tests {
             },
             received_at_ms: 10,
             transport: ObservationTransport::DirectNode,
-            payload: ObservationIngressPayload::Observation {
+            payload: ObservationIngressPayload::Observations {
                 address: ObservationTarget::Runtime {
                     key: runtime(node_id, incarnation_id),
                 },
-                observation: ObservationV1 {
+                observations: vec![ObservationV1 {
                     source_sequence: 1,
                     observed_at_unix_ms: Some(9),
                     evidence: ObservationEvidenceV1::NodeLifecycle,
                     kind: ObservationKindV1::Ready,
                     truncated: false,
-                },
+                }],
             },
         }
     }

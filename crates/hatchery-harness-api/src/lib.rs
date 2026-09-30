@@ -86,7 +86,7 @@ pub const HARNESS_MCP_AUDIENCE: &str = "gate4agent-harness-mcp-read-v1";
 /// database schema, or any other record that must survive forward migration
 /// across releases) is a different thing entirely and keeps its own
 /// explicit, hand-bumped integer.
-pub use hatchery_build_stamp::BUILD_STAMP;
+pub use gate4agent_build_stamp::BUILD_STAMP;
 // Realistic multi-pane ceiling with headroom; bounds the harness-side
 // per-subscriber HashSet<RuntimeSessionKey> and the connect-time seed burst
 // `SubscribeTerminal`'s handler sends immediately after registering (see
@@ -1366,7 +1366,7 @@ impl HarnessGitSummaryV1 {
     }
 }
 
-/// Additive mirror of `hatchery_node_protocol::WorkspaceInspectionTruncationV1`
+/// Additive mirror of `gate4agent_node_protocol::WorkspaceInspectionTruncationV1`
 /// carried onto both `HarnessRunWorkspaceInspectionV1` and
 /// `HarnessNodeWorkspaceInspectionV1` — see that type for field meaning.
 /// Kept as this crate's own type (rather than reused directly) to match
@@ -4584,14 +4584,14 @@ pub struct HarnessRuntimeInventoryV1 {
     pub managed_session_count: usize,
     pub managed_sessions_truncated: bool,
     /// Lifetime count of managed session records the node's own retention
-    /// sweep has retired (mirrors `hatchery_c2_protocol::SlimNodeInventory::
+    /// sweep has retired (mirrors `gate4agent_c2_protocol::SlimNodeInventory::
     /// retired_count`). Additive and informational only, `#[serde(default)]`
     /// so a payload from before this field existed still deserializes.
     #[serde(default)]
     pub retired_count: usize,
     // Operator-visible surface: no redaction beyond what the direct-C2 TUI
     // already shows for the same node (`NodeView::launch_inventory`). Mirrors
-    // `hatchery_node_protocol::LaunchInventory` field-for-field rather than
+    // `gate4agent_node_protocol::LaunchInventory` field-for-field rather than
     // reusing it: `gate4agent-node-protocol` already depends on this crate
     // (for the shared Harness MCP wire types), so the reverse edge would be
     // a cyclic package dependency. The TUI reconstructs the real node-protocol
@@ -4601,7 +4601,7 @@ pub struct HarnessRuntimeInventoryV1 {
 }
 
 /// Same liveness-first rationale and exact rank table as c2-protocol's own
-/// `managed_session_liveness_rank` (`hatchery_c2_protocol::SlimNodeInventory`
+/// `managed_session_liveness_rank` (`gate4agent_c2_protocol::SlimNodeInventory`
 /// page-cut ordering): `Live` ranks first, `IdentityPending` next, `Dormant`
 /// next, terminal `Unavailable` last. The producer orders a page by this
 /// rank before the `MAX_C2_MANAGED_SESSIONS_PER_NODE` cut, so a page is
@@ -4654,7 +4654,7 @@ impl HarnessRuntimeInventoryV1 {
     }
 }
 
-/// Mirror of `hatchery_node_protocol::ResolvedEnvironmentProfileReceipt`.
+/// Mirror of `gate4agent_node_protocol::ResolvedEnvironmentProfileReceipt`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct HarnessRuntimeEnvironmentProfileReceiptV1 {
@@ -4671,7 +4671,7 @@ impl HarnessRuntimeEnvironmentProfileReceiptV1 {
     }
 }
 
-/// Mirror of `hatchery_node_protocol::SpawnProfileSummary`.
+/// Mirror of `gate4agent_node_protocol::SpawnProfileSummary`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct HarnessRuntimeSpawnProfileSummaryV1 {
@@ -4693,7 +4693,7 @@ impl HarnessRuntimeSpawnProfileSummaryV1 {
     }
 }
 
-/// Mirror of `hatchery_node_protocol::ResolvedBundleReceipt`.
+/// Mirror of `gate4agent_node_protocol::ResolvedBundleReceipt`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct HarnessRuntimeBundleReceiptV1 {
@@ -4714,7 +4714,7 @@ impl HarnessRuntimeBundleReceiptV1 {
     }
 }
 
-/// Mirror of `hatchery_node_protocol::LaunchInventory`.
+/// Mirror of `gate4agent_node_protocol::LaunchInventory`.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct HarnessRuntimeLaunchInventoryV1 {

@@ -10,7 +10,7 @@ use hatchery_harness_protocol::{
     HarnessReceiptRef, HarnessSelectorV1, HarnessSessionBindingV1,
 };
 use hatchery_harness_delivery::CompiledDeliveryBundleV2;
-use hatchery_node_protocol::{
+use gate4agent_node_protocol::{
     DeliveryCommitReceiptV1, DeliveryComponentKindV2, DeliveryScopeV2,
 };
 use std::collections::BTreeMap;

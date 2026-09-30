@@ -1,4 +1,4 @@
-use hatchery_node_protocol::{
+use gate4agent_node_protocol::{
     NodeCursor, NodeId, NodeIncarnationId, SessionRecordId, WorkspaceId,
 };
 use hatchery_observation_api::{
@@ -68,15 +68,15 @@ fn observation(sequence: u64, kind: ObservationKindV1) -> ObservationIngressEnve
         cursor: NodeCursor { incarnation_id: incarnation(), sequence },
         received_at_ms: 20_000 + sequence,
         transport: ObservationTransport::DirectNode,
-        payload: ObservationIngressPayload::Observation {
+        payload: ObservationIngressPayload::Observations {
             address: runtime_target(),
-            observation: ObservationV1 {
+            observations: vec![ObservationV1 {
                 source_sequence: sequence,
                 observed_at_unix_ms: Some(19_000 + sequence),
                 evidence: ObservationEvidenceV1::StructuredProvider,
                 kind,
                 truncated: false,
-            },
+            }],
         },
     }
 }
@@ -344,10 +344,12 @@ fn restart_restores_projection_gap_managed_inventory_and_history() {
         completed_turn_count: Some(6),
         total_tokens: Some(4_096),
     });
-    let ObservationIngressPayload::Observation { observation, .. } = &mut history.payload else {
+    let ObservationIngressPayload::Observations { observations, .. } = &mut history.payload else {
         unreachable!("history observation payload")
     };
-    observation.evidence = ObservationEvidenceV1::HistoryProjection;
+    for observation in observations.iter_mut() {
+        observation.evidence = ObservationEvidenceV1::HistoryProjection;
+    }
     service.apply_ingress(history).expect("history");
     service.close().expect("close");
 

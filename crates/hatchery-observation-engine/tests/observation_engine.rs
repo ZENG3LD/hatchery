@@ -1,4 +1,4 @@
-use hatchery_node_protocol::{
+use gate4agent_node_protocol::{
     NodeCursor, NodeId, NodeIncarnationId, SessionRecordId, WorkspaceId,
 };
 use hatchery_observation_api::{
@@ -101,15 +101,15 @@ fn envelope_with_evidence(
         },
         received_at_ms: 10_000 + sequence,
         transport: ObservationTransport::DirectNode,
-        payload: ObservationIngressPayload::Observation {
+        payload: ObservationIngressPayload::Observations {
             address: target(incarnation_id),
-            observation: ObservationV1 {
+            observations: vec![ObservationV1 {
                 source_sequence: sequence,
                 observed_at_unix_ms: Some(9_000 + sequence),
                 evidence,
                 kind,
                 truncated: false,
-            },
+            }],
         },
     }
 }
@@ -127,15 +127,15 @@ fn managed_envelope(
         },
         received_at_ms: 10_000 + sequence,
         transport: ObservationTransport::DirectNode,
-        payload: ObservationIngressPayload::Observation {
+        payload: ObservationIngressPayload::Observations {
             address: managed_target(incarnation_id),
-            observation: ObservationV1 {
+            observations: vec![ObservationV1 {
                 source_sequence: sequence,
                 observed_at_unix_ms: Some(9_000 + sequence),
                 evidence: ObservationEvidenceV1::StructuredProvider,
                 kind,
                 truncated: false,
-            },
+            }],
         },
     }
 }
@@ -1515,15 +1515,15 @@ fn envelope_for_node(
         },
         received_at_ms: 10_000 + sequence,
         transport: ObservationTransport::DirectNode,
-        payload: ObservationIngressPayload::Observation {
+        payload: ObservationIngressPayload::Observations {
             address: runtime_target_for(node_id, incarnation_id, instance_id),
-            observation: ObservationV1 {
+            observations: vec![ObservationV1 {
                 source_sequence: sequence,
                 observed_at_unix_ms: Some(9_000 + sequence),
                 evidence: ObservationEvidenceV1::StructuredProvider,
                 kind,
                 truncated: false,
-            },
+            }],
         },
     }
 }
@@ -1713,4 +1713,109 @@ fn current_incarnation_projection_survives_checkpoint_load_retirement() {
         "a projection for the node's current incarnation must never be retired"
     );
     assert_eq!(restored.projection_count(), 1);
+}
+
+#[test]
+fn runtime_observations_also_reach_the_managed_record_linked_to_the_session() {
+    let incarnation_id = incarnation(21);
+    let mut engine = ObservationEngine::new();
+    accept_record_inventory(
+        &mut engine,
+        incarnation_id,
+        &[managed_link(incarnation_id, Some(0))],
+        true,
+    );
+    accept(&mut engine, envelope(incarnation_id, 1, ObservationKindV1::Working));
+
+    let runtime_projection = engine
+        .projection(&target(incarnation_id))
+        .expect("runtime projection");
+    let managed_projection = engine
+        .projection(&managed_target(incarnation_id))
+        .expect("managed projection");
+    assert_eq!(runtime_projection.timeline.len(), 1);
+    assert_eq!(managed_projection.timeline.len(), 1);
+    assert_eq!(managed_projection.timeline[0].kind, ObservationKindV1::Working);
+
+    // A session the record is not linked to never reaches it.
+    let mut other_session = envelope(incarnation_id, 2, ObservationKindV1::Working);
+    other_session.payload = ObservationIngressPayload::Observations {
+        address: ObservationTarget::Runtime { key: runtime_generation(incarnation_id, 1) },
+        observations: vec![ObservationV1 {
+            source_sequence: 2,
+            observed_at_unix_ms: Some(9_002),
+            evidence: ObservationEvidenceV1::StructuredProvider,
+            kind: ObservationKindV1::Working,
+            truncated: false,
+        }],
+    };
+    accept(&mut engine, other_session);
+    assert_eq!(
+        engine
+            .projection(&managed_target(incarnation_id))
+            .expect("managed projection")
+            .timeline
+            .len(),
+        1,
+    );
+}
+
+#[test]
+fn one_ingress_applies_every_observation_it_carries_at_its_single_cursor() {
+    let incarnation_id = incarnation(22);
+    let mut engine = ObservationEngine::new();
+    let observation = |kind| ObservationV1 {
+        source_sequence: 5,
+        observed_at_unix_ms: None,
+        evidence: ObservationEvidenceV1::StructuredProvider,
+        kind,
+        truncated: false,
+    };
+    let mut event = envelope(incarnation_id, 5, ObservationKindV1::Working);
+    event.payload = ObservationIngressPayload::Observations {
+        address: target(incarnation_id),
+        observations: vec![
+            observation(ObservationKindV1::TurnStarted),
+            observation(ObservationKindV1::Working),
+        ],
+    };
+    assert_eq!(accept(&mut engine, event.clone()), ApplyOutcome::Applied);
+    assert_eq!(
+        engine
+            .projection(&target(incarnation_id))
+            .expect("projection")
+            .timeline
+            .len(),
+        2,
+    );
+    // The same cursor carrying the same observations is a duplicate, not a
+    // collision.
+    assert_eq!(accept(&mut engine, event), ApplyOutcome::Duplicate);
+}
+
+#[test]
+fn an_ingress_carrying_more_observations_than_the_bound_is_refused() {
+    let incarnation_id = incarnation(23);
+    let mut engine = ObservationEngine::new();
+    let mut event = envelope(incarnation_id, 1, ObservationKindV1::Working);
+    event.payload = ObservationIngressPayload::Observations {
+        address: target(incarnation_id),
+        observations: vec![
+            ObservationV1 {
+                source_sequence: 1,
+                observed_at_unix_ms: None,
+                evidence: ObservationEvidenceV1::StructuredProvider,
+                kind: ObservationKindV1::Working,
+                truncated: false,
+            };
+            hatchery_observation_api::OBSERVATIONS_PER_INGRESS_MAX + 1
+        ],
+    };
+    assert!(matches!(
+        engine.prepare(event),
+        Err(ObservationEngineError::Api(ObservationApiError::TooMany {
+            field: "observations per ingress",
+            ..
+        })),
+    ));
 }

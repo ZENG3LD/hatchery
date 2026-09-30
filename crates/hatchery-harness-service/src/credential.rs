@@ -6,7 +6,7 @@ use hatchery_harness_protocol::{
     HarnessRevision, HarnessRunId, HarnessRunLifecycleV1, HarnessSelectorV1,
     HarnessSessionIdentityV1, SessionGrantId, SessionGrantStateV1,
 };
-use hatchery_node_wire::{local_hmac_sha256, proofs_match, random_nonce};
+use gate4agent_node_wire::{local_hmac_sha256, proofs_match, random_nonce};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -220,7 +220,7 @@ pub(crate) mod tests {
     }
 
     fn incarnation_selector() -> HarnessSelectorV1 {
-        selector(&hatchery_node_protocol::NodeIncarnationId::from_bytes([4; 16]).to_string())
+        selector(&gate4agent_node_protocol::NodeIncarnationId::from_bytes([4; 16]).to_string())
     }
 
     pub(crate) fn engine(

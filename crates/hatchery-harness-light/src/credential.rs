@@ -15,7 +15,7 @@
 //! `proofs_match`), just generated rather than externally supplied.
 
 use hatchery_harness_api::HarnessOperatorCredential;
-use hatchery_node_wire::{local_hmac_sha256, proofs_match, random_nonce};
+use gate4agent_node_wire::{local_hmac_sha256, proofs_match, random_nonce};
 
 use crate::error::CredentialMintError;
 use crate::util::encode_hex;

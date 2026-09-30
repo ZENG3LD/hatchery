@@ -14,7 +14,7 @@ use hatchery_harness_service::{
     },
     runtime::HarnessRuntimeCatalogs,
 };
-use hatchery_node::{NodeServer, NodeServerConfig};
+use gate4agent_node::{NodeServer, NodeServerConfig};
 use gate4agent_types::{AgentId, TerminalSize};
 
 fn selector(value: &str) -> HarnessSelectorV1 {
