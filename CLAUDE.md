@@ -14,13 +14,13 @@ publishes control events and the agent stream, and
 them (a C2 client that negotiated `control-detail-v1` receives the sanitized
 control detail that projection needs). Agent mail is `mail4agent` (`:18301`), its own service: the
 harness holds no mailbox, and the TUI does not read mail4agent yet. Both
-clients speak ONLY the harness operator wire: `gate4agent-tui` against a
-durable harness, and `gate4agent-tui-light` against
+clients speak ONLY the harness operator wire: `hatchery-tui` against a
+durable harness, and `hatchery-tui-light` against
 `hatchery-harness-light`, which it hosts in-process over c2 with no task
-kernel behind it. Neither app speaks c2 itself. Binary names, pipe names,
-`GATE4AGENT_*` env vars, and the `g4aho_` credential prefix are inherited
-unchanged from `gate4agent` — a later step renames these runtime
-identifiers to `hatchery-*`. Plans/handoffs/audits live in the owner's
+kernel behind it. Neither app speaks c2 itself. TUI binary names are
+`hatchery-tui` / `hatchery-tui-light`. Pipe names, `GATE4AGENT_*` env vars,
+and the `g4aho_` credential prefix are still inherited from `gate4agent`
+— a later step renames those remaining runtime identifiers. Plans/handoffs/audits live in the owner's
 private workspace documentation tree, not in this repository.
 
 ## Local endpoints & credentials
@@ -46,10 +46,10 @@ private workspace documentation tree, not in this repository.
   not here.
 - `crates\hatchery-tui` is its own cargo workspace and depends on
   `uzor-tui` from crates.io — every TUI build compiles the uzor
-  dependency tree, so it is a slow build from cold and a large target. It
-  also links `gate4agent-arcade`'s engine and `pet-bastion` game crates by
-  path (`..\gate4agent-arcade\...`, a further sibling repository) for the
-  status bar's pet overlay.
+  dependency tree, so it is a slow build from cold and a large target. The
+  status bar's pet overlay links in-tree `crates\hatchery-arcade` (NOT a
+  gate4agent sibling; arcade is hatchery-owned). Sources for arcade are
+  currently missing — see `crates\hatchery-arcade\README.md`.
 
 ## Running the live stack and the TUI
 
@@ -104,13 +104,13 @@ at the repo root fails with `did not match any packages`, because
 
 ```powershell
 cd (Join-Path $H "crates\hatchery-tui")
-cargo build --release --bin gate4agent-tui --bin gate4agent-tui-light
+cargo build --release --bin hatchery-tui --bin hatchery-tui-light
 ```
 
 Launch it in Windows Terminal exactly like this, exe path quoted:
 
 ```powershell
-$tui = Join-Path $H "crates\hatchery-tui\target\release\gate4agent-tui.exe"
+$tui = Join-Path $H "crates\hatchery-tui\target\release\hatchery-tui.exe"
 $q   = '"'
 Start-Process "$env:LOCALAPPDATA\Microsoft\WindowsApps\wt.exe" `
   -ArgumentList "-w new --title G4A $q$tui$q --harness-operator 127.0.0.1:18330 --style gate"
@@ -146,7 +146,7 @@ not options of `new-tab` at all. Want a bigger window — resize it by hand.
 `wt` exits 0 whether or not it started anything, and `MainWindowTitle` is a
 property of the PROCESS while a single `WindowsTerminal` process hosts every
 window — so an unrelated window's title gets read back and believed. Verify
-a launch by the thing you launched: `Get-Process gate4agent-tui`.
+a launch by the thing you launched: `Get-Process hatchery-tui`.
 
 ### Screenshotting and driving the window
 

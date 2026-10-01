@@ -50,7 +50,7 @@ fn parse_args_from(
             }
             "--help" | "-h" => {
                 return Err(
-                    "usage: gate4agent-tui --harness-operator LOOPBACK_SOCKET [--style inherit|gate]\n\
+                    "usage: hatchery-tui --harness-operator LOOPBACK_SOCKET [--style inherit|gate]\n\
                      [--control-plane LOOPBACK_SOCKET]\n\
                      credential env: GATE4AGENT_HARNESS_OPERATOR_TOKEN\n\
                      optional selector env: GATE4AGENT_HARNESS_LAUNCH_PLAN_ID\n\
@@ -140,7 +140,7 @@ async fn main() {
         hatchery_tui::diagnostics::record_runtime(
             hatchery_tui::diagnostics::RuntimeDiagnostic::Fatal,
         );
-        eprintln!("gate4agent-tui: {error}");
+        eprintln!("hatchery-tui: {error}");
         std::process::exit(1);
     }
 }
@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn harness_endpoint_is_required_before_secret_access() {
-        let args = vec!["gate4agent-tui".to_owned()];
+        let args = vec!["hatchery-tui".to_owned()];
         let mut requested_secrets = Vec::new();
         let error = parse_args_from(&args, |name| {
             requested_secrets.push(name.to_owned());
@@ -184,7 +184,7 @@ mod tests {
         let token = format!("g4aho_{}", "0".repeat(64));
         let options = parse(
             &[
-                "gate4agent-tui",
+                "hatchery-tui",
                 "--harness-operator",
                 "127.0.0.1:18080",
                 "--style",
@@ -206,7 +206,7 @@ mod tests {
         let token = format!("g4aho_{}", "0".repeat(64));
         let mut requested_secrets = Vec::new();
         let options = parse_args_from(
-            &["gate4agent-tui".to_owned(), "--harness-operator".to_owned(), "127.0.0.1:18080".to_owned()],
+            &["hatchery-tui".to_owned(), "--harness-operator".to_owned(), "127.0.0.1:18080".to_owned()],
             |name| {
                 requested_secrets.push(name.to_owned());
                 if name == HARNESS_OPERATOR_TOKEN_ENV {
@@ -226,7 +226,7 @@ mod tests {
         let control_token = format!("g4atc_{}", "1".repeat(64));
         let options = parse(
             &[
-                "gate4agent-tui",
+                "hatchery-tui",
                 "--harness-operator",
                 "127.0.0.1:18080",
                 "--control-plane",
@@ -253,7 +253,7 @@ mod tests {
         let harness_token = format!("g4aho_{}", "0".repeat(64));
         let error = parse(
             &[
-                "gate4agent-tui",
+                "hatchery-tui",
                 "--harness-operator",
                 "127.0.0.1:18080",
                 "--control-plane",
@@ -267,7 +267,7 @@ mod tests {
     #[test]
     fn manual_c2_and_startup_arguments_are_not_accepted() {
         for argument in ["--node", "--c2-control", "--startup-node", "--workspace", "--agent"] {
-            let error = parse(&["gate4agent-tui", argument, "value"], &[])
+            let error = parse(&["hatchery-tui", argument, "value"], &[])
                 .err().unwrap();
             assert_eq!(error, format!("unknown argument: {argument}"));
         }

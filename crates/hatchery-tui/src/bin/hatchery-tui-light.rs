@@ -46,7 +46,7 @@ fn parse_args_from(
             }
             "--help" | "-h" => {
                 return Err(
-                    "usage: gate4agent-tui-light --c2-control PIPE [--style inherit|gate]\n\
+                    "usage: hatchery-tui-light --c2-control PIPE [--style inherit|gate]\n\
                      credential env: GATE4AGENT_C2_TOKEN"
                         .to_owned(),
                 )
@@ -95,7 +95,7 @@ async fn main() {
     ).await {
         Ok(running) => running,
         Err(error) => {
-            eprintln!("gate4agent-tui-light: harness-light startup failed: {error}");
+            eprintln!("hatchery-tui-light: harness-light startup failed: {error}");
             std::process::exit(1);
         }
     };
@@ -117,13 +117,13 @@ async fn main() {
     };
     let run_result = hatchery_tui::run(options).await;
     if let Err(error) = running.shutdown().await {
-        eprintln!("gate4agent-tui-light: harness-light shutdown failed: {error}");
+        eprintln!("hatchery-tui-light: harness-light shutdown failed: {error}");
     }
     if let Err(error) = run_result {
         hatchery_tui::diagnostics::record_runtime(
             hatchery_tui::diagnostics::RuntimeDiagnostic::Fatal,
         );
-        eprintln!("gate4agent-tui-light: {error}");
+        eprintln!("hatchery-tui-light: {error}");
         std::process::exit(1);
     }
 }
@@ -146,7 +146,7 @@ mod tests {
 
     #[test]
     fn c2_endpoint_is_required_before_secret_access() {
-        let args = vec!["gate4agent-tui-light".to_owned()];
+        let args = vec!["hatchery-tui-light".to_owned()];
         let mut requested_secrets = Vec::new();
         let error = parse_args_from(&args, |name| {
             requested_secrets.push(name.to_owned());
@@ -159,13 +159,13 @@ mod tests {
     #[test]
     fn direct_node_and_harness_operator_arguments_are_not_available() {
         let direct = parse(
-            &["gate4agent-tui-light", "--node", r"desk-a=\\.\pipe\desk-a"],
+            &["hatchery-tui-light", "--node", r"desk-a=\\.\pipe\desk-a"],
             &[],
         ).err().unwrap();
         assert_eq!(direct, "direct Node mode is disabled; use --c2-control");
 
         let harness = parse(
-            &["gate4agent-tui-light", "--harness-operator", "127.0.0.1:18080"],
+            &["hatchery-tui-light", "--harness-operator", "127.0.0.1:18080"],
             &[],
         ).err().unwrap();
         assert_eq!(harness, "unknown argument: --harness-operator");
@@ -175,7 +175,7 @@ mod tests {
     fn startup_arguments_are_not_accepted() {
         for argument in ["--startup-node", "--workspace", "--agent"] {
             let error = parse(
-                &["gate4agent-tui-light", argument, "value"],
+                &["hatchery-tui-light", argument, "value"],
                 &[(C2_TOKEN_ENV, "token")],
             ).err().unwrap();
             assert_eq!(error, format!("unknown argument: {argument}"));
@@ -186,7 +186,7 @@ mod tests {
     fn c2_control_and_style_options_parse() {
         let startup = parse(
             &[
-                "gate4agent-tui-light",
+                "hatchery-tui-light",
                 "--c2-control",
                 r"\\.\pipe\gate4agent-c2",
                 "--style",
@@ -203,7 +203,7 @@ mod tests {
     fn unsupported_workspace_path_is_rejected() {
         let error = parse(
             &[
-                "gate4agent-tui-light",
+                "hatchery-tui-light",
                 "--c2-control",
                 r"\\.\pipe\gate4agent-c2",
                 "--cwd",

@@ -48,7 +48,7 @@ in this repository. Crate names below are prefixed `hatchery-` unless noted.
   `-harness-light` (stateless, serves the same operator wire straight over
   c2 with no task kernel behind it).
 - **Client** — `crates/hatchery-tui`, its own nested cargo workspace: bins
-  `gate4agent-tui` (against a durable harness) and `gate4agent-tui-light`
+  `hatchery-tui` (against a durable harness) and `hatchery-tui-light`
   (hosts `hatchery-harness-light` in-process). Neither app speaks c2
   itself.
 - **Build stamp** — `gate4agent-build-stamp` (in `gate4agent`): a git
@@ -56,9 +56,10 @@ in this repository. Crate names below are prefixed `hatchery-` unless noted.
   handshake instead of a hand-typed protocol version number. hatchery's
   binaries carry it through `gate4agent-node-protocol`.
 
-Binary, pipe, and env-var names above still carry the `gate4agent-`/
-`GATE4AGENT_` prefix inherited from the repository this stack was split
-out of — a later step renames these runtime identifiers to `hatchery-*`.
+Pipe and env-var names above still carry the `gate4agent-`/`GATE4AGENT_`
+prefix inherited from the repository this stack was split out of — a later
+step renames those runtime identifiers. TUI binaries are already
+`hatchery-tui` / `hatchery-tui-light`.
 
 ## Repository layout
 
@@ -131,9 +132,10 @@ reject themselves outright if run any other way.
 uzor UI framework, maintained by the same owner). It pulls from crates.io,
 not a sibling checkout, so it adds no repository requirement beyond the
 one every `hatchery-*` crate already has (`gate4agent`, see
-[Built on](#built-on)). It also links `gate4agent-arcade`'s engine and
-`pet-bastion` game crates by path, for the status bar's pet overlay — a
-further sibling repository (`../gate4agent-arcade` next to this one).
+[Built on](#built-on)). The status bar's pet overlay links **in-tree**
+`crates/hatchery-arcade` (engine + pet-bastion). Arcade is part of hatchery,
+not a `gate4agent` sibling and not part of g4a. Sources for those crates are
+currently missing — see `crates/hatchery-arcade/README.md`.
 
 ## Built on
 

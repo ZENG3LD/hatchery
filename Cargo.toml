@@ -15,6 +15,9 @@ members = [
     "crates/hatchery-observation-store",
     "crates/hatchery-observation-service",
 ]
+# hatchery-tui: nested workspace; needs hatchery-arcade sources (missing —
+# see crates/hatchery-arcade/README.md). Arcade is hatchery-owned, not g4a.
 exclude = [
     "crates/hatchery-tui",
+    "crates/hatchery-arcade",
 ]

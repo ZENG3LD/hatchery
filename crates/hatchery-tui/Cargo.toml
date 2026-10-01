@@ -2,7 +2,7 @@
 name = "hatchery-tui"
 version = "0.1.0"
 edition = "2021"
-description = "Terminal client for gate4agent: both gate4agent-tui and gate4agent-tui-light speak only the harness operator wire -- light hosts gate4agent-harness-light in-process over c2 instead of a durable task kernel"
+description = "Terminal client for hatchery: both hatchery-tui and hatchery-tui-light speak only the harness operator wire -- light hosts hatchery-harness-light in-process over c2 instead of a durable task kernel"
 publish = false
 
 [dependencies]
@@ -11,9 +11,12 @@ crossterm = "0.28"
 # rules crate, its snapshot-to-Surface render adapter, and the engine's
 # `Runner`/`ArcadeShell`/glyph-tier backend that drives and paints it. See
 # `src/pet_arcade.rs`'s own module doc comment for the full integration.
-gate4agent-arcade-engine = { path = "../../../gate4agent-arcade/engine", default-features = false, features = ["render"] }
-gate4agent-arcade-pet-bastion = { path = "../../../gate4agent-arcade/games/pet-bastion" }
-gate4agent-arcade-pet-bastion-render = { path = "../../../gate4agent-arcade/games/pet-bastion-render" }
+# Paths are in-tree hatchery-arcade (NOT a gate4agent sibling). Package
+# names remain gate4agent-arcade-* until sources are restored and renamed.
+# See crates/hatchery-arcade/README.md — sources currently MISSING.
+gate4agent-arcade-engine = { path = "../hatchery-arcade/engine", default-features = false, features = ["render"] }
+gate4agent-arcade-pet-bastion = { path = "../hatchery-arcade/games/pet-bastion" }
+gate4agent-arcade-pet-bastion-render = { path = "../hatchery-arcade/games/pet-bastion-render" }
 gate4agent-build-stamp = { path = "../../../gate4agent/crates/gate4agent-build-stamp" }
 gate4agent-c2-client = { path = "../../../gate4agent/crates/gate4agent-c2-client" }
 gate4agent-c2-protocol = { path = "../../../gate4agent/crates/gate4agent-c2-protocol" }
@@ -61,11 +64,11 @@ name = "hatchery_tui"
 path = "src/lib.rs"
 
 [[bin]]
-name = "gate4agent-tui"
+name = "hatchery-tui"
 path = "src/main.rs"
 
 [[bin]]
-name = "gate4agent-tui-light"
-path = "src/bin/gate4agent-tui-light.rs"
+name = "hatchery-tui-light"
+path = "src/bin/hatchery-tui-light.rs"
 
 [workspace]
