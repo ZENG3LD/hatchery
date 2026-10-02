@@ -17,24 +17,24 @@ crossterm = "0.28"
 hatchery-arcade-engine = { path = "../hatchery-arcade/engine", default-features = false, features = ["render"] }
 hatchery-arcade-pet-bastion = { path = "../hatchery-arcade/games/pet-bastion" }
 hatchery-arcade-pet-bastion-render = { path = "../hatchery-arcade/games/pet-bastion-render" }
-gate4agent-build-stamp = { version = "0.4.6" }
-gate4agent-c2-client = { version = "0.4.6" }
-gate4agent-c2-protocol = { version = "0.4.6" }
+gate4agent-build-stamp = { version = "0.4.7" }
+gate4agent-c2-client = { version = "0.4.7" }
+gate4agent-c2-protocol = { version = "0.4.7" }
 hatchery-harness-client = { path = "../hatchery-harness-client" }
 hatchery-harness-light = { path = "../hatchery-harness-light" }
 hatchery-harness-protocol = { path = "../hatchery-harness-protocol" }
-gate4agent-node-protocol = { version = "0.4.6" }
+gate4agent-node-protocol = { version = "0.4.7" }
 # `local_hmac_sha256`/`proofs_match`: the same constant-time credential-
 # digest primitives `hatchery-harness-service`'s own operator-credential
 # authority uses (`HarnessOperatorCredentialAuthority`) -- `control_plane`
 # follows that exact precedent instead of hand-rolling a second comparison
 # scheme. In-tree sibling crate, no new external dependency.
-gate4agent-node-wire = { version = "0.4.6" }
+gate4agent-node-wire = { version = "0.4.7" }
 hatchery-observation-api = { path = "../hatchery-observation-api" }
 hatchery-observation-engine = { path = "../hatchery-observation-engine" }
 hatchery-observation-protocol = { path = "../hatchery-observation-protocol" }
 hatchery-observation-service = { path = "../hatchery-observation-service" }
-gate4agent-types = { version = "0.4.6" }
+gate4agent-types = { version = "0.4.7" }
 icy_sixel = "0.6"
 # `control_plane`'s wire frame: line-delimited JSON, the same idiom
 # `hatchery-harness-api`/`hatchery-harness-client` already use for the
