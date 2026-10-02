@@ -5,6 +5,7 @@ pub mod c2;
 pub mod credential;
 pub mod delivery;
 pub mod dispatch;
+pub mod mesh_role;
 pub mod read;
 pub mod runtime;
 mod store;

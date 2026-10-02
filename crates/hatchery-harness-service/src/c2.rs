@@ -246,7 +246,10 @@ impl HarnessC2Adapter {
     /// local pipe-or-socket today; remote stable underlay later — still HQ
     /// dials. See docs `hq-dials-c2-mesh-role-inventory-2026-10-02.md` and
     /// owner doctrine in `oss-perimeter-mesh-roles-and-versioning` §1 /
-    /// `mesh-connectivity-daemon-design` §1.5.
+    /// `mesh-connectivity-daemon-design` §1.5. Role lock types:
+    /// [`crate::mesh_role::MeshParticipantRole::HqClientAdmin`] /
+    /// [`crate::mesh_role::MeshDialCapability::DialOnly`] (stub trait
+    /// [`crate::mesh_role::MeshUnderlayDial`] — no WireGuard daemon).
     ///
     /// The returned adapter deliberately exposes no generic request handle. Its
     /// command surface is restricted to inventory reads, typed ContextPack
