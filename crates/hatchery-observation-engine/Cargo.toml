@@ -10,8 +10,8 @@ publish = false
 name = "hatchery_observation_engine"
 
 [dependencies]
-gate4agent-node-protocol = { version = "0.4.5" }
-gate4agent-types = { version = "0.4.5" }
+gate4agent-node-protocol = { version = "0.4.6" }
+gate4agent-types = { version = "0.4.6" }
 hatchery-observation-api = { path = "../hatchery-observation-api" }
 hatchery-observation-protocol = { path = "../hatchery-observation-protocol" }
 serde = { version = "1", features = ["derive"] }
