@@ -23,6 +23,11 @@ hatchery-observation-api = { path = "../hatchery-observation-api" }
 hatchery-observation-engine = { path = "../hatchery-observation-engine" }
 hatchery-observation-protocol = { path = "../hatchery-observation-protocol" }
 hatchery-observation-service = { path = "../hatchery-observation-service" }
+# HQ messenger surface: harness consumes mail4agent as a client dependency
+# (extraction plan mailbox-service-extraction-…-2026-09-16). Path until
+# mail4agent-client is on crates.io; sibling /workspace layout on box.
+mail4agent-client = { path = "../../../mail4agent/crates/mail4agent-client" }
+mail4agent-api = { path = "../../../mail4agent/crates/mail4agent-api" }
 gate4agent-types = { version = "0.4.6" }
 rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

@@ -7,6 +7,7 @@ pub mod delivery;
 pub mod dispatch;
 pub mod mesh_role;
 pub mod mesh_underlay;
+pub mod mail;
 pub mod read;
 pub mod runtime;
 mod store;
