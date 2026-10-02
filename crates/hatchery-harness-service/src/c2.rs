@@ -393,6 +393,8 @@ impl HarnessC2Adapter {
                 context_id: SpawnOverride::Clear,
                 environment_profile_id: SpawnOverride::Clear,
                 approval_level,
+                network_allowlist: None,
+                browser_profile_id: None,
             },
             deadline_ms: SpawnDeadlineMs::new(SESSION_SPAWN_DEADLINE_MS)
                 .map_err(|_| HarnessC2Error::InvalidSessionSpawnRequest)?,
@@ -5944,6 +5946,8 @@ fn explicit_spawn_resolution(
         deadline_ms: spec.deadline_ms,
         idempotency_key: spec.idempotency_key.clone(),
         required_capabilities: spec.required_capabilities.clone(),
+        network_allowlist: spec.overrides.network_allowlist.clone(),
+        browser_profile_id: spec.overrides.browser_profile_id.clone(),
         provenance: SpawnResolutionProvenance {
             provider: SpawnFieldProvenance::Override,
             mode: SpawnFieldProvenance::Override,
@@ -6495,6 +6499,8 @@ mod tests {
                 context_id: SpawnOverride::Clear,
                 environment_profile_id: SpawnOverride::Clear,
                 approval_level: None,
+                network_allowlist: None,
+                browser_profile_id: None,
             },
             deadline_ms: SpawnDeadlineMs::new(5_000).unwrap(),
             idempotency_key: SpawnIdempotencyKey::new("h1-proof").unwrap(),

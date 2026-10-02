@@ -516,6 +516,8 @@ impl HarnessLaunchPlanV1 {
                 // by omission -- see `approval_level`'s own doc comment on
                 // this struct.
                 approval_level: Some(self.approval_level),
+                network_allowlist: None,
+                browser_profile_id: None,
             },
             deadline_ms: SpawnDeadlineMs::new(self.deadline_ms)?,
             idempotency_key: spawn_idempotency_key(&dispatch.idempotency_ref)?,

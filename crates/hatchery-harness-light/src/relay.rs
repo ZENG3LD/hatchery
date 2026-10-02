@@ -196,6 +196,8 @@ async fn spawn_session_inner(
             // impose a different level than the full path for the same
             // request.
             approval_level: approval_level.map(map_approval_level),
+            network_allowlist: None,
+            browser_profile_id: None,
         },
         deadline_ms: SpawnDeadlineMs::new(SESSION_SPAWN_DEADLINE_MS)
             .map_err(|_| LightRelayError::InvalidRequest)?,
