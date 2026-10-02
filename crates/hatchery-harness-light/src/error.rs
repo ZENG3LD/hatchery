@@ -223,6 +223,14 @@ fn map_node_failure(code: NodeFailureCode) -> HarnessOperatorHostErrorV1 {
         | NodeFailureCode::RepositoryFileWriteTimedOut
         | NodeFailureCode::RepositoryEntryCreateTimedOut => HarnessOperatorHostErrorV1::Deadline,
         NodeFailureCode::ResponseTooLarge => HarnessOperatorHostErrorV1::TooLarge,
+        // Permanent, not transient -- mirror spawn's `map_session_spawn_error`
+        // (`UnsupportedCapability` / `UnsupportedNetworkAllowlistMapping` →
+        // typed `UnsupportedCapability`), not the coarse `Unavailable` bucket.
+        // See `HarnessOperatorHostErrorV1::UnsupportedCapability`'s own doc.
+        NodeFailureCode::UnsupportedCapability
+        | NodeFailureCode::UnsupportedNetworkAllowlistMapping => {
+            HarnessOperatorHostErrorV1::UnsupportedCapability
+        }
         // This shared mapper has no `agent`/`transport` to name (unlike
         // `spawn_session_inner`'s own `Err(failure) if failure.code ==
         // UnsupportedTransport` arm, which constructs the typed
@@ -231,8 +239,6 @@ fn map_node_failure(code: NodeFailureCode) -> HarnessOperatorHostErrorV1 {
         // function serves cannot produce this code from the node at all, so
         // it falls into the same generic bucket as the codes right below.
         NodeFailureCode::UnsupportedTransport
-        | NodeFailureCode::UnsupportedCapability
-        | NodeFailureCode::UnsupportedNetworkAllowlistMapping
         | NodeFailureCode::BackendDisconnected
         | NodeFailureCode::BackendOperationFailed
         | NodeFailureCode::ShuttingDown
