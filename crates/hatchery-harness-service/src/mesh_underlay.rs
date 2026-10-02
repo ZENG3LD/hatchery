@@ -1,20 +1,11 @@
-//! Tip-5 minimal Linux underlay permit path (HQ-adjacent lab).
+//! Tip-5/6 underlay: hatchery lab path + **real** tip-6 bridge_reach dial.
 //!
-//! Peer-symmetric UDP + AEAD slice with a **separate** token barrier for
-//! probe actions. Not a WireGuard daemon. Win/mac refuse clearly.
-//!
-//! Primary peer-stack home of the same tip also lands in g4a
-//! `gate4agent-node-wire::mesh_underlay` (C2+node) — **not** on crates.io
-//! **0.4.4**. This module keeps the hatchery cite-lock + lab tests without
-//! reintroducing path-deps on unpublished g4a APIs.
-//!
-//! Tip-6 **bridge-over-underlay** (`bridge_reach`, health
-//! [`crate::mesh_role::TIP6_BRIDGE_REACH_HEALTH`]) is **node-side** in g4a
-//! (`--bridge-underlay-listen`). HQ DialOnly: dials C2; does not host bridge
-//! underlay accept. See [`crate::mesh_role::BridgeReachCite`].
-//!
-//! **owner: bump when hatchery needs tip5/6 APIs** (real wire to published
-//! `mesh_underlay::bridge_reach`).
+//! - Tip-5 lab (`linux_path`): peer-symmetric UDP + AEAD + token barrier for
+//!   local hatchery tests. Not a WireGuard daemon. Win/mac refuse clearly.
+//! - Tip-6 **real wire**: [`dial_bridge_reach`] / [`BridgeReachClient`] call
+//!   published `gate4agent-node-wire::mesh_underlay::{dial_peer,BridgeUnderlayClient}`
+//!   (crates.io **0.4.6+**). HQ DialOnly dials node `--bridge-underlay-listen`;
+//!   node hosts accept. See [`crate::mesh_role::BridgeReachCite`].
 //!
 //! Cite: mesh design §1.2 / §1.5 / tips 5–6; recon Linux TUN/WG vs Win/mac.
 
@@ -276,6 +267,102 @@ pub fn open_wireguard_daemon_stub() -> Result<(), MeshRoleError> {
     Err(MeshRoleError::UnderlayNotImplemented)
 }
 
+/// Map g4a mesh underlay errors into hatchery [`MeshRoleError`] (no secrets).
+fn map_underlay_err(err: gate4agent_node_wire::mesh_underlay::MeshUnderlayError) -> MeshRoleError {
+    use gate4agent_node_wire::mesh_underlay::MeshUnderlayError as E;
+    match err {
+        E::HqMustNotAcceptUnderlay => MeshRoleError::HqMustNotAcceptUnderlay,
+        E::Unauthorized => MeshRoleError::Unauthorized,
+        E::PlatformUnsupported { .. } => MeshRoleError::PlatformUnsupported,
+        E::WireGuardDaemonNotInThisTip => MeshRoleError::UnderlayNotImplemented,
+        E::InvalidTransportKey | E::InvalidAuthToken | E::Path(_) => {
+            MeshRoleError::UnderlayNotImplemented
+        }
+    }
+}
+
+/// Live tip-6 client after HQ DialOnly underlay dial + bridge OPEN.
+///
+/// Wraps `gate4agent_node_wire::mesh_underlay::BridgeUnderlayClient`.
+#[cfg(target_os = "linux")]
+pub struct BridgeReachClient {
+    inner: gate4agent_node_wire::mesh_underlay::BridgeUnderlayClient,
+}
+
+#[cfg(target_os = "linux")]
+impl BridgeReachClient {
+    pub async fn write_all(&mut self, data: &[u8]) -> Result<(), MeshRoleError> {
+        self.inner
+            .write_all(data)
+            .await
+            .map_err(map_underlay_err)
+    }
+
+    pub async fn read_at_least(&mut self, min_bytes: usize) -> Result<Vec<u8>, MeshRoleError> {
+        self.inner
+            .read_at_least(min_bytes)
+            .await
+            .map_err(map_underlay_err)
+    }
+
+    pub async fn close(self) -> Result<(), MeshRoleError> {
+        self.inner.close().await.map_err(map_underlay_err)
+    }
+}
+
+/// HQ DialOnly: tip-5 underlay dial to node `--bridge-underlay-listen`, then
+/// tip-6 `BridgeUnderlayClient::open` (real crates API — not cite/stub).
+///
+/// `peer` is `host:port` of the node underlay UDP bind. `transport_key` is
+/// 32 bytes (AEAD). `underlay_token` is the underlay auth barrier (distinct
+/// from application `GATE4AGENT_BRIDGE_TOKEN`).
+#[cfg(target_os = "linux")]
+pub async fn dial_bridge_reach(
+    peer: &str,
+    transport_key: [u8; 32],
+    underlay_token: &str,
+) -> Result<BridgeReachClient, MeshRoleError> {
+    use gate4agent_node_wire::mesh_underlay::{
+        dial_peer, BridgeUnderlayClient, MeshUnderlayRole, UnderlayAuthToken, UnderlayTransportKey,
+    };
+
+    // Doctrine: HQ dials; never accept.
+    assert_underlay_direction_allowed(
+        MeshParticipantRole::HqClientAdmin,
+        MeshTcpDialDirection::Dial,
+    )?;
+
+    let transport = UnderlayTransportKey::from_bytes(transport_key);
+    let auth = UnderlayAuthToken::new(underlay_token).map_err(map_underlay_err)?;
+    let session = dial_peer(
+        MeshUnderlayRole::HqClientAdmin,
+        &transport,
+        &auth,
+        peer,
+    )
+    .await
+    .map_err(map_underlay_err)?;
+    let inner = BridgeUnderlayClient::open(session, underlay_token)
+        .await
+        .map_err(map_underlay_err)?;
+    Ok(BridgeReachClient { inner })
+}
+
+/// Non-Linux: tip-6 dial refused with platform error.
+#[cfg(not(target_os = "linux"))]
+pub async fn dial_bridge_reach(
+    _peer: &str,
+    _transport_key: [u8; 32],
+    _underlay_token: &str,
+) -> Result<(), MeshRoleError> {
+    assert_underlay_direction_allowed(
+        MeshParticipantRole::HqClientAdmin,
+        MeshTcpDialDirection::Dial,
+    )?;
+    Err(MeshRoleError::PlatformUnsupported)
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -344,5 +431,20 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err, MeshRoleError::PlatformUnsupported);
+    }
+
+    #[test]
+    fn tip6_health_flag_still_node_side_after_real_wire() {
+        use crate::mesh_role::{
+            may_host_bridge_underlay_accept, BridgeReachCite, MeshParticipantRole,
+            TIP6_BRIDGE_REACH_HEALTH,
+        };
+        assert!(may_host_bridge_underlay_accept(MeshParticipantRole::NodePeer));
+        assert!(!may_host_bridge_underlay_accept(MeshParticipantRole::HqClientAdmin));
+        assert_eq!(
+            BridgeReachCite::node().tip6_health_flag(),
+            Some(TIP6_BRIDGE_REACH_HEALTH)
+        );
+        assert_eq!(BridgeReachCite::hq().tip6_health_flag(), None);
     }
 }

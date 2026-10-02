@@ -15,10 +15,9 @@
 //! - `mesh-connectivity-daemon-design-2026-10-02.md` §1.5 / tips 5–6
 //! - `oss-perimeter-mesh-roles-and-versioning-2026-10-02.md` §1
 //!
-//! **Crates pin note:** hatchery stays on crates.io **0.4.4**. Tip-5/6
-//! `gate4agent-node-wire::mesh_underlay` is **not** in that published tree.
-//! This module cites tip-6 flags + role wiring only — **owner: bump when
-//! hatchery needs tip5/6 APIs**.
+//! **Crates pin note:** tip-5/6 live under `gate4agent-node-wire` **0.4.6+**
+//! (`mesh_underlay::bridge_reach`). Role doctrine stays here; real HQ dial is
+//! [`crate::mesh_underlay::dial_bridge_reach`].
 
 use std::fmt;
 
@@ -115,8 +114,8 @@ impl fmt::Display for MeshTcpDialDirection {
 
 /// g4a tip-6 bridge health flag when `--bridge-underlay-listen` is active.
 ///
-/// Cite-only string (node envelope). Hatchery does **not** host this path on
-/// crates.io **0.4.4** — no `mesh_underlay::bridge_reach` in that publish.
+/// Node envelope health flag when tip-6 `--bridge-underlay-listen` is active.
+/// Real dial: [`crate::mesh_underlay::dial_bridge_reach`].
 pub const TIP6_BRIDGE_REACH_HEALTH: &str = "tip-6-bridge-reach";
 
 /// g4a tip-6 health value when underlay listen is configured but not yet active.
@@ -131,9 +130,10 @@ pub const fn may_host_bridge_underlay_accept(role: MeshParticipantRole) -> bool 
     matches!(role, MeshParticipantRole::NodePeer)
 }
 
-/// Thin tip-6 cite adapter: who hosts bridge reach vs who only dials C2.
+/// Tip-6 role cite: who hosts bridge reach vs who only dials (HQ DialOnly).
 ///
-/// No I/O. No WireGuard. No dependency on unpublished g4a tip-5/6 crates APIs.
+/// No I/O here. Live dial is [`crate::mesh_underlay::dial_bridge_reach`]
+/// (published `gate4agent-node-wire` bridge_reach). No WireGuard daemon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BridgeReachCite {
     role: MeshParticipantRole,
@@ -207,7 +207,7 @@ impl fmt::Display for MeshRoleError {
             }
             Self::UnderlayNotImplemented => {
                 f.write_str(
-                    "mesh underlay: no full WireGuard/daemon product in tips 5–6;                      hatchery lab = mesh_underlay; tip-6 bridge-reach = node-side g4a                      (not published on crates.io 0.4.4)",
+                    "mesh underlay: no full WireGuard/daemon product in tips 5–6; hatchery lab = mesh_underlay; tip-6 live dial = mesh_underlay::dial_bridge_reach (g4a node-wire)",
                 )
             }
             Self::PlatformUnsupported => {
@@ -233,11 +233,11 @@ pub fn assert_underlay_direction_allowed(
     Ok(())
 }
 
-/// Future connectivity underlay slice — **stub only**.
+/// Mesh underlay dial policy trait (role lock + stubs).
 ///
 /// Implementations for HQ must report [`MeshParticipantRole::HqClientAdmin`]
 /// and must not grow an accept-listener API that inverts “HQ dials C2.”
-/// No TUN/WireGuard/UDP path is provided here.
+/// Live tip-6 HQ dial: [`crate::mesh_underlay::dial_bridge_reach`] (not this stub).
 pub trait MeshUnderlayDial {
     /// Doctrine role for this participant.
     fn role(&self) -> MeshParticipantRole;
@@ -247,9 +247,9 @@ pub trait MeshUnderlayDial {
         self.role().dial_capability()
     }
 
-    /// Placeholder dial toward a peer endpoint label (no I/O).
+    /// Sync stub dial (no I/O) — kept for role-unit tests.
     ///
-    /// Real underlay tips will replace this; HQ stays dial-oriented.
+    /// Live tip-6 path: [`crate::mesh_underlay::dial_bridge_reach`] (async crates API).
     fn dial_stub(&self, _peer_label: &str) -> Result<(), MeshRoleError> {
         let _ = self.role();
         Err(MeshRoleError::UnderlayNotImplemented)
@@ -261,10 +261,9 @@ pub trait MeshUnderlayDial {
         Err(MeshRoleError::UnderlayNotImplemented)
     }
 
-    /// Tip-6 bridge-reach cite for this participant (no I/O).
+    /// Tip-6 bridge-reach role cite (no I/O).
     ///
-    /// Node may host; HQ DialOnly (dials C2). Real relay lives in g4a node
-    /// after crates bump past 0.4.4.
+    /// Node may host; HQ DialOnly. Live dial: [`crate::mesh_underlay::dial_bridge_reach`].
     fn bridge_reach_cite(&self) -> BridgeReachCite {
         BridgeReachCite::new(self.role())
     }
