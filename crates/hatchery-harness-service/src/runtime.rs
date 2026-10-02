@@ -3470,7 +3470,9 @@ fn map_session_spawn_node_failure(
         | NodeFailureCode::StaleGeneration => HarnessOperatorHostErrorV1::Conflict,
         NodeFailureCode::ControllerBusy
         | NodeFailureCode::WorkspaceBusy
-        | NodeFailureCode::BackendBusy => HarnessOperatorHostErrorV1::Busy,
+        | NodeFailureCode::BackendBusy
+        // Dig2 lease follow-on: exclusive BrowserStationLease busy → Busy.
+        | NodeFailureCode::BrowserStationProfileBusy => HarnessOperatorHostErrorV1::Busy,
         NodeFailureCode::SpawnDeadlineExceeded => HarnessOperatorHostErrorV1::Deadline,
         // Named separately from the generic backend-failure bucket right
         // below so the operator can tell "this exact provider/transport
@@ -3485,12 +3487,16 @@ fn map_session_spawn_node_failure(
         // UnsupportedCapability`'s own doc for why this no longer folds into
         // `Unavailable`.
         NodeFailureCode::UnsupportedCapability
-        | NodeFailureCode::UnsupportedNetworkAllowlistMapping => {
+        | NodeFailureCode::UnsupportedNetworkAllowlistMapping
+        // Dig2 Track A: probe cannot run (non-Windows / bad suffix) — permanent.
+        | NodeFailureCode::BrowserStationProbeUnavailable => {
             HarnessOperatorHostErrorV1::UnsupportedCapability
         }
         NodeFailureCode::BackendDisconnected
         | NodeFailureCode::BackendOperationFailed
-        | NodeFailureCode::ShuttingDown => HarnessOperatorHostErrorV1::Unavailable,
+        | NodeFailureCode::ShuttingDown
+        // Dig2 Track A: local station pipe missing/not connectable — transient.
+        | NodeFailureCode::BrowserStationUnreachable => HarnessOperatorHostErrorV1::Unavailable,
         _ => HarnessOperatorHostErrorV1::Internal,
     }
 }
@@ -16968,6 +16974,31 @@ mod tests {
                 agent: "claude".to_owned(),
                 transport: HarnessRuntimeTransportV1::Acp,
             },
+        );
+        // Dig2 lease follow-on: BrowserStation* must not collapse to Internal.
+        assert_eq!(
+            map_session_spawn_node_failure(
+                NodeFailureCode::BrowserStationProfileBusy,
+                "claude",
+                HarnessRuntimeTransportV1::Pty,
+            ),
+            HarnessOperatorHostErrorV1::Busy,
+        );
+        assert_eq!(
+            map_session_spawn_node_failure(
+                NodeFailureCode::BrowserStationProbeUnavailable,
+                "claude",
+                HarnessRuntimeTransportV1::Pty,
+            ),
+            HarnessOperatorHostErrorV1::UnsupportedCapability,
+        );
+        assert_eq!(
+            map_session_spawn_node_failure(
+                NodeFailureCode::BrowserStationUnreachable,
+                "claude",
+                HarnessRuntimeTransportV1::Pty,
+            ),
+            HarnessOperatorHostErrorV1::Unavailable,
         );
 
         let route = NodeRoute {

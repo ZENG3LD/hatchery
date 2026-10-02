@@ -215,7 +215,10 @@ fn map_node_failure(code: NodeFailureCode) -> HarnessOperatorHostErrorV1 {
         | NodeFailureCode::BackendBusy
         | NodeFailureCode::SessionRecordBusy
         | NodeFailureCode::ControllerRequired
-        | NodeFailureCode::ContextPackBusy => HarnessOperatorHostErrorV1::Busy,
+        | NodeFailureCode::ContextPackBusy
+        // Dig2 lease follow-on: exclusive BrowserStationLease busy → Busy
+        // (not Internal). Sketch dig2-station-bind-lease-sketch-2026-10-02.
+        | NodeFailureCode::BrowserStationProfileBusy => HarnessOperatorHostErrorV1::Busy,
         NodeFailureCode::SpawnDeadlineExceeded
         | NodeFailureCode::RepositoryFileReadTimedOut
         | NodeFailureCode::GitReadTimedOut
@@ -228,7 +231,9 @@ fn map_node_failure(code: NodeFailureCode) -> HarnessOperatorHostErrorV1 {
         // typed `UnsupportedCapability`), not the coarse `Unavailable` bucket.
         // See `HarnessOperatorHostErrorV1::UnsupportedCapability`'s own doc.
         NodeFailureCode::UnsupportedCapability
-        | NodeFailureCode::UnsupportedNetworkAllowlistMapping => {
+        | NodeFailureCode::UnsupportedNetworkAllowlistMapping
+        // Dig2 Track A: probe cannot run (non-Windows / bad suffix) — permanent.
+        | NodeFailureCode::BrowserStationProbeUnavailable => {
             HarnessOperatorHostErrorV1::UnsupportedCapability
         }
         // This shared mapper has no `agent`/`transport` to name (unlike
@@ -247,10 +252,36 @@ fn map_node_failure(code: NodeFailureCode) -> HarnessOperatorHostErrorV1 {
         | NodeFailureCode::RepositoryFileWriteFailed
         | NodeFailureCode::RepositoryEntryCreateFailed
         | NodeFailureCode::HostDirectoryReadFailed
-        | NodeFailureCode::ContextPackMaterializationFailed => {
+        | NodeFailureCode::ContextPackMaterializationFailed
+        // Dig2 Track A: local station pipe missing/not connectable — transient.
+        | NodeFailureCode::BrowserStationUnreachable => {
             HarnessOperatorHostErrorV1::Unavailable
         }
         NodeFailureCode::Unauthorized => HarnessOperatorHostErrorV1::Unauthorized,
         _ => HarnessOperatorHostErrorV1::Internal,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn browser_station_lease_failures_map_typed_not_internal() {
+        assert_eq!(
+            LightRelayError::NodeRejected(NodeFailureCode::BrowserStationProfileBusy)
+                .into_host_error(),
+            HarnessOperatorHostErrorV1::Busy,
+        );
+        assert_eq!(
+            LightRelayError::NodeRejected(NodeFailureCode::BrowserStationProbeUnavailable)
+                .into_host_error(),
+            HarnessOperatorHostErrorV1::UnsupportedCapability,
+        );
+        assert_eq!(
+            LightRelayError::NodeRejected(NodeFailureCode::BrowserStationUnreachable)
+                .into_host_error(),
+            HarnessOperatorHostErrorV1::Unavailable,
+        );
     }
 }
