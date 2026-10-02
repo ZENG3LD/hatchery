@@ -47,10 +47,12 @@ in this repository. Crate names below are prefixed `hatchery-` unless noted.
   `-harness-mcp` (bin `gate4agent-harness-mcp`), `-harness-delivery`,
   `-harness-light` (stateless, serves the same operator wire straight over
   c2 with no task kernel behind it).
-- **Client** — `crates/hatchery-tui`, its own nested cargo workspace: bins
+- **Client** — `crates/hatchery-tui` (root workspace member): bins
   `hatchery-tui` (against a durable harness) and `hatchery-tui-light`
   (hosts `hatchery-harness-light` in-process). Neither app speaks c2
   itself.
+- **Arcade** — `crates/hatchery-arcade/{engine,games/*,sweep,preview,bench}`
+  as root workspace members (`hatchery-arcade-*`); hatchery-owned, not g4a.
 - **Build stamp** — `gate4agent-build-stamp` (in `gate4agent`): a git
   content-hash of that repository's working tree, carried by every wire
   handshake instead of a hand-typed protocol version number. hatchery's
@@ -70,10 +72,9 @@ crates by path (e.g. `../../../gate4agent/crates/gate4agent-types`) rather
 than through crates.io — a checkout of this repository is only complete
 once `gate4agent` is checked out beside it.
 
-`crates/hatchery-tui` is its own nested cargo workspace (see
-[The TUI's uzor dependency](#the-tuis-uzor-dependency) below); every other
-`hatchery-*` crate is a member of the root workspace at the repository
-root.
+`crates/hatchery-tui` and the `hatchery-arcade-*` crates are members of
+the root workspace (see [The TUI's uzor dependency](#the-tuis-uzor-dependency)
+below). There is no nested `[workspace]` under `crates/`.
 
 ## Local endpoints
 
@@ -119,8 +120,7 @@ plain `cargo test` cannot:
 ..\gate4agent\target\release\windows-headless-supervisor.exe <timeout_ms> <ABS path to test exe> --exact <test_fn>
 ```
 
-All builds share the workspace's own `target/` (the root `target/` plus
-`crates\hatchery-tui\target\` for the TUI's own nested workspace). A
+All builds share the workspace's own root `target/`. A
 per-run `--target-dir` is a full copy of the dependency build and they
 pile up fast; when two builds overlap, Cargo's build lock simply makes the
 second wait. Tests gated by `require_windows_headless_supervisor_for_test()`
@@ -134,8 +134,8 @@ not a sibling checkout, so it adds no repository requirement beyond the
 one every `hatchery-*` crate already has (`gate4agent`, see
 [Built on](#built-on)). The status bar's pet overlay links **in-tree**
 `crates/hatchery-arcade` (engine + pet-bastion). Arcade is part of hatchery,
-not a `gate4agent` sibling and not part of g4a. Sources for those crates are
-currently missing — see `crates/hatchery-arcade/README.md`.
+not a `gate4agent` sibling and not part of g4a; packages are
+`hatchery-arcade-*` and live in the root workspace.
 
 ## Built on
 

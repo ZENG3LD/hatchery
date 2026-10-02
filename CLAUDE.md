@@ -44,12 +44,12 @@ private workspace documentation tree, not in this repository.
   `..\gate4agent\target\release\windows-headless-supervisor.exe <ms> <ABS exe> --exact <fn>`
   — that binary belongs to `gate4agent-testkit`, which stays in `gate4agent`,
   not here.
-- `crates\hatchery-tui` is its own cargo workspace and depends on
+- `crates\hatchery-tui` is a root workspace member and depends on
   `uzor-tui` from crates.io — every TUI build compiles the uzor
   dependency tree, so it is a slow build from cold and a large target. The
   status bar's pet overlay links in-tree `crates\hatchery-arcade` (NOT a
-  gate4agent sibling; arcade is hatchery-owned). Sources for arcade are
-  currently missing — see `crates\hatchery-arcade\README.md`.
+  gate4agent sibling; arcade is hatchery-owned; members folded into the
+  root workspace).
 
 ## Running the live stack and the TUI
 
@@ -98,19 +98,18 @@ Up means all four ports listening and node `/health` returning 200. c2's
 `/status` wants a credential, so a bare request coming back non-2xx is not
 by itself a failure — read `<name>.err.log` in `$R` before deciding.
 
-Build the TUI from INSIDE its own workspace. `cargo build -p hatchery-tui`
-at the repo root fails with `did not match any packages`, because
-`crates\hatchery-tui\Cargo.toml` declares its own `[workspace]`:
+Build the TUI from the **repo root** (arcade + TUI are root workspace
+members):
 
 ```powershell
-cd (Join-Path $H "crates\hatchery-tui")
-cargo build --release --bin hatchery-tui --bin hatchery-tui-light
+cd $H
+cargo build --release -p hatchery-tui --bin hatchery-tui --bin hatchery-tui-light
 ```
 
 Launch it in Windows Terminal exactly like this, exe path quoted:
 
 ```powershell
-$tui = Join-Path $H "crates\hatchery-tui\target\release\hatchery-tui.exe"
+$tui = Join-Path $H "target\release\hatchery-tui.exe"
 $q   = '"'
 Start-Process "$env:LOCALAPPDATA\Microsoft\WindowsApps\wt.exe" `
   -ArgumentList "-w new --title G4A $q$tui$q --harness-operator 127.0.0.1:18330 --style gate"
@@ -174,9 +173,11 @@ line up directly.
 
 ## Build output
 
-**One target directory per workspace: the root `target/` and the TUI's
-own `crates\hatchery-tui\target\`. Never a directory per task, agent or
-scenario.** Each such directory is a FULL copy of the dependency build —
+**One target directory for the workspace: the root `target/`. Never a
+directory per task, agent or scenario.** (Legacy nested
+`crates\hatchery-tui\target\` / `crates\hatchery-arcade\target\` may
+linger from before the fold — safe to delete.) Each extra target dir is a
+FULL copy of the dependency build —
 seven of them had accumulated to 52 GB, and the machine was failing
 builds outright (`rustc` exiting `STATUS_STACK_BUFFER_OVERRUN`, the shell
 reporting the paging file too small) until they were cleaned.

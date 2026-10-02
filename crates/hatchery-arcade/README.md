@@ -10,6 +10,10 @@ Sources are vendored in-tree (owner push `aef255e`). Cargo package ids are
 `hatchery-arcade-*` (renamed from the former local sibling's
 `gate4agent-arcade-*`). Rust imports use `hatchery_arcade_*`.
 
+Members are folded into the **root** hatchery workspace (no nested
+`[workspace]` here). Check with `cargo check --workspace` from the repo
+root, or `-p hatchery-arcade-engine` etc.
+
 ```
 hatchery-arcade/
   engine/                    # hatchery-arcade-engine
@@ -17,11 +21,6 @@ hatchery-arcade/
   games/pet-bastion-render/  # hatchery-arcade-pet-bastion-render
   sweep/ preview/ bench/
 ```
-
-This directory is a **nested Cargo workspace** (see `Cargo.toml`). The root
-hatchery workspace keeps `crates/hatchery-arcade` and `crates/hatchery-tui`
-in `exclude` so harness/observation stay independent; check arcade with
-`cargo check` from this directory, and TUI from `crates/hatchery-tui`.
 
 ## Consumers
 

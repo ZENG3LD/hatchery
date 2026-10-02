@@ -14,11 +14,18 @@ members = [
     "crates/hatchery-observation-engine",
     "crates/hatchery-observation-store",
     "crates/hatchery-observation-service",
-]
-# Nested workspaces: arcade (engine/games/sweep/preview/bench) and TUI.
-# Arcade is hatchery-owned, not g4a. Check via `cargo check` inside each
-# nest; root members stay harness + observation only.
-exclude = [
+    # Arcade (was nested workspace under crates/hatchery-arcade)
+    "crates/hatchery-arcade/engine",
+    "crates/hatchery-arcade/games/pet-bastion",
+    "crates/hatchery-arcade/games/pet-bastion-render",
+    "crates/hatchery-arcade/sweep",
+    "crates/hatchery-arcade/preview",
+    "crates/hatchery-arcade/bench",
+    # TUI (was nested single-crate workspace)
     "crates/hatchery-tui",
-    "crates/hatchery-arcade",
 ]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"

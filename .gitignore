@@ -1,5 +1,5 @@
-# Build output: one target per workspace (root, and the TUI's own nested
-# workspace). `target*/` is a safety net, not licence for more.
+# Build output: one workspace `target/` at the repo root.
+# Legacy nested `crates/*/target*/` may linger; `target*/` is a safety net.
 target*/
 
 # Live-stack run directories (logs, per-run sqlite, tokens, screenshots)

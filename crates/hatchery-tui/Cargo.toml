@@ -70,4 +70,3 @@ path = "src/main.rs"
 name = "hatchery-tui-light"
 path = "src/bin/hatchery-tui-light.rs"
 
-[workspace]
