@@ -5,7 +5,7 @@ observation + TUI. It is built on `gate4agent` -- everything about providers:
 the library that spawns, streams, and resumes CLI coding-agent subprocesses
 over PTY/pipe/ACP/daemon transports, the node process (PTY/processes/
 workspaces/worktrees) and the C2 relay that reaches nodes on remote machines
--- via crates.io version pins (`gate4agent-*` **0.4.3**; no sibling path-deps on tip).
+-- via crates.io version pins (`gate4agent-*` **0.4.4**; no sibling path-deps on tip).
 hatchery talks to the node and the C2 only through `gate4agent-node-protocol`
 and `gate4agent-c2-protocol`/`-c2-client`; outside tests it never links the
 node or C2 server crates. The observation vocabulary is hatchery's: the node

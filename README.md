@@ -78,7 +78,7 @@ Full ledger: hatchery-websession-docs
 
 Everything in this repository lives under `crates/`: harness, observation,
 TUI, and arcade. Node and C2 are **not** in-tree — hatchery pins the
-published `gate4agent-*` crates from **crates.io** (currently **0.4.3**).
+published `gate4agent-*` crates from **crates.io** (currently **0.4.4**).
 A sibling `gate4agent` checkout is no longer required to build hatchery.
 
 Local path overrides (for co-developing against an unreleased g4a tip) are
@@ -153,7 +153,7 @@ not a `gate4agent` sibling and not part of g4a; packages are
 
 - **[gate4agent](https://github.com/ZENG3LD/gate4agent)** — providers,
   node daemon, and C2 this HQ talks to: spawning/streaming CLI agents over
-  PTY/pipe/ACP, plus the node/C2 wire. Tip pins **crates.io `0.4.3`** (see
+  PTY/pipe/ACP, plus the node/C2 wire. Tip pins **crates.io `0.4.4`** (see
   [Repository layout](#repository-layout)); a sibling checkout is optional
   for local co-dev via `[patch.crates-io]` only.
 - **[mail4agent](https://github.com/ZENG3LD/mail4agent)** — agent mail as its
