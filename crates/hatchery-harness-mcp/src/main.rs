@@ -23,16 +23,16 @@ fn main() {
             .unwrap_or_else(|_| configuration_unavailable());
         hatchery_harness_mcp::run_stdio_traced(client, &mut reader, &mut writer, trace_handle)
     } else {
-        eprintln!("gate4agent-harness-mcp: invalid arguments");
+        eprintln!("hatchery-harness-mcp: invalid arguments");
         std::process::exit(2);
     };
     if result.is_err() {
-        eprintln!("gate4agent-harness-mcp: stdio unavailable");
+        eprintln!("hatchery-harness-mcp: stdio unavailable");
         std::process::exit(1);
     }
 }
 
 fn configuration_unavailable() -> ! {
-    eprintln!("gate4agent-harness-mcp: configuration unavailable");
+    eprintln!("hatchery-harness-mcp: configuration unavailable");
     std::process::exit(2);
 }

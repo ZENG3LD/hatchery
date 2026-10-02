@@ -37,10 +37,10 @@ pub const HARNESS_MCP_CREDENTIAL_ENV: &str = "GATE4AGENT_HARNESS_READ_CREDENTIAL
 pub const HARNESS_MCP_TRACE_ENV: &str = "HATCHERY_HARNESS_MCP_TRACE";
 
 const JSONRPC_VERSION: &str = "2.0";
-// MCP initialize serverInfo.name — tracks the bin. Deferred alias (§11.4):
-// "hatchery-harness-mcp". Distinct from launch server_name "hatchery"
+// MCP initialize serverInfo.name — tracks the shipping bin (wave C).
+// Distinct from launch server_name "hatchery"
 // (HarnessMcpLaunchV1 / provider-visible MCP server id).
-const SERVER_NAME: &str = "gate4agent-harness-mcp";
+const SERVER_NAME: &str = "hatchery-harness-mcp";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_LIMIT: u16 = 64;
 
@@ -519,7 +519,7 @@ impl HarnessMcpStdioTrace {
         let file = match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
             Ok(file) => file,
             Err(error) => {
-                eprintln!("gate4agent-harness-mcp: trace file unavailable: {error}");
+                eprintln!("hatchery-harness-mcp: trace file unavailable: {error}");
                 return None;
             }
         };
@@ -551,7 +551,7 @@ impl HarnessMcpStdioTrace {
         let outcome = self.file.write_all(&record).and_then(|_| self.file.flush());
         if outcome.is_err() && !self.write_failed {
             self.write_failed = true;
-            eprintln!("gate4agent-harness-mcp: trace write failed");
+            eprintln!("hatchery-harness-mcp: trace write failed");
         }
     }
 }
@@ -1657,7 +1657,7 @@ mod tests {
         let path = unique_temp_trace_path("absent");
         let _ = std::fs::remove_file(&path);
 
-        let trace = HarnessMcpStdioTrace::open_from_env(&[std::ffi::OsString::from("gate4agent-harness-mcp")]);
+        let trace = HarnessMcpStdioTrace::open_from_env(&[std::ffi::OsString::from("hatchery-harness-mcp")]);
         assert!(trace.is_none());
         assert!(!path.exists());
     }
@@ -1670,7 +1670,7 @@ mod tests {
         let _env = TraceEnvGuard::set(&path);
 
         let argv = vec![
-            std::ffi::OsString::from("gate4agent-harness-mcp"),
+            std::ffi::OsString::from("hatchery-harness-mcp"),
             std::ffi::OsString::from("--session-proxy"),
         ];
         let mut trace = HarnessMcpStdioTrace::open_from_env(&argv).expect("trace file must open");
@@ -1703,7 +1703,7 @@ mod tests {
         let lines = contents.lines().collect::<Vec<_>>();
 
         assert!(lines[0].contains("# start pid="));
-        assert!(lines[0].contains("argv=[\"gate4agent-harness-mcp\", \"--session-proxy\"]"));
+        assert!(lines[0].contains("argv=[\"hatchery-harness-mcp\", \"--session-proxy\"]"));
 
         let inbound = lines.iter().filter(|line| line.contains(" < ")).count();
         let outbound = lines.iter().filter(|line| line.contains(" > ")).count();

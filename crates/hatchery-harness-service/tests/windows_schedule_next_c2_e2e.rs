@@ -383,7 +383,7 @@ async fn schedule_next_replay_and_harness_restart_do_not_resend() {
 
 /// The harness advertises task-start capability from the live runtime
 /// inventory alone -- no `--launch-plan-json` plan anywhere. This starts
-/// the harness with the exact zero-plan catalog the `gate4agent-harness`
+/// the harness with the exact zero-plan catalog the `hatchery-harness`
 /// binary constructs from zero `--launch-plan-json` arguments
 /// (`HarnessLaunchCatalog::from_json_arguments([])`), then drives task
 /// launch options -> spec save -> task start end to end using only the

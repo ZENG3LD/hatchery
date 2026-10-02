@@ -1,4 +1,4 @@
-//! `gate4agent-harnessctl` — synchronous dev control plane for the harness
+//! `hatchery-harnessctl` — synchronous dev control plane for the harness
 //! operator socket.
 //!
 //! Thin argv wrapper over the already-existing, blocking
@@ -34,7 +34,7 @@ use hatchery_harness_api::{
 const HARNESS_OPERATOR_TOKEN_ENV: &str = "GATE4AGENT_HARNESS_OPERATOR_TOKEN";
 
 fn usage() -> &'static str {
-    "usage: gate4agent-harnessctl <command> [args] --harness-operator HOST:PORT\n\
+    "usage: hatchery-harnessctl <command> [args] --harness-operator HOST:PORT\n\
      credential env: GATE4AGENT_HARNESS_OPERATOR_TOKEN\n\
      \n\
      commands:\n\
@@ -1271,7 +1271,7 @@ fn main() {
     match execute(invocation) {
         Ok(json) => println!("{json}"),
         Err(error) => {
-            eprintln!("gate4agent-harnessctl: {error}");
+            eprintln!("hatchery-harnessctl: {error}");
             std::process::exit(1);
         }
     }
@@ -1423,7 +1423,7 @@ mod tests {
     #[test]
     fn help_short_circuits_before_any_flag_or_secret_validation() {
         let mut requested_secrets = Vec::new();
-        let outcome = parse_args_from(&args(&["gate4agent-harnessctl", "--help"]), |name| {
+        let outcome = parse_args_from(&args(&["hatchery-harnessctl", "--help"]), |name| {
             requested_secrets.push(name.to_owned());
             Err("unexpected secret read".to_owned())
         })
@@ -1434,7 +1434,7 @@ mod tests {
 
     #[test]
     fn unknown_command_is_a_usage_error() {
-        let error = parse(&["gate4agent-harnessctl", "bogus"], &[]).unwrap_err();
+        let error = parse(&["hatchery-harnessctl", "bogus"], &[]).unwrap_err();
         assert_eq!(error, usage());
     }
 
@@ -1442,7 +1442,7 @@ mod tests {
     fn endpoint_is_required_and_loopback_only_before_secret_access() {
         let mut requested_secrets = Vec::new();
         let error = parse_args_from(
-            &args(&["gate4agent-harnessctl", "runtime-inventory"]),
+            &args(&["hatchery-harnessctl", "runtime-inventory"]),
             |name| {
                 requested_secrets.push(name.to_owned());
                 Err("unexpected secret read".to_owned())
@@ -1453,7 +1453,7 @@ mod tests {
         assert!(requested_secrets.is_empty());
 
         let error = parse(
-            &["gate4agent-harnessctl", "runtime-inventory", "--harness-operator", "192.0.2.1:18080"],
+            &["hatchery-harnessctl", "runtime-inventory", "--harness-operator", "192.0.2.1:18080"],
             &[],
         )
         .unwrap_err();
@@ -1464,7 +1464,7 @@ mod tests {
     fn tasks_list_parses_state_after_parent_and_limit() {
         let outcome = parse(
             &[
-                "gate4agent-harnessctl",
+                "hatchery-harnessctl",
                 "tasks",
                 "list",
                 "--state",
@@ -1498,7 +1498,7 @@ mod tests {
     fn tasks_list_rejects_a_malformed_parent_id() {
         let error = parse(
             &[
-                "gate4agent-harnessctl",
+                "hatchery-harnessctl",
                 "tasks",
                 "list",
                 "--parent",
@@ -1516,7 +1516,7 @@ mod tests {
     fn runs_list_parses_task_lifecycle_after_parent_run_and_limit() {
         let outcome = parse(
             &[
-                "gate4agent-harnessctl",
+                "hatchery-harnessctl",
                 "runs",
                 "list",
                 "--task",
@@ -1553,7 +1553,7 @@ mod tests {
     fn runs_list_rejects_a_malformed_parent_run_id() {
         let error = parse(
             &[
-                "gate4agent-harnessctl",
+                "hatchery-harnessctl",
                 "runs",
                 "list",
                 "--parent-run",
@@ -1571,7 +1571,7 @@ mod tests {
     fn task_create_requires_title_and_body_and_rejects_unknown_flags() {
         let error = parse(
             &[
-                "gate4agent-harnessctl",
+                "hatchery-harnessctl",
                 "task",
                 "create",
                 "--body",
@@ -1586,7 +1586,7 @@ mod tests {
 
         let error = parse(
             &[
-                "gate4agent-harnessctl",
+                "hatchery-harnessctl",
                 "task",
                 "create",
                 "--title",
@@ -1605,7 +1605,7 @@ mod tests {
 
         let outcome = parse(
             &[
-                "gate4agent-harnessctl",
+                "hatchery-harnessctl",
                 "task",
                 "create",
                 "--title",
@@ -1636,7 +1636,7 @@ mod tests {
         let a = format!("htask_{}", "a".repeat(24));
         let outcome = parse(
             &[
-                "gate4agent-harnessctl", "task", "create",
+                "hatchery-harnessctl", "task", "create",
                 "--title", "t", "--body", "b",
                 "--depends", &format!("{b},{a},{b}"),
                 "--harness-operator", "127.0.0.1:18080",
@@ -1657,7 +1657,7 @@ mod tests {
     #[test]
     fn task_get_and_run_get_require_exactly_one_positional() {
         let error = parse(
-            &["gate4agent-harnessctl", "task", "get", "--harness-operator", "127.0.0.1:18080"],
+            &["hatchery-harnessctl", "task", "get", "--harness-operator", "127.0.0.1:18080"],
             &[(HARNESS_OPERATOR_TOKEN_ENV, &token())],
         )
         .unwrap_err();
@@ -1665,7 +1665,7 @@ mod tests {
 
         let task_id = format!("htask_{}", "b".repeat(24));
         let outcome = parse(
-            &["gate4agent-harnessctl", "task", "get", &task_id, "--harness-operator", "127.0.0.1:18080"],
+            &["hatchery-harnessctl", "task", "get", &task_id, "--harness-operator", "127.0.0.1:18080"],
             &[(HARNESS_OPERATOR_TOKEN_ENV, &token())],
         )
         .unwrap();
@@ -1680,7 +1680,7 @@ mod tests {
     fn task_move_requires_to_and_parses_kebab_target_state() {
         let task_id = format!("htask_{}", "1".repeat(24));
         let error = parse(
-            &["gate4agent-harnessctl", "task", "move", &task_id, "--harness-operator", "127.0.0.1:18080"],
+            &["hatchery-harnessctl", "task", "move", &task_id, "--harness-operator", "127.0.0.1:18080"],
             &[(HARNESS_OPERATOR_TOKEN_ENV, &token())],
         )
         .unwrap_err();
@@ -1688,7 +1688,7 @@ mod tests {
 
         let outcome = parse(
             &[
-                "gate4agent-harnessctl",
+                "hatchery-harnessctl",
                 "task",
                 "move",
                 &task_id,
@@ -1709,7 +1709,7 @@ mod tests {
 
         let error = parse(
             &[
-                "gate4agent-harnessctl",
+                "hatchery-harnessctl",
                 "task",
                 "move",
                 &task_id,
@@ -1728,7 +1728,7 @@ mod tests {
     fn task_operations_defaults_limit_and_parses_explicit_limit() {
         let task_id = format!("htask_{}", "2".repeat(24));
         let outcome = parse(
-            &["gate4agent-harnessctl", "task", "operations", &task_id, "--harness-operator", "127.0.0.1:18080"],
+            &["hatchery-harnessctl", "task", "operations", &task_id, "--harness-operator", "127.0.0.1:18080"],
             &[(HARNESS_OPERATOR_TOKEN_ENV, &token())],
         )
         .unwrap();
@@ -1741,7 +1741,7 @@ mod tests {
 
         let outcome = parse(
             &[
-                "gate4agent-harnessctl",
+                "hatchery-harnessctl",
                 "task",
                 "operations",
                 &task_id,
@@ -1762,7 +1762,7 @@ mod tests {
         let task_id = format!("htask_{}", "c".repeat(24));
         let outcome = parse(
             &[
-                "gate4agent-harnessctl",
+                "hatchery-harnessctl",
                 "spec",
                 "save",
                 &task_id,
@@ -1792,7 +1792,7 @@ mod tests {
         let task_id = format!("htask_{}", "f".repeat(24));
         let outcome = parse(
             &[
-                "gate4agent-harnessctl",
+                "hatchery-harnessctl",
                 "launch-options",
                 &task_id,
                 "--provider",
@@ -1831,7 +1831,7 @@ mod tests {
         let task_id = format!("htask_{}", "a".repeat(24));
         let outcome = parse(
             &[
-                "gate4agent-harnessctl",
+                "hatchery-harnessctl",
                 "launch-options",
                 &task_id,
                 "--harness-operator",
@@ -1936,7 +1936,7 @@ mod tests {
     #[test]
     fn workspace_inspect_requires_exactly_two_positionals() {
         let error = parse(
-            &["gate4agent-harnessctl", "workspace", "inspect", "node-a", "--harness-operator", "127.0.0.1:18080"],
+            &["hatchery-harnessctl", "workspace", "inspect", "node-a", "--harness-operator", "127.0.0.1:18080"],
             &[(HARNESS_OPERATOR_TOKEN_ENV, &token())],
         )
         .unwrap_err();
@@ -1944,7 +1944,7 @@ mod tests {
 
         let outcome = parse(
             &[
-                "gate4agent-harnessctl",
+                "hatchery-harnessctl",
                 "workspace",
                 "inspect",
                 "node-a",

@@ -77,7 +77,7 @@ pub const HARNESS_READ_CREDENTIAL_MAX_BYTES: usize = 8 * 1024;
 /// Do not rename alone — invalidates issued credentials.
 pub const HARNESS_MCP_AUDIENCE: &str = "gate4agent-harness-mcp-read-v1";
 /// The harness operator wire is a loopback protocol between processes built
-/// from the same tree and rolled together (`gate4agent-harness` and its two
+/// from the same tree and rolled together (`hatchery-harness` and its two
 /// clients, `hatchery-tui` / `hatchery-tui-light`, via
 /// `hatchery-harness-client`). There is exactly one peer shape at a time --
 /// no peer that cannot be rebuilt exists -- so the envelope now checks
@@ -6993,7 +6993,7 @@ impl RedactedOperationV1 {
 pub enum HarnessReadApiError {
     #[error(
         "build stamp mismatch: this side was built from tree {expected}, the peer from \
-         tree {received} -- rebuild and restart the out-of-date side (gate4agent-harness \
+         tree {received} -- rebuild and restart the out-of-date side (hatchery-harness \
          and its hatchery-harness-client-based peers are built from the same tree and \
          must be rolled together)"
     )]
@@ -7035,7 +7035,7 @@ pub enum HarnessOperatorApiError {
     #[error(
         "build stamp mismatch: this side was built from tree {expected}, the peer from \
          tree {received} -- rebuild and restart the out-of-date side \
-         (gate4agent-harness and its hatchery-tui / hatchery-tui-light client are built \
+         (hatchery-harness and its hatchery-tui / hatchery-tui-light client are built \
          from the same tree and must be rolled together)"
     )]
     BuildStampMismatch { expected: String, received: String },
@@ -11522,7 +11522,7 @@ mod tests {
     /// `HarnessRunId::new` are the validation, refusing a malformed string
     /// before a request carrying one could ever be built (the CLI's own
     /// rejection of a malformed `--parent`/`--parent-run` flag, tested in
-    /// `gate4agent-harnessctl`, goes through this exact constructor).
+    /// `hatchery-harnessctl`, goes through this exact constructor).
     #[test]
     fn parent_filters_default_on_old_shape_and_round_trip() {
         let task_id = HarnessTaskId::new(format!("htask_{}", "a".repeat(24))).unwrap();

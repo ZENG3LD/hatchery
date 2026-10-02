@@ -41,9 +41,9 @@ in this repository. Crate names below are prefixed `hatchery-` unless noted.
 - **Harness** — the stateful backend behind one app-facing protocol: task
   kanban over SQLite, session extraction/continuation, delivery of
   skills/plugins/MCP config, an operator surface: `-harness-protocol`,
-  `-harness-engine`, `-harness-service` (bin `gate4agent-harness`),
-  `-harness-api`, `-harness-client` (bin `gate4agent-harnessctl`),
-  `-harness-mcp` (bin `gate4agent-harness-mcp`), `-harness-delivery`,
+  `-harness-engine`, `-harness-service` (bin `hatchery-harness`),
+  `-harness-api`, `-harness-client` (bin `hatchery-harnessctl`),
+  `-harness-mcp` (bin `hatchery-harness-mcp`), `-harness-delivery`,
   `-harness-light` (stateless, serves the same operator wire straight over
   c2 with no task kernel behind it).
 - **Client** — `crates/hatchery-tui` (root workspace member): bins
@@ -66,8 +66,8 @@ Full ledger: hatchery-websession-docs
 
 | Runtime | Current | Deferred target / note |
 |---|---|---|
-| Helper bin | `gate4agent-harness-mcp` | `hatchery-harness-mcp` |
-| Harness / ctl bins | `gate4agent-harness`, `gate4agent-harnessctl` | `hatchery-harness`, `hatchery-harnessctl` |
+| Helper bin | `hatchery-harness-mcp` | **done** wave C |
+| Harness / ctl bins | `hatchery-harness`, `hatchery-harnessctl` | **done** wave C |
 | Session MCP env | `HATCHERY_HARNESS_SESSION_*` | already final |
 | Legacy direct MCP env | `GATE4AGENT_HARNESS_READ_*` | rename or retire; scrubbed on product spawn |
 | Operator / TUI env | `GATE4AGENT_HARNESS_*`, `GATE4AGENT_TUI_*` | `HATCHERY_*` |

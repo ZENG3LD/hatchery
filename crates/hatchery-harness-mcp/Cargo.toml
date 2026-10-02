@@ -9,9 +9,9 @@ publish = false
 name = "hatchery_harness_mcp"
 
 [[bin]]
-# Alias target (§11.4 wave C): hatchery-harness-mcp. Kept gate4agent-* until
-# live helper path / MCP serverInfo rename; see crate README + docs plan.
-name = "gate4agent-harness-mcp"
+# Wave C (2026-10-02): shipping bin renamed gate4agent-harness-mcp → hatchery-harness-mcp.
+# Env GATE4AGENT_HARNESS_* and DOMAIN/audience strings remain wave D/E (owner-gated).
+name = "hatchery-harness-mcp"
 path = "src/main.rs"
 
 [[bin]]
