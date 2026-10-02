@@ -232,6 +232,7 @@ fn map_node_failure(code: NodeFailureCode) -> HarnessOperatorHostErrorV1 {
         // it falls into the same generic bucket as the codes right below.
         NodeFailureCode::UnsupportedTransport
         | NodeFailureCode::UnsupportedCapability
+        | NodeFailureCode::UnsupportedNetworkAllowlistMapping
         | NodeFailureCode::BackendDisconnected
         | NodeFailureCode::BackendOperationFailed
         | NodeFailureCode::ShuttingDown

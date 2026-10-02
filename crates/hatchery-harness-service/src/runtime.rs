@@ -3484,7 +3484,8 @@ fn map_session_spawn_node_failure(
         // Permanent, not transient -- see `HarnessOperatorHostErrorV1::
         // UnsupportedCapability`'s own doc for why this no longer folds into
         // `Unavailable`.
-        NodeFailureCode::UnsupportedCapability => {
+        NodeFailureCode::UnsupportedCapability
+        | NodeFailureCode::UnsupportedNetworkAllowlistMapping => {
             HarnessOperatorHostErrorV1::UnsupportedCapability
         }
         NodeFailureCode::BackendDisconnected
