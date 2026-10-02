@@ -11,3 +11,7 @@ crates/hatchery-tui/tools/.codicon-cache/
 crates/hatchery-tui/tools/.lucide-cache/
 __pycache__/
 *.pyc
+
+# Legacy v4 tree removed from tip (OSS scrub tip 2, 2026-10-02).
+# Do not re-add; keep private-only if needed outside this repo.
+_archive/
