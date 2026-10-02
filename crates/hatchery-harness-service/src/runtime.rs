@@ -10272,6 +10272,7 @@ fn redact_operator_run(
         failure_category: run.failure.as_ref().map(|failure| failure.category),
         context_pack: run.context_pack.clone(),
         git_facts: run.git_facts.clone(),
+        delivery_receipt: run.delivery_receipt.clone(),
         references_redacted: false,
         created_at_unix_ms: run.created_at_unix_ms,
         updated_at_unix_ms: run.updated_at_unix_ms,

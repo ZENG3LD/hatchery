@@ -6868,6 +6868,12 @@ pub struct RedactedRunV1 {
     pub failure_category: Option<HarnessFailureCategoryV1>,
     pub context_pack: Option<HarnessResolvedContextPackReceiptV1>,
     pub git_facts: Option<HarnessRunGitFactsV1>,
+    /// Opaque `hreceipt_…` ref copied from the run record. The engine
+    /// requires it to equal the committed delivery receipt's `receipt_ref`.
+    /// The receipt body stays on the transfer. Older payloads that omit the
+    /// field deserialize as `None`.
+    #[serde(default)]
+    pub delivery_receipt: Option<HarnessReceiptRef>,
     pub references_redacted: bool,
     pub created_at_unix_ms: u64,
     pub updated_at_unix_ms: u64,
@@ -6899,6 +6905,9 @@ impl RedactedRunV1 {
         }
         if let Some(facts) = &self.git_facts {
             facts.validate().map_err(HarnessReadApiError::Protocol)?;
+        }
+        if let Some(receipt) = &self.delivery_receipt {
+            receipt.validate().map_err(HarnessReadApiError::Protocol)?;
         }
         validate_timestamps(self.created_at_unix_ms, self.updated_at_unix_ms)
     }
@@ -8748,6 +8757,7 @@ mod tests {
             "binding":"none",
             "result_disposition":null,
             "failure_category":null,
+            "delivery_receipt":null,
             "references_redacted":true,
             "created_at_unix_ms":1,
             "updated_at_unix_ms":1
@@ -10983,6 +10993,7 @@ mod tests {
             failure_category: None,
             context_pack: None,
             git_facts: None,
+            delivery_receipt: None,
             references_redacted: false,
             created_at_unix_ms: 10,
             updated_at_unix_ms: 10,

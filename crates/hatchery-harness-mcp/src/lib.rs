@@ -1134,6 +1134,7 @@ mod tests {
             failure_category: None,
             context_pack: None,
             git_facts: None,
+            delivery_receipt: None,
             references_redacted: false,
             created_at_unix_ms: 10,
             updated_at_unix_ms: 10,
