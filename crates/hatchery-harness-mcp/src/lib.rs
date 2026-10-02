@@ -37,6 +37,9 @@ pub const HARNESS_MCP_CREDENTIAL_ENV: &str = "GATE4AGENT_HARNESS_READ_CREDENTIAL
 pub const HARNESS_MCP_TRACE_ENV: &str = "HATCHERY_HARNESS_MCP_TRACE";
 
 const JSONRPC_VERSION: &str = "2.0";
+// MCP initialize serverInfo.name — tracks the bin. Deferred alias (§11.4):
+// "hatchery-harness-mcp". Distinct from launch server_name "hatchery"
+// (HarnessMcpLaunchV1 / provider-visible MCP server id).
 const SERVER_NAME: &str = "gate4agent-harness-mcp";
 const SERVER_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_LIMIT: u16 = 64;

@@ -40,6 +40,8 @@ const HARNESS_CONTINUATION_REF_DOMAIN: &[u8] =
     b"gate4agent-harness-continuation-ref-v1\0";
 const HARNESS_CONTINUATION_RECEIPT_REF_DOMAIN: &[u8] =
     b"gate4agent-harness-continuation-receipt-ref-v1\0";
+// Deferred alias (§11.4 wave E): hatchery-harness-mcp-reservation-id-v1.
+// Family of gate4agent-harness-* domains cut over together — not MCP-only.
 const HARNESS_MCP_RESERVATION_ID_DOMAIN: &[u8] =
     b"gate4agent-harness-mcp-reservation-id-v1\0";
 const HARNESS_LIFECYCLE_OPERATION_ID_DOMAIN: &[u8] =

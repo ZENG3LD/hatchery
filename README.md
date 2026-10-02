@@ -59,8 +59,20 @@ in this repository. Crate names below are prefixed `hatchery-` unless noted.
 
 Pipe and env-var names above still carry the `gate4agent-`/`GATE4AGENT_`
 prefix inherited from the repository this stack was split out of — a later
-step renames those runtime identifiers. TUI binaries are already
-`hatchery-tui` / `hatchery-tui-light`.
+step (§11.4 / brand Step 4b) renames those **hatchery-side** runtime
+identifiers. TUI binaries are already `hatchery-tui` / `hatchery-tui-light`.
+Full ledger: hatchery-websession-docs
+`plans/harness-mcp-bin-env-domain-rename-2026-10-02.md` and `STATUS.md`.
+
+| Runtime | Current | Deferred target / note |
+|---|---|---|
+| Helper bin | `gate4agent-harness-mcp` | `hatchery-harness-mcp` |
+| Harness / ctl bins | `gate4agent-harness`, `gate4agent-harnessctl` | `hatchery-harness`, `hatchery-harnessctl` |
+| Session MCP env | `HATCHERY_HARNESS_SESSION_*` | already final |
+| Legacy direct MCP env | `GATE4AGENT_HARNESS_READ_*` | rename or retire; scrubbed on product spawn |
+| Operator / TUI env | `GATE4AGENT_HARNESS_*`, `GATE4AGENT_TUI_*` | `HATCHERY_*` |
+| Node / C2 tokens & pipes | `GATE4AGENT_NODE_*`, `GATE4AGENT_C2_*`, `gate4agent-node` / `-c2` | **keep** (g4a-owned; not hatchery rename) |
+| Capability | `harness-mcp-read-proxy-v1` | **keep** (C2 negotiate) |
 
 ## Repository layout
 

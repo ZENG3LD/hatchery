@@ -6007,6 +6007,9 @@ pub fn harness_mcp_activation_digest(
     context: &HarnessDispatchContextV1,
     expires_at_unix_ms: u64,
 ) -> Result<HarnessMcpActivationDigest, HarnessServiceError> {
+    // Digest domain — wire/persistence. Deferred alias (§11.4 wave E):
+    // b"hatchery-harness-mcp-activation-v1". Do not rename without epoch/wipe;
+    // see plans/harness-mcp-bin-env-domain-rename-2026-10-02.md.
     const DOMAIN: &[u8] = b"gate4agent-harness-mcp-activation-v1";
     #[derive(Serialize)]
     struct Canonical<'a> {

@@ -70,6 +70,11 @@ pub const HARNESS_OBSERVATION_PATH_MAX_BYTES: usize = 1_024;
 /// bound was sized for.
 pub const HARNESS_OBSERVATION_BLOCK_LABEL_MAX_BYTES: usize = 256;
 pub const HARNESS_READ_CREDENTIAL_MAX_BYTES: usize = 8 * 1024;
+/// Credential audience for harness MCP read grants.
+///
+/// Wire string kept `gate4agent-harness-mcp-read-v1` until §11.4 wave E
+/// (digest/audience cutover). Deferred alias: `hatchery-harness-mcp-read-v1`.
+/// Do not rename alone — invalidates issued credentials.
 pub const HARNESS_MCP_AUDIENCE: &str = "gate4agent-harness-mcp-read-v1";
 /// The harness operator wire is a loopback protocol between processes built
 /// from the same tree and rolled together (`gate4agent-harness` and its two
