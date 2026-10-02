@@ -25876,6 +25876,7 @@ mod tests {
                 revision: SpawnBundleRevision::new("skills-v3").unwrap(),
                 digest: SpawnBundleDigest::new(format!("sha256:{}", "a".repeat(64))).unwrap(),
             }]),
+            network_allowlists: None,
         });
         app.nodes[0].workspaces[0].managed_worktree_profiles =
             Some(WorktreeProfileInventory {
@@ -28029,6 +28030,7 @@ mod tests {
         app.nodes[0].launch_inventory = Some(LaunchInventory {
             spawn_profiles: Some(Vec::new()),
             bundles: Some(Vec::new()),
+            network_allowlists: None,
         });
         app.focus = Focus::Agents;
         assert_eq!(app.reduce(UiKey::Ctrl('n')), AppAction::None);

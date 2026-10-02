@@ -6159,7 +6159,13 @@ fn project_harness_launch_inventory(
     if spawn_profiles.is_none() && bundles.is_none() {
         return Err("Harness runtime launch inventory carries no negotiated component".to_owned());
     }
-    Ok(LaunchInventory { spawn_profiles, bundles })
+    Ok(LaunchInventory {
+        spawn_profiles,
+        bundles,
+        // Node station catalog ids arrive on live NodeSnapshot; harness-runtime
+        // projection does not invent them. Dig2 probe stays stub.
+        network_allowlists: None,
+    })
 }
 
 fn project_harness_inventory_node(entry: HarnessRuntimeNodeInventoryV1) -> Result<NodeView, String> {
@@ -8237,7 +8243,8 @@ mod tests {
                 revision: SpawnBundleRevision::new("review-tools.r2").unwrap(),
                 digest: SpawnBundleDigest::new(format!("sha256:{}", "a".repeat(64))).unwrap(),
             }]),
-        }
+        },
+        network_allowlists: None,
     }
 
 
