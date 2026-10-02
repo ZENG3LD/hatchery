@@ -6132,6 +6132,9 @@ fn project_harness_launch_inventory(
                     profile_revision: receipt.profile_revision.parse().map_err(|error| {
                         format!("invalid Harness runtime environment profile revision: {error}")
                     })?,
+                    // Harness runtime mirror does not carry station catalog echoes yet.
+                    network_allowlist: None,
+                    browser_profile_id: None,
                 })
             }).transpose()?;
             Ok(SpawnProfileSummary {
@@ -8243,8 +8246,8 @@ mod tests {
                 revision: SpawnBundleRevision::new("review-tools.r2").unwrap(),
                 digest: SpawnBundleDigest::new(format!("sha256:{}", "a".repeat(64))).unwrap(),
             }]),
-        },
-        network_allowlists: None,
+            network_allowlists: None,
+        }
     }
 
 

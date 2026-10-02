@@ -10,7 +10,7 @@ publish = false
 name = "hatchery_harness_delivery"
 
 [dependencies]
-gate4agent-node-protocol = { path = "../../../gate4agent/crates/gate4agent-node-protocol" }
+gate4agent-node-protocol = { version = "0.4.3" }
 ring = "=0.17.14"
 thiserror = "2"
 

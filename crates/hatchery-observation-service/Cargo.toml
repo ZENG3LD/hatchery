@@ -16,7 +16,7 @@ hatchery-observation-store = { path = "../hatchery-observation-store" }
 thiserror = "2"
 
 [dev-dependencies]
-gate4agent-node-protocol = { path = "../../../gate4agent/crates/gate4agent-node-protocol" }
+gate4agent-node-protocol = { version = "0.4.3" }
 hatchery-observation-protocol = { path = "../hatchery-observation-protocol" }
-gate4agent-types = { path = "../../../gate4agent/crates/gate4agent-types" }
+gate4agent-types = { version = "0.4.3" }
 rusqlite = { version = "0.31", features = ["bundled"] }

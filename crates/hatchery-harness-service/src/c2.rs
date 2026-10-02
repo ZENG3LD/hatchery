@@ -7003,6 +7003,8 @@ mod tests {
         let environment = ResolvedEnvironmentProfileReceipt {
             profile_id: SpawnEnvironmentProfileId::new("isolated-codex").unwrap(),
             profile_revision: SpawnEnvironmentProfileRevision::new("r3").unwrap(),
+            network_allowlist: None,
+            browser_profile_id: None,
         };
         let proof = SpawnProfileRevisionProof {
             route: route.clone(),
@@ -7375,6 +7377,8 @@ mod tests {
         wrong_environment.environment_profile = Some(ResolvedEnvironmentProfileReceipt {
             profile_id: SpawnEnvironmentProfileId::new("environment-a").unwrap(),
             profile_revision: SpawnEnvironmentProfileRevision::new("r1").unwrap(),
+            network_allowlist: None,
+            browser_profile_id: None,
         });
         rejects(&wrong_environment);
 

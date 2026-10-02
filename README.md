@@ -23,8 +23,8 @@ in this repository. Crate names below are prefixed `hatchery-` unless noted.
   `-catalog`, `-engine`, `-kernel`, `-handle`, `-tool-protocol`,
   `-tool-engine`, `-shell-history`, `-shell-capabilities`, `-shell-hooks`,
   `-shell-managed-hooks`, `-shell-one-shot`, `-shell-native`,
-  `-runtime-native`. Not part of this repository — linked by path, see
-  [Built on](#built-on).
+  `-runtime-native`. Not part of this repository — consumed from crates.io
+  (see [Built on](#built-on)).
 - **Observation** — read-only monitoring facts projected from provider
   sessions, never prompts/transcripts/credentials: `-observation-protocol`,
   `-observation-api`, `-observation-engine`, `-observation-store`,
@@ -77,16 +77,12 @@ Full ledger: hatchery-websession-docs
 ## Repository layout
 
 Everything in this repository lives under `crates/`: harness, observation,
-TUI, and arcade. Node and C2 are **not** in-tree — they are path
-dependencies on a sibling `gate4agent` checkout. Every `hatchery-*` crate
-that needs the transport core or node/C2 wire depends on
-`../../../gate4agent/crates/<crate>` (directory name must be exactly
-`gate4agent` next to `hatchery`; a symlink is fine). crates.io is not used
-for those links.
+TUI, and arcade. Node and C2 are **not** in-tree — hatchery pins the
+published `gate4agent-*` crates from **crates.io** (currently **0.4.3**).
+A sibling `gate4agent` checkout is no longer required to build hatchery.
 
-For a complete build against current node/C2, check out `gate4agent` on
-branch `websession` (node + C2 returned there). `master` is the older
-library cut without that return.
+Local path overrides (for co-developing against an unreleased g4a tip) are
+optional and belong in a personal `[patch.crates-io]` — not in tip Cargo.toml.
 
 `crates/hatchery-tui` and the `hatchery-arcade-*` crates are members of
 the root workspace (see [The TUI's uzor dependency](#the-tuis-uzor-dependency)
@@ -127,8 +123,8 @@ Env vars only — never pass a token as argv, never commit a value:
 
 Windows PTY/session-touching tests in the node/c2/harness crates run only
 through the headless test supervisor — `gate4agent-testkit`'s
-`windows-headless-supervisor` binary, which stays in the `gate4agent`
-repository (sibling checkout, linked by path, not vendored here). It
+`windows-headless-supervisor` binary (from the `gate4agent-testkit` crates.io
+crate / its source tree). It
 suppresses Windows fault dialogs and enforces a hard per-test timeout that
 plain `cargo test` cannot:
 
@@ -147,7 +143,7 @@ reject themselves outright if run any other way.
 `crates/hatchery-tui` depends on the `uzor-tui` crate from crates.io (the
 uzor UI framework, maintained by the same owner). It pulls from crates.io,
 not a sibling checkout, so it adds no repository requirement beyond the
-one every `hatchery-*` crate already has (`gate4agent`, see
+one every `hatchery-*` crate already has (`gate4agent` crates.io pins, see
 [Built on](#built-on)). The status bar's pet overlay links **in-tree**
 `crates/hatchery-arcade` (engine + pet-bastion). Arcade is part of hatchery,
 not a `gate4agent` sibling and not part of g4a; packages are
@@ -157,9 +153,9 @@ not a `gate4agent` sibling and not part of g4a; packages are
 
 - **[gate4agent](https://github.com/ZENG3LD/gate4agent)** — providers,
   node daemon, and C2 this HQ talks to: spawning/streaming CLI agents over
-  PTY/pipe/ACP, plus the node/C2 wire. Sibling checkout linked by path (see
-  [Repository layout](#repository-layout)); use branch `websession` when
-  building hatchery against current node/C2.
+  PTY/pipe/ACP, plus the node/C2 wire. Tip pins **crates.io `0.4.3`** (see
+  [Repository layout](#repository-layout)); a sibling checkout is optional
+  for local co-dev via `[patch.crates-io]` only.
 - **[mail4agent](https://github.com/ZENG3LD/mail4agent)** — agent mail as its
   own service, local API on `127.0.0.1:18301`. The harness keeps no mailbox
   of its own.
