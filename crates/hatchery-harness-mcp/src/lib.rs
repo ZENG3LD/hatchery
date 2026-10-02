@@ -1,4 +1,10 @@
-//! MCP stdio adapter for the grant-filtered harness read API.
+//! MCP stdio adapter for the grant-filtered harness API (session helper).
+//!
+//! Two modes: no args → direct `HarnessReadClient` via
+//! `GATE4AGENT_HARNESS_READ_*`; `--session-proxy` → node's harness MCP door via
+//! `HATCHERY_HARNESS_SESSION_*` + `LocalSessionHarnessMcpClient`. Not an
+//! HQ-facing product surface — see hatchery-websession-docs
+//! `plans/node-stdio-jsonrpc-entry-2026-10-02.md`.
 
 use std::{io::{BufRead, Write}, net::SocketAddr};
 
