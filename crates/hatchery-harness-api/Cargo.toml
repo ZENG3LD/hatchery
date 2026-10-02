@@ -10,7 +10,7 @@ publish = false
 name = "hatchery_harness_api"
 
 [dependencies]
-gate4agent-build-stamp = { version = "0.4.7" }
+gate4agent-build-stamp = { version = "0.4.8" }
 hatchery-harness-protocol = { path = "../hatchery-harness-protocol" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"

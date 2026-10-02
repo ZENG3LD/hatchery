@@ -10,23 +10,23 @@ publish = false
 name = "hatchery_harness_light"
 
 [dependencies]
-gate4agent-c2-client = { version = "0.4.7" }
-gate4agent-c2-protocol = { version = "0.4.7" }
+gate4agent-c2-client = { version = "0.4.8" }
+gate4agent-c2-protocol = { version = "0.4.8" }
 hatchery-harness-api = { path = "../hatchery-harness-api" }
 hatchery-harness-service = { path = "../hatchery-harness-service" }
-gate4agent-node-protocol = { version = "0.4.7" }
-gate4agent-node-wire = { version = "0.4.7" }
+gate4agent-node-protocol = { version = "0.4.8" }
+gate4agent-node-wire = { version = "0.4.8" }
 hatchery-observation-api = { path = "../hatchery-observation-api" }
-gate4agent-types = { version = "0.4.7" }
+gate4agent-types = { version = "0.4.8" }
 serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
 tracing = "0.1"
 
 [dev-dependencies]
-gate4agent-c2 = { version = "0.4.7" }
+gate4agent-c2 = { version = "0.4.8" }
 hatchery-harness-client = { path = "../hatchery-harness-client" }
-gate4agent-node = { version = "0.4.7", features = ["fixture"] }
+gate4agent-node = { version = "0.4.8", features = ["fixture"] }
 tokio = { version = "1", features = ["full", "test-util"] }
 
 [target.'cfg(windows)'.dev-dependencies]
