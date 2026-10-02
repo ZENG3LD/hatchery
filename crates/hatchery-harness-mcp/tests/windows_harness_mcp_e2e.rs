@@ -660,7 +660,7 @@ struct McpProcess {
 
 impl McpProcess {
     async fn start(endpoint: std::net::SocketAddr, credential: &str) -> Self {
-        let mut command = Command::new(env!("CARGO_BIN_EXE_hatchery-harness-mcp"));
+        let mut command = Command::new(env!("CARGO_BIN_EXE_gate4agent-harness-mcp"));
         command.env_clear();
         for name in ["SystemRoot", "WINDIR"] {
             if let Some(value) = std::env::var_os(name) { command.env(name, value); }
@@ -1486,7 +1486,7 @@ async fn operator_schedule_next_h3b_is_exact_replay_restart_generation_and_revok
         OsString::from("/C"),
         provider_fixture_script.into_os_string(),
     ];
-    let helper_program = PathBuf::from(env!("CARGO_BIN_EXE_hatchery-harness-mcp"));
+    let helper_program = PathBuf::from(env!("CARGO_BIN_EXE_gate4agent-harness-mcp"));
     let server = NodeServer::new_harness_mcp_proxy_fixture(
         node_config,
         provider_program,

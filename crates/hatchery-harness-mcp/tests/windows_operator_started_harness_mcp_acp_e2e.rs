@@ -273,7 +273,7 @@ async fn operator_started_derived_acp_harness_mcp_plan_mints_self_grant_and_arms
     let capture_path = fixture.root.join("acp-session-new-params.json");
     std::env::set_var("G4A_ACP_FIXTURE_CAPTURE", &capture_path);
 
-    let helper_program = PathBuf::from(env!("CARGO_BIN_EXE_hatchery-harness-mcp"));
+    let helper_program = PathBuf::from(env!("CARGO_BIN_EXE_gate4agent-harness-mcp"));
     let provider_program = PathBuf::from(env!("CARGO_BIN_EXE_acp_fixture_agent"));
     let provider_id = AgentId::new("codex").unwrap();
     let server = NodeServer::new_harness_mcp_acp_launcher_fixture(
