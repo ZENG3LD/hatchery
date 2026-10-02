@@ -2,6 +2,7 @@
 name = "hatchery-harness-engine"
 version = "0.2.37"
 edition = "2021"
+license = "MIT"
 description = "Pure, prepare-then-accept state machine for the hatchery harness task/run/delivery kernel"
 publish = false
 

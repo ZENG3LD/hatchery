@@ -2,6 +2,7 @@
 name = "hatchery-harness-client"
 version = "0.2.37"
 edition = "2021"
+license = "MIT"
 description = "Typed localhost client and CLI (hatchery-harnessctl) for the hatchery harness read and operator hosts"
 publish = false
 

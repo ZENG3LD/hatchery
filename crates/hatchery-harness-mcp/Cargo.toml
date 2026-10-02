@@ -2,6 +2,7 @@
 name = "hatchery-harness-mcp"
 version = "0.2.37"
 edition = "2021"
+license = "MIT"
 description = "MCP stdio adapter exposing the grant-filtered hatchery harness read API to MCP clients"
 publish = false
 

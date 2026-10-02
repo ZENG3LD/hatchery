@@ -2,6 +2,7 @@
 name = "hatchery-observation-service"
 version = "0.2.37"
 edition = "2021"
+license = "MIT"
 description = "Single-writer durable authority combining the gate4agent observation engine and SQLite store"
 publish = false
 

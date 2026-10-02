@@ -2,6 +2,7 @@
 name = "hatchery-harness-service"
 version = "0.2.37"
 edition = "2021"
+license = "MIT"
 description = "Single-writer SQLite authority and operator host for the hatchery harness kernel (bin hatchery-harness)"
 publish = false
 

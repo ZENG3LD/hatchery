@@ -2,6 +2,7 @@
 name = "hatchery-observation-protocol"
 version = "0.2.37"
 edition = "2021"
+license = "MIT"
 description = "Dependency-light, versioned observation wire contract for gate4agent provider-session monitoring"
 publish = false
 
