@@ -4,11 +4,19 @@
 //! probe actions. Not a WireGuard daemon. Win/mac refuse clearly.
 //!
 //! Primary peer-stack home of the same tip also lands in g4a
-//! `gate4agent-node-wire::mesh_underlay` (C2+node). This module keeps the
-//! hatchery cite-lock + lab tests without reintroducing path-deps on
-//! unpublished g4a APIs.
+//! `gate4agent-node-wire::mesh_underlay` (C2+node) — **not** on crates.io
+//! **0.4.4**. This module keeps the hatchery cite-lock + lab tests without
+//! reintroducing path-deps on unpublished g4a APIs.
 //!
-//! Cite: mesh design §1.2 / §1.5 / tip 5; recon Linux TUN/WG vs Win/mac.
+//! Tip-6 **bridge-over-underlay** (`bridge_reach`, health
+//! [`crate::mesh_role::TIP6_BRIDGE_REACH_HEALTH`]) is **node-side** in g4a
+//! (`--bridge-underlay-listen`). HQ DialOnly: dials C2; does not host bridge
+//! underlay accept. See [`crate::mesh_role::BridgeReachCite`].
+//!
+//! **owner: bump when hatchery needs tip5/6 APIs** (real wire to published
+//! `mesh_underlay::bridge_reach`).
+//!
+//! Cite: mesh design §1.2 / §1.5 / tips 5–6; recon Linux TUN/WG vs Win/mac.
 
 use crate::mesh_role::{
     assert_underlay_direction_allowed, MeshParticipantRole, MeshRoleError, MeshTcpDialDirection,

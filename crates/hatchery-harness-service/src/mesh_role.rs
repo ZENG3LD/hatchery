@@ -3,15 +3,22 @@
 //! Locks owner doctrine in code **without** implementing a WireGuard / mesh
 //! daemon and **without** making HQ a mesh server:
 //!
-//! - HQ = always client / admin → [`MeshDialCapability::DialOnly`]
+//! - HQ = always client / admin → [`MeshDialCapability::DialOnly`] (HQ dials C2)
 //! - C2 + node = mesh peers → [`MeshDialCapability::DialOrAccept`] (NAT call-home)
+//! - Tip-6 **bridge reach** is **node-side** (g4a `--bridge-underlay-listen` /
+//!   health `transport_udp_underlay=tip-6-bridge-reach`); HQ never hosts it
 //! - Transport crypto ≠ authorization (token barriers stay inside any future path)
 //! - Tip 5 live Linux UDP+AEAD permit path: [`crate::mesh_underlay`]
 //!
 //! Cite:
 //! - `hq-dials-c2-mesh-role-inventory-2026-10-02.md`
-//! - `mesh-connectivity-daemon-design-2026-10-02.md` §1.5
+//! - `mesh-connectivity-daemon-design-2026-10-02.md` §1.5 / tips 5–6
 //! - `oss-perimeter-mesh-roles-and-versioning-2026-10-02.md` §1
+//!
+//! **Crates pin note:** hatchery stays on crates.io **0.4.4**. Tip-5/6
+//! `gate4agent-node-wire::mesh_underlay` is **not** in that published tree.
+//! This module cites tip-6 flags + role wiring only — **owner: bump when
+//! hatchery needs tip5/6 APIs**.
 
 use std::fmt;
 
@@ -106,6 +113,79 @@ impl fmt::Display for MeshTcpDialDirection {
     }
 }
 
+/// g4a tip-6 bridge health flag when `--bridge-underlay-listen` is active.
+///
+/// Cite-only string (node envelope). Hatchery does **not** host this path on
+/// crates.io **0.4.4** — no `mesh_underlay::bridge_reach` in that publish.
+pub const TIP6_BRIDGE_REACH_HEALTH: &str = "tip-6-bridge-reach";
+
+/// g4a tip-6 health value when underlay listen is configured but not yet active.
+pub const TIP6_BRIDGE_UNDERLAY_OPT_IN: &str = "opt-in-via-bridge-underlay-listen";
+
+/// Whether this role may host tip-6 **bridge-over-underlay** accept.
+///
+/// Only the **node** envelope runs `--bridge-underlay-listen` (browser bridge
+/// TCP relay over tip-5 underlay). HQ is DialOnly (dials C2). C2 is a mesh
+/// peer for tip-5 underlay but does **not** host the tip-6 bridge door.
+pub const fn may_host_bridge_underlay_accept(role: MeshParticipantRole) -> bool {
+    matches!(role, MeshParticipantRole::NodePeer)
+}
+
+/// Thin tip-6 cite adapter: who hosts bridge reach vs who only dials C2.
+///
+/// No I/O. No WireGuard. No dependency on unpublished g4a tip-5/6 crates APIs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BridgeReachCite {
+    role: MeshParticipantRole,
+}
+
+impl BridgeReachCite {
+    pub const fn new(role: MeshParticipantRole) -> Self {
+        Self { role }
+    }
+
+    pub const fn hq() -> Self {
+        Self {
+            role: MeshParticipantRole::HQ,
+        }
+    }
+
+    pub const fn node() -> Self {
+        Self {
+            role: MeshParticipantRole::NodePeer,
+        }
+    }
+
+    pub const fn role(self) -> MeshParticipantRole {
+        self.role
+    }
+
+    /// HQ (and non-node peers) never host tip-6 bridge underlay accept.
+    pub const fn hosts_bridge_underlay_accept(self) -> bool {
+        may_host_bridge_underlay_accept(self.role)
+    }
+
+    /// Normative health flag label when this side would advertise tip-6 reach.
+    ///
+    /// Node → [`TIP6_BRIDGE_REACH_HEALTH`]; HQ → `None` (DialOnly toward C2).
+    pub const fn tip6_health_flag(self) -> Option<&'static str> {
+        if self.hosts_bridge_underlay_accept() {
+            Some(TIP6_BRIDGE_REACH_HEALTH)
+        } else {
+            None
+        }
+    }
+
+    /// Refuse HQ attempting to host bridge underlay (doctrine lock).
+    pub fn assert_may_host_bridge_underlay(self) -> Result<(), MeshRoleError> {
+        if self.hosts_bridge_underlay_accept() {
+            Ok(())
+        } else {
+            Err(MeshRoleError::HqMustNotAcceptUnderlay)
+        }
+    }
+}
+
 /// Error when a call asks HQ (or DialOnly) to accept underlay peers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MeshRoleError {
@@ -126,7 +206,9 @@ impl fmt::Display for MeshRoleError {
                 f.write_str("HQ mesh role is dial-only; underlay accept is refused")
             }
             Self::UnderlayNotImplemented => {
-                f.write_str("mesh underlay: no full WireGuard/daemon product in tip 5; see mesh_underlay module")
+                f.write_str(
+                    "mesh underlay: no full WireGuard/daemon product in tips 5–6;                      hatchery lab = mesh_underlay; tip-6 bridge-reach = node-side g4a                      (not published on crates.io 0.4.4)",
+                )
             }
             Self::PlatformUnsupported => {
                 f.write_str("mesh underlay unsupported on this OS: Linux-first tip 5; Win/mac later")
@@ -178,6 +260,14 @@ pub trait MeshUnderlayDial {
         assert_underlay_direction_allowed(self.role(), MeshTcpDialDirection::Accept)?;
         Err(MeshRoleError::UnderlayNotImplemented)
     }
+
+    /// Tip-6 bridge-reach cite for this participant (no I/O).
+    ///
+    /// Node may host; HQ DialOnly (dials C2). Real relay lives in g4a node
+    /// after crates bump past 0.4.4.
+    fn bridge_reach_cite(&self) -> BridgeReachCite {
+        BridgeReachCite::new(self.role())
+    }
 }
 
 /// Hatchery HQ underlay view: dial-only, no daemon.
@@ -200,7 +290,7 @@ impl MeshUnderlayDial for C2MeshDialStub {
     }
 }
 
-/// Node mesh peer stub — DialOrAccept. Real path: `mesh_underlay`.
+/// Node mesh peer stub — DialOrAccept. Tip-5 lab: `mesh_underlay`; tip-6 bridge-reach = node-side g4a.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NodeMeshDialStub;
 
@@ -276,6 +366,37 @@ mod tests {
         assert_eq!(
             HqMeshDialStub.accept_stub(),
             Err(MeshRoleError::HqMustNotAcceptUnderlay)
+        );
+    }
+
+    #[test]
+    fn tip6_bridge_reach_is_node_side_hq_dials_c2_only() {
+        assert!(may_host_bridge_underlay_accept(MeshParticipantRole::NodePeer));
+        assert!(!may_host_bridge_underlay_accept(MeshParticipantRole::HqClientAdmin));
+        assert!(!may_host_bridge_underlay_accept(MeshParticipantRole::C2Peer));
+
+        let hq = BridgeReachCite::hq();
+        assert_eq!(hq.tip6_health_flag(), None);
+        assert_eq!(
+            hq.assert_may_host_bridge_underlay(),
+            Err(MeshRoleError::HqMustNotAcceptUnderlay)
+        );
+        assert_eq!(
+            HqMeshDialStub.bridge_reach_cite().tip6_health_flag(),
+            None
+        );
+
+        let node = BridgeReachCite::node();
+        assert_eq!(node.tip6_health_flag(), Some(TIP6_BRIDGE_REACH_HEALTH));
+        assert_eq!(node.assert_may_host_bridge_underlay(), Ok(()));
+        assert_eq!(
+            NodeMeshDialStub.bridge_reach_cite().tip6_health_flag(),
+            Some(TIP6_BRIDGE_REACH_HEALTH)
+        );
+        assert_eq!(TIP6_BRIDGE_REACH_HEALTH, "tip-6-bridge-reach");
+        assert_eq!(
+            TIP6_BRIDGE_UNDERLAY_OPT_IN,
+            "opt-in-via-bridge-underlay-listen"
         );
     }
 }
