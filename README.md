@@ -1,15 +1,14 @@
 # hatchery
 
-hatchery is the agent control plane: a node/c2/harness/TUI stack for
-running, observing, and orchestrating CLI coding-agent sessions (first
-tier: Claude Code, Codex, Kimi, Grok), built on the `gate4agent` transport
-core. A node wraps one machine's providers (PTY/inline sessions, the file
-browser, local git, worktrees); c2 relays any number of nodes to their
-clients; a harness — light or full — is the one stateful backend a client
-app talks to, behind a single app-facing protocol, adding task kanban,
-session context, and delivery on top of the c2 transport; the TUI is the
-current client, and it speaks only the harness operator wire in either
-mode.
+hatchery is the operator HQ above provider nodes: harness, observation,
+and TUI for running and orchestrating CLI coding-agent sessions (first
+tier: Claude Code, Codex, Kimi, Grok). Providers, the node daemon, and C2
+live in the sibling `gate4agent` repository (see [Built on](#built-on));
+this repository keeps harness / observation / TUI / arcade. A harness —
+light or full — is the one stateful backend a client app talks to, behind
+a single app-facing protocol, adding task kanban, session context, and
+delivery on top of the c2 transport; the TUI is the current client, and it
+speaks only the harness operator wire in either mode.
 
 ## Layers
 
@@ -65,12 +64,17 @@ step renames those runtime identifiers. TUI binaries are already
 
 ## Repository layout
 
-Everything in this repository lives under `crates/`: the workbench layers
-(node, c2, harness, TUI) and the engine substrate under them. Every
-`hatchery-*` crate that needs the transport core depends on `gate4agent`'s
-crates by path (e.g. `../../../gate4agent/crates/gate4agent-types`) rather
-than through crates.io — a checkout of this repository is only complete
-once `gate4agent` is checked out beside it.
+Everything in this repository lives under `crates/`: harness, observation,
+TUI, and arcade. Node and C2 are **not** in-tree — they are path
+dependencies on a sibling `gate4agent` checkout. Every `hatchery-*` crate
+that needs the transport core or node/C2 wire depends on
+`../../../gate4agent/crates/<crate>` (directory name must be exactly
+`gate4agent` next to `hatchery`; a symlink is fine). crates.io is not used
+for those links.
+
+For a complete build against current node/C2, check out `gate4agent` on
+branch `websession` (node + C2 returned there). `master` is the older
+library cut without that return.
 
 `crates/hatchery-tui` and the `hatchery-arcade-*` crates are members of
 the root workspace (see [The TUI's uzor dependency](#the-tuis-uzor-dependency)
@@ -139,11 +143,11 @@ not a `gate4agent` sibling and not part of g4a; packages are
 
 ## Built on
 
-- **[gate4agent](https://github.com/ZENG3LD/gate4agent)** — the transport core library this stack
-  is built on: spawning, streaming, and resuming CLI coding-agent
-  subprocesses over PTY/pipe/ACP/daemon transports. A sibling repository,
-  linked by path, not vendored — every `hatchery-*` crate that touches a
-  provider depends on one of its crates directly.
+- **[gate4agent](https://github.com/ZENG3LD/gate4agent)** — providers,
+  node daemon, and C2 this HQ talks to: spawning/streaming CLI agents over
+  PTY/pipe/ACP, plus the node/C2 wire. Sibling checkout linked by path (see
+  [Repository layout](#repository-layout)); use branch `websession` when
+  building hatchery against current node/C2.
 - **[mail4agent](https://github.com/ZENG3LD/mail4agent)** — agent mail as its
   own service, local API on `127.0.0.1:18301`. The harness keeps no mailbox
   of its own.
