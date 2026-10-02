@@ -3463,7 +3463,8 @@ fn map_session_spawn_node_failure(
 ) -> HarnessOperatorHostErrorV1 {
     match code {
         NodeFailureCode::InvalidRequest => HarnessOperatorHostErrorV1::InvalidRequest,
-        NodeFailureCode::UnknownWorkspace => HarnessOperatorHostErrorV1::NotFound,
+        NodeFailureCode::UnknownWorkspace
+        | NodeFailureCode::UnknownNetworkAllowlist => HarnessOperatorHostErrorV1::NotFound,
         NodeFailureCode::SpawnProfileRevisionMismatch
         | NodeFailureCode::BindingMismatch
         | NodeFailureCode::StaleGeneration => HarnessOperatorHostErrorV1::Conflict,

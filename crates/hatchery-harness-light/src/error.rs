@@ -183,6 +183,7 @@ fn map_node_failure(code: NodeFailureCode) -> HarnessOperatorHostErrorV1 {
         | NodeFailureCode::UnknownSessionRecord
         | NodeFailureCode::UnknownSession
         | NodeFailureCode::UnknownContextPack
+        | NodeFailureCode::UnknownNetworkAllowlist
         | NodeFailureCode::NotGitRepository => HarnessOperatorHostErrorV1::NotFound,
         NodeFailureCode::SpawnProfileRevisionMismatch
         | NodeFailureCode::BindingMismatch
