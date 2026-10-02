@@ -2670,7 +2670,7 @@ fn flush_pet_arcade_pixel_frame_into<W: io::Write>(
         // Defensively clears the NEW rect too, even though it is about to
         // be fully overwritten by an opaque-everywhere board raster in
         // practice (the board's own always-present `Ground` layer paints
-        // every tile, see `gate4agent-arcade`'s own `paint_terrain`): a
+        // every tile, see `hatchery-arcade`'s own `paint_terrain`): a
         // stale, still-opaque placement from something ELSE (e.g. a rail
         // icon the modal just moved on top of) sitting under a
         // `BackgroundMode::Transparent` encode could otherwise bleed

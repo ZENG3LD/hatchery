@@ -1,5 +1,5 @@
 [package]
-name = "gate4agent-arcade-engine"
+name = "hatchery-arcade-engine"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -22,21 +22,17 @@ serde = { version = "1", features = ["derive"] }
 bincode = "1.3"
 uzor-tui = { version = "1.5.1", features = ["ascii"], optional = true }
 uzor-text = { version = "1.5.1", optional = true }
-# Same sixel encoder `gate4agent-tui` already bakes its own icons with --
+# Same sixel encoder hatchery-tui already bakes its own icons with --
 # see `backend_sixel.rs`'s own module doc for why this backend calls it
 # directly instead of re-deriving sixel encoding.
 icy_sixel = { version = "0.6", optional = true }
 # URX -- uzor's own render backend (own scanline rasteriser, no GPU/window/
 # event loop -- see `render/backend_pixel.rs`'s own module doc for why this
-# replaced the hand-rolled `pixel.rs` primitives). Local path dependency into
-# the `uzor` submodule, same convention `landing/crates/landing-wasm`'s own
-# `Cargo.toml` already uses for the sibling `uzor` crate itself -- not a
-# crates.io pin, since these specific URX crates were never independently
-# confirmed to resolve there (see `docs/gate4agent/research/urx-pixel-path-
-# for-terminal-2026-08-27.md` §9). `uzor-urx-cpu`'s default features (no
-# `parallel`, no `glyph`, no `image-decode`) are exactly right here: this
-# backend never draws text or raster images through URX, and rayon-per-band
-# parallelism is an optimisation this pass's own bench numbers did not show
-# a need for.
-uzor-urx-core = { path = "../../uzor/uzor-urx-core", optional = true }
-uzor-urx-cpu = { path = "../../uzor/uzor-urx-cpu", optional = true }
+# replaced the hand-rolled `pixel.rs` primitives). crates.io pins (confirmed
+# published as uzor-urx-*); former vendored tree used a local uzor path.
+# `uzor-urx-cpu`'s default features (no `parallel`, no `glyph`, no
+# `image-decode`) are exactly right here: this backend never draws text or
+# raster images through URX, and rayon-per-band parallelism is an
+# optimisation this pass's own bench numbers did not show a need for.
+uzor-urx-core = { version = "1.5.1", optional = true }
+uzor-urx-cpu = { version = "1.5.1", optional = true }

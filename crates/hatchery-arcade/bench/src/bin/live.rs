@@ -27,8 +27,8 @@ use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
-use gate4agent_arcade_bench::console::{wait_for_dsr_reply, RawMode};
-use gate4agent_arcade_bench::{raster, sixel, stats};
+use hatchery_arcade_bench::console::{wait_for_dsr_reply, RawMode};
+use hatchery_arcade_bench::{raster, sixel, stats};
 
 const BOARD_COLS: u32 = 56;
 const BOARD_ROWS: u32 = 14;

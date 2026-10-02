@@ -1,15 +1,15 @@
 [package]
-name = "gate4agent-arcade-preview"
+name = "hatchery-arcade-preview"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Disposable dev tool: renders one real Pet Bastion mid-run snapshot through every implemented render path to PNG, and an interpolated motion sequence through the pixel path, for owner comparison. Not part of the product -- never depended on by engine/sweep/pet-bastion."
 
 [dependencies]
-gate4agent-arcade-engine = { path = "../engine", default-features = false, features = ["render"] }
-gate4agent-arcade-pet-bastion = { path = "../games/pet-bastion", default-features = false }
-gate4agent-arcade-pet-bastion-render = { path = "../games/pet-bastion-render" }
-gate4agent-arcade-sweep = { path = "../sweep", default-features = false }
+hatchery-arcade-engine = { path = "../engine", default-features = false, features = ["render"] }
+hatchery-arcade-pet-bastion = { path = "../games/pet-bastion", default-features = false }
+hatchery-arcade-pet-bastion-render = { path = "../games/pet-bastion-render" }
+hatchery-arcade-sweep = { path = "../sweep", default-features = false }
 # Same version the engine's own `render` feature already pulls in --
 # pinned explicitly since this binary names `uzor_tui::{buffer, rect}`
 # types directly (to build the scratch `TerminalBuffer`/`Rect` every

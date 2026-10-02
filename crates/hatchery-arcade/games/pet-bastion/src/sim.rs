@@ -52,7 +52,7 @@ pub struct PetBastionParams {
 
 impl PetBastionParams {
     /// A run at `difficulty` with no calibration overrides -- the
-    /// constructor every caller outside `gate4agent-arcade-sweep`'s own
+    /// constructor every caller outside `hatchery-arcade-sweep`'s own
     /// grid search uses.
     pub fn new(difficulty: Difficulty) -> Self {
         PetBastionParams { difficulty, balance_overrides: BalanceOverrides::default() }

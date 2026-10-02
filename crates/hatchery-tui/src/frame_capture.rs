@@ -39,7 +39,7 @@
 //! ([`crate::app::LayoutRects::pet_arcade_pixel_frame`]) is NOT
 //! reachable as RGBA at capture time and is NOT painted into this
 //! canvas. `render::render_pet_arcade` composes that overlay's RGBA
-//! canvas (`gate4agent_arcade_engine::compose_frame`, driven by
+//! canvas (`hatchery_arcade_engine::compose_frame`, driven by
 //! interpolated, continuously-moving sim state -- tick-boundary
 //! snapshots, wall-clock tick-alpha, aging combat effects) and
 //! immediately sixel-ENCODES it (`encode_frame`) without ever storing the

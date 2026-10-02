@@ -1,7 +1,7 @@
 //! `SimulationSnapshot -> Surface` adapter and Pet Bastion's own tile/
 //! colour catalog -- the ONE crate allowed to depend on BOTH `gate4agent-
 //! arcade-pet-bastion` (sim rules, no terminal type anywhere -- see that
-//! crate's own `lib.rs` "Forbidden" doc line) and `gate4agent-arcade-
+//! crate's own `lib.rs` "Forbidden" doc line) and `hatchery-arcade-
 //! engine`'s `render` feature (terminal rendering types).
 //!
 //! # Why a third crate, not a feature on either existing one
@@ -37,7 +37,7 @@
 //! a status effect on an OCCUPIED tile (an enemy's slow/stun) cannot be a
 //! second, competing tile identity on the SAME cell -- it is encoded as
 //! a colour tint (`bg`) on that enemy's own cell instead, plus a
-//! `TileArt::variant` bump so [`gate4agent_arcade_engine::SixelBackend`]
+//! `TileArt::variant` bump so [`hatchery_arcade_engine::SixelBackend`]
 //! can draw it with real per-pixel structure too. [`TileId::CircuitLink`]
 //! is the one effect that DOES get a real, standalone tile identity: a
 //! small halo of tiles around the pet's current anchor, painted only over
@@ -52,15 +52,15 @@
 
 use std::collections::HashMap;
 
-use gate4agent_arcade_engine::{Rgb, Surface, SurfaceCell, TileArt, TileId};
-use gate4agent_arcade_pet_bastion::board::{AnchorId, Board, ANCHORS, ANCHOR_COUNT, HEARTSEED};
-use gate4agent_arcade_pet_bastion::boss::BossKind;
-use gate4agent_arcade_pet_bastion::constants::{BOARD_HEIGHT, BOARD_WIDTH, FIXED_SCALE, PET_MOVE_TICKS, PET_MOVE_TICKS_MOTH};
-use gate4agent_arcade_pet_bastion::enemy::EnemyKind;
-use gate4agent_arcade_pet_bastion::geometry::{FixedPos, Tile};
-use gate4agent_arcade_pet_bastion::pet::{Evolution, PetState};
-use gate4agent_arcade_pet_bastion::snapshot::{BossView, EnemyView, PetView, SimulationSnapshot, TowerView};
-use gate4agent_arcade_pet_bastion::tower::{TowerKind, UpgradeLevel};
+use hatchery_arcade_engine::{Rgb, Surface, SurfaceCell, TileArt, TileId};
+use hatchery_arcade_pet_bastion::board::{AnchorId, Board, ANCHORS, ANCHOR_COUNT, HEARTSEED};
+use hatchery_arcade_pet_bastion::boss::BossKind;
+use hatchery_arcade_pet_bastion::constants::{BOARD_HEIGHT, BOARD_WIDTH, FIXED_SCALE, PET_MOVE_TICKS, PET_MOVE_TICKS_MOTH};
+use hatchery_arcade_pet_bastion::enemy::EnemyKind;
+use hatchery_arcade_pet_bastion::geometry::{FixedPos, Tile};
+use hatchery_arcade_pet_bastion::pet::{Evolution, PetState};
+use hatchery_arcade_pet_bastion::snapshot::{BossView, EnemyView, PetView, SimulationSnapshot, TowerView};
+use hatchery_arcade_pet_bastion::tower::{TowerKind, UpgradeLevel};
 
 /// Frame interpolation (fixed 20Hz sim step -> smooth 60Hz render) -- see
 /// this module's own doc comment for why it lives here and not in the
@@ -378,7 +378,7 @@ fn decor_for_tile(x: i32, y: i32) -> Option<(TileId, u8, Rgb, char)> {
 
 /// [`TileId::Path`]/[`TileId::Choke`]'s own `TileArt::variant` bit for "the
 /// tile immediately north/east/south/west is also a route tile" -- matches
-/// `gate4agent-arcade-engine`'s own private `ROAD_NORTH`/`ROAD_EAST`/
+/// `hatchery-arcade-engine`'s own private `ROAD_NORTH`/`ROAD_EAST`/
 /// `ROAD_SOUTH`/`ROAD_WEST` constants (`render::sprites`) bit for bit; kept
 /// as a plain literal here (not re-exported) since only this one producer
 /// and that one consumer ever need to agree on the encoding.
@@ -490,7 +490,7 @@ fn paint_terrain(surface: &mut Surface) {
 /// [`SimulationSnapshot`] -- calling this twice, or calling it before vs.
 /// after towers have been placed, always produces byte-identical output.
 ///
-/// This is the ONE correct input to `gate4agent_arcade_engine::
+/// This is the ONE correct input to `hatchery_arcade_engine::
 /// build_background`/`background_seed`: [`snapshot_to_surface`]'s own
 /// output later gets towers/enemies/the pet painted ON TOP of this exact
 /// same terrain, and `Surface` holds exactly one `art` per cell -- so a
@@ -580,7 +580,7 @@ fn paint_tower(surface: &mut Surface, tower: &TowerView) {
 
 /// `(status background tint, `TileArt::variant`)` for one enemy -- shared
 /// between the tile-grid `paint_enemy` pass below and
-/// `gate4agent-arcade-pet-bastion-render`'s own pixel-tier `interp` module,
+/// `hatchery-arcade-pet-bastion-render`'s own pixel-tier `interp` module,
 /// so "slowed"/"stunned" reads as the identical tint on both paths rather
 /// than two independently-maintained copies of the same three-way rule
 /// (this pass's own "readable замедление" requirement).
@@ -606,7 +606,7 @@ fn paint_enemy(surface: &mut Surface, enemy: &EnemyView) {
 }
 
 /// `TileArt::variant` = remaining HP in tenths (0..=10) -- lets
-/// [`gate4agent_arcade_engine::SixelBackend`]'s own procedural boss shape
+/// [`hatchery_arcade_engine::SixelBackend`]'s own procedural boss shape
 /// react to how close the fight is, without this adapter needing to know
 /// anything about sixel rendering itself.
 pub(crate) fn boss_hp_tenths(boss: &BossView) -> u8 {
@@ -672,9 +672,9 @@ pub fn snapshot_to_surface(snapshot: &SimulationSnapshot) -> Surface {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gate4agent_arcade_pet_bastion::snapshot::{BossBodyView, RunPhaseView};
-    use gate4agent_arcade_pet_bastion::tower;
-    use gate4agent_arcade_pet_bastion::wave::Difficulty;
+    use hatchery_arcade_pet_bastion::snapshot::{BossBodyView, RunPhaseView};
+    use hatchery_arcade_pet_bastion::tower;
+    use hatchery_arcade_pet_bastion::wave::Difficulty;
 
     fn empty_snapshot() -> SimulationSnapshot {
         SimulationSnapshot {
@@ -803,7 +803,7 @@ mod tests {
         snapshot.build_cells = Board::new()
             .build_zone_cells()
             .iter()
-            .map(|&(tile, reason)| gate4agent_arcade_pet_bastion::snapshot::BuildCellView { tile: (tile.x, tile.y), reason })
+            .map(|&(tile, reason)| hatchery_arcade_pet_bastion::snapshot::BuildCellView { tile: (tile.x, tile.y), reason })
             .collect();
         let mut surface = snapshot_to_surface(&snapshot);
         let buildable_count = snapshot.build_cells.iter().filter(|c| c.reason.is_none()).count();
@@ -851,7 +851,7 @@ mod tests {
         let stats = tower::effective_stats(TowerKind::Bell, UpgradeLevel::L2);
         let base_cost = TowerKind::Bell.base_stats().cost;
         snapshot.towers.push(TowerView {
-            id: gate4agent_arcade_pet_bastion::ids::EntityIdAllocator::default().next(),
+            id: hatchery_arcade_pet_bastion::ids::EntityIdAllocator::default().next(),
             kind: TowerKind::Bell,
             level: UpgradeLevel::L2,
             position: (tile.x, tile.y),
@@ -872,7 +872,7 @@ mod tests {
     #[test]
     fn circuit_link_halo_never_overwrites_a_real_terrain_tile() {
         let mut snapshot = empty_snapshot();
-        snapshot.pet.linked_towers = vec![gate4agent_arcade_pet_bastion::ids::EntityIdAllocator::default().next()];
+        snapshot.pet.linked_towers = vec![hatchery_arcade_pet_bastion::ids::EntityIdAllocator::default().next()];
         let surface = snapshot_to_surface(&snapshot);
         let anchor_tile = Board::anchor_tile(AnchorId(0));
 
@@ -911,7 +911,7 @@ mod tests {
             hp: 500,
             max_hp: 1000,
             hp_permille: 500,
-            bodies: vec![BossBodyView { id: gate4agent_arcade_pet_bastion::ids::EntityIdAllocator::default().next(), position: FixedPos::new(0, 0), slow_permille: 0 }],
+            bodies: vec![BossBodyView { id: hatchery_arcade_pet_bastion::ids::EntityIdAllocator::default().next(), position: FixedPos::new(0, 0), slow_permille: 0 }],
             final_phase: false,
             split_triggered: false,
             escort_triggered: [false; 3],

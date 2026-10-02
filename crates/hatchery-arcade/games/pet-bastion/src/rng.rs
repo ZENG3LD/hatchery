@@ -1,5 +1,5 @@
 //! Thin re-export of the engine's seeded PRNG
-//! ([`gate4agent_arcade_engine::rng::EngineRng`]), plus this crate's own
+//! ([`hatchery_arcade_engine::rng::EngineRng`]), plus this crate's own
 //! Fisher-Yates [`shuffle`] helper. Shuffling a game-owned `Vec` (the rune
 //! shuffle bag, a wave's spawn order) is game logic, not part of the
 //! generic engine contract, so it lives here instead of on `EngineRng`
@@ -7,7 +7,7 @@
 //! type anyway, so this is a free function taking `&mut EngineRng`, not a
 //! method.
 
-pub use gate4agent_arcade_engine::EngineRng;
+pub use hatchery_arcade_engine::EngineRng;
 
 /// In-place Fisher-Yates shuffle driven by an [`EngineRng`].
 pub fn shuffle<T>(rng: &mut EngineRng, items: &mut [T]) {

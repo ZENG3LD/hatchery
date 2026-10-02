@@ -1,5 +1,5 @@
 //! Frame interpolation: the game-specific half of "fixed sim step plus
-//! smooth render," paired with `gate4agent_arcade_engine::render::interp::
+//! smooth render," paired with `hatchery_arcade_engine::render::interp::
 //! tick_alpha`'s own generic timing-fraction half (see that module's own
 //! doc comment for exactly why the split lands there and not here).
 //!
@@ -9,7 +9,7 @@
 //! body positions, the pet's own sub-tick position), matched by which key
 //! (`EntityId` for enemies/boss bodies; the pet has exactly one instance,
 //! so no key is needed), and how a fixed-point sim position becomes a
-//! [`gate4agent_arcade_engine::DynamicSprite`] a pixel-tier backend can
+//! [`hatchery_arcade_engine::DynamicSprite`] a pixel-tier backend can
 //! actually composite.
 //!
 //! Every position here is a LINEAR interpolation between two already-
@@ -27,13 +27,13 @@
 
 use std::time::Duration;
 
-use gate4agent_arcade_engine::{DynamicSprite, TileId};
-use gate4agent_arcade_pet_bastion::board::Board;
-use gate4agent_arcade_pet_bastion::constants::{FIXED_SCALE, PET_MOVE_TICKS, PET_MOVE_TICKS_MOTH, TICK_MS};
-use gate4agent_arcade_pet_bastion::geometry::FixedPos;
-use gate4agent_arcade_pet_bastion::ids::EntityId;
-use gate4agent_arcade_pet_bastion::pet::{Evolution, PetState};
-use gate4agent_arcade_pet_bastion::snapshot::{PetView, SimulationSnapshot};
+use hatchery_arcade_engine::{DynamicSprite, TileId};
+use hatchery_arcade_pet_bastion::board::Board;
+use hatchery_arcade_pet_bastion::constants::{FIXED_SCALE, PET_MOVE_TICKS, PET_MOVE_TICKS_MOTH, TICK_MS};
+use hatchery_arcade_pet_bastion::geometry::FixedPos;
+use hatchery_arcade_pet_bastion::ids::EntityId;
+use hatchery_arcade_pet_bastion::pet::{Evolution, PetState};
+use hatchery_arcade_pet_bastion::snapshot::{PetView, SimulationSnapshot};
 
 use crate::{boss_color, boss_hp_tenths, boss_tile_id, enemy_color, enemy_status_bg_variant, enemy_tile_id, evolution_bg, evolution_variant, PET_COLOR};
 
@@ -73,7 +73,7 @@ pub fn sim_time(tick_index: u64, alpha: f64) -> Duration {
 /// impact flash and death burst additionally missing its own first tick.
 /// This fn exists so that no call site has to re-derive any of that: it
 /// is the ONE place the `prev`-not-`curr` rule lives, and both consumers
-/// (the TUI's own `render_pet_arcade` and `gate4agent-arcade-preview`'s
+/// (the TUI's own `render_pet_arcade` and `hatchery-arcade-preview`'s
 /// own sequence loop) go through it.
 ///
 /// `prev: None` is the first frame of a fresh run -- `FramePresenter`'s
@@ -132,7 +132,7 @@ fn lerp_fixed(a: FixedPos, b: FixedPos, alpha: f64) -> (f64, f64) {
 /// The pet's own continuous position, in fractional board tiles --
 /// extends `snapshot_to_surface`'s own tile-snapped `pet_tile` with a
 /// sub-TICK `alpha` (the same `0.0..=1.0` fraction
-/// `gate4agent_arcade_engine::render::interp::tick_alpha` produces): while
+/// `hatchery_arcade_engine::render::interp::tick_alpha` produces): while
 /// `Moving`, `ticks_remaining` is only ever an INTEGER count as of the
 /// snapshot it came from, so subtracting `alpha` from it before computing
 /// the travelled fraction is what actually lets the pet glide smoothly
@@ -165,7 +165,7 @@ pub fn pet_position_tiles(pet: &PetView, alpha: f64) -> (f64, f64) {
 /// either side falls back to "just show the known side's own position,
 /// unlerped": a freshly-spawned enemy has no `prev` sample to lerp FROM, a
 /// just-removed one has no `curr` sample to show AT ALL, so it is simply
-/// absent here -- see `gate4agent-arcade-pet-bastion-render`'s own
+/// absent here -- see `hatchery-arcade-pet-bastion-render`'s own
 /// `effects` module for how a kill's own visual continuity is carried by a
 /// death effect instead, not by this function inventing a position for an
 /// entity that no longer exists).
@@ -257,11 +257,11 @@ pub fn resolve_position(snapshot: &SimulationSnapshot, id: EntityId) -> Option<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gate4agent_arcade_pet_bastion::board::AnchorId;
-    use gate4agent_arcade_pet_bastion::enemy::EnemyKind;
-    use gate4agent_arcade_pet_bastion::ids::EntityIdAllocator;
-    use gate4agent_arcade_pet_bastion::snapshot::{EnemyView, PetView, RunPhaseView};
-    use gate4agent_arcade_pet_bastion::wave::Difficulty;
+    use hatchery_arcade_pet_bastion::board::AnchorId;
+    use hatchery_arcade_pet_bastion::enemy::EnemyKind;
+    use hatchery_arcade_pet_bastion::ids::EntityIdAllocator;
+    use hatchery_arcade_pet_bastion::snapshot::{EnemyView, PetView, RunPhaseView};
+    use hatchery_arcade_pet_bastion::wave::Difficulty;
 
     fn base_snapshot() -> SimulationSnapshot {
         SimulationSnapshot {
@@ -367,14 +367,14 @@ mod tests {
         let tower_id = alloc.next();
         let enemy_id = alloc.next();
         let mut snapshot = base_snapshot();
-        snapshot.towers.push(gate4agent_arcade_pet_bastion::snapshot::TowerView {
+        snapshot.towers.push(hatchery_arcade_pet_bastion::snapshot::TowerView {
             id: tower_id,
-            kind: gate4agent_arcade_pet_bastion::tower::TowerKind::Needle,
-            level: gate4agent_arcade_pet_bastion::tower::UpgradeLevel::Base,
+            kind: hatchery_arcade_pet_bastion::tower::TowerKind::Needle,
+            level: hatchery_arcade_pet_bastion::tower::UpgradeLevel::Base,
             position: (4, 1),
             linked: false,
             cooldown_ticks: 0,
-            stats: gate4agent_arcade_pet_bastion::tower::effective_stats(gate4agent_arcade_pet_bastion::tower::TowerKind::Needle, gate4agent_arcade_pet_bastion::tower::UpgradeLevel::Base),
+            stats: hatchery_arcade_pet_bastion::tower::effective_stats(hatchery_arcade_pet_bastion::tower::TowerKind::Needle, hatchery_arcade_pet_bastion::tower::UpgradeLevel::Base),
             next_upgrade_cost: None,
             sell_price: 0,
         });

@@ -1,5 +1,5 @@
 [package]
-name = "gate4agent-arcade-pet-bastion-render"
+name = "hatchery-arcade-pet-bastion-render"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,5 +10,5 @@ description = "Pet Bastion snapshot -> engine Surface adapter and tile catalog m
 # ONE consumer allowed to sit on both sides of the terminal/no-terminal
 # split (see the engine's own `render/mod.rs` doc comment and pet-bastion's
 # own `lib.rs` "Forbidden" doc line).
-gate4agent-arcade-engine = { path = "../../engine", default-features = false, features = ["render"] }
-gate4agent-arcade-pet-bastion = { path = "../pet-bastion", default-features = false }
+hatchery-arcade-engine = { path = "../../engine", default-features = false, features = ["render"] }
+hatchery-arcade-pet-bastion = { path = "../pet-bastion", default-features = false }

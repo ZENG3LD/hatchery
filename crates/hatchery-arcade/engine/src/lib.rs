@@ -1,7 +1,7 @@
-//! `gate4agent-arcade-engine` -- a deterministic mini-game engine plus an
+//! `hatchery-arcade-engine` -- a deterministic mini-game engine plus an
 //! optional multi-tier terminal renderer for the `gate4agent-tui` pet
 //! modal arcade. See
-//! `docs/gate4agent/plans/gate4agent-arcade-engine-2026-08-26.md` for the
+//! `docs/gate4agent/plans/hatchery-arcade-engine-2026-08-26.md` for the
 //! full design. This file only re-exports; all real code lives in the
 //! named modules below.
 //!
@@ -10,7 +10,7 @@
 //! imports anything from `render`. `render` is the ONLY part of this
 //! crate that may import `uzor_tui`/`uzor_text`, and is entirely absent
 //! from a build with `default-features = false` (e.g.
-//! `gate4agent-arcade-sweep`'s own dependency edge).
+//! `hatchery-arcade-sweep`'s own dependency edge).
 
 pub mod admission;
 pub mod cadence;

@@ -12,7 +12,7 @@ use icy_sixel::SixelImage;
 use image::{Rgb, RgbImage};
 use uzor_tui::{buffer::TerminalBuffer, style::Color};
 
-use gate4agent_arcade_engine::{PixelCanvas, SixelPlacement};
+use hatchery_arcade_engine::{PixelCanvas, SixelPlacement};
 
 /// A plausible real dark terminal background -- hand-synced to
 /// `gate4agent-tui`'s own `icons.rs::OVERRIDE_ACTIVE_BG`, so this preview
@@ -141,7 +141,7 @@ pub fn render_halfblock_png(buf: &TerminalBuffer, cell_px_w: u32, cell_px_h: u32
     img.save(out_path)
 }
 
-/// Must match `gate4agent-arcade-engine`'s own `render::backend_sixel`
+/// Must match `hatchery-arcade-engine`'s own `render::backend_sixel`
 /// `PX_PER_CELL_W`/`_H` exactly -- those are private to that module (only
 /// [`SixelPlacement::rect`], in TERMINAL-CELL space, is public), so this
 /// preview tool keeps its own documented copy rather than growing that
@@ -186,7 +186,7 @@ pub fn render_sixel_png(cols: u32, rows: u32, placements: &[SixelPlacement], out
 /// Renders the NEW pixel tier's own already-composed [`PixelCanvas`]
 /// straight to PNG, composited over [`TERMINAL_BG`] -- unlike
 /// [`render_sixel_png`], this reads the RGBA canvas
-/// `gate4agent_arcade_engine::compose_frame` actually produced directly,
+/// `hatchery_arcade_engine::compose_frame` actually produced directly,
 /// with no sixel encode/decode round trip in between, so what this PNG
 /// shows is exactly what `encode_frame` was handed (the round trip is
 /// exercised and timed separately, see `main.rs`'s own cost-measurement

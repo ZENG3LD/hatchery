@@ -23,7 +23,7 @@ pub struct DifficultyPreset {
 }
 
 /// Search-time balance overrides layered on TOP of a `Difficulty` preset --
-/// `gate4agent-arcade-sweep`'s own grid-search knobs
+/// `hatchery-arcade-sweep`'s own grid-search knobs
 /// (`--bellkeeper-hp-mult`/`--night-maw-hp-mult`/`--reward-mult`), threaded
 /// through `PetBastionParams` so the sweep can vary calibration numbers
 /// without recompiling `constants.rs`. Neutral (every field `1000`
@@ -41,7 +41,7 @@ pub struct BalanceOverrides {
     /// Extra multiplier on minion HP for waves 5-8 only (waves 1-4 are
     /// unaffected) -- the sweep's own finding this exists to fix: with every
     /// other override neutral, 300 Cozy seeds that cleared a weakened
-    /// Bellkeeper produced ZERO wave 5-7 deaths (`gate4agent-arcade-sweep
+    /// Bellkeeper produced ZERO wave 5-7 deaths (`hatchery-arcade-sweep
     /// --bellkeeper-hp-mult=300 --seeds=300`, every policy's own death-wave
     /// histogram read `w5=0 w6=0 w7=0`) -- the run is entirely wall-shaped
     /// around the two bosses, with nothing between them able to end a run.

@@ -1,5 +1,5 @@
 //! The Pet Bastion arcade overlay: host-side glue between `gate4agent-tui`
-//! and the `gate4agent-arcade` mini-game engine. Owns exactly one hosted
+//! and the `hatchery-arcade` mini-game engine. Owns exactly one hosted
 //! run (paused, in progress, or finished) and every piece of state its
 //! glyph-tier board needs to be driven from either input device -- a
 //! selected-tile/selected-anchor cursor (keyboard: `Tab`/`[`/`]`, still the
@@ -11,7 +11,7 @@
 //!
 //! # Free build placement, not fixed pads, not a route-proximity radius
 //!
-//! `gate4agent-arcade-pet-bastion`'s own board (`board.rs`) used to expose
+//! `hatchery-arcade-pet-bastion`'s own board (`board.rs`) used to expose
 //! ten fixed build pads (`PadId`/`PADS`), then a build radius around each
 //! route. Both are gone -- it now exposes every board cell that is not
 //! itself a route/choke tile, a pet anchor, or already occupied
@@ -28,14 +28,14 @@
 //! Drawing lives in `render.rs` (`render_pet_arcade`), matching this
 //! crate's own "every `render_*` fn lives in `render.rs`" convention --
 //! this module owns simulation/session state and input handling only, the
-//! same split `gate4agent-arcade-pet-bastion` (rules) vs. `gate4agent-
+//! same split `hatchery-arcade-pet-bastion` (rules) vs. `gate4agent-
 //! arcade-pet-bastion-render` (presentation) already draws one layer down.
 //!
 //! # Why `Rc<RefCell<PetArcade>>`, not a plain field
 //!
 //! `App` derives `Clone, Debug` (exercised by real, non-`cfg(test)`-gated
 //! test code that clones a live `App` to render it twice under a mutated
-//! field). Neither `gate4agent_arcade_engine::Runner` nor `GameScreen` nor
+//! field). Neither `hatchery_arcade_engine::Runner` nor `GameScreen` nor
 //! `ArcadeShell` implement `Clone` -- `Runner`'s own fields are private
 //! with no public reconstruction API, so there is no way to hand-clone one
 //! from outside the engine crate at all. `Rc::clone` sidesteps this
@@ -50,7 +50,7 @@
 //! # Admission
 //!
 //! The engine's own `AdmissionSource` is a host-decided trust boundary the
-//! engine never inspects (see `gate4agent_arcade_engine::admission`'s own
+//! engine never inspects (see `hatchery_arcade_engine::admission`'s own
 //! doc comment) -- it converts whatever real consumption signal a host
 //! trusts into a plain credit count before `Runner::start` ever runs. This
 //! TUI has no energy/session economy wired to the arcade yet, so
@@ -64,24 +64,24 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use gate4agent_arcade_engine::{
+use hatchery_arcade_engine::{
     AdmissionCredit, AdmissionError, AdmissionSource, ArcadeOccupant, ArcadeShell, CellArea,
     DynamicSprite, DynamicStroke, GameCatalogEntry, GameEntry, GameScreen, MiniGame, Runner,
 };
-use gate4agent_arcade_pet_bastion::board::{AnchorId, BuildIneligibleReason, ANCHOR_COUNT, ANCHORS};
-use gate4agent_arcade_pet_bastion::constants::{
+use hatchery_arcade_pet_bastion::board::{AnchorId, BuildIneligibleReason, ANCHOR_COUNT, ANCHORS};
+use hatchery_arcade_pet_bastion::constants::{
     BLINK_COST, FIXED_SCALE, FULL_CIRCUIT_COST, PET_PULSE_COST,
 };
-use gate4agent_arcade_pet_bastion::geometry::{FixedPos, Tile};
-use gate4agent_arcade_pet_bastion::ids::EntityId;
-use gate4agent_arcade_pet_bastion::pet::{Evolution, PetCharge, PetState};
-use gate4agent_arcade_pet_bastion::rune::Rune;
-use gate4agent_arcade_pet_bastion::snapshot::{RunPhaseView, SimulationSnapshot, TowerView};
-use gate4agent_arcade_pet_bastion::tower::{TowerKind, UpgradeBranch};
-use gate4agent_arcade_pet_bastion::wave::Difficulty;
-use gate4agent_arcade_pet_bastion::{Command, PetBastionParams, RunOutcome, Simulation};
-use gate4agent_arcade_pet_bastion_render::effects::EffectsLayer;
-use gate4agent_arcade_pet_bastion_render::interp::{sim_time, FramePresenter};
+use hatchery_arcade_pet_bastion::geometry::{FixedPos, Tile};
+use hatchery_arcade_pet_bastion::ids::EntityId;
+use hatchery_arcade_pet_bastion::pet::{Evolution, PetCharge, PetState};
+use hatchery_arcade_pet_bastion::rune::Rune;
+use hatchery_arcade_pet_bastion::snapshot::{RunPhaseView, SimulationSnapshot, TowerView};
+use hatchery_arcade_pet_bastion::tower::{TowerKind, UpgradeBranch};
+use hatchery_arcade_pet_bastion::wave::Difficulty;
+use hatchery_arcade_pet_bastion::{Command, PetBastionParams, RunOutcome, Simulation};
+use hatchery_arcade_pet_bastion_render::effects::EffectsLayer;
+use hatchery_arcade_pet_bastion_render::interp::{sim_time, FramePresenter};
 
 use crate::app::UiKey;
 
@@ -93,7 +93,7 @@ pub(crate) const TICK_INTERVAL: Duration = <Simulation as MiniGame>::TICK;
 /// The pixel tier's own target render cadence -- 60Hz/~16.7ms, deliberately
 /// independent of [`TICK_INTERVAL`]'s own fixed 20Hz: the sim itself never
 /// runs any faster than that (the owner's own "симуляция остаётся на 20
-/// тиках в секунду" mandate, restated at `gate4agent_arcade_pet_bastion_
+/// тиках в секунду" mandate, restated at `hatchery_arcade_pet_bastion_
 /// render::interp`'s own module doc comment) -- what a faster redraw buys
 /// is smoother MOTION, via `interp::interpolated_dynamic_sprites`
 /// interpolating between the two most recent tick-boundary snapshots
@@ -258,7 +258,7 @@ pub(crate) struct PetArcade {
     /// tick_alpha`] measures progress from THIS instant, matching the
     /// fixed-step-plus-interpolation recipe's own "how far past the last
     /// completed tick is render time right now" definition
-    /// (`gate4agent_arcade_engine::tick_alpha`'s own doc comment).
+    /// (`hatchery_arcade_engine::tick_alpha`'s own doc comment).
     last_tick_at: Instant,
     /// Every run that has FINISHED (won or lost), newest last -- see
     /// [`PetArcadeScoreEntry`]'s own doc comment for what a row holds and
@@ -544,11 +544,11 @@ impl PetArcade {
     /// own last pushed tick, `0.0..=1.0` -- `now` is the caller's own read,
     /// never re-queried here, so a caller (the real render loop, or a
     /// test's own hand-advanced clock) controls exactly which instant this
-    /// is measured against. See [`gate4agent_arcade_engine::tick_alpha`]'s
+    /// is measured against. See [`hatchery_arcade_engine::tick_alpha`]'s
     /// own doc comment for the underlying arithmetic and its `0.0`/`1.0`
     /// clamping.
     pub(crate) fn tick_alpha(&self, now: Instant) -> f64 {
-        gate4agent_arcade_engine::tick_alpha(now.saturating_duration_since(self.last_tick_at), TICK_INTERVAL)
+        hatchery_arcade_engine::tick_alpha(now.saturating_duration_since(self.last_tick_at), TICK_INTERVAL)
     }
 
     /// Ages `effects` to `now` (a simulated instant -- `interp::sim_time`,
@@ -894,7 +894,7 @@ impl PetArcade {
 
     /// One of the Pet Charge draft card's own `F1`-`F3` options, clicked --
     /// see [`Self::click_draft_rune`]'s own doc comment for the matching
-    /// rationale. `gate4agent-arcade`'s own concurrent addition
+    /// rationale. `hatchery-arcade`'s own concurrent addition
     /// (`RunPhaseView::PetChargeDraft`) used to reach this crate only as a
     /// phase label -- no overlay, no options drawn, no way to answer it at
     /// all, which stalled a run outright after wave 1.
@@ -965,7 +965,7 @@ impl PetArcade {
     }
 
     /// `ArcadeShell::negotiate_size` -- "that layer owns sizing
-    /// negotiation" (see `gate4agent_arcade_engine::shell`'s own module
+    /// negotiation" (see `hatchery_arcade_engine::shell`'s own module
     /// doc). `None` means the terminal has no room for this game at all.
     pub(crate) fn negotiate_size(&self, available: CellArea) -> Option<CellArea> {
         self.shell.negotiate_size(&self.screen, available)
@@ -1024,7 +1024,7 @@ impl PetArcade {
     /// `GameScreen::Results`'s own two fields (`RunOutcome`, a hash) are
     /// both plain, publicly constructible values (unlike `GameScreen::
     /// InRun`, which wraps the engine's own opaque `Runner` and so cannot
-    /// be hand-built from outside `gate4agent-arcade` at all -- see this
+    /// be hand-built from outside `hatchery-arcade` at all -- see this
     /// module's own top doc comment). Never compiled into a real build.
     #[cfg(test)]
     pub(crate) fn force_results_for_test(&mut self, outcome: RunOutcome) {
@@ -1097,7 +1097,7 @@ pub(crate) fn build_drag_state_at(snapshot: &SimulationSnapshot, kind: TowerKind
 }
 
 /// Rounds a continuous fixed-point board position to its nearest tile,
-/// round-half-up, integer-only -- the SAME formula `gate4agent-arcade-pet-
+/// round-half-up, integer-only -- the SAME formula `hatchery-arcade-pet-
 /// bastion-render`'s own (private, not reusable from here) `round_to_tile`
 /// uses to decide which cell an enemy/boss body's own glyph is painted on.
 /// Click resolution (`PetArcade::click_tile`) needs the identical rounding

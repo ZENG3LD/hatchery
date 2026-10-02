@@ -84,9 +84,9 @@ use hatchery_harness_client::{
     HarnessRunWorktreeViewV1, HarnessWorktreeIntentV1, RedactedRunIntentV1,
     RedactedWorktreeIntentV1, TaskCreatorCategoryV1,
 };
-use gate4agent_arcade_pet_bastion::pet::{Evolution, PetCharge};
-use gate4agent_arcade_pet_bastion::rune::Rune;
-use gate4agent_arcade_pet_bastion::tower::{TowerKind, UpgradeBranch};
+use hatchery_arcade_pet_bastion::pet::{Evolution, PetCharge};
+use hatchery_arcade_pet_bastion::rune::Rune;
+use hatchery_arcade_pet_bastion::tower::{TowerKind, UpgradeBranch};
 use uzor_tui::Rect;
 
 use crate::icons::{IconId, SixelVariant};
@@ -1428,7 +1428,7 @@ impl MenuPlacement {
 /// anything while this one modal is open.
 ///
 /// `Pixel` composites the whole board as one continuous URX-rendered raster
-/// per frame (`gate4agent_arcade_engine::{compose_frame, encode_frame}`,
+/// per frame (`hatchery_arcade_engine::{compose_frame, encode_frame}`,
 /// `render::render_pet_arcade`'s own doc comment) and is the default -- the
 /// point of this whole pass. `Glyph` is the pre-existing, always-available
 /// floor tier (`GlyphBackend`) this crate shipped before the pixel tier
@@ -3179,7 +3179,7 @@ pub enum HitTarget {
     PetArcadeChooseEvolution(Evolution),
     /// One of the Pet Charge draft card's own `F1`-`F3` options -- see
     /// `PetArcadeDraftRune`'s own doc comment for the matching rationale.
-    /// `gate4agent-arcade`'s own concurrent addition (`RunPhaseView::
+    /// `hatchery-arcade`'s own concurrent addition (`RunPhaseView::
     /// PetChargeDraft`, drafted after waves 1/3/5/7): this used to reach
     /// this crate only as a phase label string, with no overlay, no
     /// options drawn, and no `Command::DraftPetCharge` ever issued -- a run
@@ -3378,7 +3378,7 @@ pub struct SixelIconPlacement {
 /// strip/gallery icon resolves its own bytes from a small, fixed catalog
 /// keyed by `(IconId, tier, family, background)` (see `icons.rs`'s own
 /// `SIXEL_CACHE`); this frame is a genuinely NEW raster built fresh every
-/// single frame it paints at all (`gate4agent_arcade_engine::{compose_
+/// single frame it paints at all (`hatchery_arcade_engine::{compose_
 /// frame, encode_frame}`, driven by interpolated, continuously-moving sim
 /// state) -- there is no fixed catalog entry this could ever be a cache
 /// key into. `client::flush_pet_arcade_pixel_frame_into` is the ONE place
@@ -3394,7 +3394,7 @@ pub struct SixelIconPlacement {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PetArcadePixelPlacement {
     pub rect: Rect,
-    /// Already sixel-encoded bytes (`gate4agent_arcade_engine::PixelFrame::
+    /// Already sixel-encoded bytes (`hatchery_arcade_engine::PixelFrame::
     /// encoded`), ready to write straight to the terminal -- this crate
     /// never re-encodes or otherwise touches these bytes, only relocates
     /// the cursor and writes them (see `client::flush_pet_arcade_pixel_

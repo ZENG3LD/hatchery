@@ -36,7 +36,7 @@ pub const MAX_CATCHUP_TICKS: u32 = 5;
 const RECORDED_TICK_QUEUE_CAP: usize = 64;
 
 /// One completed tick's own presentation-facing record -- exactly the
-/// three pieces `gate4agent_arcade_pet_bastion_render::effects::
+/// three pieces `hatchery_arcade_pet_bastion_render::effects::
 /// EffectsLayer::ingest` requires (see that fn's own doc comment):
 /// the tick index BEFORE this tick ran, `G`'s own snapshot taken
 /// immediately BEFORE this tick's `advance` call, and the events that
@@ -75,7 +75,7 @@ pub struct Runner<G: MiniGame> {
     /// is `Option`, not a `bool` flag next to an always-allocated queue:
     /// a `Runner` nobody asked to record must cost nothing beyond what
     /// this crate's own tests already assert it costs today (see
-    /// `gate4agent-arcade-sweep`'s own dependency-boundary doc, restated
+    /// `hatchery-arcade-sweep`'s own dependency-boundary doc, restated
     /// on `set_recording` itself).
     record: Option<VecDeque<RecordedTick<G>>>,
 }
@@ -109,7 +109,7 @@ impl<G: MiniGame> Runner<G> {
     /// `None`, so `advance`'s own recording branch (`self.game.
     /// snapshot()` plus a [`RecordedTick`] push) never runs at all, not
     /// merely runs against an empty queue. This is what keeps
-    /// `gate4agent-arcade-sweep`'s own headless balance meter (thousands
+    /// `hatchery-arcade-sweep`'s own headless balance meter (thousands
     /// of games per run) unaffected: `sweep` does not even construct a
     /// `Runner` -- its own harness drives `MiniGame::advance` directly
     /// via `sweep_api::simulate` (see that module's own doc comment,

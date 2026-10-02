@@ -1,5 +1,5 @@
-//! `gate4agent-arcade-sweep` -- a headless CLI balance driver over
-//! `gate4agent_arcade_engine::sweep_api::simulate`. Runs a grid of seeds x
+//! `hatchery-arcade-sweep` -- a headless CLI balance driver over
+//! `hatchery_arcade_engine::sweep_api::simulate`. Runs a grid of seeds x
 //! difficulties x policies for Pet Bastion: Night Garden and prints a
 //! balance report: win rate per difficulty, death-wave distribution,
 //! outcome distribution, ticks-per-run, and an explicit determinism check
@@ -13,20 +13,20 @@ mod cli;
 mod policy;
 mod report;
 
-use gate4agent_arcade_engine::sweep_api::simulate;
-use gate4agent_arcade_pet_bastion::sim::{PetBastionParams, Simulation};
-use gate4agent_arcade_pet_bastion::wave::{BalanceOverrides, Difficulty};
+use hatchery_arcade_engine::sweep_api::simulate;
+use hatchery_arcade_pet_bastion::sim::{PetBastionParams, Simulation};
+use hatchery_arcade_pet_bastion::wave::{BalanceOverrides, Difficulty};
 
 use cli::Cli;
 use policy::{BaselinePolicy, CircuitPolicy, GreedyPolicy, PolicyKind, SlowStackPolicy};
-use gate4agent_arcade_engine::RunOutcome;
+use hatchery_arcade_engine::RunOutcome;
 use report::{DeathCause, DifficultyReport, PolicyReport, RunRecord};
 
 fn main() {
     let cli = match Cli::parse(std::env::args().skip(1)) {
         Ok(cli) => cli,
         Err(err) => {
-            eprintln!("gate4agent-arcade-sweep: {err}");
+            eprintln!("hatchery-arcade-sweep: {err}");
             eprintln!();
             eprintln!("{}", Cli::usage());
             std::process::exit(2);
@@ -37,7 +37,7 @@ fn main() {
         return;
     }
 
-    println!("gate4agent-arcade-sweep");
+    println!("hatchery-arcade-sweep");
     println!(
         "seeds={} start_seed={} max_ticks={} difficulty={:?}",
         cli.seeds, cli.start_seed, cli.max_ticks, cli.difficulty

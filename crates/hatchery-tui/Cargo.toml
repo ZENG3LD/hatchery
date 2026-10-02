@@ -12,11 +12,10 @@ crossterm = "0.28"
 # `Runner`/`ArcadeShell`/glyph-tier backend that drives and paints it. See
 # `src/pet_arcade.rs`'s own module doc comment for the full integration.
 # Paths are in-tree hatchery-arcade (NOT a gate4agent sibling). Package
-# names remain gate4agent-arcade-* until sources are restored and renamed.
-# See crates/hatchery-arcade/README.md — sources currently MISSING.
-gate4agent-arcade-engine = { path = "../hatchery-arcade/engine", default-features = false, features = ["render"] }
-gate4agent-arcade-pet-bastion = { path = "../hatchery-arcade/games/pet-bastion" }
-gate4agent-arcade-pet-bastion-render = { path = "../hatchery-arcade/games/pet-bastion-render" }
+# ids are hatchery-arcade-* (renamed from former gate4agent-arcade-*).
+hatchery-arcade-engine = { path = "../hatchery-arcade/engine", default-features = false, features = ["render"] }
+hatchery-arcade-pet-bastion = { path = "../hatchery-arcade/games/pet-bastion" }
+hatchery-arcade-pet-bastion-render = { path = "../hatchery-arcade/games/pet-bastion-render" }
 gate4agent-build-stamp = { path = "../../../gate4agent/crates/gate4agent-build-stamp" }
 gate4agent-c2-client = { path = "../../../gate4agent/crates/gate4agent-c2-client" }
 gate4agent-c2-protocol = { path = "../../../gate4agent/crates/gate4agent-c2-protocol" }

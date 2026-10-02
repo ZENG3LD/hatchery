@@ -7,15 +7,15 @@
 
 use std::collections::HashSet;
 
-use gate4agent_arcade_engine::sweep_api::Policy;
-use gate4agent_arcade_engine::{EngineRng, MiniGame, RunOutcome};
-use gate4agent_arcade_pet_bastion::boss::BossKind;
-use gate4agent_arcade_pet_bastion::event::SimEvent;
-use gate4agent_arcade_pet_bastion::pet::PetState;
-use gate4agent_arcade_pet_bastion::sim::{PetBastionParams, Simulation};
-use gate4agent_arcade_pet_bastion::snapshot::SimulationSnapshot;
-use gate4agent_arcade_pet_bastion::wave::Difficulty;
-use gate4agent_arcade_sweep::policy::SlowStackPolicy;
+use hatchery_arcade_engine::sweep_api::Policy;
+use hatchery_arcade_engine::{EngineRng, MiniGame, RunOutcome};
+use hatchery_arcade_pet_bastion::boss::BossKind;
+use hatchery_arcade_pet_bastion::event::SimEvent;
+use hatchery_arcade_pet_bastion::pet::PetState;
+use hatchery_arcade_pet_bastion::sim::{PetBastionParams, Simulation};
+use hatchery_arcade_pet_bastion::snapshot::SimulationSnapshot;
+use hatchery_arcade_pet_bastion::wave::Difficulty;
+use hatchery_arcade_sweep::policy::SlowStackPolicy;
 
 /// One candidate mid-run frame and how it scored against [`frame_score`].
 pub struct FoundFrame {
@@ -93,7 +93,7 @@ pub fn find_preview_frame(max_seeds_to_try: u64, max_ticks: u64) -> Option<Found
 /// snapshots (`snapshots[0]` at `start_tick`, `snapshots[k]` at
 /// `start_tick + k`) and the `count_ticks` real `SimEvent` lists each
 /// `Simulation::advance` call between them actually returned -- exactly
-/// what `gate4agent-arcade-pet-bastion-render`'s own `interp`/`effects`
+/// what `hatchery-arcade-pet-bastion-render`'s own `interp`/`effects`
 /// modules need to demonstrate genuine cross-tick interpolation, not a
 /// single frame.
 pub struct FrameSequence {

@@ -1,18 +1,18 @@
 //! Headless URX CPU-render cost bench: how long does `uzor-urx-cpu::
-//! CpuBackend::render` (via `gate4agent-arcade-engine`'s own public
+//! CpuBackend::render` (via `hatchery-arcade-engine`'s own public
 //! `build_scene`/`render_over_background`) cost on a scene of this crate's
 //! own real complexity, at the full `560x266` board `bench`'s own `live`/
 //! `encode` binaries already proved the terminal holds at 60fps
 //! (`BOARD_COLS=56, BOARD_ROWS=14` at `10x19` px/cell there; here `28x14`
 //! real Pet Bastion board tiles at `20x19` px/cell -- same `560x266`
-//! total, see `gate4agent-arcade-engine/src/render/backend_pixel.rs`'s own
+//! total, see `hatchery-arcade-engine/src/render/backend_pixel.rs`'s own
 //! `PX_PER_CELL_W` doc comment for why `20`, not `10`). No terminal
 //! involved -- this is the OTHER half of the 16.7ms/60fps frame budget
 //! those binaries measure (encode + terminal ingest is the sixel side);
 //! this binary measures the drawing cost itself.
 //!
 //! Two distinct costs, measured separately, matching the engine's own
-//! background/overlay split (`gate4agent-arcade-engine::render::
+//! background/overlay split (`hatchery-arcade-engine::render::
 //! background`'s own module doc comment):
 //!
 //! - `build_background` -- the continuous ground/decor/route/pool/marker
@@ -26,12 +26,12 @@
 //!   the already-cached background. This is the number that actually has
 //!   to fit the 60fps budget, every single tick.
 //!
-//! Run: `cargo run --release -p gate4agent-arcade-bench --bin urx_render`
+//! Run: `cargo run --release -p hatchery-arcade-bench --bin urx_render`
 
 use std::time::Instant;
 
-use gate4agent_arcade_bench::stats;
-use gate4agent_arcade_engine::{build_background, build_scene, render_over_background, BoardBackground, DynamicSprite, DynamicStroke, Rgb, Surface, SurfaceCell, TileArt, TileId};
+use hatchery_arcade_bench::stats;
+use hatchery_arcade_engine::{build_background, build_scene, render_over_background, BoardBackground, DynamicSprite, DynamicStroke, Rgb, Surface, SurfaceCell, TileArt, TileId};
 
 const BOARD_W: u16 = 28;
 const BOARD_H: u16 = 14;
@@ -56,10 +56,10 @@ fn terrain_cell(glyph: char, fg: Rgb, tile: TileId, variant: u8) -> SurfaceCell 
     SurfaceCell { glyph, fg, bg: None, art: Some(TileArt { tile, variant }) }
 }
 
-/// Cheap deterministic hash, the SAME finalizer shape `gate4agent-arcade-
+/// Cheap deterministic hash, the SAME finalizer shape `hatchery-arcade-
 /// pet-bastion-render::tile_hash` uses (see that function's own doc
 /// comment) -- reproduced here, not imported, so this bench stays a leaf
-/// that never depends on `gate4agent-arcade-pet-bastion`'s own simulation
+/// that never depends on `hatchery-arcade-pet-bastion`'s own simulation
 /// (this module's own doc comment).
 fn tile_hash(x: u16, y: u16, salt: u32) -> u32 {
     let mut h = (x as u32).wrapping_mul(0x9E37_79B1);
@@ -82,17 +82,17 @@ fn is_route(x: i32, y: i32) -> bool {
 /// Builds a `28x14` terrain-only [`Surface`] representative of a mid-wave
 /// Pet Bastion night-garden board: a `Ground`-covered board (every tile,
 /// deterministic tone variant), a static decor scatter (rocks/plants/
-/// fireflies, ~20% of tiles -- the same density `gate4agent-arcade-pet-
+/// fireflies, ~20% of tiles -- the same density `hatchery-arcade-pet-
 /// bastion-render::decor_for_tile` produces), a two-lane path shaped by
 /// real neighbour connectivity, a small water pool ringing the Heartseed,
 /// and pet anchors -- the same `TileId::is_board_environment` content
-/// `gate4agent-arcade-pet-bastion-render::terrain_surface` would paint
+/// `hatchery-arcade-pet-bastion-render::terrain_surface` would paint
 /// from the real board, hand-built here so `bench` never has to depend on
-/// `gate4agent-arcade-pet-bastion`'s own simulation (this bench stays a
+/// `hatchery-arcade-pet-bastion`'s own simulation (this bench stays a
 /// leaf that only depends on `engine`'s `render` feature, exactly like
 /// `preview` already does). No tower, no `BuildPad`, no dynamic content --
 /// exactly what [`build_background`] is meant to be fed, matching
-/// `gate4agent-arcade-engine::render::background`'s own "feed this a
+/// `hatchery-arcade-engine::render::background`'s own "feed this a
 /// TERRAIN-ONLY Surface" doc requirement.
 fn representative_terrain_surface() -> Surface {
     let mut surface = Surface::new(BOARD_W, BOARD_H, SurfaceCell::BLANK);
@@ -166,7 +166,7 @@ fn representative_terrain_surface() -> Surface {
 
 /// [`representative_terrain_surface`] plus a dozen towers spanning all six
 /// kinds and every level -- the same OVERLAY content (`TileId::is_tower`,
-/// never `is_board_environment`) `gate4agent-arcade-pet-bastion-render::
+/// never `is_board_environment`) `hatchery-arcade-pet-bastion-render::
 /// paint_tower` would add on top of the terrain from a real snapshot. This
 /// is the `Surface` [`build_scene`]'s own per-frame overlay pass reads --
 /// the background layer underneath it is composited separately, from a
@@ -202,7 +202,7 @@ fn representative_surface() -> Surface {
 /// [`representative_surface`] plus [`TileId::BuildPad`] painted over every
 /// tile that is not already route/water/anchor/Heartseed/tower terrain --
 /// the one scenario that still exercises `BuildPad` at all, matching
-/// `gate4agent-arcade-pet-bastion-render::paint_build_zone_highlight`'s own
+/// `hatchery-arcade-pet-bastion-render::paint_build_zone_highlight`'s own
 /// opt-in, drag-mode-only overlay (`board::Board::near_route_cells` marks
 /// roughly half a real board's own tiles buildable, so this is a real,
 /// dense worst case, not a token handful).
@@ -310,7 +310,7 @@ fn fmt_percentiles(label: &str, samples: &[f64]) {
 /// get stable percentile statistics on that one-time cost, exactly the
 /// "p50 и p95" the owner's own brief asked this bench to report for it --
 /// a real host still calls this exactly once per board, per
-/// `gate4agent-arcade-engine::render::background`'s own module doc.
+/// `hatchery-arcade-engine::render::background`'s own module doc.
 fn measure_background_build(terrain_surface: &Surface) {
     let mut samples = Vec::with_capacity(SAMPLES);
     let mut px_w = 0u32;
@@ -395,7 +395,7 @@ fn main() {
     let px_h = BOARD_H as u32 * PX_PER_CELL_H;
     assert_eq!((px_w, px_h), (560, 266), "this bench's own board must land on the exact size bench/live.rs already proved the terminal holds at 60fps");
 
-    println!("gate4agent-arcade-bench: urx_render");
+    println!("hatchery-arcade-bench: urx_render");
     println!("board {px_w}x{px_h}px ({BOARD_W}x{BOARD_H} cells, {PX_PER_CELL_W}x{PX_PER_CELL_H}px/cell), 12 towers, night-garden ground+decor+road terrain, BuildPad absent from the normal frame");
     println!();
 

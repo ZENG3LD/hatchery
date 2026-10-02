@@ -4,8 +4,8 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
-use gate4agent_arcade_pet_bastion::wave::Difficulty;
-use gate4agent_arcade_pet_bastion::RunOutcome;
+use hatchery_arcade_pet_bastion::wave::Difficulty;
+use hatchery_arcade_pet_bastion::RunOutcome;
 use gate4agent_node_protocol::{
     NodeId, RepositoryPath, WorkspaceId, MAX_REPOSITORY_PATH_BYTES,
 };

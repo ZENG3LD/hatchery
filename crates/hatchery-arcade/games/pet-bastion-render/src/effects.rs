@@ -23,14 +23,14 @@
 
 use std::time::Duration;
 
-use gate4agent_arcade_engine::{DynamicSprite, DynamicStroke, Rgb, TileId};
-use gate4agent_arcade_pet_bastion::board::HEARTSEED;
-use gate4agent_arcade_pet_bastion::constants::{FIXED_SCALE, TICK_MS};
-use gate4agent_arcade_pet_bastion::enemy::EnemyKind;
-use gate4agent_arcade_pet_bastion::event::SimEvent;
-use gate4agent_arcade_pet_bastion::ids::EntityId;
-use gate4agent_arcade_pet_bastion::snapshot::SimulationSnapshot;
-use gate4agent_arcade_pet_bastion::tower::TowerKind;
+use hatchery_arcade_engine::{DynamicSprite, DynamicStroke, Rgb, TileId};
+use hatchery_arcade_pet_bastion::board::HEARTSEED;
+use hatchery_arcade_pet_bastion::constants::{FIXED_SCALE, TICK_MS};
+use hatchery_arcade_pet_bastion::enemy::EnemyKind;
+use hatchery_arcade_pet_bastion::event::SimEvent;
+use hatchery_arcade_pet_bastion::ids::EntityId;
+use hatchery_arcade_pet_bastion::snapshot::SimulationSnapshot;
+use hatchery_arcade_pet_bastion::tower::TowerKind;
 
 use crate::interp::{pet_position_tiles, resolve_position};
 use crate::{enemy_color, tower_base_color, CIRCUIT_LINK_COLOR};
@@ -80,7 +80,7 @@ const RELAY_FLICKER_MS: f64 = MUZZLE_TELL_CEILING_MS * 0.5;
 
 /// The three offsets Ember Nest's own `EffectKind::Pip` puff spawns at,
 /// relative to the tower's own centre, in TILE units -- lifted straight
-/// from `gate4agent_arcade_engine::render::sprites`'s own `nest_path`
+/// from `hatchery_arcade_engine::render::sprites`'s own `nest_path`
 /// arm (its own `TowerEmberNest` match arm inside `paint_tile`), which
 /// paints three embers at pixel-space offsets `(0.0, -0.2)`, `(-0.22,
 /// 0.16)`, `(0.22, 0.16)` scaled by `half` (one HALF of one tile's own
@@ -419,13 +419,13 @@ impl EffectsLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gate4agent_arcade_pet_bastion::board::AnchorId;
-    use gate4agent_arcade_pet_bastion::geometry::FixedPos;
-    use gate4agent_arcade_pet_bastion::ids::EntityIdAllocator;
-    use gate4agent_arcade_pet_bastion::pet::PetState;
-    use gate4agent_arcade_pet_bastion::snapshot::{EnemyView, PetView, RunPhaseView, TowerView};
-    use gate4agent_arcade_pet_bastion::tower::{effective_stats, TowerKind, UpgradeLevel};
-    use gate4agent_arcade_pet_bastion::wave::Difficulty;
+    use hatchery_arcade_pet_bastion::board::AnchorId;
+    use hatchery_arcade_pet_bastion::geometry::FixedPos;
+    use hatchery_arcade_pet_bastion::ids::EntityIdAllocator;
+    use hatchery_arcade_pet_bastion::pet::PetState;
+    use hatchery_arcade_pet_bastion::snapshot::{EnemyView, PetView, RunPhaseView, TowerView};
+    use hatchery_arcade_pet_bastion::tower::{effective_stats, TowerKind, UpgradeLevel};
+    use hatchery_arcade_pet_bastion::wave::Difficulty;
 
     fn base_snapshot() -> SimulationSnapshot {
         SimulationSnapshot {

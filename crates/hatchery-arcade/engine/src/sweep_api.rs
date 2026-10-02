@@ -1,7 +1,7 @@
 //! The headless balance-harness surface: drives `MiniGame::advance` in a
 //! tight, unthrottled loop, bypassing `Runner`'s wall-clock accumulator
 //! entirely -- a sweep has no real-time pacing concern. This is the
-//! crate's second consumer: `gate4agent-arcade-sweep`'s own `main.rs`
+//! crate's second consumer: `hatchery-arcade-sweep`'s own `main.rs`
 //! calls [`simulate`] in a loop over thousands of `(seed, policy)` pairs.
 //! Always compiled -- no `render` feature needed.
 

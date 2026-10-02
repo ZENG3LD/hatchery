@@ -20,13 +20,13 @@
 //! does not fabricate.
 //!
 //! Deliberately its OWN workspace member, not a new binary inside
-//! `sweep` or `engine`: it depends on `gate4agent-arcade-engine`'s
+//! `sweep` or `engine`: it depends on `hatchery-arcade-engine`'s
 //! `render` feature (`uzor-tui`/`uzor-text`/`icy_sixel`) PLUS `image`/
 //! `ab_glyph` (a font rasterizer, needed only to turn the glyph tier's
-//! own text output into a PNG). Neither belongs in `gate4agent-arcade-
+//! own text output into a PNG). Neither belongs in `hatchery-arcade-
 //! sweep`'s own dependency graph, which must stay headless (see that
 //! crate's own `Cargo.toml` doc comment), nor in `engine`'s normal
-//! (non-`render`) graph -- `cargo tree -p gate4agent-arcade-sweep` never
+//! (non-`render`) graph -- `cargo tree -p hatchery-arcade-sweep` never
 //! resolves this crate or any of ITS dependencies, since nothing in the
 //! `sweep`/`engine`(default)/`pet-bastion` dependency edges points at
 //! `preview` (dependencies only point one way, into the workspace's
@@ -39,14 +39,14 @@ use std::path::Path;
 use std::time::Instant;
 
 use ab_glyph::FontRef;
-use gate4agent_arcade_engine::{
+use hatchery_arcade_engine::{
     build_background, compose_frame, encode_frame, DirtyHint, GlyphBackend, HalfBlockBackend, PixelFrameOutput, RenderBackend, SixelBackend, SixelOutput, Surface, TileFootprint,
 };
-use gate4agent_arcade_pet_bastion::constants::TICK_MS;
-use gate4agent_arcade_pet_bastion::wave::Difficulty;
-use gate4agent_arcade_pet_bastion_render::effects::EffectsLayer;
-use gate4agent_arcade_pet_bastion_render::interp::{interpolated_dynamic_sprites, render_sim_time, sim_time};
-use gate4agent_arcade_pet_bastion_render::{snapshot_to_surface, terrain_surface};
+use hatchery_arcade_pet_bastion::constants::TICK_MS;
+use hatchery_arcade_pet_bastion::wave::Difficulty;
+use hatchery_arcade_pet_bastion_render::effects::EffectsLayer;
+use hatchery_arcade_pet_bastion_render::interp::{interpolated_dynamic_sprites, render_sim_time, sim_time};
+use hatchery_arcade_pet_bastion_render::{snapshot_to_surface, terrain_surface};
 use uzor_tui::{buffer::TerminalBuffer, rect::Rect};
 
 /// Owner-visible preview output directory -- the session scratchpad, per
@@ -77,7 +77,7 @@ const PIXEL_SEQUENCE_TICKS: usize = 3;
 /// real combat rather than an idle moment -- see `frame::
 /// capture_best_combat_window`'s own doc comment.
 const PIXEL_SEQUENCE_COMBAT_SEARCH_TICKS: u64 = 120;
-/// Matches `gate4agent-arcade-sweep`'s own CLI default ceiling
+/// Matches `hatchery-arcade-sweep`'s own CLI default ceiling
 /// (`cli.rs::Cli::default`'s own `max_ticks` doc comment).
 const MAX_TICKS: u64 = 30_000;
 
@@ -100,7 +100,7 @@ fn main() {
     let found = frame::find_preview_frame(MAX_SEEDS_TO_TRY, MAX_TICKS)
         .unwrap_or_else(|| fail(format_args!("no seed among the first {MAX_SEEDS_TO_TRY} produced a winning run with a qualifying wave-4-Bellkeeper frame")));
 
-    println!("gate4agent-arcade preview");
+    println!("hatchery-arcade preview");
     println!("seed={} tick={} score={} wave=4 boss=Bellkeeper", found.seed, found.tick_index, found.score);
     println!(
         "towers={} enemies={} circuit_linked={} sap={} integrity={}",
@@ -273,7 +273,7 @@ fn main() {
     // only while the owner is actively dragging a tower out of the
     // palette).
     let mut drag_surface = snapshot_to_surface(&found.snapshot);
-    gate4agent_arcade_pet_bastion_render::paint_build_zone_highlight(&mut drag_surface, &found.snapshot);
+    hatchery_arcade_pet_bastion_render::paint_build_zone_highlight(&mut drag_surface, &found.snapshot);
     let drag_canvas = compose_frame(&background, &drag_surface, &[], &[], true);
     let drag_png = Path::new(OUT_DIR).join("arcade-preview-pixel-drag.png");
     raster::render_pixel_canvas_png(&drag_canvas, &drag_png).unwrap_or_else(|err| fail(format_args!("failed writing {drag_png:?}: {err}")));

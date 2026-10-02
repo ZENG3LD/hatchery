@@ -60,7 +60,7 @@
 //! a decor tile -- exactly the per-tile repaint cost this whole cache
 //! exists to eliminate. A game-specific adapter is expected to expose a
 //! small, snapshot-independent "environment only" `Surface` builder for
-//! this (e.g. `gate4agent-arcade-pet-bastion-render::terrain_surface`,
+//! this (e.g. `hatchery-arcade-pet-bastion-render::terrain_surface`,
 //! which is nothing more than that crate's own terrain-painting pass with
 //! no snapshot-driven overlay ever applied on top) -- a HOST calls that
 //! once, keeps the resulting `Surface` around purely to feed this module,
@@ -126,7 +126,7 @@ fn tile_center_px(x: u16, y: u16) -> (f64, f64) {
 /// Cheap deterministic 32-bit hash of an integer coordinate pair plus a
 /// `salt` (a distinct constant per independent decision made off the same
 /// coordinate) -- this module's OWN copy of the same avalanche-mix shape
-/// `gate4agent-arcade-pet-bastion-render::tile_hash`/`gate4agent-arcade-
+/// `hatchery-arcade-pet-bastion-render::tile_hash`/`hatchery-arcade-
 /// bench::urx_render::tile_hash` already use (see either one's own doc
 /// comment for why each crate keeps its own copy rather than importing
 /// one): `engine` never depends on a specific game crate just to scatter
@@ -471,7 +471,7 @@ mod tests {
     /// rather than the different, and legitimately seed-changing, case
     /// [`background_seed_changes_when_environment_content_changes`] covers
     /// (a tower REPLACING an environment tile that used to be there -- see
-    /// `gate4agent_arcade_pet_bastion_render::terrain_surface`'s own doc
+    /// `hatchery_arcade_pet_bastion_render::terrain_surface`'s own doc
     /// comment for why a real host must never hand this module a `Surface`
     /// where that can happen).
     fn surface_with_a_blank_gutter_column() -> Surface {

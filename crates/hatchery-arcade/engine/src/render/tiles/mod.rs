@@ -1,5 +1,5 @@
 //! The concrete tile-identity catalog. Named per Pet Bastion: Night Garden
-//! (`gate4agent-arcade-pet-bastion-render`'s own `snapshot_to_surface`
+//! (`hatchery-arcade-pet-bastion-render`'s own `snapshot_to_surface`
 //! adapter is the only place that constructs [`TileArt`](crate::render::TileArt)
 //! values against this enum), since it is this arcade's first, and so far
 //! only, hosted mini-game. A future second game growing its own tile
@@ -27,7 +27,7 @@ pub enum TileId {
     /// The night-garden ground itself -- painted onto EVERY board tile
     /// first, before any other terrain/decor/unit pass, so a normal frame
     /// never has a genuinely empty (fully transparent) cell: see
-    /// `gate4agent-arcade-pet-bastion-render`'s own `paint_terrain` doc
+    /// `hatchery-arcade-pet-bastion-render`'s own `paint_terrain` doc
     /// comment for why a dense scene needs a real base layer under
     /// everything, not just under the tiles that happen to carry gameplay
     /// meaning. `TileArt::variant` (0..=3) selects one of a handful of
@@ -66,7 +66,7 @@ pub enum TileId {
     Choke,
     /// A free build-zone tile, highlighted ONLY while the owner is
     /// actively dragging a tower from the palette -- see
-    /// `gate4agent-arcade-pet-bastion-render`'s own `paint_build_zone_highlight`
+    /// `hatchery-arcade-pet-bastion-render`'s own `paint_build_zone_highlight`
     /// doc comment for why this is never part of the ordinary per-tick
     /// `snapshot_to_surface` pass any more (a real board carries roughly
     /// as many buildable tiles as terrain tiles; painting every one of
@@ -106,8 +106,8 @@ pub enum TileId {
     // -- Effects -------------------------------------------------------
     /// The Living Circuit's own visual tell: a small halo of tiles around
     /// the pet's current anchor, painted whenever [`PetView::
-    /// linked_towers`](../../../gate4agent_arcade_pet_bastion/snapshot/struct.PetView.html)
-    /// is non-empty. See `gate4agent-arcade-pet-bastion-render`'s own
+    /// linked_towers`](../../../hatchery_arcade_pet_bastion/snapshot/struct.PetView.html)
+    /// is non-empty. See `hatchery-arcade-pet-bastion-render`'s own
     /// adapter doc for why this halo, rather than a literal line traced
     /// from the anchor to every linked tower, is the honest choice given
     /// `Surface`'s one-glyph-per-tile contract (a traced line would have
@@ -118,7 +118,7 @@ pub enum TileId {
 
     // -- Combat effects (transient, driven by `SimEvent`, never persistent
     // sim state -- see `crate::render::pixel::DynamicSprite`/`DynamicStroke`
-    // and `gate4agent-arcade-pet-bastion-render`'s own `effects` module) --
+    // and `hatchery-arcade-pet-bastion-render`'s own `effects` module) --
     /// A flying shot's own bright leading point (paired with a
     /// [`crate::render::pixel::DynamicStroke`] trail from the firing
     /// tower).

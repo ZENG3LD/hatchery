@@ -102,7 +102,7 @@ pub struct EnemyView {
 /// `id` is a pure display-layer addition (`BossBody::id` already exists
 /// internally; this only exposes it): a renderer that interpolates a
 /// body's position between two snapshots (see
-/// `gate4agent-arcade-pet-bastion-render`'s own frame-interpolation
+/// `hatchery-arcade-pet-bastion-render`'s own frame-interpolation
 /// module) needs a stable key to match "the same body" across two ticks --
 /// index-in-`bodies` alone is not stable across a Night Maw split, which
 /// pushes a brand-new second body onto the end of the list.

@@ -1,7 +1,7 @@
 //! Manual CLI argument parsing -- `std::env::args` only, no external
 //! argument-parsing crate (per the task's own no-new-dependency rule).
 
-use gate4agent_arcade_pet_bastion::wave::{BalanceOverrides, Difficulty};
+use hatchery_arcade_pet_bastion::wave::{BalanceOverrides, Difficulty};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DifficultyFilter {
@@ -65,7 +65,7 @@ impl Default for Cli {
 
 impl Cli {
     pub fn usage() -> &'static str {
-        "USAGE: gate4agent-arcade-sweep [OPTIONS]\n\n\
+        "USAGE: hatchery-arcade-sweep [OPTIONS]\n\n\
          OPTIONS:\n  \
          --seeds=<N>                 number of seeds per (difficulty, policy) combo [default: 50]\n  \
          --start-seed=<N>            first seed in the sweep range [default: 0]\n  \

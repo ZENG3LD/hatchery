@@ -82,7 +82,7 @@ pub(super) fn tint(c: Rgb, permille: u32) -> Rgb {
 
 /// A boss body's own brightness, as a [`darken`] permille, from the
 /// remaining HP in tenths every boss `TileArt::variant` already carries
-/// (`gate4agent-arcade-pet-bastion-render`'s own `boss_hp_tenths`, whose
+/// (`hatchery-arcade-pet-bastion-render`'s own `boss_hp_tenths`, whose
 /// doc comment states outright that this variant exists so a procedural
 /// boss shape can "react to how close the fight is").
 ///
@@ -101,7 +101,7 @@ pub(super) fn tint(c: Rgb, permille: u32) -> Rgb {
 /// floored at [`BOSS_DIM_FLOOR_PERMILLE`] at death.
 ///
 /// The floor is not a taste call. Night Maw's own body colour is
-/// `Rgb(140, 40, 180)` (`gate4agent-arcade-pet-bastion-render`'s own
+/// `Rgb(140, 40, 180)` (`hatchery-arcade-pet-bastion-render`'s own
 /// `boss_color`), a purple whose luminance is already low, and the night
 /// garden's own ground is `Rgb(20, 40, 30)` (`background.rs`'s own
 /// `env_cell` base). Dimming that purple much past this floor drops the
@@ -468,7 +468,7 @@ fn wash(scene: &mut Scene, cx: f64, cy: f64, w: f64, h: f64, frac: f64, c: Rgb, 
 }
 
 /// The soft square wash every enemy sprite gets when carrying a status tint
-/// (`Some(SLOW_BG)`/`Some(STUN_BG)` from `gate4agent-arcade-pet-bastion-
+/// (`Some(SLOW_BG)`/`Some(STUN_BG)` from `hatchery-arcade-pet-bastion-
 /// render`'s own colour catalog) -- factored out since six enemy arms all
 /// need the identical call, and it must stay identical across all six for
 /// "slowed"/"stunned" to read as one consistent visual language regardless
@@ -486,7 +486,7 @@ pub(super) const ROAD_WEST: u8 = 8;
 
 /// A road/path tile shaped by its own connectivity `mask` (bits
 /// [`ROAD_NORTH`]/[`ROAD_EAST`]/[`ROAD_SOUTH`]/[`ROAD_WEST`], set by
-/// `gate4agent-arcade-pet-bastion-render`'s own `paint_terrain` from real
+/// `hatchery-arcade-pet-bastion-render`'s own `paint_terrain` from real
 /// route-neighbour adjacency, carried into this pixel tier via `TileArt::
 /// variant`) -- flush against every side that connects to another route
 /// tile, inset against every side that does not, so a whole route reads
@@ -1538,7 +1538,7 @@ mod tests {
     /// The floor in [`boss_vitality_permille`] exists for exactly this:
     /// a boss dimmed past the luminance of the night-garden ground it
     /// walks on stops reading as a body and starts reading as a hole.
-    /// Checked against both bosses' own REAL colours (`gate4agent-arcade-
+    /// Checked against both bosses' own REAL colours (`hatchery-arcade-
     /// pet-bastion-render`'s own `boss_color`) and the real ground base
     /// (`background.rs`'s own `env_cell` seed), never a placeholder --
     /// Night Maw's purple is the one that actually fails a careless

@@ -1,8 +1,8 @@
 //! Aggregation and stdout formatting for one (difficulty, policy) sweep
 //! grid's worth of `SimulationReport`s.
 
-use gate4agent_arcade_engine::RunOutcome;
-use gate4agent_arcade_pet_bastion::wave::Difficulty;
+use hatchery_arcade_engine::RunOutcome;
+use hatchery_arcade_pet_bastion::wave::Difficulty;
 
 use crate::policy::{ActionCounters, PolicyKind};
 

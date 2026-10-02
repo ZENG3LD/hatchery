@@ -44,23 +44,23 @@
 //! counters need no separate before/after snapshot diff in the sweep's own
 //! run loop.
 
-use gate4agent_arcade_engine::sweep_api::Policy;
-use gate4agent_arcade_pet_bastion::board::{AnchorId, Board, Route, RouteId, RouteSegment, ANCHOR_COUNT, HEARTSEED};
-use gate4agent_arcade_pet_bastion::boss::BossKind;
-use gate4agent_arcade_pet_bastion::command::Command;
-use gate4agent_arcade_pet_bastion::constants::{
+use hatchery_arcade_engine::sweep_api::Policy;
+use hatchery_arcade_pet_bastion::board::{AnchorId, Board, Route, RouteId, RouteSegment, ANCHOR_COUNT, HEARTSEED};
+use hatchery_arcade_pet_bastion::boss::BossKind;
+use hatchery_arcade_pet_bastion::command::Command;
+use hatchery_arcade_pet_bastion::constants::{
     BELLKEEPER_BELL_INTERVAL_TICKS, BELLKEEPER_ESCORT_THRESHOLDS_PERMILLE, BELLKEEPER_SILENCE_TICKS, BLINK_COST,
     FIXED_SCALE, FULL_CIRCUIT_COST, LINK_BURST_COOLDOWN_TICKS, MAX_COMBINED_SLOW_PERMILLE,
     MOONWELL_LINGER_TICK_DAMAGE_PERMILLE, PET_PULSE_COST, PET_PULSE_RADIUS_FP, SPARK_CAP, TICKS_PER_SECOND,
 };
-use gate4agent_arcade_pet_bastion::enemy::EnemyKind;
-use gate4agent_arcade_pet_bastion::geometry::{FixedPos, Tile};
-use gate4agent_arcade_pet_bastion::pet::{Evolution, PetCharge, PetState};
-use gate4agent_arcade_pet_bastion::rune::Rune;
-use gate4agent_arcade_pet_bastion::sim::Simulation;
-use gate4agent_arcade_pet_bastion::snapshot::{RunPhaseView, SimulationSnapshot};
-use gate4agent_arcade_pet_bastion::tower::{self, TowerKind, UpgradeBranch, UpgradeLevel};
-use gate4agent_arcade_pet_bastion::wave::is_boss_wave;
+use hatchery_arcade_pet_bastion::enemy::EnemyKind;
+use hatchery_arcade_pet_bastion::geometry::{FixedPos, Tile};
+use hatchery_arcade_pet_bastion::pet::{Evolution, PetCharge, PetState};
+use hatchery_arcade_pet_bastion::rune::Rune;
+use hatchery_arcade_pet_bastion::sim::Simulation;
+use hatchery_arcade_pet_bastion::snapshot::{RunPhaseView, SimulationSnapshot};
+use hatchery_arcade_pet_bastion::tower::{self, TowerKind, UpgradeBranch, UpgradeLevel};
+use hatchery_arcade_pet_bastion::wave::is_boss_wave;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PolicyKind {
@@ -214,7 +214,7 @@ impl Policy<Simulation> for BaselinePolicy {
 /// version of this policy gated strictly on the rotation (never buying
 /// anything but the exact next kind), which left Sap sitting unspent for
 /// many ticks waiting for an expensive kind's exact cost -- an own-goal
-/// found via this crate's headless sweep itself: `gate4agent-arcade-pet-
+/// found via this crate's headless sweep itself: `hatchery-arcade-pet-
 /// bastion/src/tests.rs`'s own `boss_phase_transitions_fire_over_a_real_
 /// wave_four_fight` test comment states plainly "full pad coverage is"
 /// what beats a route-progress-first targeting boss, not kind diversity;
@@ -476,7 +476,7 @@ fn pick_circuit_rune(options: &[Rune]) -> Option<Rune> {
 // AND the single LARGEST Link Burst payout of the four boss-reaching
 // kinds (3 full-damage shots, vs one primary hit for Prism or one field
 // tick for Ember Nest/Moonwell). A diagnostic trace against a real
-// Standard-difficulty wave-4 build (`gate4agent-arcade-sweep`'s own
+// Standard-difficulty wave-4 build (`hatchery-arcade-sweep`'s own
 // `probe_diag.rs`, not shipped) showed `GreedyPolicy`'s own `choose_kind`
 // falling back to Bell (its own cheapest-affordable fallback, usually the
 // single worst boss-DPS-per-Sap kind on the roster) for 3 of 5 built
@@ -1377,7 +1377,7 @@ fn pad_lane(pad_pos: FixedPos, board: &Board) -> RouteId {
 /// [`best_build_action`] already credits every non-Bell kind with.
 ///
 /// This is not a cosmetic addition. A first pass at this function (boss
-/// contact value only, otherwise identical) moved `gate4agent-arcade-
+/// contact value only, otherwise identical) moved `hatchery-arcade-
 /// sweep --difficulty=standard --seeds=200`'s own reading of "how close
 /// this policy gets" from Bellkeeper at 1.0% HP remaining to 0.3% --
 /// closer, but the win rate itself stayed 0/200. A `DIAG_DEATH_CAUSE`
@@ -1428,7 +1428,7 @@ fn best_circuit_build_action(snapshot: &SimulationSnapshot, board: &Board, boss_
     // 0. A genuine floor, not another vote in a per-Sap comparison route 0
     // always wins on raw value: this MINIMUM (not parity -- route 0 still
     // gets every tower beyond the floor, since it stays the higher-value
-    // lane) is calibrated empirically against `gate4agent-arcade-sweep
+    // lane) is calibrated empirically against `hatchery-arcade-sweep
     // --difficulty=standard`'s own two failure signatures -- a floor of 0
     // (no gate) left 190-198/200 losses at `integrity` 0/-1 (leak-drained,
     // `DIAG_DEATH_CAUSE`); a floor that matched route 0's own count 1:1
@@ -1678,11 +1678,11 @@ impl Policy<Simulation> for SlowStackPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gate4agent_arcade_engine::sweep_api::simulate;
-    use gate4agent_arcade_pet_bastion::geometry::{dist2_to_axis_aligned_segment, tiles_to_fixed};
-    use gate4agent_arcade_pet_bastion::sim::PetBastionParams;
-    use gate4agent_arcade_pet_bastion::snapshot::PetView;
-    use gate4agent_arcade_pet_bastion::wave::Difficulty;
+    use hatchery_arcade_engine::sweep_api::simulate;
+    use hatchery_arcade_pet_bastion::geometry::{dist2_to_axis_aligned_segment, tiles_to_fixed};
+    use hatchery_arcade_pet_bastion::sim::PetBastionParams;
+    use hatchery_arcade_pet_bastion::snapshot::PetView;
+    use hatchery_arcade_pet_bastion::wave::Difficulty;
 
     #[test]
     fn isqrt_matches_known_squares() {

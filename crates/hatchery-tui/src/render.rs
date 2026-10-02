@@ -5,13 +5,13 @@ use uzor_tui::{
     split, Block, Color, Constraint, Direction, Line, Modifier, Paragraph, Rect, Span, Style,
     TerminalBuffer, Text, Widget,
 };
-use gate4agent_arcade_engine::{
+use hatchery_arcade_engine::{
     build_background, compose_frame, encode_frame, BoardBackground, CellArea, DirtyHint, DynamicSprite, DynamicStroke,
     GlyphBackend, PixelFrameOutput, RenderBackend, Rgb as ArcadeRgb, Surface, TileFootprint, TileId,
 };
-use gate4agent_arcade_pet_bastion::board::{AnchorId, Board};
-use gate4agent_arcade_pet_bastion::boss::BossKind;
-use gate4agent_arcade_pet_bastion::constants::{
+use hatchery_arcade_pet_bastion::board::{AnchorId, Board};
+use hatchery_arcade_pet_bastion::boss::BossKind;
+use hatchery_arcade_pet_bastion::constants::{
     ANCHOR_RUNE_LINGER_TICKS, BLINK_COST, BOARD_HEIGHT, BOARD_WIDTH, BOSS_LAP_INTEGRITY_DAMAGE, CIRCUIT_BASE_SLOTS,
     CIRCUIT_MOTH_SLOTS, CIRCUIT_WISP_SLOTS, CRAB_PET_PULSE_DAMAGE_PERMILLE, CRAB_SHIELD_CAP, CRAB_SHIELD_ON_ARRIVAL,
     ECHO_EVERY_NTH_ATTACK, EVOLUTION_AFTER_WAVE, FIXED_SCALE, FULL_CIRCUIT_COST, FULL_CIRCUIT_TICKS,
@@ -22,16 +22,16 @@ use gate4agent_arcade_pet_bastion::constants::{
     SYMBIOSIS_DAMAGE_BONUS_PERMILLE, TICKS_PER_SECOND, WAVE_COUNT, WISP_FREE_BLINK_INTERVAL_TICKS,
     ZONE_ENEMY_SPEED_PERMILLE, ZONE_TOWER_DAMAGE_PERMILLE,
 };
-use gate4agent_arcade_pet_bastion::enemy::EnemyKind;
-use gate4agent_arcade_pet_bastion::pet::{Evolution, PetCharge};
-use gate4agent_arcade_pet_bastion::rune::Rune;
-use gate4agent_arcade_pet_bastion::snapshot::{FieldZoneView, RunPhaseView, SimulationSnapshot, TowerView};
-use gate4agent_arcade_pet_bastion::tower::{effective_stats, DamageFamily, TowerKind, TowerStats, UpgradeBranch, UpgradeLevel};
-use gate4agent_arcade_pet_bastion::wave::Difficulty;
-use gate4agent_arcade_pet_bastion::zone::{ZoneKind, ZonePolarity};
-use gate4agent_arcade_pet_bastion::RunOutcome as PetBastionRunOutcome;
-use gate4agent_arcade_pet_bastion_render::interp::{interpolated_dynamic_sprites, render_sim_time};
-use gate4agent_arcade_pet_bastion_render::{snapshot_to_surface, terrain_surface};
+use hatchery_arcade_pet_bastion::enemy::EnemyKind;
+use hatchery_arcade_pet_bastion::pet::{Evolution, PetCharge};
+use hatchery_arcade_pet_bastion::rune::Rune;
+use hatchery_arcade_pet_bastion::snapshot::{FieldZoneView, RunPhaseView, SimulationSnapshot, TowerView};
+use hatchery_arcade_pet_bastion::tower::{effective_stats, DamageFamily, TowerKind, TowerStats, UpgradeBranch, UpgradeLevel};
+use hatchery_arcade_pet_bastion::wave::Difficulty;
+use hatchery_arcade_pet_bastion::zone::{ZoneKind, ZonePolarity};
+use hatchery_arcade_pet_bastion::RunOutcome as PetBastionRunOutcome;
+use hatchery_arcade_pet_bastion_render::interp::{interpolated_dynamic_sprites, render_sim_time};
+use hatchery_arcade_pet_bastion_render::{snapshot_to_surface, terrain_surface};
 use gate4agent_c2_protocol::C2RelayRoute;
 use hatchery_harness_protocol::HarnessRunGitFactsOutcomeV1;
 use gate4agent_node_protocol::{
@@ -1203,7 +1203,7 @@ fn render_status_bar_right_modal(
 /// (`PetArcade::negotiate_size`, backed by `GameEntry::min_modal_size`/
 /// `preferred_modal_size`), never hardcoded here. Those two sizes describe
 /// the game's own CONTENT area (board + HUD panel + header/hint rows --
-/// see `gate4agent_arcade_pet_bastion::sim`'s own `GameEntry` impl doc for
+/// see `hatchery_arcade_pet_bastion::sim`'s own `GameEntry` impl doc for
 /// the exact accounting), not this overlay's outer bordered rect, so the
 /// border this fn draws is budgeted OUTSIDE what gets negotiated (`content_
 /// budget` below reserves 2 cells on each axis before ever asking), and
@@ -1215,7 +1215,7 @@ fn render_status_bar_right_modal(
 ///
 /// The board is painted by projecting a `BOARD_WIDTH x BOARD_HEIGHT`
 /// `Surface` onto `dest` at `footprint` cells per tile (`GlyphBackend::
-/// project`, from `gate4agent-arcade-engine`) -- tile `(tx, ty)`'s own
+/// project`, from `hatchery-arcade-engine`) -- tile `(tx, ty)`'s own
 /// glyph lands at screen cell `(dest.x + tx * footprint.cells_w, dest.y +
 /// ty * footprint.cells_h)`. Below, once that same `dest`/`footprint` pair
 /// is computed, this fn walks every tile that arithmetic actually painted
@@ -1230,10 +1230,10 @@ fn render_status_bar_right_modal(
 ///
 /// # The pixel tier's own cached board background
 ///
-/// [`PET_ARCADE_PIXEL_BACKGROUND`] is `gate4agent_arcade_engine::
+/// [`PET_ARCADE_PIXEL_BACKGROUND`] is `hatchery_arcade_engine::
 /// build_background`'s own expensive one-time raster (ground/decor/
 /// routes/pool/anchors/Heartseed), built exactly once, process-wide, from
-/// `gate4agent_arcade_pet_bastion_render::terrain_surface()` -- NOT from
+/// `hatchery_arcade_pet_bastion_render::terrain_surface()` -- NOT from
 /// this fn's own live, per-snapshot `surface` (see that function's own doc
 /// comment for why a live surface is the wrong input: a placed tower
 /// replaces a decor tile's own `art`, which would otherwise make the
@@ -1310,7 +1310,7 @@ fn render_pet_arcade(
     // tier's own fixed-scale board (`backend_pixel::PX_PER_CELL_W`/`_H`
     // assume a `28 * 2 = 56`-cell-wide, `14`-cell-tall board -- exactly
     // `footprint_w == 2`'s own full, unclamped `board_w`/`board_h`, see
-    // `gate4agent-arcade`'s own `backend_pixel.rs` module doc comment for
+    // `hatchery-arcade`'s own `backend_pixel.rs` module doc comment for
     // the `20px`/cell-tile derivation this depends on). `footprint_w == 1`
     // (a narrow terminal/modal) is the one real, common reason to fall
     // back -- the structurally impossible "landed on the terminal's own
@@ -1321,7 +1321,7 @@ fn render_pet_arcade(
     let pixel_tier_fits = footprint_w == 2 && board_h == BOARD_HEIGHT as u16;
 
     // `inner.height` is guaranteed `>= BOARD_HEIGHT + 1` (the min-size
-    // contract's own one reserved row -- `gate4agent-arcade-pet-bastion`'s
+    // contract's own one reserved row -- `hatchery-arcade-pet-bastion`'s
     // own `sim.rs::MIN_HINT_ROWS`/`PREFERRED_HINT_ROWS`, which this crate
     // cannot edit: that game crate is off-limits for this pass) --
     // `extra_rows` is therefore always at least 1. Owner report: the two
@@ -1429,7 +1429,7 @@ fn render_pet_arcade(
     // for the exact same reason. Backfilling every still-`Reset` cell
     // inside `dest` with `theme.modal` here (host-side, AFTER the engine's
     // own paint pass) is the only fix available without editing
-    // `gate4agent-arcade`'s own render crate: it never touches a cell that
+    // `hatchery-arcade`'s own render crate: it never touches a cell that
     // carries a real terrain/unit `bg`, only the ones the backend left as
     // a literal "no colour of my own" marker.
     for row in dest.y..dest.bottom() {
@@ -1502,7 +1502,7 @@ fn render_pet_arcade(
         // (`prev -> snapshot` at `alpha`), and that interval is the tick
         // whose events were ingested with `born_at = sim_time(tick_index_
         // before, 0.0)` in `PetArcade::advance`. `interp::render_sim_time`
-        // owns that rule for both this call site and `gate4agent-arcade-
+        // owns that rule for both this call site and `hatchery-arcade-
         // preview`'s own sequence loop -- see its doc comment for what
         // aging by `curr`'s index instead actually costs (every trail
         // invisible, every flash and burst missing its own first tick).
@@ -1514,7 +1514,7 @@ fn render_pet_arcade(
         // рисуется башня, а не тянется надпись"). `dynamic` is pushed into
         // `compose_frame` AFTER `strokes` below (`build_scene`'s own
         // paint order: strokes first, then every `dynamic` sprite on top --
-        // see `gate4agent-arcade`'s own `backend_pixel::build_scene`), so a
+        // see `hatchery-arcade`'s own `backend_pixel::build_scene`), so a
         // ghost pushed here always paints OVER the buildable-tile outlines
         // `pet_arcade_pixel_highlight_strokes` draws for this exact same
         // drag, matching "over the lit legal cells that already highlight
@@ -1595,7 +1595,7 @@ fn one_decimal(numerator: i64, denominator: i64) -> String {
 /// Charge draft options, the evolution choices, a placed tower (hovering
 /// the board tile it stands on), a board tile's own field zone, the
 /// [Space] Start Wave control, and the HUD's own top resource row. EVERY
-/// number below is read from `gate4agent_arcade_pet_bastion::constants`
+/// number below is read from `hatchery_arcade_pet_bastion::constants`
 /// (or, for towers, `TowerKind::base_stats`/`effective_stats`, the SAME
 /// calls `render_pet_arcade_hud`/`render_pet_arcade_context` already make)
 /// at call time, never copied into a string literal -- the same
@@ -1941,7 +1941,7 @@ fn pet_arcade_info_scroll_state(total_lines: u16, visible_rows: u16, requested_s
 /// on the first Heartseed arrival (only once every enemy on it is dead) --
 /// both are silent rule changes the owner has no other way to learn.
 ///
-/// EVERY number below is read from `gate4agent_arcade_pet_bastion::
+/// EVERY number below is read from `hatchery_arcade_pet_bastion::
 /// constants` (this module's own import list at the top of the file) AT
 /// RENDER TIME, never copied into a string literal here -- a number that
 /// can drift out of sync with the sim it describes is worse than showing
@@ -2107,7 +2107,7 @@ pub(crate) fn pet_arcade_info_lines() -> Vec<PetArcadeInfoLine> {
             "Each lap costs Integrity instead: -{LEAK_INTEGRITY_DAMAGE} for a minion, -{BOSS_LAP_INTEGRITY_DAMAGE} for a boss."
         )),
         PetArcadeInfoLine::Body("A wave ends only once every enemy on it is dead, not on Heartseed arrival.".to_owned()),
-        // `gate4agent-arcade`'s own concurrent rules addition -- the Living
+        // `hatchery-arcade`'s own concurrent rules addition -- the Living
         // Circuit's own build draft and the per-wave field zones, neither
         // of which had a single word of documentation anywhere in the
         // interface before this pass, the exact "мне не ясна механика"
@@ -2695,7 +2695,7 @@ fn pet_arcade_header_line(snapshot: &SimulationSnapshot) -> String {
 ///
 /// Skips any cell that ALREADY carries its own `bg` (a stunned/slowed
 /// enemy's status tint, a boss's own kind colour, the pet's own evolution
-/// glow -- `gate4agent-arcade-pet-bastion-render`'s own `paint_enemy`/
+/// glow -- `hatchery-arcade-pet-bastion-render`'s own `paint_enemy`/
 /// `paint_boss`/`paint_pet`, the only three painters that ever set `bg` at
 /// all) rather than overwriting it: that state is more specific and more
 /// urgent than an ambient field zone, and overwriting it here would be
@@ -2743,7 +2743,7 @@ fn pet_arcade_field_zone_glyph_tint(kind: ZoneKind, polarity: ZonePolarity) -> A
 /// either `Tab`/`[`/`]` or a click, see `pet_arcade`'s own module doc
 /// comment) is visible on the board -- never touches `glyph`/`fg`, so the
 /// real terrain/unit glyph underneath always stays legible, the same
-/// "tint, never replace" discipline `gate4agent-arcade-pet-bastion-render`
+/// "tint, never replace" discipline `hatchery-arcade-pet-bastion-render`
 /// already uses for its own status-effect tiles.
 fn pet_arcade_highlight_cursor(surface: &mut Surface, selected_tile: (u8, u8), selected_anchor: u8) {
     let (px, py) = (u16::from(selected_tile.0), u16::from(selected_tile.1));
@@ -2831,7 +2831,7 @@ fn pet_arcade_tier_label(tier: PetArcadeVisualTier, pixel_tier_fits: bool) -> St
 
 /// Pixel-tier equivalent of [`pet_arcade_highlight_cursor`]/[`pet_arcade_
 /// highlight_buildable_tiles`] above: those two mutate a `Surface` cell's
-/// own `bg`, which `gate4agent-arcade`'s own pixel-tier painters only ever
+/// own `bg`, which `hatchery-arcade`'s own pixel-tier painters only ever
 /// read for a handful of `TileId`s (towers/enemies/bosses/the pet -- see
 /// `backend_pixel::paint_overlay_layer` -> `sprites::paint_tile`'s own
 /// match arms). Plain terrain (`Ground`/`Path`/`PetAnchor`/`Rock`/`Plant`/
@@ -2842,7 +2842,7 @@ fn pet_arcade_tier_label(tier: PetArcadeVisualTier, pixel_tier_fits: bool) -> St
 /// tint ever applied to it (see that static's own doc comment) -- so a
 /// `bg`-only tint on an otherwise-bare tile (the common case: a cursor or
 /// drag hover highlight usually lands on open ground) is silently
-/// invisible in the pixel tier either way. `gate4agent-arcade` is out of
+/// invisible in the pixel tier either way. `hatchery-arcade` is out of
 /// scope for this pass (a sibling agent owns it concurrently) -- the fix
 /// on THIS side of that boundary is to draw the SAME information as a
 /// bright inset outline via the engine's own public `DynamicStroke`
@@ -2923,7 +2923,7 @@ fn pet_arcade_field_zone_color(kind: ZoneKind, polarity: ZonePolarity) -> Arcade
 /// with, scaled up to a whole `ZONE_SECTOR_COLS x ZONE_SECTOR_ROWS` sector
 /// (`bounds`, `SimulationSnapshot::field_zones`'s own pre-resolved tile
 /// rectangle) instead of one tile. Two constraints this crate already
-/// enforces elsewhere for terrain (`gate4agent-arcade`'s own `background.
+/// enforces elsewhere for terrain (`hatchery-arcade`'s own `background.
 /// rs` module doc: "No hard edge anywhere in this layer, by construction")
 /// apply here too, on this side of that boundary:
 ///
@@ -2939,7 +2939,7 @@ fn pet_arcade_field_zone_color(kind: ZoneKind, polarity: ZonePolarity) -> Arcade
 ///   flat-filled rectangle" shape that module's own doc describes,
 ///   available here via [`DynamicStroke::alpha`] rather than a real
 ///   gradient (this crate cannot add a raster gradient primitive of its
-///   own; `gate4agent-arcade` -- where one lives -- is out of scope for
+///   own; `hatchery-arcade` -- where one lives -- is out of scope for
 ///   this pass).
 /// - **Must not drown the units on it.** An outline covers a tiny fraction
 ///   of the sector's own interior compared to a fill, and every alpha here
@@ -3206,7 +3206,7 @@ fn render_pet_arcade_context(
         // The Living Circuit's own build draft -- structurally the SAME
         // decision point as `RuneDraft` just above (mirrored deliberately
         // rather than inventing a second kind of draft), reached after
-        // waves 1/3/5/7 instead of 2/6. Owner report (`gate4agent-arcade`'s
+        // waves 1/3/5/7 instead of 2/6. Owner report (`hatchery-arcade`'s
         // own concurrent rules pass): this phase used to reach this crate
         // only as a header label string -- no overlay, no options drawn,
         // `Command::DraftPetCharge` never issued -- so a run stalled here
@@ -3510,14 +3510,14 @@ fn tower_kind_glyph(kind: TowerKind) -> char {
     }
 }
 
-/// A host-side duplicate of `gate4agent-arcade-pet-bastion-render`'s own
+/// A host-side duplicate of `hatchery-arcade-pet-bastion-render`'s own
 /// PRIVATE `tower_tile_id` table (`lib.rs`) -- same reason `tower_kind_
 /// glyph`/`tower_kind_label` above already duplicate that crate's own
 /// per-kind tables instead of importing them (that crate is off-limits to
 /// edit for this pass, and its own tables are `pub(crate)`, not exported).
 /// Feeds [`pet_arcade_drag_ghost_sprite`]'s own `DynamicSprite::tile`, so
 /// the drag ghost paints as the exact same `TileId` a placed tower of this
-/// kind uses (`gate4agent-arcade-pet-bastion-render`'s own `snapshot_to_
+/// kind uses (`hatchery-arcade-pet-bastion-render`'s own `snapshot_to_
 /// surface` adapter picks the identical variant for a REAL placement).
 fn tower_kind_tile_id(kind: TowerKind) -> TileId {
     match kind {
@@ -3531,7 +3531,7 @@ fn tower_kind_tile_id(kind: TowerKind) -> TileId {
 }
 
 /// [`tower_kind_tile_id`]'s own colour counterpart -- a host-side duplicate
-/// of `gate4agent-arcade-pet-bastion-render`'s own PRIVATE `tower_base_
+/// of `hatchery-arcade-pet-bastion-render`'s own PRIVATE `tower_base_
 /// color` table, for the exact same reason.
 fn tower_kind_base_color(kind: TowerKind) -> ArcadeRgb {
     match kind {
@@ -25983,9 +25983,9 @@ mod tests {
         pet_charges_picked: Vec<PetCharge>,
         field_zones: Vec<FieldZoneView>,
     ) -> SimulationSnapshot {
-        use gate4agent_arcade_pet_bastion::pet::PetState;
-        use gate4agent_arcade_pet_bastion::snapshot::PetView;
-        use gate4agent_arcade_pet_bastion::wave::Difficulty;
+        use hatchery_arcade_pet_bastion::pet::PetState;
+        use hatchery_arcade_pet_bastion::snapshot::PetView;
+        use hatchery_arcade_pet_bastion::wave::Difficulty;
 
         SimulationSnapshot {
             tick_index: 0,
@@ -26172,8 +26172,8 @@ mod tests {
         tick_pet_arcade(&app, &mut now);
         let snapshot = app.pet_arcade.borrow().snapshot().unwrap();
         let reached_or_moving_to_2 = match snapshot.pet.state {
-            gate4agent_arcade_pet_bastion::pet::PetState::AtAnchor(anchor) => anchor == AnchorId(2),
-            gate4agent_arcade_pet_bastion::pet::PetState::Moving { to, .. } => to == AnchorId(2),
+            hatchery_arcade_pet_bastion::pet::PetState::AtAnchor(anchor) => anchor == AnchorId(2),
+            hatchery_arcade_pet_bastion::pet::PetState::Moving { to, .. } => to == AnchorId(2),
         };
         assert!(reached_or_moving_to_2, "the click must have queued a MovePet to anchor 2: {:?}", snapshot.pet.state);
     }
@@ -26236,7 +26236,7 @@ mod tests {
     /// an enabled one.
     #[test]
     fn pet_arcade_pulse_blink_circuit_and_move_buttons_queue_their_commands() {
-        use gate4agent_arcade_pet_bastion::Command;
+        use hatchery_arcade_pet_bastion::Command;
 
         let mut app = open_pet_arcade_app(140, 40);
         let buf = render_pet_arcade_app(&mut app);
@@ -26317,7 +26317,7 @@ mod tests {
     /// UpgradeToL3` branch.
     #[test]
     fn pet_arcade_click_upgrades_to_l3_both_branches_are_clickable() {
-        use gate4agent_arcade_pet_bastion::Command;
+        use hatchery_arcade_pet_bastion::Command;
 
         let mut app = open_pet_arcade_app(140, 40);
         render_pet_arcade_app(&mut app);
@@ -26385,10 +26385,10 @@ mod tests {
     /// `PetArcade::click_draft_rune`/`click_choose_evolution`.
     #[test]
     fn pet_arcade_rune_draft_and_evolution_choice_options_are_clickable() {
-        use gate4agent_arcade_pet_bastion::pet::PetState;
-        use gate4agent_arcade_pet_bastion::snapshot::PetView;
-        use gate4agent_arcade_pet_bastion::wave::Difficulty;
-        use gate4agent_arcade_pet_bastion::Command;
+        use hatchery_arcade_pet_bastion::pet::PetState;
+        use hatchery_arcade_pet_bastion::snapshot::PetView;
+        use hatchery_arcade_pet_bastion::wave::Difficulty;
+        use hatchery_arcade_pet_bastion::Command;
 
         let mut app = open_pet_arcade_app(140, 40);
         render_pet_arcade_app(&mut app);
@@ -26419,7 +26419,7 @@ mod tests {
             },
             rune_options: vec![Rune::Echo, Rune::Anchor, Rune::Phase],
             runes_picked: Vec::new(),
-            // gate4agent-arcade's own concurrent addition -- see
+            // hatchery-arcade's own concurrent addition -- see
             // pet_arcade_phase_label's own PetChargeDraft arm doc
             // comment; empty here since neither fixture exercises it.
             pet_charge_options: Vec::new(),
@@ -26462,7 +26462,7 @@ mod tests {
         );
     }
 
-    /// The Pet Charge draft: `gate4agent-arcade`'s own concurrent rules
+    /// The Pet Charge draft: `hatchery-arcade`'s own concurrent rules
     /// pass added this decision point (drafted after waves 1/3/5/7,
     /// `PET_CHARGE_DRAFT_AFTER_WAVES`), and it used to reach this crate
     /// only as a phase LABEL string -- no overlay, no options drawn, no
@@ -26482,7 +26482,7 @@ mod tests {
     /// EXACTLY one `Command::DraftPetCharge`, never more.
     #[test]
     fn pet_arcade_pet_charge_draft_is_answerable_by_click_and_key() {
-        use gate4agent_arcade_pet_bastion::Command;
+        use hatchery_arcade_pet_bastion::Command;
 
         let mut app = open_pet_arcade_app(140, 40);
         render_pet_arcade_app(&mut app);
@@ -26629,7 +26629,7 @@ mod tests {
     /// `Command::Place`.
     #[test]
     fn pet_arcade_keyboard_place_queues_exactly_one_command_per_press() {
-        use gate4agent_arcade_pet_bastion::Command;
+        use hatchery_arcade_pet_bastion::Command;
 
         let mut app = open_pet_arcade_app(140, 40);
         render_pet_arcade_app(&mut app);
@@ -26646,7 +26646,7 @@ mod tests {
 
     /// Owner report: dropping on a slot that cannot take a tower must
     /// cancel without spending anything, not silently fail after already
-    /// charging Sap. Free placement (`gate4agent-arcade-pet-bastion`'s own
+    /// charging Sap. Free placement (`hatchery-arcade-pet-bastion`'s own
     /// `board.rs` module doc: "я хочу ставить куда хочу", `BuildIneligible
     /// Reason::{Route,Anchor,Occupied,OutOfBounds}` the only four refusal
     /// reasons left) means there is no build-radius edge to walk off any
@@ -26660,7 +26660,7 @@ mod tests {
     /// entire remaining refusal list.
     #[test]
     fn pet_arcade_dragging_a_tower_onto_an_invalid_tile_places_nothing_and_charges_nothing() {
-        use gate4agent_arcade_pet_bastion::board::HEARTSEED;
+        use hatchery_arcade_pet_bastion::board::HEARTSEED;
 
         let mut app = open_pet_arcade_app(140, 40);
         render_pet_arcade_app(&mut app);
@@ -26747,10 +26747,10 @@ mod tests {
     /// test cannot drive deterministically.
     #[test]
     fn pet_arcade_upgrade_button_dims_when_unaffordable() {
-        use gate4agent_arcade_pet_bastion::ids::EntityId;
-        use gate4agent_arcade_pet_bastion::pet::PetState;
-        use gate4agent_arcade_pet_bastion::snapshot::{PetView, TowerView};
-        use gate4agent_arcade_pet_bastion::wave::Difficulty;
+        use hatchery_arcade_pet_bastion::ids::EntityId;
+        use hatchery_arcade_pet_bastion::pet::PetState;
+        use hatchery_arcade_pet_bastion::snapshot::{PetView, TowerView};
+        use hatchery_arcade_pet_bastion::wave::Difficulty;
 
         let mut app = open_pet_arcade_app(140, 40);
         render_pet_arcade_app(&mut app);
@@ -26786,7 +26786,7 @@ mod tests {
             },
             rune_options: Vec::new(),
             runes_picked: Vec::new(),
-            // gate4agent-arcade's own concurrent addition -- see
+            // hatchery-arcade's own concurrent addition -- see
             // pet_arcade_phase_label's own PetChargeDraft arm doc
             // comment; empty here since neither fixture exercises it.
             pet_charge_options: Vec::new(),
@@ -26816,12 +26816,12 @@ mod tests {
     /// it opens the mechanics modal, and that the modal's own text is
     /// built from the SIM's real constants -- these assertions are the
     /// actual numeric substrings those constants resolve to today, read
-    /// straight off `gate4agent_arcade_pet_bastion::constants` here too,
+    /// straight off `hatchery_arcade_pet_bastion::constants` here too,
     /// never a copied literal, so this test breaks the moment the modal's
     /// own numbers would silently drift from the rules they describe.
     #[test]
     fn pet_arcade_info_button_opens_a_mechanics_card_built_from_real_constants() {
-        use gate4agent_arcade_pet_bastion::constants::{
+        use hatchery_arcade_pet_bastion::constants::{
             BOSS_LAP_INTEGRITY_DAMAGE, LEAK_INTEGRITY_DAMAGE, RUNE_DRAFT_AFTER_WAVES, RUNE_DRAFT_OPTIONS, SPARK_CAP,
             SPARK_PER_KILLS,
         };
@@ -27031,7 +27031,7 @@ mod tests {
     /// seeded run's own RNG happened to draw this run.
     #[test]
     fn pet_arcade_field_zone_highlight_tints_exactly_the_zone_bounds_and_nothing_else() {
-        use gate4agent_arcade_engine::SurfaceCell;
+        use hatchery_arcade_engine::SurfaceCell;
 
         let mut surface = Surface::new(BOARD_WIDTH as u16, BOARD_HEIGHT as u16, SurfaceCell::BLANK);
         let snapshot = pet_arcade_fixture_snapshot(
@@ -27067,7 +27067,7 @@ mod tests {
     /// entirely untouched, glyph included.
     #[test]
     fn pet_arcade_field_zone_highlight_never_overwrites_a_cell_that_already_carries_its_own_bg() {
-        use gate4agent_arcade_engine::SurfaceCell;
+        use hatchery_arcade_engine::SurfaceCell;
 
         let mut surface = Surface::new(BOARD_WIDTH as u16, BOARD_HEIGHT as u16, SurfaceCell::BLANK);
         let existing_bg = ArcadeRgb(9, 9, 9);
@@ -27091,7 +27091,7 @@ mod tests {
     /// `DynamicStroke`s per zone, and NOT ONE of them lands on a whole-
     /// number board-tile coordinate -- the "no cell-aligned hard edge"
     /// constraint this crate's own terrain layer already enforces
-    /// (`gate4agent-arcade`'s own `background.rs` module doc), checked
+    /// (`hatchery-arcade`'s own `background.rs` module doc), checked
     /// here on this side of that boundary since this crate draws its own
     /// zone overlay rather than reusing that module.
     #[test]
@@ -27317,7 +27317,7 @@ mod tests {
     /// rather than a blank list before any run has finished.
     #[test]
     fn pet_arcade_menu_score_list_shows_empty_state_then_real_entries() {
-        use gate4agent_arcade_pet_bastion::wave::Difficulty;
+        use hatchery_arcade_pet_bastion::wave::Difficulty;
 
         let mut app = open_pet_arcade_app(140, 40);
         render_pet_arcade_app(&mut app);
@@ -27489,7 +27489,7 @@ mod tests {
     /// a copied literal on either side of the assertion.
     #[test]
     fn pet_arcade_rune_tooltips_state_what_they_do_and_what_they_attach_to() {
-        use gate4agent_arcade_pet_bastion::constants::{
+        use hatchery_arcade_pet_bastion::constants::{
             ANCHOR_RUNE_LINGER_TICKS, ECHO_EVERY_NTH_ATTACK, PHASE_EVERY_NTH_HIT, SYMBIOSIS_DAMAGE_BONUS_PERMILLE,
         };
 
@@ -27521,7 +27521,7 @@ mod tests {
     /// same way `pet_arcade_pet_charge_tooltip` itself does.
     #[test]
     fn pet_arcade_pet_charge_tooltips_state_what_they_do_and_what_they_attach_to() {
-        use gate4agent_arcade_pet_bastion::constants::{
+        use hatchery_arcade_pet_bastion::constants::{
             PET_CHARGE_BLOOM_RADIUS_PERMILLE, PET_CHARGE_FANG_DAMAGE_PERMILLE, PET_CHARGE_SURGE_EXTRA_SPEED_PERMILLE,
         };
 
@@ -27559,7 +27559,7 @@ mod tests {
     /// damage_bonus_permille`/`enemy_speed_permille` polarity rules.
     #[test]
     fn pet_arcade_field_zone_tooltip_matches_the_snapshot_and_the_real_constants() {
-        use gate4agent_arcade_pet_bastion::constants::{ZONE_ENEMY_SPEED_PERMILLE, ZONE_TOWER_DAMAGE_PERMILLE};
+        use hatchery_arcade_pet_bastion::constants::{ZONE_ENEMY_SPEED_PERMILLE, ZONE_TOWER_DAMAGE_PERMILLE};
 
         let snapshot = pet_arcade_fixture_snapshot(
             RunPhaseView::Combat,
@@ -27865,8 +27865,8 @@ mod tests {
     /// described "gets stronger".
     #[test]
     fn pet_arcade_placed_tower_tooltip_previews_the_real_next_upgrade_stats() {
-        use gate4agent_arcade_pet_bastion::ids::EntityId;
-        use gate4agent_arcade_pet_bastion::tower::next_upgrade_cost;
+        use hatchery_arcade_pet_bastion::ids::EntityId;
+        use hatchery_arcade_pet_bastion::tower::next_upgrade_cost;
 
         let base_cost = TowerKind::Needle.base_stats().cost;
         let base = TowerView {
@@ -27911,7 +27911,7 @@ mod tests {
     /// applies too.
     #[test]
     fn pet_arcade_tile_tooltip_combines_a_placed_tower_with_its_own_field_zone() {
-        use gate4agent_arcade_pet_bastion::ids::EntityId;
+        use hatchery_arcade_pet_bastion::ids::EntityId;
 
         let tower = TowerView {
             id: EntityId(1),

@@ -1,6 +1,6 @@
 //! Pet Bastion: Night Garden -- a deterministic tower-defense run.
 //!
-//! Role: pure, deterministic game rules on top of the `gate4agent-arcade`
+//! Role: pure, deterministic game rules on top of the `hatchery-arcade`
 //! engine contract. Owns the board, towers, enemies, bosses, the Living
 //! Circuit, the eight-wave run schedule, rune drafts, pet evolutions, the
 //! pet's own Pet Charge build (`pet::PetCharge`) and per-wave field
@@ -14,7 +14,7 @@
 //! [`wave::Difficulty`], [`contract::RunOutcome`], [`rng::EngineRng`].
 //!
 //! Imports: nothing beyond `std`. This crate depends on
-//! `gate4agent-arcade-engine` (path dependency, default features only).
+//! `hatchery-arcade-engine` (path dependency, default features only).
 //! `contract.rs`, `hash.rs` and `rng.rs` are thin re-export shims over the
 //! engine's own `game`/`hash`/`rng` modules (plus, in `rng.rs`, this
 //! crate's own game-owned `shuffle` helper -- the engine's `EngineRng`

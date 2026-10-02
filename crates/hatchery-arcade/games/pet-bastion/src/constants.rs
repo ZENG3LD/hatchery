@@ -92,7 +92,7 @@ pub const COZY_THREAT_PERMILLE: i64 = 850;
 /// boundary.
 pub const COZY_HP_PERMILLE: i64 = 924;
 /// x0.827 of the plan's own seed value (1100) -- see `BELLKEEPER_BASE_HP`'s
-/// own doc for the full post-fix `gate4agent-arcade-sweep` methodology this
+/// own doc for the full post-fix `hatchery-arcade-sweep` methodology this
 /// was found under. Cozy's own boss-HP scalar (`COZY_HP_PERMILLE`) already
 /// makes both bosses noticeably weaker for Cozy than for Standard at the
 /// SAME base HP constant (both base HP constants are shared across all
@@ -273,7 +273,7 @@ pub const WILD_HP_PERMILLE: i64 = 733;
 /// build even less affordable, not more.
 ///
 /// Re-found the same way the value above originally was: a
-/// `gate4agent-arcade-sweep --reward-mult` grid search (permille scoped to
+/// `hatchery-arcade-sweep --reward-mult` grid search (permille scoped to
 /// Wild's OWN preset only, so this never touches Cozy/Standard, exactly
 /// like the original search) at the NEW 1049/3239 boss HP, `slow_stack`.
 /// Reproduced the same "Sap-affordability step" signature this constant's
@@ -608,7 +608,7 @@ pub const BELLKEEPER_SILENCE_TICKS: u64 = 2 * TICKS_PER_SECOND as u64;
 /// plan's own un-cut number: DPS output within a wave's own time/threat
 /// budget, not the movement defect, is still the real ceiling here.
 ///
-/// Found by a `gate4agent-arcade-sweep` grid search (coarse permille step
+/// Found by a `hatchery-arcade-sweep` grid search (coarse permille step
 /// -> fine step -> exhaustive single-permille scan across every flat
 /// region) against the post-fix engine, run DIRECTLY on this constant (not
 /// through `--bellkeeper-hp-mult`/`--night-maw-hp-mult`/`--reward-mult`,
@@ -657,7 +657,7 @@ pub const BELLKEEPER_SILENCE_TICKS: u64 = 2 * TICKS_PER_SECOND as u64;
 /// geometrically-separated pads ever could -- not a bug, the literal
 /// balance shift free placement was expected to cause.
 ///
-/// Re-found by a `gate4agent-arcade-sweep` grid search run through
+/// Re-found by a `hatchery-arcade-sweep` grid search run through
 /// `--bellkeeper-hp-mult`/`--night-maw-hp-mult` (both multipliers moved
 /// together, since -- per this doc's own original methodology -- a single
 /// shared boss-HP level cannot satisfy three difficulty bands alone;
@@ -704,7 +704,7 @@ pub const BELLKEEPER_SILENCE_TICKS: u64 = 2 * TICKS_PER_SECOND as u64;
 /// jump (measured Standard 41.0%/Wild 14.0% at 1049 before this
 /// re-calibration, both above their own 20-40%/3-8% bands).
 ///
-/// Re-found by a `gate4agent-arcade-sweep` grid search run through
+/// Re-found by a `hatchery-arcade-sweep` grid search run through
 /// `--bellkeeper-hp-mult`/`--night-maw-hp-mult` (both moved together, same
 /// methodology as this doc's own original search), 100 seeds per point:
 /// 1000/1010/1020/1030 permille measured `slow_stack` Standard
@@ -742,7 +742,7 @@ pub const BELLKEEPER_SILENCE_TICKS: u64 = 2 * TICKS_PER_SECOND as u64;
 /// difficulty (Cozy/Standard/Wild all 100.0%), full board-wide free placement
 /// plus unlimited retries via looping erasing all three bands at once.
 ///
-/// Re-found by a `gate4agent-arcade-sweep` grid search run through
+/// Re-found by a `hatchery-arcade-sweep` grid search run through
 /// `--bellkeeper-hp-mult`/`--night-maw-hp-mult` (both multipliers moved
 /// together, same methodology as this doc's own original search), Standard,
 /// `slow_stack`: coarse step (1500/2000/2500/3000 permille, 50 seeds) found
@@ -889,7 +889,7 @@ pub const PET_CHARGE_DRAFT_OPTIONS: usize = 3;
 /// compose the same way twice rather than needing a second formula.
 ///
 /// Deliberately modest, not a design guess left unchecked: a direct
-/// `gate4agent-arcade-sweep` A/B (this constant, [`PET_CHARGE_FANG_DAMAGE_PERMILLE`]
+/// `hatchery-arcade-sweep` A/B (this constant, [`PET_CHARGE_FANG_DAMAGE_PERMILLE`]
 /// and [`PET_CHARGE_BLOOM_RADIUS_PERMILLE`] all zeroed versus all three at
 /// this file's own shipped values, 200 seeds, Standard/Wild, `slow_stack`)
 /// found the four Pet Charges together move Standard from the standing

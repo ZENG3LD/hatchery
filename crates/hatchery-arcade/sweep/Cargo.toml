@@ -1,5 +1,5 @@
 [package]
-name = "gate4agent-arcade-sweep"
+name = "hatchery-arcade-sweep"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,5 +11,5 @@ description = "Headless balance sweep. Never depends on a terminal."
 # must never resolve uzor-tui/uzor-text/icy_sixel into its graph, by
 # construction, regardless of what the engine's own default feature set
 # becomes in the future.
-gate4agent-arcade-engine = { path = "../engine", default-features = false }
-gate4agent-arcade-pet-bastion = { path = "../games/pet-bastion", default-features = false }
+hatchery-arcade-engine = { path = "../engine", default-features = false }
+hatchery-arcade-pet-bastion = { path = "../games/pet-bastion", default-features = false }

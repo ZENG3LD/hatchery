@@ -19,7 +19,7 @@
 //! sim states am I right now." WHICH fields to interpolate, by what key
 //! (an enemy's own `EntityId`, a boss body's own `id`, the pet's own
 //! `PetState`), and how to turn that into paintable data is Pet Bastion's
-//! own domain knowledge -- see `gate4agent-arcade-pet-bastion-render`'s own
+//! own domain knowledge -- see `hatchery-arcade-pet-bastion-render`'s own
 //! `interp` module, which is where that half actually lives, exactly as
 //! this whole pass's own task framing asked for.
 

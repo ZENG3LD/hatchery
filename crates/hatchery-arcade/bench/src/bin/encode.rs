@@ -5,9 +5,9 @@
 //! nothing about encoding depends on a real terminal being on the other
 //! end).
 //!
-//! Run: `cargo run --release -p gate4agent-arcade-bench --bin encode`
+//! Run: `cargo run --release -p hatchery-arcade-bench --bin encode`
 
-use gate4agent_arcade_bench::{raster, sixel, stats};
+use hatchery_arcade_bench::{raster, sixel, stats};
 
 const SIZES: [(u32, u32, &str); 3] = [(560, 266, "560x266 (1x, = 56x14 cells)"), (1120, 532, "1120x532 (2x)"), (280, 133, "280x133 (0.5x, = 1/4 area of 1x)")];
 const PALETTES: [u16; 3] = [16, 32, 256];

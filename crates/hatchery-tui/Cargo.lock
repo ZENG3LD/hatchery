@@ -382,35 +382,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gate4agent-arcade-engine"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "icy_sixel",
- "serde",
- "thiserror 2.0.20",
- "uzor-text",
- "uzor-tui",
- "uzor-urx-core",
- "uzor-urx-cpu",
-]
-
-[[package]]
-name = "gate4agent-arcade-pet-bastion"
-version = "0.1.0"
-dependencies = [
- "gate4agent-arcade-engine",
-]
-
-[[package]]
-name = "gate4agent-arcade-pet-bastion-render"
-version = "0.1.0"
-dependencies = [
- "gate4agent-arcade-engine",
- "gate4agent-arcade-pet-bastion",
-]
-
-[[package]]
 name = "gate4agent-build-stamp"
 version = "0.1.0"
 
@@ -508,6 +479,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ba4ff7128dee98c7dc9794b6a411377e1404dba1c97deb8d1a55297bd25d8af"
 dependencies = [
  "hashbrown",
+]
+
+[[package]]
+name = "hatchery-arcade-engine"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "icy_sixel",
+ "serde",
+ "thiserror 2.0.20",
+ "uzor-text",
+ "uzor-tui",
+ "uzor-urx-core",
+ "uzor-urx-cpu",
+]
+
+[[package]]
+name = "hatchery-arcade-pet-bastion"
+version = "0.1.0"
+dependencies = [
+ "hatchery-arcade-engine",
+]
+
+[[package]]
+name = "hatchery-arcade-pet-bastion-render"
+version = "0.1.0"
+dependencies = [
+ "hatchery-arcade-engine",
+ "hatchery-arcade-pet-bastion",
 ]
 
 [[package]]
@@ -662,15 +662,15 @@ name = "hatchery-tui"
 version = "0.1.0"
 dependencies = [
  "crossterm",
- "gate4agent-arcade-engine",
- "gate4agent-arcade-pet-bastion",
- "gate4agent-arcade-pet-bastion-render",
  "gate4agent-build-stamp",
  "gate4agent-c2-client",
  "gate4agent-c2-protocol",
  "gate4agent-node-protocol",
  "gate4agent-node-wire",
  "gate4agent-types",
+ "hatchery-arcade-engine",
+ "hatchery-arcade-pet-bastion",
+ "hatchery-arcade-pet-bastion-render",
  "hatchery-harness-client",
  "hatchery-harness-light",
  "hatchery-harness-protocol",
@@ -1770,6 +1770,8 @@ dependencies = [
 [[package]]
 name = "uzor-urx-core"
 version = "1.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d47f8a17ca25a39f0b93565349cddf3586aff24c5cf5f9658894de5f26a3fc8"
 dependencies = [
  "kurbo",
  "metrics",
@@ -1779,6 +1781,8 @@ dependencies = [
 [[package]]
 name = "uzor-urx-cpu"
 version = "1.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f439c56690b6e1110d01657162e9a47625b9ce1ba1bba9cda1f74adc30772e0"
 dependencies = [
  "bumpalo",
  "bytemuck",
@@ -1794,6 +1798,8 @@ dependencies = [
 [[package]]
 name = "uzor-urx-image"
 version = "1.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97dae21a87f053ec0e6760c08866bbc874a0c5456c67a445934fd2a618fae384"
 dependencies = [
  "uzor-urx-core",
 ]
