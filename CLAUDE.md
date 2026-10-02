@@ -53,6 +53,10 @@ private workspace documentation tree, not in this repository.
 
 ## Running the live stack and the TUI
 
+> **OSS scrub tip 1 (2026-10-02):** station id and host paths below are
+> **synthetic examples** (`fixture-node-…`, `C:\Users\example\…`). Real
+> operator paths/ids stay private; do not commit them.
+
 Bring the four processes up in order — node, both c2, harness — then the
 TUI. Secrets live in the `gate4agent` repo, at
 `..\gate4agent\.run\p0-live-20260818\relaunch.env`, and are loaded into the
@@ -60,19 +64,19 @@ environment; never pass them in argv. That relaunch env has not moved into
 `hatchery` — it stays there until the runtime-identifier rename.
 
 ```powershell
-$H    = "C:\Users\VA PC\CODING\ML_TRADING\nemo\hatchery"
-$G    = "C:\Users\VA PC\CODING\ML_TRADING\nemo\gate4agent"
+$H    = "C:\Users\example\dev\hatchery"
+$G    = "C:\Users\example\dev\gate4agent"
 $R    = Join-Path $G ".run\p0-live-20260818"
 $bin  = Join-Path $H "target\release"
 Get-Content (Join-Path $R "relaunch.env") | ForEach-Object {
   if ($_ -match '^([A-Z0-9_]+)=(.*)$') { Set-Item -Path ("env:" + $matches[1]) -Value $matches[2] } }
-$env:GATE4AGENT_NODE_TOKEN_OPBOX_WINDOWS_X86_64_1D67E837F8FA = $env:GATE4AGENT_NODE_TOKEN
+$env:GATE4AGENT_NODE_TOKEN_FIXTURE_NODE_WINDOWS_X86_64_DEADBEEF0001 = $env:GATE4AGENT_NODE_TOKEN
 ```
 
 `Start-Process -ArgumentList` must get ONE quoted string, not an array.
 An array is joined with spaces and nothing is re-quoted, so every path
 holding a space is split — node reports `workspace 'gate4agent' root
-'C:\Users\VA' is invalid: path is not a directory` and exits.
+'C:\Users\ex' is invalid: path is not a directory` and exits.
 
 **node, both c2, and the harness are spawned headless** — pass
 `-WindowStyle Hidden` and redirect both streams to a log in `$R`. They are
@@ -81,12 +85,12 @@ clutters the desktop the operator is actually working in, and their output
 belongs in a file you can read afterwards anyway. The TUI is the only one
 of the five that gets a window, and it gets it from `wt`.
 
-- node — `--node-id opbox-windows-x86-64-1d67e837f8fa`, one
+- node — `--node-id fixture-node-windows-x86-64-deadbeef0001`, one
   `--workspace "<name>=<abs path>"` per repo, a matching
   `--worktree-mode <name>=manual`, one
   `--history-root "<provider>|<layout>|<abs root>"` per provider, then
   `--endpoint \.\pipe\gate4agent-node --api-listen 127.0.0.1:18310`.
-- c2 (primary) — `--node opbox-windows-x86-64-1d67e837f8fa=\.\pipe\gate4agent-node
+- c2 (primary) — `--node fixture-node-windows-x86-64-deadbeef0001=\.\pipe\gate4agent-node
   --api-listen 127.0.0.1:18320 --control-endpoint \.\pipe\gate4agent-c2`.
 - c2 (harness's own) — the same line with `:18321` and
   `\.\pipe\gate4agent-c2-harness`.

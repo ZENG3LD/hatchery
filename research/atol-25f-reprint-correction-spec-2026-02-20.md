@@ -41,7 +41,7 @@ Input resembles tag-based fiscal document JSON, for example:
 - values like `1030` (name), `1079` (price), `1043` (amount), `1212`/`1214` (payment attributes), `2108` (measure)
 
 Example source file used in analysis:
-- `C:\Users\VA PC\Downloads\Telegram Desktop\7380440801603539_6662.json`
+- `example-ofd-export/7380440801603539_6662.json` (local sample; path scrubbed)
 
 ### 4.2 Output (correction payload)
 
@@ -52,7 +52,7 @@ Target payload shape (example already available):
 - `receipt` with `company`, `items`, `payments`, `total`
 
 Example source file used in analysis:
-- `C:\Users\VA PC\Downloads\Telegram Desktop\7380440801603539_6662_correction.json`
+- `example-ofd-export/7380440801603539_6662_correction.json` (local sample; path scrubbed)
 
 ## 5. Mapping Rules (OFD -> Correction Payload)
 

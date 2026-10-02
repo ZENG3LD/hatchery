@@ -49,10 +49,9 @@ use hatchery_arcade_pet_bastion_render::interp::{interpolated_dynamic_sprites, r
 use hatchery_arcade_pet_bastion_render::{snapshot_to_surface, terrain_surface};
 use uzor_tui::{buffer::TerminalBuffer, rect::Rect};
 
-/// Owner-visible preview output directory -- the session scratchpad, per
-/// the task's own instruction (this tool is not part of the product, its
-/// output is not committed).
-const OUT_DIR: &str = r"C:\Users\VAPC~1\AppData\Local\Temp\claude\C--Users-VA-PC-CODING-ML-TRADING-nemo\649db025-6ac3-4310-8b34-eff5e48b4434\scratchpad";
+/// Preview output directory (synthetic path; not a real operator home).
+/// This tool is not part of the product; its output is not committed.
+const OUT_DIR: &str = r"C:\Users\example\AppData\Local\Temp\hatchery-arcade-preview";
 const FONT_PATH: &str = r"C:\Windows\Fonts\consola.ttf";
 /// Chosen preview terminal-cell pixel size for the glyph/half-block PNGs
 /// -- a plausible monospace cell aspect (roughly 1:2, matching a typical
