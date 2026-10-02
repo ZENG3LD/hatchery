@@ -1,0 +1,31 @@
+[package]
+name = "gate4agent-arcade-bench"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Disposable measurement tool: answers 'can icy_sixel + Windows Terminal push a game board at 60fps' with real numbers (encode microseconds, bytes/frame, live-terminal round-trip fps). NOT part of the product -- never depended on by engine/games/sweep/preview."
+
+[dependencies]
+# Same encoder version the engine's own `render` feature and `preview`
+# already pin -- this bench measures THAT encoder, not a substitute.
+icy_sixel = "0.6"
+# The `urx_render` bin's own dependency: builds a real `Surface`/
+# `DynamicSprite`/`DynamicStroke` scene through the engine's own public
+# `render` feature (`build_scene`/`render_scene`) so this bench measures
+# the SAME URX draw path the product uses, not a hand-rolled substitute --
+# the exact same reasoning `preview`'s own `Cargo.toml` already documents
+# for its own identical dependency. Still a leaf crate: nothing in
+# `engine`/`games`/`sweep` depends back on `bench`.
+gate4agent-arcade-engine = { path = "../engine", default-features = false, features = ["render"] }
+# Raw Win32 console mode (stdin: line/echo off, VT input on) plus a raw
+# `ReadFile` on the stdin handle -- needed to read the terminal's own
+# cursor-position-report (DSR, `ESC[6n`) response bytes as they arrive,
+# which is how `live.rs` clocks how long Windows Terminal itself takes to
+# ingest a frame (see `src/console.rs`'s own doc comment). `std::io::Stdin`
+# cannot do this: it line-buffers by default and there is no portable API
+# to flip Windows console modes without a `windows-sys` (or `winapi`)
+# call. Already resolved in this workspace's own `Cargo.lock` (pulled in
+# transitively by `uzor-tui`'s own terminal-size detection), so this adds
+# no new supply-chain surface, only an explicit direct dependency on a
+# crate already vetted and building in this tree.
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console", "Win32_Storage_FileSystem", "Win32_System_IO"] }

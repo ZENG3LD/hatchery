@@ -1,0 +1,13 @@
+[package]
+name = "gate4agent-arcade-pet-bastion"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Pet Bastion: Night Garden -- a deterministic tower-defense run."
+
+[dependencies]
+# Sim core only -- `default-features = false` is a structural guard, not a
+# behavioural change (the engine's own `default = []` already carries no
+# render dep), so a future default feature on the engine can never drag
+# uzor/rendering types into this crate's build by accident.
+gate4agent-arcade-engine = { path = "../../engine", default-features = false }

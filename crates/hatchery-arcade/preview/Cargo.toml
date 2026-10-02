@@ -1,0 +1,25 @@
+[package]
+name = "gate4agent-arcade-preview"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Disposable dev tool: renders one real Pet Bastion mid-run snapshot through every implemented render path to PNG, and an interpolated motion sequence through the pixel path, for owner comparison. Not part of the product -- never depended on by engine/sweep/pet-bastion."
+
+[dependencies]
+gate4agent-arcade-engine = { path = "../engine", default-features = false, features = ["render"] }
+gate4agent-arcade-pet-bastion = { path = "../games/pet-bastion", default-features = false }
+gate4agent-arcade-pet-bastion-render = { path = "../games/pet-bastion-render" }
+gate4agent-arcade-sweep = { path = "../sweep", default-features = false }
+# Same version the engine's own `render` feature already pulls in --
+# pinned explicitly since this binary names `uzor_tui::{buffer, rect}`
+# types directly (to build the scratch `TerminalBuffer`/`Rect` every
+# `RenderBackend::project` call needs).
+uzor-tui = "1.5.1"
+# Only needed to DECODE the sixel tier's own real wire-format output back
+# into pixels for the PNG -- see `raster.rs`'s own doc comment.
+icy_sixel = "0.6"
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Font rasterizer for the glyph tier's own PNG -- a preview-only tool
+# dependency, never pulled into `engine`'s normal dependency graph (see
+# `main.rs`'s own doc comment).
+ab_glyph = "0.2"
