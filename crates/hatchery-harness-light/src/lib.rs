@@ -238,6 +238,12 @@ pub(crate) enum LightCommand {
 /// the live runtime inventory (so the very first `RuntimeInventoryList` an
 /// early caller sees already reflects whatever nodes are online), then
 /// starts accepting operator connections on an ephemeral loopback port.
+///
+/// **Dial-only toward C2:** the C2 path is always outbound
+/// (`connect_local_reconnecting`). The loopback `TcpListener` below is the
+/// *operator wire* for TUI/client → harness — **not** a mesh underlay or C2
+/// accept door, and C2 never dials HQ. HQ mesh role = client/admin only
+/// (see `hq-dials-c2-mesh-role-inventory-2026-10-02.md`).
 pub async fn start_harness_light(
     c2_endpoint: &str,
     c2_token: &str,

@@ -240,6 +240,14 @@ fn resolve_exact_route(
 impl HarnessC2Adapter {
     /// Connects the harness as the authenticated C2 operator.
     ///
+    /// **Dial-only (HQ mesh role):** this always *dials* the C2 control
+    /// endpoint via `connect_local_reconnecting`. Hatchery (HQ) is never a
+    /// mesh/C2 accept-peer and never waits for C2 to dial HQ. Same-LAN /
+    /// local pipe-or-socket today; remote stable underlay later — still HQ
+    /// dials. See docs `hq-dials-c2-mesh-role-inventory-2026-10-02.md` and
+    /// owner doctrine in `oss-perimeter-mesh-roles-and-versioning` §1 /
+    /// `mesh-connectivity-daemon-design` §1.5.
+    ///
     /// The returned adapter deliberately exposes no generic request handle. Its
     /// command surface is restricted to inventory reads, typed ContextPack
     /// export, and SpawnSpec dispatch.
