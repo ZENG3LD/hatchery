@@ -249,7 +249,8 @@ impl HarnessC2Adapter {
     /// `mesh-connectivity-daemon-design` §1.5. Role lock types:
     /// [`crate::mesh_role::MeshParticipantRole::HqClientAdmin`] /
     /// [`crate::mesh_role::MeshDialCapability::DialOnly`] (stub trait
-    /// [`crate::mesh_role::MeshUnderlayDial`] — no WireGuard daemon).
+    /// [`crate::mesh_role::MeshUnderlayDial`]; tip-5 Linux UDP+AEAD path in
+    /// [`crate::mesh_underlay`] — still no full WireGuard daemon; HQ never accept).
     ///
     /// The returned adapter deliberately exposes no generic request handle. Its
     /// command surface is restricted to inventory reads, typed ContextPack

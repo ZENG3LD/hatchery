@@ -6,6 +6,7 @@
 //! - HQ = always client / admin → [`MeshDialCapability::DialOnly`]
 //! - C2 + node = mesh peers → [`MeshDialCapability::DialOrAccept`] (NAT call-home)
 //! - Transport crypto ≠ authorization (token barriers stay inside any future path)
+//! - Tip 5 live Linux UDP+AEAD permit path: [`crate::mesh_underlay`]
 //!
 //! Cite:
 //! - `hq-dials-c2-mesh-role-inventory-2026-10-02.md`
@@ -106,12 +107,16 @@ impl fmt::Display for MeshTcpDialDirection {
 }
 
 /// Error when a call asks HQ (or DialOnly) to accept underlay peers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MeshRoleError {
     /// HQ / DialOnly must not accept mesh underlay peers.
     HqMustNotAcceptUnderlay,
-    /// Stub underlay has no real tunnel yet.
+    /// WireGuard / kernel TUN daemon product is not this tip.
     UnderlayNotImplemented,
+    /// Win/mac (non-Linux) underlay refused with a clear operator hint.
+    PlatformUnsupported,
+    /// Probe / action refused — token barrier failed (crypto ≠ auth).
+    Unauthorized,
 }
 
 impl fmt::Display for MeshRoleError {
@@ -121,7 +126,13 @@ impl fmt::Display for MeshRoleError {
                 f.write_str("HQ mesh role is dial-only; underlay accept is refused")
             }
             Self::UnderlayNotImplemented => {
-                f.write_str("mesh underlay stub: no WireGuard/daemon in this tip")
+                f.write_str("mesh underlay: no full WireGuard/daemon product in tip 5; see mesh_underlay module")
+            }
+            Self::PlatformUnsupported => {
+                f.write_str("mesh underlay unsupported on this OS: Linux-first tip 5; Win/mac later")
+            }
+            Self::Unauthorized => {
+                f.write_str("underlay probe unauthorized: token barrier failed (crypto ≠ auth)")
             }
         }
     }
@@ -179,6 +190,26 @@ impl MeshUnderlayDial for HqMeshDialStub {
     }
 }
 
+/// C2 mesh peer stub — DialOrAccept (NAT call-home). Real path: `mesh_underlay`.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct C2MeshDialStub;
+
+impl MeshUnderlayDial for C2MeshDialStub {
+    fn role(&self) -> MeshParticipantRole {
+        MeshParticipantRole::C2Peer
+    }
+}
+
+/// Node mesh peer stub — DialOrAccept. Real path: `mesh_underlay`.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NodeMeshDialStub;
+
+impl MeshUnderlayDial for NodeMeshDialStub {
+    fn role(&self) -> MeshParticipantRole {
+        MeshParticipantRole::NodePeer
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,5 +261,21 @@ mod tests {
         assert_eq!(MeshParticipantRole::HqClientAdmin.to_string(), "hq-client-admin");
         assert_eq!(MeshDialCapability::DialOnly.to_string(), "dial-only");
         assert_eq!(MeshTcpDialDirection::Dial.to_string(), "dial");
+    }
+
+    #[test]
+    fn peer_stubs_may_accept_direction_but_trait_still_unimpl_until_mesh_underlay() {
+        let c2 = C2MeshDialStub;
+        let node = NodeMeshDialStub;
+        assert_eq!(c2.dial_capability(), MeshDialCapability::DialOrAccept);
+        assert_eq!(node.dial_capability(), MeshDialCapability::DialOrAccept);
+        // Trait accept path: role allows accept, then UnderlayNotImplemented
+        // (tip-5 live path lives in `crate::mesh_underlay`, not this stub trait).
+        assert_eq!(c2.accept_stub(), Err(MeshRoleError::UnderlayNotImplemented));
+        assert_eq!(node.accept_stub(), Err(MeshRoleError::UnderlayNotImplemented));
+        assert_eq!(
+            HqMeshDialStub.accept_stub(),
+            Err(MeshRoleError::HqMustNotAcceptUnderlay)
+        );
     }
 }
