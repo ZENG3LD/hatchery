@@ -2,7 +2,7 @@
 name = "hatchery-harness-client"
 version = "0.2.37"
 edition = "2021"
-description = "Typed localhost client and CLI (gate4agent-harnessctl) for the gate4agent harness read and operator hosts"
+description = "Typed localhost client and CLI (gate4agent-harnessctl) for the hatchery harness read and operator hosts"
 publish = false
 
 [lib]

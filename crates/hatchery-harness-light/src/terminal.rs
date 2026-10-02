@@ -1,6 +1,6 @@
-//! Wires `gate4agent-harness-service`'s promoted-`pub` `TerminalBufferRegistry`
+//! Wires `hatchery-harness-service`'s promoted-`pub` `TerminalBufferRegistry`
 //! into the light harness: live C2 terminal-frame events feed the ring
-//! (mirrors `gate4agent-harness-service::runtime`'s own event-loop ingestion,
+//! (mirrors `hatchery-harness-service::runtime`'s own event-loop ingestion,
 //! see that module's `C2NodeEvent::TerminalFrame`/`ResyncRequired` handling),
 //! and `TerminalRead` pages it. The registry itself is reused verbatim -- see
 //! `hatchery_harness_service::terminal`'s own module doc comment for why it
@@ -36,7 +36,7 @@ pub(crate) fn new_shared() -> SharedTerminalRegistry {
 /// Reacts to one live `RoutedNodeEvent`: ingests a `TerminalFrame` into its
 /// session's ring, or drops every buffer for the event's node+incarnation on
 /// `ResyncRequired` -- the exact two event kinds
-/// `gate4agent-harness-service::runtime`'s own event-loop handles the same
+/// `hatchery-harness-service::runtime`'s own event-loop handles the same
 /// way (see that module's `C2NodeEvent::TerminalFrame`/`ResyncRequired` match
 /// arms). Called from `lib.rs`'s select loop the same "detached per event,
 /// respecting the drain doctrine" way `crate::inventory::handle_event`
@@ -83,7 +83,7 @@ pub(crate) async fn reconcile_topology(registry: &SharedTerminalRegistry, topolo
 }
 
 /// Serves `TerminalRead`: pages the maintained ring for `session`, honoring
-/// `limit`/`after_sequence` exactly as `gate4agent-harness-service::runtime`'s
+/// `limit`/`after_sequence` exactly as `hatchery-harness-service::runtime`'s
 /// own `TerminalRead` handler does (the same reused `page`/`terminal_frame_to_wire`
 /// calls) -- a session absent from the ring (never spawned in this process,
 /// or already evicted/reconciled away) is a typed `NotFound`, not an empty
@@ -131,7 +131,7 @@ pub(crate) async fn read(
     HarnessOperatorReplyV1::Ok { response: HarnessOperatorResponseV1::TerminalRead(response) }
 }
 
-/// Light-local mirror of `gate4agent-harness-service::runtime`'s own (private)
+/// Light-local mirror of `hatchery-harness-service::runtime`'s own (private)
 /// `terminal_session_key`: parses the wire's client-supplied session address
 /// into the ring's typed key. `Err(())` rather than a typed host error --
 /// this is purely a local shape check the one caller (`read`) already turns
@@ -246,7 +246,7 @@ mod tests {
 
     /// `handle_event` ingests `TerminalFrame` and drops the whole route on
     /// `ResyncRequired`, exactly mirroring
-    /// `gate4agent-harness-service::runtime`'s own event-loop handling.
+    /// `hatchery-harness-service::runtime`'s own event-loop handling.
     #[tokio::test]
     async fn handle_event_ingests_frames_and_resync_required_invalidates_the_route() {
         use gate4agent_c2_protocol::NodeCursor;

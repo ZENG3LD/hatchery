@@ -1,7 +1,7 @@
 //! Pure composition of independently-clocked wake deadlines.
 //!
 //! Generalizes the exact "fold every deadline through `Duration::min`"
-//! shape `gate4agent-tui`'s own `FrameScheduler::poll_timeout`/
+//! shape `hatchery-tui`'s own `FrameScheduler::poll_timeout`/
 //! `animation_wake_interval` already use, so a host with N
 //! independently-clocked occupants (the pet's own 16ms animation cadence,
 //! a hosted game's own fixed sim tick, an optional slower cosmetic

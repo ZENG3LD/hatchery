@@ -1,10 +1,10 @@
 //! In-process operator credential minting and verification.
 //!
-//! `gate4agent-harness-service`'s own operator credential check
+//! `hatchery-harness-service`'s own operator credential check
 //! (`HarnessOperatorCredentialAuthority` in `runtime.rs`) is a private,
 //! non-`pub` type, and is bound to an *externally supplied* credential (the
 //! full harness reads `GATE4AGENT_HARNESS_OPERATOR_TOKEN` from the
-//! environment -- see `gate4agent-harness-service/src/bin/gate4agent-
+//! environment -- see `hatchery-harness-service/src/bin/gate4agent-
 //! harness.rs`). Light mode's contract is the opposite: the credential is
 //! generated fresh in-process at `start_harness_light` and handed back to
 //! the caller, never read from the environment. This module is therefore a

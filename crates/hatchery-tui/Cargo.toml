@@ -24,7 +24,7 @@ hatchery-harness-light = { path = "../hatchery-harness-light" }
 hatchery-harness-protocol = { path = "../hatchery-harness-protocol" }
 gate4agent-node-protocol = { path = "../../../gate4agent/crates/gate4agent-node-protocol" }
 # `local_hmac_sha256`/`proofs_match`: the same constant-time credential-
-# digest primitives `gate4agent-harness-service`'s own operator-credential
+# digest primitives `hatchery-harness-service`'s own operator-credential
 # authority uses (`HarnessOperatorCredentialAuthority`) -- `control_plane`
 # follows that exact precedent instead of hand-rolling a second comparison
 # scheme. In-tree sibling crate, no new external dependency.
@@ -36,7 +36,7 @@ hatchery-observation-service = { path = "../hatchery-observation-service" }
 gate4agent-types = { path = "../../../gate4agent/crates/gate4agent-types" }
 icy_sixel = "0.6"
 # `control_plane`'s wire frame: line-delimited JSON, the same idiom
-# `gate4agent-harness-api`/`gate4agent-harness-client` already use for the
+# `hatchery-harness-api`/`hatchery-harness-client` already use for the
 # harness operator wire (see that crate's own `Cargo.toml` for the matching
 # version pins this mirrors).
 serde = { version = "1", features = ["derive"] }

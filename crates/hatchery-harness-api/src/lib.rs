@@ -73,8 +73,8 @@ pub const HARNESS_READ_CREDENTIAL_MAX_BYTES: usize = 8 * 1024;
 pub const HARNESS_MCP_AUDIENCE: &str = "gate4agent-harness-mcp-read-v1";
 /// The harness operator wire is a loopback protocol between processes built
 /// from the same tree and rolled together (`gate4agent-harness` and its two
-/// clients, `gate4agent-tui` / `gate4agent-tui-light`, via
-/// `gate4agent-harness-client`). There is exactly one peer shape at a time --
+/// clients, `hatchery-tui` / `hatchery-tui-light`, via
+/// `hatchery-harness-client`). There is exactly one peer shape at a time --
 /// no peer that cannot be rebuilt exists -- so the envelope now checks
 /// [`BUILD_STAMP`] for exact equality instead of a hand-typed version
 /// counter: `BUILD_STAMP` is a content hash of the working tree computed at
@@ -90,7 +90,7 @@ pub use gate4agent_build_stamp::BUILD_STAMP;
 // Realistic multi-pane ceiling with headroom; bounds the harness-side
 // per-subscriber HashSet<RuntimeSessionKey> and the connect-time seed burst
 // `SubscribeTerminal`'s handler sends immediately after registering (see
-// `gate4agent-harness-service::runtime`'s `HostCommand::SubscribeTerminal`
+// `hatchery-harness-service::runtime`'s `HostCommand::SubscribeTerminal`
 // arm).
 pub const HARNESS_TERMINAL_SUBSCRIPTION_SESSIONS_MAX: usize = 32;
 // Same rationale as immediately above, for `SubscribeAgentStream` -- bounds
@@ -314,7 +314,7 @@ pub struct HarnessOperatorEnvelopeV1 {
 impl HarnessOperatorEnvelopeV1 {
     /// Builds an envelope carrying this binary's own [`BUILD_STAMP`] -- the
     /// one place every caller in this tree (this crate's own tests,
-    /// `gate4agent-harness-service`, `gate4agent-harness-client`) should
+    /// `hatchery-harness-service`, `hatchery-harness-client`) should
     /// build one from, rather than hand-filling `build_stamp` at each site.
     pub fn new(credential: HarnessOperatorCredential, request: HarnessOperatorRequestV1) -> Self {
         Self {
@@ -779,7 +779,7 @@ impl HarnessIssuedExecutionSpecSummaryV1 {
 }
 
 /// Names, with its compared inputs, the exact reason `context_source_option`
-/// (`gate4agent-harness-service::runtime`) declined to surface a run as a
+/// (`hatchery-harness-service::runtime`) declined to surface a run as a
 /// `context_sources` candidate. Instrumentation only, never a policy
 /// decision -- the admission logic itself is unchanged by this type's
 /// existence; it only makes an already-silent exclusion observable from
@@ -1097,7 +1097,7 @@ impl<'de> Deserialize<'de> for HarnessRepositoryPathV1 {
 /// to its UTF-8 representation only, the same way `HarnessRepositoryPathV1`
 /// narrows the node's dual-representation `RepositoryPath` -- see
 /// `repository_path_from_api`/`project_repository_path` in
-/// `gate4agent-harness-service` for that precedent: a genuinely non-UTF-8
+/// `hatchery-harness-service` for that precedent: a genuinely non-UTF-8
 /// host path from the node is a projection failure, never silently
 /// lossy-displayed. Validation intentionally stays as minimal as the node's
 /// own `validate_opaque_host_path` (non-empty, bounded, no NUL byte): unlike
@@ -2273,7 +2273,7 @@ impl HarnessProviderSessionIdentityV1 {
 /// removes the binding). The node's `task_id` there is its own local
 /// identifier space (format `task-<24 lowercase hex>`, unrelated to this
 /// crate's `HarnessTaskId` despite the similar name -- the node layer has no
-/// dependency on `gate4agent-harness-protocol` and never mints one from a
+/// dependency on `hatchery-harness-protocol` and never mints one from a
 /// `HarnessTaskId`), so `task_id` here stays a bounded opaque string rather
 /// than the typed `HarnessTaskId`: the harness-service boundary parses and
 /// validates it against the node's own format when building the C2 request.
@@ -2442,7 +2442,7 @@ pub enum HarnessOperatorRequestV1 {
     // stale value comes back as the node's `RepositoryFileRevisionConflict`
     // failure code, which this wire surfaces as the typed `Conflict` host
     // error (see `map_node_workspace_write_error` in
-    // `gate4agent-harness-service`), never collapsed into `Internal`.
+    // `hatchery-harness-service`), never collapsed into `Internal`.
     // `CreateNodeWorkspaceFile`/`CreateNodeWorkspaceDirectory` relay the
     // node's own two distinct creation verbs (`NodeRequest::
     // CreateWorkspaceFile`/`CreateWorkspaceDirectory`) -- the node models
@@ -2553,12 +2553,12 @@ pub enum HarnessOperatorRequestV1 {
     // ordinary interface -- `PromptSession` and `WriteSessionInput` must
     // never silently fall back to each other across that line.
     //
-    // Enforced in `gate4agent-harness-service`, not here: this wire type
+    // Enforced in `hatchery-harness-service`, not here: this wire type
     // carries only a bare routing address (`HarnessRuntimeSessionAddressV1`
     // has no transport field of its own), and tightening the node's shared
     // `NodeRequest::Prompt` handler itself would also narrow the
     // `ResumeSessionRecord` capability above, which this change does not
-    // touch. `gate4agent-harness-service` checks its own cached runtime
+    // touch. `hatchery-harness-service` checks its own cached runtime
     // inventory before ever dispatching to C2/the node and refuses by name
     // (`HarnessOperatorHostErrorV1::UnsupportedTransport`) when that cache
     // already knows the target is PTY; the node's existing
@@ -2591,7 +2591,7 @@ pub enum HarnessOperatorRequestV1 {
     // clearing an exited/failed session's binding from the node -- the same
     // node-side call a successful `StopSession` already fires as a best-effort
     // follow-up reap (see `HarnessC2Adapter::remove_stopped_session`'s doc
-    // comment in `gate4agent-harness-service`), now exposed as its own
+    // comment in `hatchery-harness-service`), now exposed as its own
     // first-class verb for a session that reached that state on its own.
     // `ResumeSession` relays `NodeRequest::Resume` and, unlike `SpawnSession`,
     // acks dispatch only: the node never returns a new address for it (same
@@ -2683,7 +2683,7 @@ pub enum HarnessOperatorRequestV1 {
     // PTY bound to it. `PreviewSessionRecord` relays `NodeRequest::
     // PreviewSessionRecord` and rides the same read-worker pool as
     // `CatalogNativeSessions`/`PageNativeSessions`/`PreviewNativeSession`
-    // above (`is_native_history_request` in `gate4agent-harness-service`) --
+    // above (`is_native_history_request` in `hatchery-harness-service`) --
     // the light TUI sends this exact node request for both an initial
     // preview open and a background history refresh of an already-open
     // preview tab, so this wire stays a single verb the same way.
@@ -2763,7 +2763,7 @@ pub enum HarnessOperatorRequestV1 {
     // above, a host-directory browse targets the node's host filesystem, not
     // a registered workspace, so it does not fit `InspectNodeWorkspace`'s
     // family (see `PreparedHostDirectoryBrowse`'s doc comment in
-    // `gate4agent-harness-service` for why this rides its own bounded read
+    // `hatchery-harness-service` for why this rides its own bounded read
     // lane rather than that family's). `directory: None` opens the node's
     // default root; `after` pages a previously returned `next_after` cursor.
     BrowseHostDirectories {
@@ -2776,7 +2776,7 @@ pub enum HarnessOperatorRequestV1 {
     // `ForgetContextPack` are the resource-mutation family: workspace/
     // worktree lifecycle plus context-pack export/forget, dispatched through
     // the bounded resource-mutation worker pool (`is_resource_mutation_
-    // request` in `gate4agent-harness-service`) the same way the session-
+    // request` in `hatchery-harness-service`) the same way the session-
     // record family uses its own pool -- see `ResourceMutationKind`'s doc
     // comment there for why these seven heterogeneous verbs share one lane.
     // `RegisterWorkspace`'s success (like every workspace/worktree lifecycle
@@ -3033,7 +3033,7 @@ impl HarnessOperatorRequestV1 {
             // Same bound as `WriteSessionInput` immediately above -- see
             // `PromptSession`'s own doc comment for why this is a separate
             // verb rather than a flag on that one, and why the PTY-transport
-            // refusal it also carries lives in `gate4agent-harness-service`
+            // refusal it also carries lives in `hatchery-harness-service`
             // rather than here: this type alone cannot see the target
             // session's transport.
             Self::PromptSession { session, text } => {
@@ -3380,7 +3380,7 @@ pub enum HarnessOperatorEventV1 {
     /// around the gap.
     Lagged { sequence: u64 },
     /// Server-side keep-alive, unconditional and periodic (see
-    /// `gate4agent-harness-service::runtime`'s own
+    /// `hatchery-harness-service::runtime`'s own
     /// `HOST_SUBSCRIBER_KEEPALIVE_INTERVAL`): the registry's only way to
     /// discover a dead subscriber is a write to it actually failing, so
     /// without something to push on an otherwise-idle connection an
@@ -3392,8 +3392,8 @@ pub enum HarnessOperatorEventV1 {
     /// client applies -- faking either risks a client acting on a change
     /// that never happened. `Ping` carries nothing to act on, so it cannot
     /// be mistaken for either; every current reader
-    /// (`gate4agent-harness-client`'s generic `next_event` decode,
-    /// `gate4agent-tui`'s `project_harness_operator_event`) drops it on the
+    /// (`hatchery-harness-client`'s generic `next_event` decode,
+    /// `hatchery-tui`'s `project_harness_operator_event`) drops it on the
     /// floor by construction. `sequence` is kept only for schema symmetry
     /// with every other variant -- there is no gap to detect against a
     /// keep-alive that carries no state of its own.
@@ -3836,7 +3836,7 @@ pub enum HarnessOperatorAgentEventV1 {
         chunk: HarnessAgentStreamChunkV1,
         /// The harness's own wall-clock reading of the moment this chunk
         /// was first published to `AgentStreamSubscriberRegistry`
-        /// (`gate4agent-harness-service::agent_stream`), carried unchanged
+        /// (`hatchery-harness-service::agent_stream`), carried unchanged
         /// through every delivery path -- live, state seed, and the bounded
         /// replay `ReplayBoundary` marks the end of. A replayed chunk keeps
         /// the timestamp it was born with here; nothing ever restamps it to
@@ -3856,7 +3856,7 @@ pub enum HarnessOperatorAgentEventV1 {
     /// Sent at most once per `SubscribeAgentStream` subscription per
     /// session, right after that session's replayed instant chunks
     /// (`Text`/`Thinking`/`Blocked` pulled from the harness's own bounded
-    /// replay ring -- see `gate4agent-harness-service::agent_stream`'s own
+    /// replay ring -- see `hatchery-harness-service::agent_stream`'s own
     /// doc comment) and before any live chunk for that session: the marker
     /// that lets the operator tell "recent history it missed" apart from
     /// "happening right now". Sent for every session the harness has
@@ -4794,7 +4794,7 @@ pub enum HarnessRuntimeSessionStatusV1 { Registered, Starting, Running, Stopping
 /// `HARNESS_SESSION_BYTES_MAX_BYTES`), so `ControlSession`'s special-key
 /// payload is duplicated here as its own closed wire enum rather than
 /// imported. The variant set and names are kept in lockstep by hand --
-/// `gate4agent-harness-service`'s `c2::map_terminal_control` is the single
+/// `hatchery-harness-service`'s `c2::map_terminal_control` is the single
 /// place that converts one into the other, so a variant added to one side
 /// without the other fails to compile there. No `validate()` method: unlike
 /// a bounded string or byte vector, a closed enum's own deserialization is
@@ -4963,7 +4963,7 @@ impl OperatorGateOptionV1 {
 /// dependency on `gate4agent-types` (see the doc comment on
 /// `HarnessTerminalControlV1`), so the node's gate classification is
 /// duplicated here as its own closed wire shape rather than imported.
-/// `gate4agent-harness-service` is the single place that maps one into the
+/// `hatchery-harness-service` is the single place that maps one into the
 /// other (`map_operator_gate`), so a field added to one side without the
 /// other fails to compile there.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -4999,7 +4999,7 @@ impl OperatorGateStateV1 {
 /// dependency on `gate4agent-types` (see the doc comment on
 /// `HarnessTerminalControlV1`), so the node's screen-content classification
 /// is duplicated here as its own closed wire enum rather than imported.
-/// `gate4agent-harness-service` is the single place that maps one into the
+/// `hatchery-harness-service` is the single place that maps one into the
 /// other, so a variant added to one side without the other fails to compile
 /// there.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -5118,7 +5118,7 @@ pub struct HarnessRuntimeTerminalFrameV1 {
     pub bracketed_paste: Option<bool>,
 }
 // NOTE: gate4agent_types::TerminalFrame::contents (plain-text render) is
-// deliberately dropped on the wire -- gate4agent-tui's apply_terminal_frame
+// deliberately dropped on the wire -- hatchery-tui's apply_terminal_frame
 // never reads it. No dead field on the wire.
 
 impl HarnessRuntimeTerminalFrameV1 {
@@ -5689,7 +5689,7 @@ pub enum HarnessOperatorHostErrorV1 {
     // `Unavailable` now returns this instead.
     UnsupportedCapability,
     Internal,
-    // Added alongside `gate4agent-harness-light` (the P2.2 light-harness
+    // Added alongside `hatchery-harness-light` (the P2.2 light-harness
     // extraction), riding the V11 era: distinct from `NotFound` (a request
     // scoped to an id that provably does not and never will exist under the
     // current backend, e.g. any task/run id against a backend with no task
@@ -5706,7 +5706,7 @@ pub enum HarnessOperatorHostErrorV1 {
     // enum has ever shipped under already tolerates an unrecognized error
     // variant the same way `#[serde(rename_all = "kebab-case")]` does for
     // any other closed enum here -- see this module's round-trip tests. No
-    // skew risk in practice: `gate4agent-harness-light` pairs this crate
+    // skew risk in practice: `hatchery-harness-light` pairs this crate
     // in-process (same build, same binary), never across a version boundary.
     Unsupported,
     // The host decoded the envelope but its declared `build_stamp` did not
@@ -5728,12 +5728,12 @@ pub enum HarnessOperatorHostErrorV1 {
     // that arm used to swallow now has its own arm there and its own named
     // variant here; the catch-all is gone. Fields whose native type lives in
     // a crate this one does not depend on (`gate4agent-node-protocol`,
-    // `gate4agent-harness-service`, or the foreign `HarnessEngineError` this
+    // `hatchery-harness-service`, or the foreign `HarnessEngineError` this
     // crate must not open) ride the wire as `String` -- the same treatment
     // `UnsupportedTransport::agent` above already gives an unreachable id.
     //
     // The one exception is `HarnessServiceError::Engine`, whose OWN inner
-    // variants live in `gate4agent-harness-engine` -- a crate under active
+    // variants live in `hatchery-harness-engine` -- a crate under active
     // edit by another worker this fix must not open. Every non-`NotFound`
     // `HarnessEngineError` still collapses into `EngineRefused { detail }`
     // (its Debug rendering), which is strictly more than the bare `Conflict`
@@ -5896,7 +5896,7 @@ pub struct HarnessReadEnvelopeV1 {
 impl HarnessReadEnvelopeV1 {
     /// Builds an envelope carrying this binary's own [`BUILD_STAMP`] -- the
     /// one place every caller in this tree (this crate's own tests,
-    /// `gate4agent-harness-client`) should build one from, rather than
+    /// `hatchery-harness-client`) should build one from, rather than
     /// hand-filling `build_stamp` at each site.
     pub fn new(credential: HarnessReadCredential, request: HarnessReadRequestV1) -> Self {
         Self { build_stamp: BUILD_STAMP.to_string(), credential, request }
@@ -5974,7 +5974,7 @@ pub enum HarnessReadRequestV1 {
     /// caller's own task -- never the task that governs the caller's own
     /// run (`HarnessTaskMoveResultV1::TaskIsOwn`). Gated by
     /// `grant.task_permissions.mutate`. `to` names the operator's own task
-    /// graph (`validate_operator_move` in `gate4agent-harness-service`); an
+    /// graph (`validate_operator_move` in `hatchery-harness-service`); an
     /// illegal transition or a stale `expected_revision` is a named refusal,
     /// never a host error.
     TaskMove {
@@ -5987,7 +5987,7 @@ pub enum HarnessReadRequestV1 {
     /// other agent verb resolves its identity from; there is no run-id
     /// argument, so a session can never finish another session's run.
     /// `done` applies `HarnessLifecycleProjectionV1::CompletedReview`
-    /// (`gate4agent-harness-service`), landing the task in `Review` --
+    /// (`hatchery-harness-service`), landing the task in `Review` --
     /// never `Done`, the review gate a session cannot skip. `failed`
     /// applies `HarnessLifecycleProjectionV1::Failed` and records a
     /// retryable `HarnessFailureV1`. Never gated by any grant permission
@@ -5998,7 +5998,7 @@ pub enum HarnessReadRequestV1 {
     /// `summary` is accepted on the wire for backward compatibility but has
     /// no effect: it used to be posted as mail to the task's own forum,
     /// removed 2026-09-17 when the mailbox moved to its own service (see
-    /// `gate4agent-harness-service::read::execute_exact_binding_read`'s
+    /// `hatchery-harness-service::read::execute_exact_binding_read`'s
     /// `RunFinish` handler). Not idempotent: a second call against an
     /// already-terminal run is refused by name as
     /// `HarnessRunFinishResultV1::AlreadyFinished`, never silently accepted.
@@ -6442,7 +6442,7 @@ pub struct SessionMonitorDetailV1 {
     pub subagent_facts: Vec<ActivityFactV1>,
     pub interaction_facts: Vec<InteractionFactV1>,
     /// One fact per `ObservationKindV1::ActionBlocked` observation recorded
-    /// against this session. `gate4agent-harness-service::read::monitor_detail`
+    /// against this session. `hatchery-harness-service::read::monitor_detail`
     /// derives these from the session's own bounded `timeline`
     /// (`hatchery_observation_engine::SessionProjection::timeline`), not
     /// from a dedicated correlation-tracked list: a block has no
@@ -6989,7 +6989,7 @@ pub enum HarnessReadApiError {
     #[error(
         "build stamp mismatch: this side was built from tree {expected}, the peer from \
          tree {received} -- rebuild and restart the out-of-date side (gate4agent-harness \
-         and its gate4agent-harness-client-based peers are built from the same tree and \
+         and its hatchery-harness-client-based peers are built from the same tree and \
          must be rolled together)"
     )]
     BuildStampMismatch { expected: String, received: String },
@@ -7030,7 +7030,7 @@ pub enum HarnessOperatorApiError {
     #[error(
         "build stamp mismatch: this side was built from tree {expected}, the peer from \
          tree {received} -- rebuild and restart the out-of-date side \
-         (gate4agent-harness and its gate4agent-tui / gate4agent-tui-light client are built \
+         (gate4agent-harness and its hatchery-tui / hatchery-tui-light client are built \
          from the same tree and must be rolled together)"
     )]
     BuildStampMismatch { expected: String, received: String },
@@ -11213,7 +11213,7 @@ mod tests {
     }
 
     /// `HarnessOperatorHostErrorV1::Unsupported` (added alongside
-    /// `gate4agent-harness-light`, see its own doc comment): a purely
+    /// `hatchery-harness-light`, see its own doc comment): a purely
     /// additive unit variant, so this only needs to prove it round-trips --
     /// on its own, and wrapped in the `HarnessOperatorReplyV1::Error` shape
     /// every operator host error actually rides on the wire.

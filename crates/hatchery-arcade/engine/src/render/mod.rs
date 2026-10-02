@@ -1,6 +1,6 @@
 //! Feature-gated multi-tier terminal rendering surface -- the ONLY part
 //! of `hatchery-arcade-engine` that may import `uzor_tui`/`uzor_text`/
-//! `icy_sixel`. Nothing in `render/` ever imports `gate4agent-tui`,
+//! `icy_sixel`. Nothing in `render/` ever imports `hatchery-tui`,
 //! `gate4agent-*`, or any TUI/async/filesystem/network type; nothing in
 //! the sim core (`crate::game`, `crate::runner`, `crate::shell`, ...)
 //! ever imports from here.

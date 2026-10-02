@@ -153,7 +153,7 @@ const HOST_SUBSCRIBER_LIMIT: usize = 8;
 // A subscriber that abandons its own connection while the harness has
 // nothing new to push therefore sits occupying its registry entry and its
 // `HOST_SUBSCRIBER_LIMIT` permit indefinitely: confirmed in practice, an
-// ordinary, continuously-running `gate4agent-tui` self-abandons and
+// ordinary, continuously-running `hatchery-tui` self-abandons and
 // re-subscribes roughly every 120s on its own, with zero dependency on any
 // real task/run/inventory event ever happening (docs/gate4agent/research/
 // gate4agent-operator-subscriber-slot-leak-2026-08-25.md). At
@@ -622,7 +622,7 @@ impl HarnessEventSubscriber {
 /// semaphore before a connection ever reaches `HostCommand::Subscribe`, so
 /// linear scan/removal costs nothing observable.
 ///
-/// Promoted `pub` for `gate4agent-harness-light` (A3): every method here
+/// Promoted `pub` for `hatchery-harness-light` (A3): every method here
 /// (`insert`/`is_empty`/`send_to`/`emit`/`needs_recovery`/`recover_lagged_with`)
 /// works purely in terms of `mpsc::Sender<HarnessOperatorEventV1>` and
 /// `OperatorRequestLogIdentity` -- no `HarnessService`/kernel entanglement --
@@ -722,7 +722,7 @@ impl SubscriberRegistry {
     /// Whether any live subscriber's outbound queue is currently full and
     /// awaiting a `Lagged`+`SnapshotBaseline` recovery pair --
     /// `recover_lagged_with`'s own cheap pre-check, promoted `pub` so a
-    /// caller whose baseline is expensive (or, for `gate4agent-harness-light`,
+    /// caller whose baseline is expensive (or, for `hatchery-harness-light`,
     /// needs an async lock read no sync closure can perform) to assemble
     /// can decide whether to pay that cost at all before calling it.
     pub fn needs_recovery(&self) -> bool {
@@ -736,11 +736,11 @@ impl SubscriberRegistry {
     /// retries on the next pass. `baseline` is called at most once, and only
     /// once `needs_recovery` is true (mirroring the inline check this was
     /// generalized from) -- the (potentially non-trivial, and for
-    /// `gate4agent-harness-light`, async-lock-guarded) baseline assembly
+    /// `hatchery-harness-light`, async-lock-guarded) baseline assembly
     /// only ever runs when at least one subscriber actually needs it.
     ///
     /// Promoted `pub` and generalized from the original `recover_lagged`
-    /// (kept below, now a thin wrapper) so `gate4agent-harness-light` (no
+    /// (kept below, now a thin wrapper) so `hatchery-harness-light` (no
     /// `HarnessService`/`HarnessRuntimeInventoryCache`, no task/run kernel at
     /// all) can supply its own light-local baseline -- empty tasks/runs
     /// (canon: light has no kernel) and nodes from its own shared,
@@ -3934,7 +3934,7 @@ fn is_session_control_request(request: &HarnessOperatorRequestV1) -> bool {
 /// can never drift from the wire discriminant as request variants are
 /// added.
 ///
-/// Promoted `pub` for `gate4agent-harness-light`: its own `SubscribeEvents`
+/// Promoted `pub` for `hatchery-harness-light`: its own `SubscribeEvents`
 /// branch (A3) needs an identity to hand `SubscriberRegistry::insert`, and
 /// this is exactly the same pure `&HarnessOperatorRequestV1 ->` identity
 /// mapping either harness wants, with zero kernel entanglement.
@@ -8674,14 +8674,14 @@ fn project_run_correlation(
 /// managed-session/launch-inventory field mapping, with no other input and
 /// no side effects.
 ///
-/// Promoted `pub` for `gate4agent-harness-light`: this is exactly the
+/// Promoted `pub` for `hatchery-harness-light`: this is exactly the
 /// projection that crate's own runtime-inventory maintenance needs
 /// (`RuntimeInventoryList`'s served-from-cache path), and it is pure data
 /// mapping with zero kernel entanglement -- unlike
 /// `HarnessRuntimeInventoryCache` itself (`pub(crate)`, keyed to this
 /// crate's own `HarnessObservationResync`/observation-recovery machinery,
 /// which the light harness has no equivalent for and does not want; see
-/// `gate4agent-harness-light::inventory`'s module doc for why that cache is
+/// `hatchery-harness-light::inventory`'s module doc for why that cache is
 /// reimplemented light-local instead of reused). Reusing this one function
 /// keeps both harnesses' `HarnessRuntimeInventoryV1` projection identical by
 /// construction, with no duplicated field-mapping logic to drift.
@@ -9814,7 +9814,7 @@ fn terminal_session_key(
 /// Dispatch-time refusal for `PromptSession` against a session this
 /// harness's own cached runtime inventory already knows is PTY-transport --
 /// see `HarnessOperatorRequestV1::PromptSession`'s doc comment in
-/// `gate4agent-harness-api` for the rule this enforces and why it lives
+/// `hatchery-harness-api` for the rule this enforces and why it lives
 /// here rather than in the node or in that wire type itself. Called from
 /// the `HostCommand::Operator` select-loop arm before `PreparedSessionControl
 /// ::from_operator_request` ever runs, so a confirmed-PTY target never
@@ -10161,7 +10161,7 @@ fn map_operator_service_error(error: HarnessServiceError) -> HarnessOperatorHost
         // Both carry their cause all the way to the operator rather than
         // collapsing onto the bare `TaskNotReady` the wire used to answer
         // with, which said only "no" to three different questions. See those
-        // two variants' own doc comments in `gate4agent-harness-api`.
+        // two variants' own doc comments in `hatchery-harness-api`.
         HarnessServiceError::TaskDependenciesNotDone { task_id, dependency_ids } => {
             HarnessOperatorHostErrorV1::TaskDependenciesNotDone {
                 task_id: task_id.as_str().to_owned(),
@@ -10713,7 +10713,7 @@ async fn handle_connection(
 /// exactly "close the socket," which this loop observes as a write failure
 /// on its very next attempt.
 ///
-/// Promoted `pub` for `gate4agent-harness-light` (A3): this forwarding loop
+/// Promoted `pub` for `hatchery-harness-light` (A3): this forwarding loop
 /// has no kernel dependency of its own (a bare `TcpStream` + `mpsc::Receiver`
 /// + `OwnedSemaphorePermit`), so it is reused verbatim for that crate's own
 /// `SubscribeEvents` connections rather than reimplemented.
@@ -10748,7 +10748,7 @@ fn event_kind_label(event: &HarnessOperatorEventV1) -> &'static str {
 /// `write_operator_reply` -- never shuts the connection down afterward, so
 /// the socket stays open for the next event.
 ///
-/// Promoted `pub` for `gate4agent-harness-light` (A3), same reasoning as
+/// Promoted `pub` for `hatchery-harness-light` (A3), same reasoning as
 /// `run_operator_event_subscription` (its one caller) above.
 pub async fn write_operator_event(
     stream: &mut TcpStream,
@@ -10989,10 +10989,10 @@ async fn read_single_frame(stream: &mut TcpStream) -> Result<Vec<u8>, HarnessRun
 /// the moment any read chunk contains the `g4aho_` operator-credential
 /// prefix (a cheap streaming classification used by [`handle_connection`]'s
 /// deadline-branch reply-shape choice; a caller that only ever serves
-/// operator frames, like `gate4agent-harness-light`, can pass a throwaway
+/// operator frames, like `hatchery-harness-light`, can pass a throwaway
 /// `&mut bool` and ignore it).
 ///
-/// Promoted `pub` for `gate4agent-harness-light`: the light harness serves
+/// Promoted `pub` for `hatchery-harness-light`: the light harness serves
 /// the identical newline-delimited-JSON operator wire this function already
 /// frames for the full harness, and reimplementing this exact byte-level
 /// read loop (size cap, single-frame/no-embedded-newline validation, EOF
@@ -11045,7 +11045,7 @@ async fn write_reply(
 /// [`read_single_frame_detecting_operator`]'s EOF-is-the-request-boundary on
 /// the other side).
 ///
-/// Promoted `pub` for `gate4agent-harness-light`, alongside
+/// Promoted `pub` for `hatchery-harness-light`, alongside
 /// `read_single_frame_detecting_operator`: same framing, same size cap, same
 /// consumer.
 pub async fn write_operator_reply(
@@ -12189,8 +12189,8 @@ fn finish_run_git_facts_capture(
 }
 
 /// Purely-mechanical, infallible field-for-field projection from the
-/// operator-facing (`gate4agent-harness-api`) git-summary hierarchy to its
-/// structurally-identical `gate4agent-harness-protocol` mirror (A3 design
+/// operator-facing (`hatchery-harness-api`) git-summary hierarchy to its
+/// structurally-identical `hatchery-harness-protocol` mirror (A3 design
 /// §1.1/§3.2). Infallible because both hierarchies share numerically
 /// identical bounds (status entries/recent commits/path/branch/summary byte
 /// caps) and `inspection.git` already passed

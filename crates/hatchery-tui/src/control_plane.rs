@@ -1,11 +1,11 @@
 //! Loopback control endpoint for driving and inspecting a running
-//! `gate4agent-tui`/`gate4agent-tui-light` process programmatically --
+//! `hatchery-tui`/`hatchery-tui-light` process programmatically --
 //! built so an agent verifying the app never again has to grab the
 //! operator's real mouse and keyboard the way it did before this module
 //! existed (see this crate's own delivery notes for that incident).
 //!
 //! **Off by default.** `client::RunOptions::control_plane` is `None`
-//! unless `gate4agent-tui`'s own `--control-plane LOOPBACK_SOCKET` flag is
+//! unless `hatchery-tui`'s own `--control-plane LOOPBACK_SOCKET` flag is
 //! given; `client::run` then never calls [`spawn`], so the default build
 //! binds no socket and spawns no thread -- byte-identical to before this
 //! module existed. The credential comes from the environment
@@ -138,7 +138,7 @@ const CONTROL_WAIT_POLL_INTERVAL: Duration = Duration::from_millis(20);
 const CONTROL_WAIT_MAX_TIMEOUT_MS: u64 = 30_000;
 
 /// CLI/env-sourced configuration for [`spawn`]: where to bind, and the
-/// secret a caller must present. Constructed by `gate4agent-tui`'s own
+/// secret a caller must present. Constructed by `hatchery-tui`'s own
 /// `main.rs` (`--control-plane` + `GATE4AGENT_TUI_CONTROL_TOKEN`) and
 /// carried through `client::RunOptions::control_plane`.
 #[derive(Clone)]
@@ -626,7 +626,7 @@ struct ControlCapturedFrameV1 {
 ///
 /// Checks `is_loopback()` itself, before ever calling `TcpListener::bind`
 /// -- a non-loopback `endpoint.bind` never touches a socket at all, it is
-/// rejected outright. `gate4agent-tui`'s own CLI parser
+/// rejected outright. `hatchery-tui`'s own CLI parser
 /// (`parse_control_plane_bind`) already enforces the same rule before this
 /// is ever reached; this is the module's own belt, not reliance on that
 /// caller's suspenders.
@@ -643,7 +643,7 @@ pub(crate) fn spawn(
         .map_err(|error| format!("control plane local address unavailable: {error}"))?;
     let authority = ControlPlaneCredentialAuthority::new(&endpoint.credential)?;
     std::thread::Builder::new()
-        .name("gate4agent-tui-control".to_owned())
+        .name("hatchery-tui-control".to_owned())
         .spawn(move || accept_loop(listener, authority, commands))
         .map_err(|error| format!("control plane accept thread spawn failed: {error}"))?;
     Ok(local_addr)
@@ -663,7 +663,7 @@ fn accept_loop(
         // and writes one reply" outweighs any pooling this would otherwise
         // need.
         let _ = std::thread::Builder::new()
-            .name("gate4agent-tui-control-conn".to_owned())
+            .name("hatchery-tui-control-conn".to_owned())
             .spawn(move || serve_connection(stream, authority, &commands));
     }
 }
@@ -1130,7 +1130,7 @@ fn dump_frame(app: &App) -> ControlFrameV1 {
 /// exactly like every other verb on this wire that returns something
 /// bounded instead of something proportional to screen content.
 ///
-/// Filename pattern (`gate4agent-tui-frame-<pid>-<nanos>.png`) matches
+/// Filename pattern (`hatchery-tui-frame-<pid>-<nanos>.png`) matches
 /// `client::tests`'s own existing `std::env::temp_dir()` convention for
 /// this crate's other disposable per-process artifacts -- unique per
 /// call (process id plus a nanosecond timestamp), so concurrent captures
@@ -1140,7 +1140,7 @@ fn dump_frame(app: &App) -> ControlFrameV1 {
 fn capture_frame(app: &App) -> Result<ControlCapturedFrameV1, ControlErrorV1> {
     let frame = crate::frame_capture::render_frame_png(app);
     let path = std::env::temp_dir().join(format!(
-        "gate4agent-tui-frame-{}-{}.png",
+        "hatchery-tui-frame-{}-{}.png",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

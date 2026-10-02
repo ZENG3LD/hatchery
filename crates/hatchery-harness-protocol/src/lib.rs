@@ -442,7 +442,7 @@ impl HarnessTaskCreateResultV1 {
 /// endpoints of the transition; every other variant is a named refusal in
 /// the same style `HarnessTaskCreateResultV1` establishes. `IllegalTransition`
 /// answers to the same shape of rule the operator's own
-/// `validate_operator_move` (`gate4agent-harness-service`) enforces --
+/// `validate_operator_move` (`hatchery-harness-service`) enforces --
 /// `from != to`, no move out of a terminal state, `Done` only from
 /// `Review` -- without duplicating that function here: the service applies
 /// its own agent-scoped rule and reports the two states it rejected.
@@ -510,7 +510,7 @@ pub enum HarnessExecutionModeV1 {
 /// levels are named again here rather than imported. Keep the variant set
 /// and the `FullAuto` default in exact lockstep with `ApprovalLevel`'s own;
 /// the two are converted between at the one boundary that links both
-/// crates (`gate4agent-harness-service`), never compared or serialized
+/// crates (`hatchery-harness-service`), never compared or serialized
 /// against each other directly.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -2053,7 +2053,7 @@ impl HarnessFailureV1 {
 
 /// Mirror of harness-api's `HarnessGitStatusCodeV1` (field-for-field), kept
 /// as a narrow, intentional duplication forced by crate layering:
-/// `gate4agent-harness-protocol` has no dependency on `gate4agent-harness-api`.
+/// `hatchery-harness-protocol` has no dependency on `hatchery-harness-api`.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HarnessRunGitStatusCodeV1 {

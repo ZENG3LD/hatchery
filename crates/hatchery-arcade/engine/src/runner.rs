@@ -121,7 +121,7 @@ impl<G: MiniGame> Runner<G> {
     /// Turning recording ON discards any previously queued (undrained)
     /// entries -- a fresh recording session starts clean, matching how a
     /// host restarting a run also rebuilds its own presentation state
-    /// (e.g. `gate4agent-tui`'s own `PetArcade` resetting its
+    /// (e.g. `hatchery-tui`'s own `PetArcade` resetting its
     /// `EffectsLayer` alongside its `FramePresenter` in `start_run`).
     pub fn set_recording(&mut self, recording: bool) {
         self.record = if recording { Some(VecDeque::new()) } else { None };

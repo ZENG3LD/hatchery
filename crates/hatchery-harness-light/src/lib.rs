@@ -1,13 +1,13 @@
-//! `gate4agent-harness-light`: a stateless, in-process light harness.
+//! `hatchery-harness-light`: a stateless, in-process light harness.
 //!
-//! Implements the SAME operator wire `gate4agent-harness-service` serves
+//! Implements the SAME operator wire `hatchery-harness-service` serves
 //! (newline-delimited JSON request/reply frames over loopback TCP, the
 //! `g4aho_` operator credential, `HarnessOperatorRequestV1`/
 //! `HarnessOperatorReplyV1`), so an ordinary `HarnessOperatorClient`
-//! (`gate4agent-harness-client`) connects to either one identically. Unlike
+//! (`hatchery-harness-client`) connects to either one identically. Unlike
 //! the full harness, there is no SQLite task kernel and no persistence: this
 //! is meant to be hosted in-process inside a light client binary (e.g.
-//! `gate4agent-tui-light`), talking directly to C2 instead of going through
+//! `hatchery-tui-light`), talking directly to C2 instead of going through
 //! a durable single-writer authority. See `crate::dispatch`'s module doc for
 //! exactly which operator requests this crate serves, relays, or
 //! typed-rejects.
@@ -57,7 +57,7 @@ use tokio::time::{interval_at, timeout, Instant, MissedTickBehavior};
 pub use error::HarnessLightError;
 
 /// Per-connection outer deadline: classify, authorize, dispatch, and reply,
-/// all in one bound -- mirrors `gate4agent-harness-service::runtime`'s own
+/// all in one bound -- mirrors `hatchery-harness-service::runtime`'s own
 /// `HOST_CONNECTION_DEADLINE` role for the same one-shot request/reply
 /// framing.
 const LIGHT_CONNECTION_DEADLINE: Duration = Duration::from_secs(45);
@@ -74,12 +74,12 @@ const LIGHT_CONNECTION_DEADLINE: Duration = Duration::from_secs(45);
 /// this loop task is spawned at all, see `start_harness_light`), so this
 /// must stay generously above any realistic fleet size purely so that sweep
 /// can never observe a full channel. Mirrors
-/// `gate4agent-harness-service::runtime`'s own `HOST_SUBSCRIBER_QUEUE_CAPACITY`
+/// `hatchery-harness-service::runtime`'s own `HOST_SUBSCRIBER_QUEUE_CAPACITY`
 /// value for the same "generous, not tuned to a measured load" reasoning.
 const LIGHT_COMMAND_CAPACITY: usize = 256;
 
 /// Own dedicated pool for subscribed connections, mirroring
-/// `gate4agent-harness-service::runtime`'s own `HOST_SUBSCRIBER_LIMIT` (a
+/// `hatchery-harness-service::runtime`'s own `HOST_SUBSCRIBER_LIMIT` (a
 /// plain literal, not promoted `pub` -- same no-kernel-dependency
 /// duplication rationale `crate::relay::SESSION_SPAWN_DEADLINE_MS` already
 /// documents for this crate). This crate has no ordinary-connection
@@ -90,12 +90,12 @@ const LIGHT_COMMAND_CAPACITY: usize = 256;
 /// already self-bounds (it always ends within `LIGHT_CONNECTION_DEADLINE`).
 const LIGHT_SUBSCRIBER_LIMIT: usize = 8;
 
-/// Mirrors `gate4agent-harness-service::runtime`'s own
+/// Mirrors `hatchery-harness-service::runtime`'s own
 /// `HOST_SUBSCRIBER_QUEUE_CAPACITY` -- same rationale as
 /// `LIGHT_SUBSCRIBER_LIMIT` above.
 const LIGHT_SUBSCRIBER_QUEUE_CAPACITY: usize = 256;
 
-/// Mirrors `gate4agent-harness-service::runtime`'s own
+/// Mirrors `hatchery-harness-service::runtime`'s own
 /// `HOST_SUBSCRIBER_KEEPALIVE_INTERVAL` -- see that constant's own doc
 /// comment for the full reasoning (this crate reuses `SubscriberRegistry`
 /// verbatim, so it inherits the exact same "only reaps on a failed write"
@@ -197,12 +197,12 @@ impl HarnessLightRunning {
 /// `Subscribe`/`InventoryChanged`/`InventoryRemoved` are A3's own bridge
 /// into the loop-owned `SubscriberRegistry` -- see `LightState::commands`'s
 /// doc comment for the drain-doctrine rationale, and
-/// `gate4agent-harness-service::runtime`'s own `HostCommand::Subscribe` for
+/// `hatchery-harness-service::runtime`'s own `HostCommand::Subscribe` for
 /// the full harness's exact counterpart to the first.
 pub(crate) enum LightCommand {
     Shutdown(oneshot::Sender<()>),
     /// Registers a new event subscriber. Fire-and-forget, same shape as
-    /// `gate4agent-harness-service::runtime`'s own `HostCommand::Subscribe`:
+    /// `hatchery-harness-service::runtime`'s own `HostCommand::Subscribe`:
     /// no ack -- the connection task already holds the paired
     /// `mpsc::Receiver`, and the loop's own `SnapshotBaseline` push (sent to
     /// `sender` the moment this arm runs) is itself the observable proof of
@@ -282,7 +282,7 @@ pub async fn start_harness_light(
 
 /// The light harness's single background task: accepts operator connections
 /// (spawning a detached handler per connection, matching
-/// `gate4agent-harness-service::runtime`'s own per-connection task shape),
+/// `hatchery-harness-service::runtime`'s own per-connection task shape),
 /// applies live C2 events and topology changes to the runtime-inventory
 /// roster AND the terminal ring (`crate::terminal`), and stops on
 /// `LightCommand::Shutdown`.
@@ -423,7 +423,7 @@ async fn run_light_host(
             }
             _ = subscriber_keepalive.tick(), if !subscribers.is_empty() => {
                 // Same `Ping` shape and the same reasoning as
-                // `gate4agent-harness-service::runtime`'s own
+                // `hatchery-harness-service::runtime`'s own
                 // `emit_subscriber_keepalive`: `emit`'s existing `Closed`
                 // handling reaps a dead peer and logs it; this call site
                 // adds no logging of its own.
@@ -431,7 +431,7 @@ async fn run_light_host(
             }
         }
         // Runs once per select-loop pass, exactly mirroring
-        // `gate4agent-harness-service::runtime`'s own placement of
+        // `hatchery-harness-service::runtime`'s own placement of
         // `subscribers.recover_lagged(...)` right after its own `select!`
         // block: `needs_recovery`'s cheap check means the `.read().await`
         // lock acquisition below only actually happens on a pass where at
@@ -446,7 +446,7 @@ async fn run_light_host(
 
 /// Handles exactly one operator connection: read one frame, classify,
 /// authorize, dispatch, reply. Mirrors
-/// `gate4agent-harness-service::runtime::handle_connection`'s operator
+/// `hatchery-harness-service::runtime::handle_connection`'s operator
 /// branch, minus everything specific to that function's other frame family
 /// (the legacy read wire) and its cancel-signal plumbing (node-workspace/
 /// session-spawn/session-control/etc cancellation is out of scope for this

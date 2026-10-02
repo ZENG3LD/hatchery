@@ -309,7 +309,7 @@ pub(crate) async fn handle_request(
 /// representation rather than hand-matching every variant name a second
 /// time, so the logged operation can never drift from the wire discriminant
 /// as request variants are added -- the same technique
-/// `gate4agent-harness-service::runtime`'s (private)
+/// `hatchery-harness-service::runtime`'s (private)
 /// `OperatorRequestLogIdentity::describe` already uses for the same reason.
 fn operation_name(request: &HarnessOperatorRequestV1) -> String {
     serde_json::to_value(request)

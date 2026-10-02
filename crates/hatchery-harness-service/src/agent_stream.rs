@@ -12,7 +12,7 @@
 //! retry.
 //!
 //! Seeding, though, is not one rule for all six chunk kinds (see
-//! `HarnessOperatorAgentEventV1`'s own doc comment in `gate4agent-harness-api`
+//! `HarnessOperatorAgentEventV1`'s own doc comment in `hatchery-harness-api`
 //! for the full inventory) -- three different disciplines, not two:
 //!
 //! - **`Text`, `Thinking`, `Blocked`: instants, never seeded.** A fact about
@@ -118,7 +118,7 @@ const AGENT_STREAM_REPLAY_RING_CHUNKS_MAX: usize = HOST_AGENT_STREAM_SUBSCRIBER_
 /// footprint (the `text` on `Text`/`Thinking`, `reason`+`help` on `Blocked`
 /// -- see `instant_chunk_text_bytes`), the second of the two bounds above.
 /// Matches `HARNESS_AGENT_STREAM_TEXT_MAX_BYTES`
-/// (`gate4agent-harness-api`), the wire's own ceiling on ONE free-text
+/// (`hatchery-harness-api`), the wire's own ceiling on ONE free-text
 /// field, reused here as the ceiling on the ring's WHOLE retained text
 /// across every chunk it holds: without this second bound, a run of
 /// near-maximum-size `Text`/`Thinking` chunks well under
@@ -149,7 +149,7 @@ fn unix_time_ms() -> u64 {
 // Not a `From` impl for the same orphan-rule reason `terminal::
 // terminal_frame_to_wire`/`session_key_to_address` aren't ones: both sides
 // of every conversion below are foreign to this crate (one half minted by
-// `gate4agent-node-protocol`, the other by `gate4agent-harness-api`), and
+// `gate4agent-node-protocol`, the other by `hatchery-harness-api`), and
 // this crate is the only one that depends on both.
 fn session_key_to_address(key: &RuntimeSessionKey) -> HarnessRuntimeSessionAddressV1 {
     HarnessRuntimeSessionAddressV1 {
@@ -555,7 +555,7 @@ impl AgentStreamSubscriber {
     /// problem, not live content to report through `Lagged`. Unlike every
     /// other send path here, it never touches `next_sequence` --
     /// `ReplayBoundary` carries no `sequence` field (see that variant's own
-    /// doc comment in `gate4agent-harness-api`). Returns `true` only when
+    /// doc comment in `hatchery-harness-api`). Returns `true` only when
     /// the channel is discovered closed, same pruning contract as
     /// `deliver_seed`.
     fn deliver_replay_boundary(

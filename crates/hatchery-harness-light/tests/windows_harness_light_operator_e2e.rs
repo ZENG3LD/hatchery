@@ -1,11 +1,11 @@
 #![cfg(windows)]
 
-//! E2E coverage for `gate4agent-harness-light`'s A1 slice: fixture node +
+//! E2E coverage for `hatchery-harness-light`'s A1 slice: fixture node +
 //! real C2 + `start_harness_light` (no SQLite task kernel, no
 //! `HarnessC2Adapter` -- this crate owns its own C2 connection directly),
 //! then an ordinary `HarnessOperatorClient` (the exact client the full
 //! harness's own operator E2Es use, see
-//! `gate4agent-harness-service/tests/windows_harness_operator_session_verbs_e2e.rs`)
+//! `hatchery-harness-service/tests/windows_harness_operator_session_verbs_e2e.rs`)
 //! connects with the credential `start_harness_light` generated in-process.
 //!
 //! Same three-process fixture shape (node/C2/host) and the same
@@ -17,7 +17,7 @@
 //! `WriteSessionInput`/`ControlSession(Enter)` are exercised for acceptance
 //! only, not for their terminal effect: A1 has no `TerminalRead`
 //! (`TerminalBufferRegistry` is deliberately deferred past this slice, see
-//! `gate4agent-harness-light`'s crate doc and the coordinator report), so
+//! `hatchery-harness-light`'s crate doc and the coordinator report), so
 //! unlike the full harness's own session-verbs E2E this test cannot poll a
 //! terminal frame for the echoed/submitted text -- only that both verbs
 //! relay and return their typed acks.
@@ -94,7 +94,7 @@ fn unix_time_ms() -> u64 {
 fn pipe(label: &str) -> String {
     static NEXT: AtomicU64 = AtomicU64::new(1);
     format!(
-        r"\\.\pipe\gate4agent-harness-light-{label}-{}-{}",
+        r"\\.\pipe\hatchery-harness-light-{label}-{}-{}",
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed),
     )
@@ -165,7 +165,7 @@ fn find_runtime_session<'a>(
 /// `SubscribeEvents` push (`SnapshotBaseline`'s `nodes` list,
 /// `RuntimeInventoryChanged`'s `node`) carries, not a paged
 /// `RuntimeInventoryList` reply. Mirrors
-/// `gate4agent-harness-service`'s own subscription E2E's identical helper.
+/// `hatchery-harness-service`'s own subscription E2E's identical helper.
 fn find_session_in_node(
     node: &HarnessRuntimeNodeInventoryV1,
     address: &HarnessRuntimeSessionAddressV1,
@@ -202,7 +202,7 @@ fn event_sequence(event: &HarnessOperatorEventV1) -> u64 {
 /// body -- see the test's own subscribe section) until one satisfies
 /// `matches`, asserting every event observed along the way -- not just the
 /// matched one -- carries a strictly increasing `sequence` for THIS
-/// subscription. Mirrors `gate4agent-harness-service`'s own subscription
+/// subscription. Mirrors `hatchery-harness-service`'s own subscription
 /// E2E's identical helper.
 async fn wait_for_event(
     event_rx: &mut UnboundedReceiver<HarnessOperatorEventV1>,
@@ -376,7 +376,7 @@ async fn windows_harness_light_operator_session_verbs_and_typed_rejections() {
     // SubmitIntent (create-task): a typed `Unsupported` rejection -- the
     // task-kernel mutation family this A1 slice does not implement. The
     // action itself is a real, independently-validating `CreateTask` (the
-    // same fixture `gate4agent-harness-api`'s own `operator_v3_intent_is_
+    // same fixture `hatchery-harness-api`'s own `operator_v3_intent_is_
     // authority_free_and_fails_closed_on_v2` test uses), so this proves the
     // light harness's own dispatcher rejects it -- not that the request
     // never made it onto the wire.
@@ -652,7 +652,7 @@ async fn windows_harness_light_operator_workspace_history_management_and_termina
 }
 
 /// A3 coverage: `SubscribeEvents` serves the SAME V11 push contract the full
-/// harness does (see `gate4agent-harness-service/tests/windows_harness_
+/// harness does (see `hatchery-harness-service/tests/windows_harness_
 /// operator_event_subscription_e2e.rs`, this test's own template) -- a
 /// subscriber gets a `SnapshotBaseline` immediately (nodes from the live
 /// inventory, tasks/runs always empty: light mode has no task kernel, by

@@ -2388,7 +2388,7 @@ pub struct PreparedNodeWorkspaceRead {
 
 impl PreparedNodeWorkspaceRead {
     /// `pub`: the light-local counterpart of `from_operator_request` below --
-    /// `gate4agent-harness-light` has no `HarnessC2Adapter` (see this crate's
+    /// `hatchery-harness-light` has no `HarnessC2Adapter` (see this crate's
     /// own doc comment on why that stays unshared) and resolves its own
     /// `NodeRoute` via a raw `C2ControlHandle`, so it builds this bundle
     /// directly rather than through the adapter-entangled constructor.
@@ -2671,7 +2671,7 @@ fn node_workspace_file_revision_from_api(
 /// Exact mirror of `HarnessApprovalLevelV1` -> `gate4agent_types::
 /// ApprovalLevel` -- same rationale as `map_terminal_control`/
 /// `map_provider_interaction_response`: the two enums are kept in lockstep
-/// by doc comment, not by a shared dependency (`gate4agent-harness-api` has
+/// by doc comment, not by a shared dependency (`hatchery-harness-api` has
 /// none on `gate4agent-types`), so the boundary crate that links both is
 /// where the conversion lives.
 fn map_approval_level(level: HarnessApprovalLevelV1) -> gate4agent_types::ApprovalLevel {
@@ -2752,13 +2752,13 @@ impl PreparedSessionSpawn {
 /// `SetSessionModel`) with no CAS/replay layer, and the node itself acks
 /// all four with the same bare `NodeResponse::Accepted` the other eight
 /// settle against (see `HarnessOperatorRequestV1::ResolveInteraction`'s doc
-/// comment in `gate4agent-harness-api`).
+/// comment in `hatchery-harness-api`).
 ///
 /// `Prompt` (`PromptSession` on the wire) is the thirteenth: same relay
 /// shape, `NodeRequest::Prompt` this time -- a different node request from
 /// `Input`'s `NodeRequest::Input`, not a variant of it (see
 /// `HarnessOperatorRequestV1::PromptSession`'s doc comment in
-/// `gate4agent-harness-api` for why, and for the PTY-transport refusal this
+/// `hatchery-harness-api` for why, and for the PTY-transport refusal this
 /// crate enforces before a `PromptSession` request ever reaches this type;
 /// see `prompt_session_pty_refusal`). Thirteen variants, one enum.
 pub(crate) enum SessionControlKind {
@@ -3284,7 +3284,7 @@ impl PreparedSessionRecordMutation {
     }
 }
 
-/// `pub`: reused by `gate4agent-harness-light`'s `SetSessionTask` relay to
+/// `pub`: reused by `hatchery-harness-light`'s `SetSessionTask` relay to
 /// build `SessionRecordMutationKind::SetTask`.
 pub fn session_task_target_from_api(
     target: &HarnessSessionTaskTargetV1,
@@ -3301,7 +3301,7 @@ pub fn session_task_target_from_api(
     })
 }
 
-/// `pub`: reused by `gate4agent-harness-light`'s `IndexProviderSession` relay
+/// `pub`: reused by `hatchery-harness-light`'s `IndexProviderSession` relay
 /// to build `SessionRecordMutationKind::IndexProvider`.
 pub fn provider_session_identity_from_api(
     identity: &HarnessProviderSessionIdentityV1,
@@ -3349,7 +3349,7 @@ impl PendingSessionRecordMutation {
     }
 }
 
-/// `pub`: reused verbatim by `gate4agent-harness-light`'s session-record-
+/// `pub`: reused verbatim by `hatchery-harness-light`'s session-record-
 /// mutation relay -- pure correlation/projection, no adapter dependency.
 pub fn correlate_session_record_mutation_response(
     prepared: &PreparedSessionRecordMutation,
@@ -3577,7 +3577,7 @@ fn project_host_path(path: &OpaqueHostPath) -> Result<HarnessHostPathV1, Harness
     HarnessHostPathV1::new(text).map_err(|_| HarnessC2Error::ResourceMutationProjection)
 }
 
-/// `pub`: reused verbatim by `gate4agent-harness-light`'s `BrowseHostDirectories`
+/// `pub`: reused verbatim by `hatchery-harness-light`'s `BrowseHostDirectories`
 /// relay, which has no `PreparedHostDirectoryBrowse`/`Kind` enum of its own
 /// to promote (there is only one verb in this family) and so calls this
 /// projection directly.
@@ -3890,7 +3890,7 @@ fn project_git_worktree_snapshot(
     })
 }
 
-/// `pub`: reused verbatim by `gate4agent-harness-light`'s management-family
+/// `pub`: reused verbatim by `hatchery-harness-light`'s management-family
 /// relay -- pure correlation/projection, no adapter dependency.
 pub fn correlate_resource_mutation_response(
     prepared: &PreparedResourceMutation,
@@ -4288,7 +4288,7 @@ fn project_git_diff_mode(
 /// `project_git_status_entry`, `project_git_commit`, `project_git_diff_mode`)
 /// with the run-scoped family — only the top-level origin and response
 /// variant differ.
-/// `pub`: reused verbatim by `gate4agent-harness-light`'s node-workspace-read
+/// `pub`: reused verbatim by `hatchery-harness-light`'s node-workspace-read
 /// relay. Pure projection (route/kind + `C2NodeResponse` -> wire response,
 /// with the honesty/truncation-marker and size-cap logic every per-field
 /// helper below it already carries) -- no adapter/kernel dependency, so this
@@ -4645,7 +4645,7 @@ fn native_history_wire_request(
     Ok((route, wire_request))
 }
 
-/// `pub`: reused verbatim by `gate4agent-harness-light`'s native-history
+/// `pub`: reused verbatim by `hatchery-harness-light`'s native-history
 /// relay for the three incarnation-pinned verbs (`CatalogNativeSessions`/
 /// `PageNativeSessions`/`PreviewNativeSession`), which trust the caller-
 /// supplied route the same way this crate's own dispatch does -- no
@@ -4704,7 +4704,7 @@ pub fn native_history_wire_window(
     }
 }
 
-/// `pub`: reused verbatim by `gate4agent-harness-light` for all four native-
+/// `pub`: reused verbatim by `hatchery-harness-light` for all four native-
 /// history-pool verbs (`CatalogNativeSessions`/`PageNativeSessions`/
 /// `PreviewNativeSession`/`PreviewSessionRecord`) -- pure request/response
 /// correlation plus projection (`project_native_history_*`), no adapter

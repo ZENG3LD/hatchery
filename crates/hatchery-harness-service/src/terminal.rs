@@ -5,7 +5,7 @@
 //! (`runtime.rs`) stays the sole SQLite ingress path and is untouched by this
 //! module. This registry is a parallel, in-memory-only tap.
 //!
-//! `pub`: this whole module is reused verbatim by `gate4agent-harness-light`
+//! `pub`: this whole module is reused verbatim by `hatchery-harness-light`
 //! (`crate::terminal` there) to serve `TerminalRead`. It is kernel-free by
 //! construction (no `HarnessService`/SQLite/`HarnessC2Adapter` dependency --
 //! only `NodeRoute`, wire types, and the plain `RuntimeSessionKey`), so unlike
@@ -158,7 +158,7 @@ fn frame_byte_footprint(frame: &TerminalFrame) -> usize {
 }
 
 // Not a `From` impl: both `TerminalFrame` (gate4agent-types) and
-// `HarnessRuntimeTerminalFrameV1` (gate4agent-harness-api) are foreign to
+// `HarnessRuntimeTerminalFrameV1` (hatchery-harness-api) are foreign to
 // this crate, so the orphan rule forbids implementing the foreign `From`
 // trait for a foreign type here. This crate is the only one that depends on
 // both sides, so the translation lives here as a plain function instead.
@@ -284,7 +284,7 @@ fn map_operator_gate_option_semantics(
 
 // Not a `From` impl for the same orphan-rule reason `terminal_frame_to_wire`
 // above isn't one: `RuntimeSessionKey` (gate4agent-observation-api) and
-// `HarnessRuntimeSessionAddressV1` (gate4agent-harness-api) are both foreign
+// `HarnessRuntimeSessionAddressV1` (hatchery-harness-api) are both foreign
 // to this crate. The reverse direction of `runtime::terminal_session_key`
 // (which parses a client-supplied wire address into this same key type) --
 // needed here because `TerminalSubscriberRegistry::publish`/`send_to` only
@@ -638,7 +638,7 @@ mod tests {
     }
 
     /// Sibling test to `TerminalBufferRegistry`'s existing `page`-based
-    /// coverage (exercised in `gate4agent-harness-light`'s own test module):
+    /// coverage (exercised in `hatchery-harness-light`'s own test module):
     /// `latest` returns `None` for a session the ring has never seen, and
     /// the newest ingested frame once it has.
     #[test]

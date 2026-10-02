@@ -736,7 +736,7 @@ async fn durable_context_pack_survives_two_restarts_and_serves_finished_run_cont
     // `ContextPackStore::open`'s reseed has no public single-shot probe
     // reachable from an external test (`HarnessC2Adapter` deliberately
     // exposes no generic NodeRequest handle -- see its doc comment in
-    // crates/gate4agent-harness-service/src/c2.rs), so the reseed is
+    // crates/hatchery-harness-service/src/c2.rs), so the reseed is
     // proved together with steps 7-9: run B's spawn can only resolve the
     // pack via a durable Node whose `context_catalog` was reseeded from
     // `ContextPackStore::open`, since run A's original session/process no

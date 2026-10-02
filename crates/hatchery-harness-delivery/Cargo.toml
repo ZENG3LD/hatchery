@@ -2,7 +2,7 @@
 name = "hatchery-harness-delivery"
 version = "0.2.37"
 edition = "2021"
-description = "Pure, reviewed-source compiler for staged gate4agent harness delivery bundles (skills, plugins, MCP config, files)"
+description = "Pure, reviewed-source compiler for staged hatchery harness delivery bundles (skills, plugins, MCP config, files)"
 publish = false
 
 [lib]

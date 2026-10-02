@@ -1240,7 +1240,7 @@ fn format_agent_stream_event(
             Some(format!("ts={ts} seq={sequence} session={session} LAGGED dropped={dropped}"))
         }
         // No `ts=`/`seq=`: `ReplayBoundary` carries neither (see that
-        // variant's own doc comment in `gate4agent-harness-api`) -- it is a
+        // variant's own doc comment in `hatchery-harness-api`) -- it is a
         // marker between two bursts of chunks that already carry their own
         // timestamps, not an instant of its own.
         HarnessOperatorAgentEventV1::ReplayBoundary { session, replayed, dropped_before_replay } => {
@@ -1404,7 +1404,7 @@ mod tests {
     /// `seq=` at all: `ReplayBoundary` is a marker between two bursts of
     /// chunks that already carry their own timestamps, not an instant of
     /// its own (see that variant's own doc comment in
-    /// `gate4agent-harness-api`).
+    /// `hatchery-harness-api`).
     #[test]
     fn replay_boundary_prints_replayed_and_dropped_before_replay_with_no_ts_or_seq() {
         let event = HarnessOperatorAgentEventV1::ReplayBoundary {

@@ -2,7 +2,7 @@
 name = "hatchery-harness-engine"
 version = "0.2.37"
 edition = "2021"
-description = "Pure, prepare-then-accept state machine for the gate4agent harness task/run/delivery kernel"
+description = "Pure, prepare-then-accept state machine for the hatchery harness task/run/delivery kernel"
 publish = false
 
 [lib]

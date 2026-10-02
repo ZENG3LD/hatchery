@@ -2,7 +2,7 @@
 name = "hatchery-harness-light"
 version = "0.4.0"
 edition = "2021"
-description = "Stateless in-process light harness: serves the same operator wire as gate4agent-harness-service, backed directly by C2 instead of the SWC task kernel"
+description = "Stateless in-process light harness: serves the same operator wire as hatchery-harness-service, backed directly by C2 instead of the SWC task kernel"
 license = "MIT"
 publish = false
 

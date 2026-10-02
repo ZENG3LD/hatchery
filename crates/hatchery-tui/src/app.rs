@@ -9396,7 +9396,7 @@ fn append_event_to_diagnostics_file(event: &AppEvent) {
 
     /// Rewrites the direct-shaped launch/session-control actions into their
     /// typed harness-operator siblings -- the app speaks only the harness
-    /// operator wire now (both `gate4agent-tui` and `gate4agent-tui-light`),
+    /// operator wire now (both `hatchery-tui` and `hatchery-tui-light`),
     /// so this rewrite is unconditional. `build_launch_action` and the terminal
     /// input/resize/stop/paste/control key handlers stay dialect-agnostic and
     /// keep building the same `SpawnSpec`/`Input`/`Resize`/`Stop`/

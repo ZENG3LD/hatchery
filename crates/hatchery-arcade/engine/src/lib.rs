@@ -1,5 +1,5 @@
 //! `hatchery-arcade-engine` -- a deterministic mini-game engine plus an
-//! optional multi-tier terminal renderer for the `gate4agent-tui` pet
+//! optional multi-tier terminal renderer for the `hatchery-tui` pet
 //! modal arcade. See
 //! `docs/gate4agent/plans/hatchery-arcade-engine-2026-08-26.md` for the
 //! full design. This file only re-exports; all real code lives in the

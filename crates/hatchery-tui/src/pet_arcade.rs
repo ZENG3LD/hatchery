@@ -1,4 +1,4 @@
-//! The Pet Bastion arcade overlay: host-side glue between `gate4agent-tui`
+//! The Pet Bastion arcade overlay: host-side glue between `hatchery-tui`
 //! and the `hatchery-arcade` mini-game engine. Owns exactly one hosted
 //! run (paused, in progress, or finished) and every piece of state its
 //! glyph-tier board needs to be driven from either input device -- a

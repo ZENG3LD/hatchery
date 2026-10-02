@@ -2,7 +2,7 @@
 //! sessions, launch inventory) from live C2 snapshots and events, and serves
 //! `RuntimeInventoryList`.
 //!
-//! Unlike `gate4agent-harness-service::runtime::HarnessRuntimeInventoryCache`
+//! Unlike `hatchery-harness-service::runtime::HarnessRuntimeInventoryCache`
 //! (`pub(crate)`, keyed to `HarnessObservationResync` -- the full harness's
 //! own gap-tracked, event-sequence-recovering resync object built by its
 //! observation bridge/adapter), this cache always rebuilds a node's whole
@@ -102,7 +102,7 @@ pub(crate) async fn refresh_route(
             };
             let node_id = node.node_id.clone();
             // Cloned before the map takes ownership: mirrors
-            // `gate4agent-harness-service::runtime`'s own
+            // `hatchery-harness-service::runtime`'s own
             // `HarnessRuntimeInventoryCache::refresh`, which pays this exact
             // same one clone unconditionally (`self.nodes.insert(..,
             // node.clone())`) so it can still hand the original back to its

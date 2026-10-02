@@ -25,7 +25,7 @@
 //!
 //! [`snapshot_to_surface`] is the whole public API: one pure function,
 //! `&SimulationSnapshot -> Surface`, called once per frame by whatever
-//! render host (today: the `preview` binary; eventually, `gate4agent-tui`'s
+//! render host (today: the `preview` binary; eventually, `hatchery-tui`'s
 //! own pet modal) wants to paint a Pet Bastion run. Every colour/glyph/
 //! shape decision below is a deliberate, documented design choice, not a
 //! placeholder -- see each `const`/function's own doc comment.
@@ -99,7 +99,7 @@ const WATER_POOL_COLOR: Rgb = Rgb(36, 66, 104);
 /// сливаться" this pass's own brief asked to avoid, decor included.
 const FIREFLY_COLOR: Rgb = Rgb(150, 240, 230);
 pub(crate) const PET_COLOR: Rgb = Rgb(203, 166, 247);
-/// Matches `gate4agent-tui`'s own `icons.rs::ACCENT_BG` mauve -- the same
+/// Matches `hatchery-tui`'s own `icons.rs::ACCENT_BG` mauve -- the same
 /// accent colour that crate already uses for "this is selected/active",
 /// reused here for the pet/Circuit family for visual continuity with the
 /// TUI this preview stands in for.

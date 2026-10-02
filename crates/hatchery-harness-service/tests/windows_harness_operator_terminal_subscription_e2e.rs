@@ -7,7 +7,7 @@
 //! for `SubscribeEvents`. This is deliberately NOT a reducer-level test --
 //! it drives `handle_connection`'s new branch, the `SubscribeTerminal` wire
 //! encode/decode, `deny_unknown_fields`, and the v12 version gate all at
-//! once, through a real `gate4agent-harness-client::subscribe_terminal`
+//! once, through a real `hatchery-harness-client::subscribe_terminal`
 //! socket, exactly the "green while broken" trap the plan calls out that a
 //! `TerminalSubscriberRegistry::publish` unit test alone would miss.
 //!

@@ -171,15 +171,15 @@ pub struct HarnessOperatorEndpoint {
 
 /// The app now speaks exactly one dialect (the harness operator wire, V9-V11
 /// -- see `docs/gate4agent/plans/gate4agent-app-harness-protocol-contract-
-/// 2026-08-20.md`): `gate4agent-tui` hosts the full harness and
-/// `gate4agent-tui-light` hosts `gate4agent-harness-light` in-process, but
+/// 2026-08-20.md`): `hatchery-tui` hosts the full harness and
+/// `hatchery-tui-light` hosts `hatchery-harness-light` in-process, but
 /// both drive `run()` through this same, single struct.
 #[derive(Clone)]
 pub struct RunOptions {
     pub operator: HarnessOperatorEndpoint,
     /// Whether the kanban (task/run board) starts enabled -- `true` for the
-    /// full harness (`gate4agent-tui`'s own default), `false` for
-    /// `gate4agent-tui-light` (the session board stays the default view,
+    /// full harness (`hatchery-tui`'s own default), `false` for
+    /// `hatchery-tui-light` (the session board stays the default view,
     /// matching light's pre-cutover UX; light-harness tasks/runs are always
     /// empty by canon anyway, see `gate4agent-harness-light`'s crate doc).
     pub kanban_default: bool,
@@ -906,7 +906,7 @@ pub async fn run(options: RunOptions) -> Result<(), Box<dyn std::error::Error>> 
     // the PRIMARY screen buffer and survives in the owner's own
     // scrollback instead of being swallowed on alt-screen exit.
     eprintln!(
-        "gate4agent-tui: terminal background source={} rgb=({}, {}, {})",
+        "hatchery-tui: terminal background source={} rgb=({}, {}, {})",
         background_source.label(),
         terminal_background.0,
         terminal_background.1,
@@ -1035,7 +1035,7 @@ pub async fn run(options: RunOptions) -> Result<(), Box<dyn std::error::Error>> 
     if let Some(endpoint) = control_plane {
         let (control_tx, receiver) = mpsc::channel(CONTROL_COMMAND_QUEUE);
         let bound = crate::control_plane::spawn(endpoint, control_tx)?;
-        eprintln!("gate4agent-tui: control plane listening on {bound}");
+        eprintln!("hatchery-tui: control plane listening on {bound}");
         control_rx = Some(receiver);
     }
 
@@ -9948,7 +9948,7 @@ mod tests {
         };
         let preferences = preferences_for_save(&App::default(), PtyColorMode::Inherited);
         let path = std::env::temp_dir().join(format!(
-            "gate4agent-tui-mode-secret-{}-{}.json",
+            "hatchery-tui-mode-secret-{}-{}.json",
             std::process::id(),
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos(),
         ));

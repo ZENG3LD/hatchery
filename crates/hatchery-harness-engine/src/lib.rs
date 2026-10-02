@@ -2014,7 +2014,7 @@ impl HarnessEngine {
     /// making `Failed` (which `validate_run_operation_coherence` already
     /// accepts against a `Succeeded` originating operation, the same way it
     /// does for a rejected spawn) the coherent, truthful word for it. The
-    /// caller (`gate4agent-harness-service`'s runtime) is the sole authority
+    /// caller (`hatchery-harness-service`'s runtime) is the sole authority
     /// for WHEN this is legitimate -- this crate has no C2 client of its own
     /// and never decides the trigger, only records the settlement once the
     /// caller already knows the run's bound incarnation is provably stale.
@@ -2063,7 +2063,7 @@ impl HarnessEngine {
         // failure -- the same convention `prepare_run_event_commit`'s
         // callers already use for a `MutateRun` operation that lands a run
         // on `Failed` (see `commit_lifecycle_projection` in
-        // `gate4agent-harness-service`'s runtime), where the substantive
+        // `hatchery-harness-service`'s runtime), where the substantive
         // failure lives on the run (`run.failure`), never on this wrapper
         // operation (`operation.failure` stays `None`, as `Succeeded`
         // requires).

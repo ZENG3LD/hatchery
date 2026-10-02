@@ -15,7 +15,7 @@ use uzor_tui::{buffer::TerminalBuffer, style::Color};
 use hatchery_arcade_engine::{PixelCanvas, SixelPlacement};
 
 /// A plausible real dark terminal background -- hand-synced to
-/// `gate4agent-tui`'s own `icons.rs::OVERRIDE_ACTIVE_BG`, so this preview
+/// `hatchery-tui`'s own `icons.rs::OVERRIDE_ACTIVE_BG`, so this preview
 /// sits on the SAME "at rest" background colour the real TUI's pet modal
 /// already uses, rather than an arbitrary placeholder grey.
 pub const TERMINAL_BG: (u8, u8, u8) = (30, 30, 46);

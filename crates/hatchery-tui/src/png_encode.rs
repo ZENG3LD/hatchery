@@ -10,7 +10,7 @@
 //! RGBA image, one IDAT chunk, no filtering beyond "None", no real
 //! DEFLATE compression) that hand-rolling it stays well inside "an
 //! existing rasteriser/dependency serves" territory, and doing so keeps
-//! `gate4agent-tui`'s own `Cargo.toml` exactly as it was before this verb
+//! `hatchery-tui`'s own `Cargo.toml` exactly as it was before this verb
 //! existed -- see this crate's global instructions on not introducing a
 //! new dependency without it being asked for outright.
 //!

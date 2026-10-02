@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bake the gate4agent-tui icon catalog from microsoft/vscode-codicons,
+"""Bake the hatchery-tui icon catalog from microsoft/vscode-codicons,
 ALONGSIDE a second bake of the same `IconId` set from lucide-icons/lucide
 (never a replacement -- codicons stay the default, see `app::IconFamily`).
 

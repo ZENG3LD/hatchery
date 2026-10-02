@@ -1,6 +1,6 @@
 //! The richest tier: a real per-pixel raster per tile, encoded to SIXEL
-//! via `icy_sixel` -- the SAME encoder `gate4agent-tui` already bakes its
-//! own icons with (`crates/gate4agent-tui/src/icons.rs`'s own
+//! via `icy_sixel` -- the SAME encoder `hatchery-tui` already bakes its
+//! own icons with (`crates/hatchery-tui/src/icons.rs`'s own
 //! `SixelImage::try_from_rgba` / `EncodeOptions` usage), so this backend
 //! matches that crate's own already-hardened conventions rather than
 //! inventing a second sixel-encoding style: transparent background
@@ -34,7 +34,7 @@
 //! HalfBlockBackend`] already keeps).
 //!
 //! Failure mode: encoding a small, fixed-size, in-memory RGBA buffer to
-//! SIXEL is not expected to ever fail in practice (`gate4agent-tui`'s own
+//! SIXEL is not expected to ever fail in practice (`hatchery-tui`'s own
 //! `build_sixel_sized` treats the equivalent call as infallible via
 //! `.expect(...)`), but this crate's own "never panic in library code"
 //! rule means a genuine (if unreachable in testing) encoder error here
@@ -47,7 +47,7 @@ use uzor_tui::{buffer::TerminalBuffer, rect::Rect};
 use crate::hash::StableHasher;
 use crate::render::{DirtyHint, RenderBackend, Rgb, Surface, SurfaceCell, TileFootprint, TileId};
 
-/// Assumed terminal-cell pixel size, hand-synced to `gate4agent-tui`'s own
+/// Assumed terminal-cell pixel size, hand-synced to `hatchery-tui`'s own
 /// `icons.rs::ASSUMED_CELL_WIDTH_PX`/`ASSUMED_CELL_HEIGHT_PX` -- the same
 /// measured Cascadia Mono / Consolas cell aspect that crate's own baked
 /// icons already assume. There is no live font-metrics query on this
@@ -81,7 +81,7 @@ pub enum SixelOutput {
 }
 
 fn encode_options() -> EncodeOptions {
-    // Same "small explicit palette, no dithering" recipe `gate4agent-tui`
+    // Same "small explicit palette, no dithering" recipe `hatchery-tui`
     // already settled on for its own flat-colour UI glyphs (`icons.rs::
     // icon_encode_options`'s own doc comment) -- every tile this backend
     // draws is a handful of flat procedural shapes, never a photograph,

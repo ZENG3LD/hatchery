@@ -1119,7 +1119,7 @@ mod tests {
     fn temp_path(test: &str) -> PathBuf {
         let unique = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
         env::temp_dir()
-            .join(format!("gate4agent-tui-preferences-{}-{unique}", std::process::id()))
+            .join(format!("hatchery-tui-preferences-{}-{unique}", std::process::id()))
             .join(format!("{test}.conf"))
     }
 

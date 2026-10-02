@@ -1,7 +1,7 @@
 //! Shared C2 call helpers: route resolution against the live topology and a
 //! bounded node snapshot fetch, used by both `crate::inventory` (roster
 //! maintenance) and `crate::relay` (spawn profile preflight). Mirrors
-//! `gate4agent-harness-service::c2::HarnessC2Adapter::exact_route`/
+//! `hatchery-harness-service::c2::HarnessC2Adapter::exact_route`/
 //! `snapshot` (both `pub`, but `HarnessC2Adapter` keeps its `control:
 //! C2ReconnectingHandle` field private and exposes no generic request path
 //! by design -- see that type's own doc comment -- so reusing it here would
@@ -23,7 +23,7 @@ use crate::error::LightRelayError;
 /// Pure decision function behind [`exact_route`], factored out so the
 /// reconnect-vs-genuinely-unknown distinction is testable without any live
 /// C2 connection -- the light-local mirror of
-/// `gate4agent-harness-service::c2::resolve_exact_route`.
+/// `hatchery-harness-service::c2::resolve_exact_route`.
 ///
 /// While `control`'s underlying physical connection is being re-established,
 /// its cached topology (`current_topology()`) is stale-but-populated: the

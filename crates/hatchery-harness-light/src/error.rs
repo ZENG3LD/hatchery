@@ -1,11 +1,11 @@
-//! Error types for `gate4agent-harness-light`.
+//! Error types for `hatchery-harness-light`.
 //!
 //! Two tiers: [`HarnessLightError`] is the crate's public, top-level error
 //! (start-up and shutdown failures only -- nothing per-request ever reaches
 //! a caller of `start_harness_light`, see the module doc on `dispatch`).
 //! [`LightRelayError`] is the crate-private error every C2/Node relay call
 //! (`crate::c2`, `crate::relay`) produces; [`LightRelayError::into_host_error`]
-//! is this crate's light-local mirror of `gate4agent-harness-service`'s own
+//! is this crate's light-local mirror of `hatchery-harness-service`'s own
 //! `map_session_spawn_node_failure`/`map_session_control_error` (private to
 //! that crate, so not reusable here -- see the crate-level report for why
 //! this is a deliberate, documented light-local reimplementation rather than
@@ -108,7 +108,7 @@ pub(crate) enum LightRelayError {
 impl LightRelayError {
     /// Maps this internal error to the wire-visible
     /// `HarnessOperatorHostErrorV1`, mirroring the taxonomy
-    /// `gate4agent-harness-service::runtime`'s (private)
+    /// `hatchery-harness-service::runtime`'s (private)
     /// `map_session_spawn_node_failure`/`map_session_control_error` already
     /// establish for the same underlying `NodeFailureCode`/transport
     /// failures, so a given node-side rejection reads the same way through
@@ -153,7 +153,7 @@ impl LightRelayError {
 /// across every verb family this crate relays (session spawn/control,
 /// node-workspace read/write, native history, session-record mutation,
 /// resource mutation, host-directory browse) -- unlike
-/// `gate4agent-harness-service::runtime`, which keeps one bespoke `map_*_error`
+/// `hatchery-harness-service::runtime`, which keeps one bespoke `map_*_error`
 /// per family (six of them) because each family's `HarnessC2Error` wraps a
 /// distinct set of enqueue/transport/deadline/route-mismatch variants around
 /// the shared `NodeFailureCode`. Light mode's direct-relay model (no

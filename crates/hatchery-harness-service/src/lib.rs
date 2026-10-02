@@ -6943,7 +6943,7 @@ fn continuation_source_session(
     })
 }
 
-/// `pub`: reused verbatim by `gate4agent-harness-light`'s resource-mutation
+/// `pub`: reused verbatim by `hatchery-harness-light`'s resource-mutation
 /// relay (`ExportContextPack`) via `c2::correlate_resource_mutation_response`,
 /// which already calls this function internally -- pure node-receipt-to-wire
 /// projection, no task-kernel/SQLite dependency.
@@ -7640,7 +7640,7 @@ mod tests {
     // DACL directly via `SetNamedSecurityInfoW` with the well-known "Owner
     // Rights" SID (SDDL `OW`) sidesteps account-name/SID resolution
     // entirely — the identical, already-proven approach
-    // `gate4agent-harness-delivery`'s own tests use for the same check.
+    // `hatchery-harness-delivery`'s own tests use for the same check.
     #[cfg(windows)]
     fn protect_delivery_test_path(path: &Path) {
         use std::ffi::OsStr;

@@ -1,6 +1,6 @@
 //! Relays the nine direct operator session verbs (`SpawnSession` plus the
 //! eight thin session-control verbs) straight to C2/Node, mirroring the
-//! `NodeRequest` shapes `gate4agent-harness-service::c2`'s
+//! `NodeRequest` shapes `hatchery-harness-service::c2`'s
 //! `HarnessC2Adapter::dispatch_session_spawn`/`PreparedSessionControl`
 //! already use for the same operator wire verbs -- see the crate-level
 //! report for why those are reimplemented light-local rather than reused:
@@ -57,7 +57,7 @@ use crate::util::encode_hex;
 use crate::LightState;
 
 /// Node-local processing budget for a direct `SpawnSession` dispatch.
-/// Mirrors `gate4agent-harness-service::c2`'s own (private)
+/// Mirrors `hatchery-harness-service::c2`'s own (private)
 /// `SESSION_SPAWN_DEADLINE_MS` -- a plain literal with no kernel dependency,
 /// so duplicating it here (rather than promoting a private `const`) keeps
 /// this crate's spawn deadline in step with the full harness's own direct-
@@ -70,7 +70,7 @@ const SESSION_SPAWN_DEADLINE_MS: u64 = 20_000;
 /// `launch_inventory.spawn_profiles` lookup `preflight_spawn_profile` uses)
 /// so a stale/unknown profile is a typed `NotFound`, not a node-side crash.
 /// `HarnessApprovalLevelV1` -> `gate4agent_types::ApprovalLevel`, an exact
-/// mirror of the same mapping in `gate4agent-harness-service::c2` (private
+/// mirror of the same mapping in `hatchery-harness-service::c2` (private
 /// to that crate, like every other spawn helper this module reimplements --
 /// see the module doc). Exhaustive on purpose: a level added to the wire
 /// must fail to compile here rather than silently resolve to the default,
@@ -168,7 +168,7 @@ async fn spawn_session_inner(
         )
         .map_err(|_| LightRelayError::InvalidRequest)?])
         .map_err(|_| LightRelayError::InvalidRequest)?,
-        // See the mirror match in `gate4agent-harness-service::c2` -- ACP has
+        // See the mirror match in `hatchery-harness-service::c2` -- ACP has
         // no terminal, so none of the raw-pty/semantic-readiness capabilities
         // apply; the real transport-support gate is the kernel's
         // `spec.capabilities.transports.acp.is_some()` check.
@@ -250,7 +250,7 @@ fn execution_mode(mode: HarnessExecutionModeV1) -> SessionMode {
 
 /// The transport a `HarnessExecutionModeV1` requests, in the wire's own
 /// `HarnessRuntimeTransportV1` vocabulary -- mirrors
-/// `gate4agent-harness-service::runtime`'s own `harness_transport_for_mode`.
+/// `hatchery-harness-service::runtime`'s own `harness_transport_for_mode`.
 /// Only needed to name the transport a rejected spawn asked for (see
 /// `LightRelayError::NodeUnsupportedTransport`).
 fn harness_transport_for_mode(mode: HarnessExecutionModeV1) -> HarnessRuntimeTransportV1 {
@@ -263,7 +263,7 @@ fn harness_transport_for_mode(mode: HarnessExecutionModeV1) -> HarnessRuntimeTra
 
 /// The eight thin session-control verbs, sharing one C2 relay shape and one
 /// `C2NodeResponse::Accepted` reply -- the light-local mirror of
-/// `gate4agent-harness-service::c2::SessionControlKind`.
+/// `hatchery-harness-service::c2::SessionControlKind`.
 pub(crate) enum SessionVerb {
     Input { text: String },
     Resize { terminal_size: HarnessRuntimeTerminalSizeV1 },
@@ -406,7 +406,7 @@ async fn session_control_inner(
     // explicit follow-up `Remove` it would keep reporting itself in the
     // runtime inventory forever. Fired detached, after this verb's own
     // outcome is already decided, so a slow or failed reap never delays or
-    // fails `StopSession` itself -- mirrors `gate4agent-harness-service::
+    // fails `StopSession` itself -- mirrors `hatchery-harness-service::
     // c2::HarnessC2Adapter::remove_stopped_session` (`pub(crate)`, not
     // reusable) exactly, including firing for every settled `Stop`, not only
     // a forced one.
@@ -465,7 +465,7 @@ fn spawn_stop_reap(state: &LightState, route: NodeRoute, session: SessionAddress
 /// Exact mirror of `gate4agent_types::TerminalControl` <- the wire type
 /// `HarnessTerminalControlV1`, exhaustive so a variant added to either side
 /// without the other fails to compile here -- the same technique (and the
-/// same duplication rationale) as `gate4agent-harness-service::c2`'s own
+/// same duplication rationale) as `hatchery-harness-service::c2`'s own
 /// (private) `map_terminal_control`.
 fn map_terminal_control(control: HarnessTerminalControlV1) -> TerminalControl {
     match control {
@@ -534,13 +534,13 @@ fn map_terminal_control(control: HarnessTerminalControlV1) -> TerminalControl {
 // verbs above already established (resolve a live route, build the wire
 // request, `state.control.request` it, check the response is routed from the
 // same node/incarnation, map the outcome) rather than the full harness's own
-// `Prepared*`/`Pending*` C2-waiter split (`gate4agent-harness-service::c2`):
+// `Prepared*`/`Pending*` C2-waiter split (`hatchery-harness-service::c2`):
 // that split exists to let the harness's single-writer host loop dispatch a
 // request and poll its completion later without blocking the loop on the C2
 // round trip, which this crate has no equivalent of (one task per operator
 // connection already IS the concurrency unit -- see the crate-level report).
 //
-// What *is* reused from `gate4agent-harness-service::c2` (promoted `pub`, see
+// What *is* reused from `hatchery-harness-service::c2` (promoted `pub`, see
 // each promoted item's own doc comment there) is every PURE piece: the
 // `WorkspaceReadKind`/`WorkspaceWriteKind`/`SessionRecordMutationKind`/
 // `ResourceMutationKind` enums and their `Prepared*` bundles (route + kind,
@@ -558,7 +558,7 @@ fn map_terminal_control(control: HarnessTerminalControlV1) -> TerminalControl {
 // Deadlines: unlike the nine verbs above (which rely solely on the outer
 // `crate::LIGHT_CONNECTION_DEADLINE`, 45s), every family below wraps its C2
 // round trip in `tokio::time::timeout` under its own bucket, mirroring
-// `gate4agent-harness-service::runtime`'s own `HOST_*_RESPONSE_DEADLINE`
+// `hatchery-harness-service::runtime`'s own `HOST_*_RESPONSE_DEADLINE`
 // constants (plain literals, duplicated for the same no-kernel-dependency
 // reason `SESSION_SPAWN_DEADLINE_MS` above already is) -- a hung node call on
 // any of these must fail the *request* with a typed `Deadline`, not silently

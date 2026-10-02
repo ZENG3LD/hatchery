@@ -85,7 +85,7 @@ async fn main() {
             std::process::exit(if message.starts_with("usage:") { 0 } else { 2 });
         }
     };
-    // The light binary hosts `gate4agent-harness-light` in-process (see that
+    // The light binary hosts `hatchery-harness-light` in-process (see that
     // crate's own doc comment) instead of speaking the c2 dialect itself: the
     // minted operator credential/endpoint hand-off is an in-process return
     // value, never an env round trip.

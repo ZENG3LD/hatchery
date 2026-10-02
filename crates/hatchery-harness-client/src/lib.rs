@@ -26,7 +26,7 @@ pub const HARNESS_CONTEXT_SOURCE_OBSERVATION_DEADLINE: Duration = Duration::from
 // Client-side outer bounds for the nine direct session verbs: spawn, plus
 // the eight thin session-control verbs that share one deadline. Both stay
 // above the host's own `HOST_SESSION_SPAWN_RESPONSE_DEADLINE`/
-// `HOST_SESSION_CONTROL_RESPONSE_DEADLINE` (gate4agent-harness-service/
+// `HOST_SESSION_CONTROL_RESPONSE_DEADLINE` (hatchery-harness-service/
 // runtime.rs) with the same ~2s margin the other extended-deadline
 // verbs below already use.
 pub const HARNESS_SESSION_SPAWN_DEADLINE: Duration = Duration::from_secs(30);
@@ -1418,7 +1418,7 @@ impl HarnessOperatorClient {
     /// queue. `sessions` is declared once, at subscribe time -- opening or
     /// closing a pane means calling this again with the updated list, not
     /// patching an existing subscription (see `SubscribeTerminal`'s own doc
-    /// comment, `gate4agent-harness-api`).
+    /// comment, `hatchery-harness-api`).
     pub fn subscribe_terminal(
         &self,
         sessions: Vec<HarnessRuntimeSessionAddressV1>,
@@ -1689,7 +1689,7 @@ impl HarnessTerminalSubscription {
     /// Lets the caller force this blocking connection to unblock and die
     /// (its `next_event`'s `read` returns an error) from another thread,
     /// without adding a second wire message -- the client-side subscription
-    /// worker (`gate4agent-tui`) needs this because the desired-session-set
+    /// worker (`hatchery-tui`) needs this because the desired-session-set
     /// can change while a `next_event` call is blocked on a socket read with
     /// no data pending: shutting down this cloned handle's read half is the
     /// only way to interrupt that blocking read from outside the thread that
@@ -3436,7 +3436,7 @@ mod tests {
     /// `try_clone_canceler` operates on the shared underlying socket, not on
     /// a specific in-flight call: shutting the cloned handle down makes the
     /// ORIGINAL subscription's next `next_event` read fail, exactly the
-    /// property `gate4agent-tui`'s subscription worker depends on to force a
+    /// property `hatchery-tui`'s subscription worker depends on to force a
     /// blocked `next_event` call to unblock from another thread when the
     /// desired session set changes. Calling shutdown before `next_event` even
     /// starts proves the same underlying property deterministically, without

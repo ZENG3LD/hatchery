@@ -21,7 +21,7 @@
 //! before it, naming the actor as not a run.
 //!
 //! `ApprovalLevel::FullAuto` is the level under test, not `Unmanaged`:
-//! `derive_launch_plans_from_inventory` (`gate4agent-harness-service::
+//! `derive_launch_plans_from_inventory` (`hatchery-harness-service::
 //! dispatch`) only offers the harness-MCP/ACP sibling at a level whose
 //! catalog row carries a sourced `acp_mode_id: Some(_)`
 //! (`approval_level_resolution`, `gate4agent-catalog::launch`) --
@@ -36,7 +36,7 @@
 //! prompt` is ever reached.
 //!
 //! The Node's dispatch target for this derived plan is `acp_fixture_agent`
-//! (`gate4agent-harness-mcp`'s own `[[bin]]`, `src/bin/
+//! (`hatchery-harness-mcp`'s own `[[bin]]`, `src/bin/
 //! acp_fixture_agent.rs`): a minimal real ACP v1 agent over stdio,
 //! launched through `NodeServer::new_harness_mcp_acp_launcher_fixture`
 //! (`gate4agent-node/src/server.rs`). That constructor is the fix for a
@@ -273,7 +273,7 @@ async fn operator_started_derived_acp_harness_mcp_plan_mints_self_grant_and_arms
     let capture_path = fixture.root.join("acp-session-new-params.json");
     std::env::set_var("G4A_ACP_FIXTURE_CAPTURE", &capture_path);
 
-    let helper_program = PathBuf::from(env!("CARGO_BIN_EXE_gate4agent-harness-mcp"));
+    let helper_program = PathBuf::from(env!("CARGO_BIN_EXE_hatchery-harness-mcp"));
     let provider_program = PathBuf::from(env!("CARGO_BIN_EXE_acp_fixture_agent"));
     let provider_id = AgentId::new("codex").unwrap();
     let server = NodeServer::new_harness_mcp_acp_launcher_fixture(
