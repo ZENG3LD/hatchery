@@ -1585,6 +1585,7 @@ checksum = "4050469837a6ff301cd14c1f8f24f88549e6d548f24f64e2148eb0f72cebc51f"
 [[package]]
 name = "mail4agent-api"
 version = "0.1.0"
+source = "git+https://github.com/ZENG3LD/mail4agent?rev=151a725ea10000cf59c5ae02a45834ccb4c3b390#151a725ea10000cf59c5ae02a45834ccb4c3b390"
 dependencies = [
  "serde",
  "serde_json",
@@ -1593,6 +1594,7 @@ dependencies = [
 [[package]]
 name = "mail4agent-client"
 version = "0.1.0"
+source = "git+https://github.com/ZENG3LD/mail4agent?rev=151a725ea10000cf59c5ae02a45834ccb4c3b390#151a725ea10000cf59c5ae02a45834ccb4c3b390"
 dependencies = [
  "mail4agent-api",
  "reqwest",
