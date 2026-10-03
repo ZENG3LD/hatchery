@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 description = "Terminal client for hatchery: both hatchery-tui and hatchery-tui-light speak only the harness operator wire -- light hosts hatchery-harness-light in-process over c2 instead of a durable task kernel"
-publish = false
+repository = "https://github.com/ZENG3LD/hatchery"
+readme = "../../README.md"
 
 [dependencies]
 crossterm = "0.28"
