@@ -1,16 +1,17 @@
 [package]
 name = "hatchery-harness-client"
-version = "0.2.37"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/ZENG3LD/hatchery"
+readme = "../../README.md"
 description = "Typed localhost client and CLI (hatchery-harnessctl) for the hatchery harness read and operator hosts"
-publish = false
 
 [lib]
 name = "hatchery_harness_client"
 
 [dependencies]
-hatchery-harness-api = { path = "../hatchery-harness-api" }
+hatchery-harness-api = { version = "0.1.0", path = "../hatchery-harness-api" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

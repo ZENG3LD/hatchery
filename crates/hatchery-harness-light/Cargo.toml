@@ -1,10 +1,11 @@
 [package]
 name = "hatchery-harness-light"
-version = "0.4.0"
+version = "0.1.0"
 edition = "2021"
 description = "Stateless in-process light harness: serves the same operator wire as hatchery-harness-service, backed directly by C2 instead of the SWC task kernel"
 license = "MIT"
-publish = false
+repository = "https://github.com/ZENG3LD/hatchery"
+readme = "../../README.md"
 
 [lib]
 name = "hatchery_harness_light"
@@ -12,11 +13,11 @@ name = "hatchery_harness_light"
 [dependencies]
 gate4agent-c2-client = { version = "0.4.8" }
 gate4agent-c2-protocol = { version = "0.4.8" }
-hatchery-harness-api = { path = "../hatchery-harness-api" }
-hatchery-harness-service = { path = "../hatchery-harness-service" }
+hatchery-harness-api = { version = "0.1.0", path = "../hatchery-harness-api" }
+hatchery-harness-service = { version = "0.1.0", path = "../hatchery-harness-service" }
 gate4agent-node-protocol = { version = "0.4.8" }
 gate4agent-node-wire = { version = "0.4.8" }
-hatchery-observation-api = { path = "../hatchery-observation-api" }
+hatchery-observation-api = { version = "0.1.0", path = "../hatchery-observation-api" }
 gate4agent-types = { version = "0.4.8" }
 serde_json = "1"
 thiserror = "2"
@@ -25,7 +26,7 @@ tracing = "0.1"
 
 [dev-dependencies]
 gate4agent-c2 = { version = "0.4.8" }
-hatchery-harness-client = { path = "../hatchery-harness-client" }
+hatchery-harness-client = { version = "0.1.0", path = "../hatchery-harness-client" }
 gate4agent-node = { version = "0.4.8", features = ["fixture"] }
 tokio = { version = "1", features = ["full", "test-util"] }
 

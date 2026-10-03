@@ -1,16 +1,17 @@
 [package]
 name = "hatchery-harness-engine"
-version = "0.2.37"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/ZENG3LD/hatchery"
+readme = "../../README.md"
 description = "Pure, prepare-then-accept state machine for the hatchery harness task/run/delivery kernel"
-publish = false
 
 [lib]
 name = "hatchery_harness_engine"
 
 [dependencies]
-hatchery-harness-protocol = { path = "../hatchery-harness-protocol" }
+hatchery-harness-protocol = { version = "0.1.0", path = "../hatchery-harness-protocol" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 

@@ -1,10 +1,11 @@
 [package]
 name = "hatchery-harness-service"
-version = "0.2.37"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/ZENG3LD/hatchery"
+readme = "../../README.md"
 description = "Single-writer SQLite authority and operator host for the hatchery harness kernel (bin hatchery-harness)"
-publish = false
 
 [lib]
 name = "hatchery_harness_service"
@@ -13,16 +14,16 @@ name = "hatchery_harness_service"
 gate4agent-c2-client = { version = "0.4.8" }
 gate4agent-c2-protocol = { version = "0.4.8" }
 gate4agent-catalog = { version = "0.4.8" }
-hatchery-harness-api = { path = "../hatchery-harness-api" }
-hatchery-harness-engine = { path = "../hatchery-harness-engine" }
-hatchery-harness-delivery = { path = "../hatchery-harness-delivery" }
-hatchery-harness-protocol = { path = "../hatchery-harness-protocol" }
+hatchery-harness-api = { version = "0.1.0", path = "../hatchery-harness-api" }
+hatchery-harness-engine = { version = "0.1.0", path = "../hatchery-harness-engine" }
+hatchery-harness-delivery = { version = "0.1.0", path = "../hatchery-harness-delivery" }
+hatchery-harness-protocol = { version = "0.1.0", path = "../hatchery-harness-protocol" }
 gate4agent-node-protocol = { version = "0.4.8" }
 gate4agent-node-wire = { version = "0.4.8" }
-hatchery-observation-api = { path = "../hatchery-observation-api" }
-hatchery-observation-engine = { path = "../hatchery-observation-engine" }
-hatchery-observation-protocol = { path = "../hatchery-observation-protocol" }
-hatchery-observation-service = { path = "../hatchery-observation-service" }
+hatchery-observation-api = { version = "0.1.0", path = "../hatchery-observation-api" }
+hatchery-observation-engine = { version = "0.1.0", path = "../hatchery-observation-engine" }
+hatchery-observation-protocol = { version = "0.1.0", path = "../hatchery-observation-protocol" }
+hatchery-observation-service = { version = "0.1.0", path = "../hatchery-observation-service" }
 # HQ messenger surface: harness consumes mail4agent as a client dependency
 # (extraction plan mailbox-service-extraction-…-2026-09-16).
 # Real client is crates.io 0.1.2 (0.1.0 was a placeholder; 0.1.1 of the
@@ -41,7 +42,7 @@ ring = "=0.17.14"
 
 [dev-dependencies]
 gate4agent-c2 = { version = "0.4.8" }
-hatchery-harness-client = { path = "../hatchery-harness-client" }
+hatchery-harness-client = { version = "0.1.0", path = "../hatchery-harness-client" }
 gate4agent-node = { version = "0.4.8", features = ["fixture"] }
 ring = "=0.17.14"
 

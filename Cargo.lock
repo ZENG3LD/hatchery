@@ -973,7 +973,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-api"
-version = "0.2.37"
+version = "0.1.0"
 dependencies = [
  "gate4agent-build-stamp",
  "hatchery-harness-protocol",
@@ -984,7 +984,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-client"
-version = "0.2.37"
+version = "0.1.0"
 dependencies = [
  "hatchery-harness-api",
  "serde",
@@ -994,7 +994,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-delivery"
-version = "0.2.37"
+version = "0.1.0"
 dependencies = [
  "gate4agent-node-protocol",
  "libc",
@@ -1005,7 +1005,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-engine"
-version = "0.2.37"
+version = "0.1.0"
 dependencies = [
  "hatchery-harness-protocol",
  "serde",
@@ -1015,7 +1015,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-light"
-version = "0.4.0"
+version = "0.1.0"
 dependencies = [
  "gate4agent-c2",
  "gate4agent-c2-client",
@@ -1037,7 +1037,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-mcp"
-version = "0.2.37"
+version = "0.1.0"
 dependencies = [
  "gate4agent-c2",
  "gate4agent-c2-client",
@@ -1060,7 +1060,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-protocol"
-version = "0.2.37"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1069,7 +1069,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-service"
-version = "0.2.37"
+version = "0.1.0"
 dependencies = [
  "gate4agent-c2",
  "gate4agent-c2-client",
@@ -1103,7 +1103,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-api"
-version = "0.2.37"
+version = "0.1.0"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -1114,7 +1114,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-engine"
-version = "0.2.37"
+version = "0.1.0"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -1128,7 +1128,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-protocol"
-version = "0.2.37"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1137,7 +1137,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-service"
-version = "0.2.37"
+version = "0.1.0"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -1151,7 +1151,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-store"
-version = "0.2.37"
+version = "0.1.0"
 dependencies = [
  "hatchery-observation-api",
  "hatchery-observation-engine",

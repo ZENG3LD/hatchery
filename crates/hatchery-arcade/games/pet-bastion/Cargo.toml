@@ -1,8 +1,10 @@
 [package]
 name = "hatchery-arcade-pet-bastion"
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 license.workspace = true
+repository = "https://github.com/ZENG3LD/hatchery"
+readme = "../../../../README.md"
 description = "Pet Bastion: Night Garden -- a deterministic tower-defense run."
 
 [dependencies]
@@ -10,4 +12,4 @@ description = "Pet Bastion: Night Garden -- a deterministic tower-defense run."
 # behavioural change (the engine's own `default = []` already carries no
 # render dep), so a future default feature on the engine can never drag
 # uzor/rendering types into this crate's build by accident.
-hatchery-arcade-engine = { path = "../../engine", default-features = false }
+hatchery-arcade-engine = { version = "0.1.0", path = "../../engine", default-features = false }

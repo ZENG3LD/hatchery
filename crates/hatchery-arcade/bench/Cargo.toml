@@ -1,8 +1,10 @@
 [package]
 name = "hatchery-arcade-bench"
-version.workspace = true
+version = "0.1.0"
 edition.workspace = true
 license.workspace = true
+repository = "https://github.com/ZENG3LD/hatchery"
+readme = "../../../README.md"
 description = "Disposable measurement tool: answers 'can icy_sixel + Windows Terminal push a game board at 60fps' with real numbers (encode microseconds, bytes/frame, live-terminal round-trip fps). NOT part of the product -- never depended on by engine/games/sweep/preview."
 
 [dependencies]
@@ -16,7 +18,7 @@ icy_sixel = "0.6"
 # the exact same reasoning `preview`'s own `Cargo.toml` already documents
 # for its own identical dependency. Still a leaf crate: nothing in
 # `engine`/`games`/`sweep` depends back on `bench`.
-hatchery-arcade-engine = { path = "../engine", default-features = false, features = ["render"] }
+hatchery-arcade-engine = { version = "0.1.0", path = "../engine", default-features = false, features = ["render"] }
 # Raw Win32 console mode (stdin: line/echo off, VT input on) plus a raw
 # `ReadFile` on the stdin handle -- needed to read the terminal's own
 # cursor-position-report (DSR, `ESC[6n`) response bytes as they arrive,

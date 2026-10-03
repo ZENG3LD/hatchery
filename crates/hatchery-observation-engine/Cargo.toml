@@ -1,10 +1,11 @@
 [package]
 name = "hatchery-observation-engine"
-version = "0.2.37"
+version = "0.1.0"
 edition = "2021"
 license = "MIT"
+repository = "https://github.com/ZENG3LD/hatchery"
+readme = "../../README.md"
 description = "Bounded in-memory reducer projecting gate4agent observation ingress into session state"
-publish = false
 
 [lib]
 name = "hatchery_observation_engine"
@@ -12,8 +13,8 @@ name = "hatchery_observation_engine"
 [dependencies]
 gate4agent-node-protocol = { version = "0.4.8" }
 gate4agent-types = { version = "0.4.8" }
-hatchery-observation-api = { path = "../hatchery-observation-api" }
-hatchery-observation-protocol = { path = "../hatchery-observation-protocol" }
+hatchery-observation-api = { version = "0.1.0", path = "../hatchery-observation-api" }
+hatchery-observation-protocol = { version = "0.1.0", path = "../hatchery-observation-protocol" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 tracing = "0.1"
