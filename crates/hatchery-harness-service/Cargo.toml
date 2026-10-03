@@ -25,10 +25,10 @@ hatchery-observation-protocol = { path = "../hatchery-observation-protocol" }
 hatchery-observation-service = { path = "../hatchery-observation-service" }
 # HQ messenger surface: harness consumes mail4agent as a client dependency
 # (extraction plan mailbox-service-extraction-…-2026-09-16).
-# crates.io mail4agent-client 0.1.0 is a placeholder stub, so this pins the
-# public OSS repo (same rev the real MailClient shipped at). No sibling path.
-mail4agent-client = { git = "https://github.com/ZENG3LD/mail4agent", rev = "151a725ea10000cf59c5ae02a45834ccb4c3b390" }
-mail4agent-api = { git = "https://github.com/ZENG3LD/mail4agent", rev = "151a725ea10000cf59c5ae02a45834ccb4c3b390" }
+# Real client is crates.io 0.1.2 (0.1.0 was a placeholder; 0.1.1 of the
+# mail4agent package was already taken). No sibling path, no git pin.
+mail4agent-client = "0.1.2"
+mail4agent-api = "0.1.2"
 gate4agent-types = { version = "0.4.8" }
 rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
