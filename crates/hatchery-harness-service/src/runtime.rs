@@ -112,7 +112,7 @@ use hatchery_harness_protocol::{
     HarnessContextSourceSelectionV1, HarnessContextSourceAvailabilityV1, HarnessRequestDigest,
     HarnessWorktreeIntentV1, HarnessContinuationV1, HarnessDeliveryV1,
     HarnessTransferAuthorityRefV1,
-    HarnessGrantTargetV1, SessionGrantV1,
+    HarnessGrantTargetV1, SessionGrantStateV1, SessionGrantV1,
 };
 use gate4agent_node_wire::{local_hmac_sha256, proofs_match};
 use gate4agent_node_protocol::{
@@ -938,6 +938,7 @@ fn operator_mutation_task_id(
             Some(request.task_id.clone())
         }
         HarnessOperatorRequestV1::StartTaskV2 { request } => Some(request.task_id.clone()),
+        HarnessOperatorRequestV1::MintHarnessMcpGrant { request } => Some(request.task_id.clone()),
         HarnessOperatorRequestV1::SubmitIntent { intent } => {
             authorize_operator_intent(intent.clone()).ok()
                 .and_then(|resolved| operator_mutation_task_id(&resolved))
@@ -2118,6 +2119,30 @@ pub(crate) fn resolve_harness_mcp_grant(
                     "dispatch operation id fails deterministic default grant id derivation",
                 ))?;
             let minted_grant_id = grant_ids.grant_id.clone();
+            // An operator `grant mint` applies this same function before the
+            // dispatch coordinator does. Those calls do not share a timestamp,
+            // so byte-identical operation replay cannot be the idempotency
+            // key. The grant id is already deterministic: if that grant is
+            // present and still the default for this run and target, return
+            // it. The coordinator then arms the node against the grant the
+            // operator command minted.
+            if let Some(existing) = harness.engine().grant(&minted_grant_id) {
+                let same_default = existing.actor_run_id == *actor_run_id
+                    && existing.revision == first_revision
+                    && existing.state == SessionGrantStateV1::Active
+                    && existing.allows_target(
+                        &target.node_id,
+                        &target.workspace_id,
+                        &target.provider_profile,
+                        target.mode,
+                    );
+                if !same_default {
+                    return Err(HarnessRuntimeError::DispatchPreparation(
+                        "deterministic default grant already exists and does not match this dispatch",
+                    ));
+                }
+                return Ok((minted_grant_id, existing.revision));
+            }
             let default_grant = SessionGrantV1::default_for_run(
                 grant_ids.grant_id,
                 actor_run_id.clone(),
@@ -7628,6 +7653,9 @@ fn scheduled_dispatch_from_operator_response(
         HarnessOperatorResponseV1::TaskStarted(outcome) if !outcome.replayed => {
             Some(outcome.dispatch.clone())
         }
+        HarnessOperatorResponseV1::HarnessMcpGrantMinted(mint) if !mint.replayed => {
+            Some(mint.dispatch.clone())
+        }
         _ => None,
     }
 }
@@ -9720,6 +9748,64 @@ fn execute_operator_request(
                 harness
                     .start_task_v2(&effective_launch, &catalogue, request)
                     .map_err(map_operator_service_error)?,
+            )
+        }
+        HarnessOperatorRequestV1::MintHarnessMcpGrant { request } => {
+            // Same catalogue the start verb validates against. The plan is
+            // checked before `start_task_v2` so a non-GrantBound issuance is
+            // refused without creating a run.
+            let (catalogue, _context_source_exclusions) = full_task_launch_catalogue(
+                harness,
+                observation,
+                support,
+                launch_catalog,
+                delivery_catalog,
+                runtime_inventory,
+                &request.task_id,
+            )?;
+            let (effective_launch, _truncated) =
+                effective_launch_catalog(launch_catalog, runtime_inventory);
+            let issuance = harness.engine().task_launch_issuance(&request.task_id)
+                .cloned()
+                .ok_or(HarnessOperatorHostErrorV1::NotFound)?;
+            let plan = effective_launch.resolve(&issuance.plan)
+                .map_err(|_| HarnessOperatorHostErrorV1::InvalidRequest)?;
+            if plan.harness_mcp != crate::dispatch::HarnessMcpPolicyV1::GrantBound
+                || !matches!(plan.grant, crate::dispatch::HarnessGrantPolicyV1::Operator)
+            {
+                return Err(HarnessOperatorHostErrorV1::InvalidRequest);
+            }
+            let target = HarnessGrantTargetV1 {
+                node_id: plan.node_id.clone(),
+                workspace_id: plan.workspace_id.clone(),
+                provider_profile: plan.provider_profile.clone(),
+                mode: plan.mode,
+            };
+            let now_unix_ms = request.authority.now_unix_ms;
+            let outcome = harness
+                .start_task_v2(&effective_launch, &catalogue, request)
+                .map_err(map_operator_service_error)?;
+            let (grant_id, revision) = resolve_harness_mcp_grant(
+                harness,
+                &outcome.dispatch.operation_id,
+                &crate::dispatch::HarnessGrantPolicyV1::Operator,
+                &outcome.dispatch.run_id,
+                target,
+                now_unix_ms,
+            ).map_err(|error| {
+                tracing::warn!(
+                    error = ?error,
+                    "operator harness-mcp grant mint failed",
+                );
+                HarnessOperatorHostErrorV1::InvalidRequest
+            })?;
+            HarnessOperatorResponseV1::HarnessMcpGrantMinted(
+                hatchery_harness_api::HarnessMcpGrantMintV1 {
+                    grant_id,
+                    revision,
+                    dispatch: outcome.dispatch,
+                    replayed: outcome.replayed,
+                },
             )
         }
         // Unreachable in production: the host select loop intercepts these
@@ -13121,6 +13207,19 @@ mod tests {
         ).unwrap();
         assert_eq!(replayed_grant_id, grant_id);
         assert_eq!(replayed_revision, grant_revision);
+
+        // A later call does not share the original timestamp. It must still
+        // return the same grant (operator mint, then the dispatch coordinator).
+        let (later_grant_id, later_revision) = resolve_harness_mcp_grant(
+            &mut harness,
+            &dispatch_operation_id,
+            &crate::dispatch::HarnessGrantPolicyV1::Operator,
+            &run_id,
+            resolve_grant_target(),
+            99,
+        ).unwrap();
+        assert_eq!(later_grant_id, grant_id);
+        assert_eq!(later_revision, grant_revision);
     }
 
     /// The `Exact` branch is the pre-existing, unchanged behaviour: a launch

@@ -49,6 +49,7 @@ fn usage() -> &'static str {
      \x20 launch-options TASK_ID [--provider ID] [--workspace ID] [--plan ID] [--after PLAN_ID]\n\
      \x20 spec save TASK_ID --plan PLAN_ID [--context-source-run RUN_ID] [--delivery BUNDLE_ID] [--review POLICY]\n\
      \x20 task start TASK_ID\n\
+     \x20 grant mint TASK_ID\n\
      \x20 observe-context RUN_ID\n\
      \x20 transfers RUN_ID\n\
      \x20 runtime-inventory [--after NODE_ID] [--limit N]\n\
@@ -121,6 +122,7 @@ enum Command {
         review: HarnessTaskReviewPolicyV1,
     },
     TaskStart { task_id: HarnessTaskId },
+    GrantMint { task_id: HarnessTaskId },
     ObserveContext { run_id: HarnessRunId },
     Transfers { run_id: HarnessRunId },
     RuntimeInventory { after: Option<String>, limit: u16 },
@@ -168,6 +170,7 @@ enum Verb {
     LaunchOptions,
     SpecSave,
     TaskStart,
+    GrantMint,
     ObserveContext,
     Transfers,
     RuntimeInventory,
@@ -198,6 +201,7 @@ fn resolve_verb(args: &[String]) -> Result<(Verb, usize), String> {
             Some("start") => Ok((Verb::TaskStart, 2)),
             _ => Err(usage().to_owned()),
         },
+        Some("grant") if args.get(2).map(String::as_str) == Some("mint") => Ok((Verb::GrantMint, 2)),
         Some("run") if args.get(2).map(String::as_str) == Some("get") => Ok((Verb::RunGet, 2)),
         Some("results") => Ok((Verb::Results, 1)),
         Some("spec") if args.get(2).map(String::as_str) == Some("save") => Ok((Verb::SpecSave, 2)),
@@ -490,6 +494,10 @@ fn build_command(
         Verb::TaskStart => {
             let task_id = expect_single_positional(positionals, "task-id").and_then(parse_task_id)?;
             Ok(Command::TaskStart { task_id })
+        }
+        Verb::GrantMint => {
+            let task_id = expect_single_positional(positionals, "task-id").and_then(parse_task_id)?;
+            Ok(Command::GrantMint { task_id })
         }
         Verb::ObserveContext => {
             let run_id = expect_single_positional(positionals, "run-id").and_then(parse_run_id)?;
@@ -797,6 +805,14 @@ fn resolve_delivery(
 }
 
 #[derive(serde::Serialize)]
+struct MintedHarnessMcpGrant {
+    grant_id: String,
+    revision: u64,
+    run_id: String,
+    replayed: bool,
+}
+
+#[derive(serde::Serialize)]
 struct TaskCreated {
     task_id: HarnessTaskId,
     outcome: HarnessOperatorMutationOutcomeV1,
@@ -947,6 +963,32 @@ fn execute(invocation: Invocation) -> Result<String, String> {
                 })
                 .map_err(|error| error.to_string())?;
             render(&outcome)
+        }
+        Command::GrantMint { task_id } => {
+            let options = client
+                .task_launch_options_get(task_id.clone())
+                .map_err(|error| error.to_string())?;
+            let current = options
+                .current_issued_spec
+                .ok_or_else(|| "task has no issued execution spec; run `spec save` first".to_owned())?;
+            let authority = fresh_authority()?;
+            let minted = client
+                .mint_harness_mcp_grant(HarnessStartTaskRequestV2 {
+                    authority,
+                    task_id,
+                    expected_task_revision: options.task_revision,
+                    expected_execution_spec_revision: current.revision,
+                    expected_launch_issuance: current.launch_issuance,
+                })
+                .map_err(|error| error.to_string())?;
+            // Grant id and revision only. The dispatch intent stays off
+            // stdout; the mint type has no credential field.
+            render(&MintedHarnessMcpGrant {
+                grant_id: minted.grant_id.as_str().to_owned(),
+                revision: minted.revision.get(),
+                run_id: minted.dispatch.run_id.as_str().to_owned(),
+                replayed: minted.replayed,
+            })
         }
         Command::ObserveContext { run_id } => {
             let observation = client

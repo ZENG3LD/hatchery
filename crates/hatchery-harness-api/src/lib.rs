@@ -2760,6 +2760,13 @@ pub enum HarnessOperatorRequestV1 {
     StartTask { request: HarnessStartTaskRequestV1 },
     ReplaceTaskExecutionSpecV2 { request: HarnessReplaceTaskExecutionSpecRequestV2 },
     StartTaskV2 { request: HarnessStartTaskRequestV2 },
+    /// Starts the issued task the same way `StartTaskV2` does, then mints
+    /// the dispatch's default harness-MCP grant through
+    /// `runtime::resolve_harness_mcp_grant` (the production mint, not a test
+    /// helper). Refused unless the issued plan is `GrantBound` with an
+    /// `Operator` grant policy. The reply is the grant id and revision; it
+    /// does not carry a read credential.
+    MintHarnessMcpGrant { request: HarnessStartTaskRequestV2 },
     SubmitIntent { intent: HarnessOperatorIntentV1 },
     // Node-scoped, paged host-directory listing behind the folder-browser
     // dialog: the harness-mode sibling of the light TUI's own
@@ -3238,6 +3245,7 @@ impl HarnessOperatorRequestV1 {
             }
             Self::ReplaceTaskExecutionSpecV2 { request } => request.validate(),
             Self::StartTaskV2 { request } => request.validate(),
+            Self::MintHarnessMcpGrant { request } => request.validate(),
             Self::SubmitIntent { intent } => intent.validate(),
             Self::BrowseHostDirectories { node_id, directory, after } => {
                 if !valid_runtime_id(node_id, 128) {
@@ -3901,6 +3909,26 @@ impl HarnessOperatorAgentEventV1 {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HarnessMcpGrantMintV1 {
+    pub grant_id: SessionGrantId,
+    pub revision: HarnessRevision,
+    /// The same dispatch `StartTaskV2` returns. Present so the host can
+    /// notify subscribers; `hatchery-harnessctl grant mint` does not print it.
+    pub dispatch: HarnessDispatchIntentV1,
+    pub replayed: bool,
+}
+
+impl HarnessMcpGrantMintV1 {
+    pub fn validate(&self) -> Result<(), HarnessOperatorApiError> {
+        self.grant_id.validate().map_err(HarnessOperatorApiError::Protocol)?;
+        self.revision.validate().map_err(HarnessOperatorApiError::Protocol)?;
+        self.dispatch.validate().map_err(HarnessOperatorApiError::Protocol)?;
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "value", rename_all = "kebab-case", deny_unknown_fields)]
 pub enum HarnessOperatorResponseV1 {
     Monitor(SessionMonitorV1),
@@ -3982,6 +4010,10 @@ pub enum HarnessOperatorResponseV1 {
     ExecutionSpecMutation(HarnessOperatorMutationOutcomeV1),
     Schedule(HarnessScheduleOutcomeV1),
     TaskStarted(HarnessTaskStartOutcomeV1),
+    /// Grant id and revision from `resolve_harness_mcp_grant`. No bearer
+    /// credential: `HarnessReadCredential`'s `Serialize` writes the raw
+    /// token, and this command must not.
+    HarnessMcpGrantMinted(HarnessMcpGrantMintV1),
 }
 
 impl HarnessOperatorResponseV1 {
@@ -4097,6 +4129,7 @@ impl HarnessOperatorResponseV1 {
             Self::TaskStarted(value) => {
                 value.validate().map_err(HarnessOperatorApiError::Protocol)
             }
+            Self::HarnessMcpGrantMinted(value) => value.validate(),
         }
     }
 }

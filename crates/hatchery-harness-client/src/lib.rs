@@ -1352,6 +1352,34 @@ impl HarnessOperatorClient {
         }
     }
 
+    /// Operator mint of the default harness-MCP grant. Calls the production
+    /// `MintHarnessMcpGrant` host path (`resolve_harness_mcp_grant`), which
+    /// also starts the issued task so the node can arm that grant. The
+    /// returned value has a grant id, not a read credential.
+    pub fn mint_harness_mcp_grant(
+        &self,
+        request: HarnessStartTaskRequestV2,
+    ) -> Result<HarnessMcpGrantMintV1, HarnessOperatorClientError> {
+        let expected_task_id = request.task_id.clone();
+        let expected_operation_id = request.authority.operation_id.clone();
+        let expected_idempotency_ref = request.authority.idempotency_ref.clone();
+        match self.send(HarnessOperatorRequestV1::MintHarnessMcpGrant { request })? {
+            HarnessOperatorResponseV1::HarnessMcpGrantMinted(value) => {
+                if value.dispatch.task_id != expected_task_id
+                    || value.dispatch.operation_id != expected_operation_id
+                    || value.dispatch.idempotency_ref != expected_idempotency_ref
+                {
+                    return Err(HarnessOperatorClientError::Api(
+                        HarnessOperatorApiError::InvalidTaskLaunchSelection,
+                    ));
+                }
+                value.validate()?;
+                Ok(value)
+            }
+            _ => Err(HarnessOperatorClientError::UnexpectedResponse),
+        }
+    }
+
     pub fn start_task_v2(
         &self,
         request: HarnessStartTaskRequestV2,
