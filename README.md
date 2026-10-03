@@ -17,8 +17,8 @@ Providers, the node and the c2 live in `gate4agent` (see [Built on](#built-on)
 below); the harness, the observation side and the client app are `hatchery-*`
 in this repository. Crate names below are prefixed `hatchery-` unless noted.
 
-- **Providers** — blackbox vendor CLIs (Claude Code, Codex, Kimi, Grok,
-  qwen-code) wrapped by the transport core in `gate4agent`: root crate
+- **Providers** — blackbox vendor CLIs (Claude Code, Codex, Kimi, Grok)
+  wrapped by the transport core in `gate4agent`: root crate
   `gate4agent`, `gate4agent-pty`, `-types`, `-adapters`, `-provider-ports`,
   `-catalog`, `-engine`, `-kernel`, `-handle`, `-tool-protocol`,
   `-tool-engine`, `-shell-history`, `-shell-capabilities`, `-shell-hooks`,
