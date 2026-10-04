@@ -191,6 +191,185 @@ async fn next_png(ws: &mut Ws) -> Result<Vec<u8>, ClientError> {
     Err(ClientError("no PNG frame arrived from C2".into()))
 }
 
+/// CLOCK_MONOTONIC nanoseconds. Same clock in every netns on this box.
+pub fn mono_ns() -> u64 {
+    #[repr(C)]
+    struct Timespec {
+        tv_sec: i64,
+        tv_nsec: i64,
+    }
+    extern "C" {
+        fn clock_gettime(clk_id: i32, tp: *mut Timespec) -> i32;
+    }
+    const CLOCK_MONOTONIC: i32 = 1;
+    let mut ts = Timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    let rc = unsafe { clock_gettime(CLOCK_MONOTONIC, &mut ts) };
+    if rc != 0 {
+        return 0;
+    }
+    (ts.tv_sec as u64)
+        .saturating_mul(1_000_000_000)
+        .saturating_add(ts.tv_nsec as u64)
+}
+
+/// `b"FRME"` + capture_ns little-endian. Not a PNG.
+pub fn parse_frame_timing(bytes: &[u8]) -> Option<u64> {
+    if bytes.len() == 12 && bytes.starts_with(b"FRME") {
+        let mut buf = [0u8; 8];
+        buf.copy_from_slice(&bytes[4..12]);
+        Some(u64::from_le_bytes(buf))
+    } else {
+        None
+    }
+}
+
+fn append_clock(path: &std::path::Path, line: &str) {
+    use std::io::Write;
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{line}");
+        let _ = file.flush();
+    }
+}
+
+/// Read frames, then send every click, then keep reading until a later frame differs.
+///
+/// Frame latency is `recv_ns - capture_ns` where capture_ns was stamped on the
+/// node into the FRME prefix and recv_ns is taken here when the PNG bytes arrive.
+/// Click send timestamps are written for the node to pair by sequence.
+pub async fn pull_login(
+    c2_http: &str,
+    session: &str,
+    clicks: &[(f64, f64, MouseButton)],
+    min_frames: usize,
+    clock_path: &std::path::Path,
+) -> Result<(Vec<u8>, Vec<u8>), ClientError> {
+    if clicks.is_empty() {
+        return Err(ClientError("at least one click is required".into()));
+    }
+    if min_frames == 0 {
+        return Err(ClientError("min_frames must be at least 1".into()));
+    }
+    let _ = std::fs::remove_file(clock_path);
+    let endpoints = c2_endpoints(c2_http, session)?;
+    open_session(&endpoints.post_url).await?;
+    let mut ws = connect_ws(&endpoints.ws_url).await?;
+    let mut pending_capture: Option<u64> = None;
+    let mut before: Option<Vec<u8>> = None;
+    let mut count = 0usize;
+    let pre_deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    while count < min_frames {
+        if tokio::time::Instant::now() >= pre_deadline {
+            return Err(ClientError(format!(
+                "only {count} frames arrived before clicks"
+            )));
+        }
+        let (png, capture) = next_timed_png(&mut ws, &mut pending_capture).await?;
+        note_frame(clock_path, &png, capture);
+        count += 1;
+        before = Some(png);
+    }
+    let before = before.ok_or_else(|| ClientError("no before frame".into()))?;
+    for (i, (x, y, button)) in clicks.iter().enumerate() {
+        let seq = i + 1;
+        let bytes = encode_click(*x, *y, *button);
+        let send_ns = mono_ns();
+        ws.send(Message::binary(bytes.clone()))
+            .await
+            .map_err(|err| ClientError(format!("send click failed: {err}")))?;
+        append_clock(
+            clock_path,
+            &format!("click seq={seq} send_ns={send_ns} bytes={}", bytes.len()),
+        );
+        eprintln!(
+            "[hatchery-bidi] sent click seq={seq} bytes={}",
+            bytes.len()
+        );
+    }
+    let mut after = before.clone();
+    let mut saw_diff = false;
+    let post_deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let mut extra = 0usize;
+    while extra < 12 && tokio::time::Instant::now() < post_deadline {
+        let timed = tokio::time::timeout(
+            Duration::from_secs(8),
+            next_timed_png(&mut ws, &mut pending_capture),
+        )
+        .await;
+        let (png, capture) = match timed {
+            Ok(Ok(pair)) => pair,
+            Ok(Err(err)) => return Err(err),
+            Err(_) => break,
+        };
+        note_frame(clock_path, &png, capture);
+        extra += 1;
+        if png != before {
+            after = png;
+            saw_diff = true;
+        }
+    }
+    if !saw_diff {
+        return Err(ClientError(
+            "post-click frames did not differ from the before frame".into(),
+        ));
+    }
+    Ok((before, after))
+}
+
+fn note_frame(clock_path: &std::path::Path, png: &[u8], capture: Option<u64>) {
+    let recv = mono_ns();
+    match capture {
+        Some(capture_ns) => append_clock(
+            clock_path,
+            &format!(
+                "frame capture_ns={capture_ns} recv_ns={recv} bytes={}",
+                png.len()
+            ),
+        ),
+        None => append_clock(
+            clock_path,
+            &format!("frame capture_ns=missing recv_ns={recv} bytes={}", png.len()),
+        ),
+    }
+    eprintln!("[hatchery-bidi] frame bytes={}", png.len());
+}
+
+async fn next_timed_png(ws: &mut Ws, pending: &mut Option<u64>) -> Result<(Vec<u8>, Option<u64>), ClientError> {
+    for _ in 0..16 {
+        let msg = tokio::time::timeout(Duration::from_secs(30), ws.next())
+            .await
+            .map_err(|_| ClientError("timed out waiting for a frame".into()))?
+            .ok_or_else(|| ClientError("websocket closed before a frame".into()))?
+            .map_err(|err| ClientError(err.to_string()))?;
+        match msg {
+            Message::Binary(data) => {
+                if let Some(ns) = parse_frame_timing(&data) {
+                    *pending = Some(ns);
+                    continue;
+                }
+                if data.len() >= 8 && data.starts_with(&[0x89, b'P', b'N', b'G']) {
+                    let capture = pending.take();
+                    return Ok((data.to_vec(), capture));
+                }
+            }
+            Message::Ping(payload) => {
+                ws.send(Message::Pong(payload))
+                    .await
+                    .map_err(|err| ClientError(err.to_string()))?;
+            }
+            Message::Close(_) => break,
+            _ => {}
+        }
+    }
+    Err(ClientError("no PNG frame arrived from C2".into()))
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,6 +390,15 @@ mod tests {
         assert_eq!(ends.ws_url, "ws://10.88.1.2:18443/session/proof1/hq");
         assert!(!ends.ws_url.contains("/node"));
         assert!(c2_endpoints("http://10.88.1.2:18443/node", "proof1").is_err());
+    }
+
+    #[test]
+    fn frame_timing_header_is_not_a_png() {
+        let mut bytes = b"FRME".to_vec();
+        bytes.extend_from_slice(&1000u64.to_le_bytes());
+        assert_eq!(parse_frame_timing(&bytes), Some(1000));
+        assert!(parse_frame_timing(b"not-a-header").is_none());
+        assert!(mono_ns() > 0);
     }
 
     fn hex_decode(hex: &str) -> Vec<u8> {
