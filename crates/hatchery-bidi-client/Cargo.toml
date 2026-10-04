@@ -1,0 +1,17 @@
+[package]
+name = "hatchery-bidi-client"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+description = "HQ client for the bidirectional browser stream. Dials C2 only: receives frame bytes and sends one click."
+repository = "https://github.com/ZENG3LD/hatchery"
+
+[dependencies]
+futures-util = "0.3"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
+tokio-tungstenite = "0.26"
+
+[[bin]]
+name = "hatchery-bidi"
+path = "src/main.rs"

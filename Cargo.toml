@@ -23,6 +23,7 @@ members = [
     "crates/hatchery-arcade/bench",
     # TUI (was nested single-crate workspace)
     "crates/hatchery-tui",
+    "crates/hatchery-bidi-client",
 ]
 
 [workspace.package]
