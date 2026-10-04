@@ -567,8 +567,6 @@ dependencies = [
 [[package]]
 name = "gate4agent-build-stamp"
 version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a95625fb93d4e506df127729e77e8cb760fb9ee3196d5e0340152603121649c0"
 
 [[package]]
 name = "gate4agent-c2"
@@ -590,8 +588,6 @@ dependencies = [
 [[package]]
 name = "gate4agent-c2-client"
 version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d81f99683daf06c0cdba7a771c638da709cf6d441f29d5f7f29d95a38cff1ad"
 dependencies = [
  "gate4agent-c2-protocol",
  "gate4agent-node-protocol",
@@ -607,8 +603,6 @@ dependencies = [
 [[package]]
 name = "gate4agent-c2-protocol"
 version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09a4f3a9d42c159533a206d9b76d7456fcc936ebef4ace6e119fa5cd1ca75978"
 dependencies = [
  "gate4agent-build-stamp",
  "gate4agent-node-protocol",
@@ -690,8 +684,6 @@ dependencies = [
 [[package]]
 name = "gate4agent-node-protocol"
 version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ca03be6c756f795314deb23f31b981332aa8fbf8a5b57532594d8adcf925b09"
 dependencies = [
  "gate4agent-build-stamp",
  "gate4agent-types",
@@ -705,8 +697,6 @@ dependencies = [
 [[package]]
 name = "gate4agent-node-wire"
 version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe947336edb0367e4eb1abad974d708a7954a2839324da05668f593ed1880537"
 dependencies = [
  "gate4agent-node-protocol",
  "libc",
@@ -842,8 +832,6 @@ dependencies = [
 [[package]]
 name = "gate4agent-types"
 version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ba7666f67e18403ac74e9aba715d314c0ff5d3115b367b7cc0860bb73c355c9"
 dependencies = [
  "serde",
  "thiserror 2.0.18",

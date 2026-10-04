@@ -27,6 +27,9 @@ use thiserror::Error;
 pub enum HarnessLightError {
     #[error("harness-light failed to connect to c2: {0}")]
     C2Connect(C2ControlError),
+    #[cfg(unix)]
+    #[error("harness-light failed to bring up the HQ WireGuard client: {0}")]
+    WireGuard(gate4agent_c2_client::HqWgClientError),
     #[error("harness-light failed to mint the operator credential: {0}")]
     Credential(#[from] CredentialMintError),
     #[error("harness-light failed to bind the operator endpoint: {0}")]

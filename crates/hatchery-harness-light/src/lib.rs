@@ -240,10 +240,11 @@ pub(crate) enum LightCommand {
 /// starts accepting operator connections on an ephemeral loopback port.
 ///
 /// **Dial-only toward C2:** the C2 path is always outbound
-/// (`connect_local_reconnecting`). The loopback `TcpListener` below is the
-/// *operator wire* for TUI/client → harness — **not** a mesh underlay or C2
-/// accept door, and C2 never dials HQ. HQ mesh role = client/admin only
-/// (see `hq-dials-c2-mesh-role-inventory-2026-10-02.md`).
+/// (`connect_local_reconnecting` on the local unix socket, or
+/// `connect_tunnel_reconnecting` after a kernel WireGuard client dial).
+/// The loopback `TcpListener` below is the *operator wire* for TUI/client →
+/// harness — **not** a mesh underlay or C2 accept door, and C2 never dials
+/// HQ. HQ is not a mesh peer and does not dial a node.
 pub async fn start_harness_light(
     c2_endpoint: &str,
     c2_token: &str,
@@ -251,6 +252,33 @@ pub async fn start_harness_light(
     let (control, events) =
         gate4agent_c2_client::connect_local_reconnecting(c2_endpoint, c2_token).await
             .map_err(HarnessLightError::C2Connect)?;
+    finish_harness_light(control, events).await
+}
+
+/// Brings up a kernel WireGuard client (listen port 0, one C2 peer) and then
+/// dials the existing control frames over TCP to `c2_tunnel_ip:control_port`.
+/// Not a hop through a node. The unix [`start_harness_light`] path is unchanged.
+#[cfg(unix)]
+pub async fn start_harness_light_wg(
+    config: gate4agent_c2_client::HqWgClientConfig,
+    c2_token: &str,
+) -> Result<HarnessLightRunning, HarnessLightError> {
+    let control_addr = config.control_addr().map_err(HarnessLightError::WireGuard)?;
+    let bring_up = config.clone();
+    tokio::task::spawn_blocking(move || gate4agent_c2_client::bring_up_hq_wireguard(&bring_up))
+        .await
+        .map_err(HarnessLightError::Join)?
+        .map_err(HarnessLightError::WireGuard)?;
+    let (control, events) = gate4agent_c2_client::connect_tunnel_reconnecting(control_addr, c2_token)
+        .await
+        .map_err(HarnessLightError::C2Connect)?;
+    finish_harness_light(control, events).await
+}
+
+async fn finish_harness_light(
+    control: C2ReconnectingHandle,
+    events: C2ReconnectingEventReceiver,
+) -> Result<HarnessLightRunning, HarnessLightError> {
     let topology = control.subscribe_topology();
 
     let (credential_authority, operator_credential) = credential::LightCredentialAuthority::mint()?;
