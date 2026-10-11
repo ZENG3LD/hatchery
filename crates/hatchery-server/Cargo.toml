@@ -1,0 +1,45 @@
+[workspace]
+
+[package]
+name = "hatchery-server"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/ZENG3LD/hatchery"
+description = "Host for hatchery subservices (harness, m4a, memory): one supervisor process, loopback control and health"
+
+[lib]
+name = "hatchery_server"
+
+[[bin]]
+name = "hatchery-server"
+path = "src/main.rs"
+
+# Separate workspace: the harness (rusqlite 0.31), m4a (mail4agent 0.4) and
+# memory4agent (rusqlite 0.32, bundled sqlite) cannot share one native sqlite in
+# one dependency graph. The server therefore hosts the harness and memory as
+# supervised processes and embeds only the m4a library.
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+toml = "0.8"
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+m4a-agent = { version = "0.4", optional = true }
+
+[features]
+# Full kit by default: there is no light mode.
+default = ["kit"]
+kit = ["harness", "m4a", "memory"]
+# harness + observation (bin hatchery-harness) as a supervised process.
+harness = []
+# m4a: key vault of the node-side messenger (m4a-agent 0.4); master key from env.
+m4a = ["dep:m4a-agent"]
+# memory4agent-server (crates.io memory4agent 0.3) as an on-demand loopback process.
+memory = []
+
+[dev-dependencies]
+tempfile = "3"
