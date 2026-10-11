@@ -146,7 +146,7 @@ fn required_value(flag: &str, value: Option<String>) -> String {
 
 #[cfg(any(windows, unix))]
 fn fail(message: &str) -> ! {
-    eprintln!("gate4agent-c2: {message}");
+    eprintln!("hatchery-c2: {message}");
     std::process::exit(2)
 }
 
@@ -175,7 +175,7 @@ const LOCAL_ENDPOINT_SPELLING: &str = "LOCAL_ENDPOINT";
 /// only the endpoint spelling is.
 fn print_help() {
     println!(
-        "gate4agent-c2 --node NODE_ID={endpoint}|tcp://127.0.0.1:PORT|tcp://[::1]:PORT|accept \
+        "hatchery-c2 --node NODE_ID={endpoint}|tcp://127.0.0.1:PORT|tcp://[::1]:PORT|accept \
 [--node ...] [--api-listen 127.0.0.1:PORT] [--node-listen 127.0.0.1:PORT] \
 [--control-endpoint {endpoint}] [--control-tunnel TUNNEL_IP:PORT]",
         endpoint = LOCAL_ENDPOINT_SPELLING,
@@ -187,6 +187,6 @@ fn print_help() {
 
 #[cfg(not(any(windows, unix)))]
 fn main() {
-    eprintln!("gate4agent-c2: this operating system has no supported local transport");
+    eprintln!("hatchery-c2: this operating system has no supported local transport");
     std::process::exit(2);
 }
