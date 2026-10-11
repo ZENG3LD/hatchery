@@ -14,6 +14,7 @@ async fn main() {
         .parse()
         .expect("built-in listen address");
     let mut log_path = None;
+    let mut limits = hatchery_bidi_relay::RelayLimits::default();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -24,8 +25,18 @@ async fn main() {
                     .unwrap_or_else(|err| fail(&format!("--listen is invalid: {err}")));
             }
             "--log" => log_path = Some(need("--log", args.next())),
+            "--max-pending-frames" => {
+                limits.max_pending_frames = need("--max-pending-frames", args.next())
+                    .parse()
+                    .unwrap_or_else(|err| fail(&format!("--max-pending-frames is invalid: {err}")));
+            }
+            "--max-pending-bytes" => {
+                limits.max_pending_bytes = need("--max-pending-bytes", args.next())
+                    .parse()
+                    .unwrap_or_else(|err| fail(&format!("--max-pending-bytes is invalid: {err}")));
+            }
             "--help" | "-h" => {
-                eprintln!("hatchery-bidi-relay --listen IP:PORT [--log FILE]");
+                eprintln!("hatchery-bidi-relay --listen IP:PORT [--log FILE] [--max-pending-frames N] [--max-pending-bytes N]");
                 return;
             }
             other => fail(&format!("unknown argument: {other}")),
@@ -50,7 +61,8 @@ async fn main() {
                 let _ = file.flush();
             }
         }
-    });
+    })
+    .with_limits(limits);
 
     let (listener, local) = bind(listen)
         .await

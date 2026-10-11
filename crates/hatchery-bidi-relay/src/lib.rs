@@ -18,12 +18,33 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex};
 use tokio_tungstenite::tungstenite::Message;
 
-const MAX_PENDING: usize = 4;
+/// Default bound on frames held for a peer that is not connected yet.
+pub const DEFAULT_MAX_PENDING_FRAMES: usize = 256;
+/// Default bound on bytes held for a peer that is not connected yet.
+pub const DEFAULT_MAX_PENDING_BYTES: usize = 64 * 1024 * 1024;
+
+/// Bounds of the buffer kept for an absent peer. Beyond either bound the
+/// oldest frames are dropped, counted, and a warning line is logged.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RelayLimits {
+    pub max_pending_frames: usize,
+    pub max_pending_bytes: usize,
+}
+
+impl Default for RelayLimits {
+    fn default() -> Self {
+        Self {
+            max_pending_frames: DEFAULT_MAX_PENDING_FRAMES,
+            max_pending_bytes: DEFAULT_MAX_PENDING_BYTES,
+        }
+    }
+}
 const HEADER_LIMIT: usize = 65_536;
 
 #[derive(Clone)]
 pub struct RelayLog {
     inner: Arc<dyn Fn(String) + Send + Sync>,
+    limits: RelayLimits,
 }
 
 impl RelayLog {
@@ -33,7 +54,20 @@ impl RelayLog {
     {
         Self {
             inner: Arc::new(log),
+            limits: RelayLimits::default(),
         }
+    }
+
+    /// Replace the pending-buffer bounds (default: 256 frames, 64 MiB).
+    pub fn with_limits(mut self, limits: RelayLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    pub fn warn_drop(&self, session: &str, dropped_frames: usize, dropped_bytes: usize, total_dropped: u64) {
+        (self.inner)(format!(
+            "bidi-relay WARN session={session} pending buffer full: dropped_frames={dropped_frames} dropped_bytes={dropped_bytes} total_dropped={total_dropped}"
+        ));
     }
 
     pub fn forward(&self, session: &str, dir: &str, bytes: usize) {
@@ -77,6 +111,8 @@ impl Default for Session {
 struct Slot {
     tx: Option<mpsc::Sender<Vec<u8>>>,
     pending: VecDeque<Vec<u8>>,
+    pending_bytes: usize,
+    dropped: u64,
 }
 
 impl Default for Slot {
@@ -84,6 +120,8 @@ impl Default for Slot {
         Self {
             tx: None,
             pending: VecDeque::new(),
+            pending_bytes: 0,
+            dropped: 0,
         }
     }
 }
@@ -160,12 +198,13 @@ async fn pump<S>(
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let (mut write, mut read) = ws.split();
-    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(16);
+    let (tx, mut rx) = mpsc::channel::<Vec<u8>>(log.limits.max_pending_frames.max(16) + 16);
     {
         let mut map = sessions.lock().await;
         let slot = map.entry(session.clone()).or_default().slot_mut(role);
         slot.tx = Some(tx);
         let queued: Vec<Vec<u8>> = slot.pending.drain(..).collect();
+        slot.pending_bytes = 0;
         if let Some(tx) = &slot.tx {
             for msg in queued {
                 if tx.try_send(msg).is_err() {
@@ -181,7 +220,7 @@ async fn pump<S>(
             incoming = read.next() => {
                 match incoming {
                     Some(Ok(Message::Binary(data))) => {
-                        forward(&sessions, &session, role, data.to_vec()).await;
+                        forward(&sessions, &session, role, data.to_vec(), &log).await;
                     }
                     Some(Ok(Message::Ping(payload))) => {
                         if write.send(Message::Pong(payload)).await.is_err() {
@@ -226,6 +265,7 @@ async fn forward(
     session: &str,
     from: Role,
     bytes: Vec<u8>,
+    log: &RelayLog,
 ) {
     let tx = {
         let mut map = sessions.lock().await;
@@ -248,9 +288,22 @@ async fn forward(
         let _ = tx.send(bytes).await;
         return;
     }
+    dest.pending_bytes += bytes.len();
     dest.pending.push_back(bytes);
-    while dest.pending.len() > MAX_PENDING {
-        dest.pending.pop_front();
+    let (mut lost_frames, mut lost_bytes) = (0usize, 0usize);
+    while dest.pending.len() > log.limits.max_pending_frames
+        || (dest.pending_bytes > log.limits.max_pending_bytes && dest.pending.len() > 1)
+    {
+        if let Some(old) = dest.pending.pop_front() {
+            dest.pending_bytes -= old.len();
+            lost_frames += 1;
+            lost_bytes += old.len();
+        }
+    }
+    if lost_frames > 0 {
+        dest.dropped += lost_frames as u64;
+        let total = dest.dropped;
+        log.warn_drop(session, lost_frames, lost_bytes, total);
     }
 }
 
