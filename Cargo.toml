@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/hatchery-harness-protocol",
+    "crates/hatchery-bidi-relay",
     "crates/hatchery-harness-api",
     "crates/hatchery-harness-engine",
     "crates/hatchery-harness-delivery",

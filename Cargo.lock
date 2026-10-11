@@ -1742,6 +1742,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hatchery-bidi-relay"
+version = "0.2.0"
+dependencies = [
+ "futures-util",
+ "sha2",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
 name = "hatchery-c2"
 version = "0.2.0"
 dependencies = [
@@ -1915,7 +1925,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-node"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "claude-session-restore",
  "codex-session-restore",
