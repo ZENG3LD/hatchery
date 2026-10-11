@@ -1,6 +1,6 @@
 #!/bin/sh
 # Static check for mode 1/2/3 entry points. No Docker build, no QEMU boot.
-# Prefer: cargo test -p gate4agent-node --lib deploy_artifacts
+# Prefer: cargo test -p hatchery-node --lib deploy_artifacts
 set -eu
 HERE=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 test -f "$HERE/gate4agent-node.service"
@@ -13,6 +13,6 @@ bash -n "$HERE/install-provider-clis.sh"
 # Run the lib assertions when cargo is available.
 if command -v cargo >/dev/null 2>&1; then
   REPO=$(CDPATH= cd -- "$HERE/../../../.." && pwd)
-  (CDPATH= cd -- "$REPO" && cargo test -p gate4agent-node --lib deploy_artifacts)
+  (CDPATH= cd -- "$REPO" && cargo test -p hatchery-node --lib deploy_artifacts)
 fi
 echo "deploy static check OK"

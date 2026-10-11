@@ -1,11 +1,11 @@
 #![cfg(unix)]
 
-use gate4agent_node::protocol::{
+use hatchery_node::protocol::{
     ClientRole, NodeFailureCode, NodeId, NodeRequest, NodeResponse, RepositoryPath,
     WorkspaceFileContent, WorkspaceId, MAX_WORKSPACE_FILE_BYTES,
     NODE_WORKSPACE_FILE_READ_CAPABILITY,
 };
-use gate4agent_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
+use hatchery_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
 use gate4agent_node_wire::{LocalNodeClient, NodeClientError};
 use std::ffi::{CString, OsString};
 use std::fs;
@@ -105,7 +105,7 @@ fn assert_failure(result: Result<NodeResponse, NodeClientError>, expected: NodeF
 async fn read(
     client: &mut LocalNodeClient,
     path: RepositoryPath,
-) -> gate4agent_node::protocol::WorkspaceFileContent {
+) -> hatchery_node::protocol::WorkspaceFileContent {
     let NodeResponse::WorkspaceFileRead { file } = client
         .request(NodeRequest::ReadWorkspaceFile {
             workspace_id: workspace_id(),

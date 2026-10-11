@@ -19,12 +19,13 @@ copy_tree() {
     -cf - . | tar -C "$dest" -xf -
 }
 
-copy_tree "$REPO" "$STAGE/gate4agent"
+copy_tree "$REPO" "$STAGE/hatchery"
+copy_tree "$WS/gate4agent" "$STAGE/gate4agent"
 copy_tree "$WS/dig2browser" "$STAGE/dig2browser"
 copy_tree "$WS/session-restore" "$STAGE/session-restore"
 
 docker build \
-  -f "$STAGE/gate4agent/crates/gate4agent-node/deploy/node/Dockerfile" \
+  -f "$STAGE/hatchery/crates/hatchery-node/deploy/node/Dockerfile" \
   -t gate4agent-node:kit \
   "$@" \
   "$STAGE"

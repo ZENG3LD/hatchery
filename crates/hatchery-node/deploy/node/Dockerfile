@@ -2,10 +2,10 @@
 # Does not provision secrets, tokens, or WireGuard private keys.
 #
 # Build context is a directory that contains these siblings:
-#   gate4agent/   dig2browser/   session-restore/
+#   hatchery/   gate4agent/   dig2browser/   session-restore/
 # `deploy/node/docker-build.sh` stages that context (it excludes target/ and .git).
 #
-#   ./crates/gate4agent-node/deploy/node/docker-build.sh
+#   ./crates/hatchery-node/deploy/node/docker-build.sh
 #
 # Provider CLIs are not installed unless you pass
 #   --build-arg INSTALL_PROVIDER_CLIS=1 --build-arg PROVIDER_CLI_INSTALL='...'
@@ -13,11 +13,12 @@
 
 FROM rust:bookworm AS build
 WORKDIR /src
+COPY hatchery /src/hatchery
 COPY gate4agent /src/gate4agent
 COPY dig2browser /src/dig2browser
 COPY session-restore /src/session-restore
-WORKDIR /src/gate4agent
-RUN cargo build --locked --release -p gate4agent-node
+WORKDIR /src/hatchery
+RUN cargo build --locked --release -p hatchery-node
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -26,9 +27,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         wireguard-tools \
         libssl3 \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=build /src/gate4agent/target/release/gate4agent-node /usr/local/bin/gate4agent-node
-COPY gate4agent/crates/gate4agent-node/deploy/node/install-provider-clis.sh /usr/local/sbin/install-provider-clis
-COPY gate4agent/crates/gate4agent-node/deploy/node/gate4agent-node.service /etc/systemd/system/gate4agent-node.service
+COPY --from=build /src/hatchery/target/release/gate4agent-node /usr/local/bin/gate4agent-node
+COPY hatchery/crates/hatchery-node/deploy/node/install-provider-clis.sh /usr/local/sbin/install-provider-clis
+COPY hatchery/crates/hatchery-node/deploy/node/gate4agent-node.service /etc/systemd/system/gate4agent-node.service
 ARG INSTALL_PROVIDER_CLIS=0
 ARG PROVIDER_CLI_INSTALL=
 RUN chmod 0755 /usr/local/sbin/install-provider-clis \

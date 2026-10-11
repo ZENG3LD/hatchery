@@ -1,11 +1,11 @@
 #![cfg(unix)]
 
-use gate4agent_node::protocol::{
+use hatchery_node::protocol::{
     AgentId, ClientRole, LocalTransportKind, NodeFailureCode, NodeId, NodeRequest,
     NodeResponse, NodeSnapshot, PathEncoding, PathStyle, SessionAddress, SessionMode, WorkspaceId,
     BUILD_STAMP,
 };
-use gate4agent_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
+use hatchery_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
 use gate4agent_node_wire::{LocalNodeClient, NodeClientError};
 use gate4agent_types::{SessionStatus, TerminalControl, TerminalSize};
 use std::fs;

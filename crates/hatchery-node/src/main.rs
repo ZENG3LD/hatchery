@@ -1,8 +1,8 @@
-use gate4agent_node::protocol::{
+use hatchery_node::protocol::{
     ManagedWorktreeRetention, NodeId, SessionRecordRetentionConfig, WorkspaceId, WorktreeProfileId,
     WorktreeProfileRevision,
 };
-use gate4agent_node::{
+use hatchery_node::{
     default_node_endpoint, default_state_path, resolve_network_allowlist_catalog,
     HistorySourceLayout, ManagedWorktreeProfile, NativeHistoryConfig, NativeHistoryRoot,
     NodeSecretReference, NodeSecretResolveError, NodeSecretResolver, NodeSecretValue, NodeServer,
@@ -33,7 +33,7 @@ async fn main() {
         .and_then(|path| {
             path.into_os_string()
                 .into_string()
-                .map_err(|_| gate4agent_node::NodeServerError::InvalidEndpoint)
+                .map_err(|_| hatchery_node::NodeServerError::InvalidEndpoint)
         })
         .unwrap_or_else(|error| fail(&error.to_string()));
     let mut api_listen = "127.0.0.1:18310"
@@ -221,16 +221,16 @@ async fn main() {
                 println!(
                     "--install-provider-clis: off by default; when set, download missing claude/codex/kimi/grok packages only (no logins)"
                 );
-                println!("node kit (default): dig2browser, mail4agent, session-restore, kernel WireGuard. Strip with --no-default-features --features bare");
+                println!("node kit (default): dig2browser, mail4agent, session-restore, kernel WireGuard. Cores are individual features (m4a, d2b, session-restore, wireguard)");
                 #[cfg(feature = "wireguard")]
                 println!("kernel WireGuard peer (either side may dial): set {wg_iface} to a name plus {wg_key} (path only), {wg_addr}, {wg_peer_addr}, {wg_peer_key}; optional {wg_listen} (default 51820), {wg_endpoint} (omit so C2 dials this node). Not HQ. Not the UDP mesh stub.",
-                    wg_iface = gate4agent_node::WG_INTERFACE_ENV,
-                    wg_key = gate4agent_node::WG_PRIVATE_KEY_ENV,
-                    wg_addr = gate4agent_node::WG_ADDRESS_ENV,
-                    wg_peer_addr = gate4agent_node::WG_PEER_ADDRESS_ENV,
-                    wg_peer_key = gate4agent_node::WG_PEER_KEY_ENV,
-                    wg_listen = gate4agent_node::WG_LISTEN_PORT_ENV,
-                    wg_endpoint = gate4agent_node::WG_PEER_ENDPOINT_ENV,
+                    wg_iface = hatchery_node::WG_INTERFACE_ENV,
+                    wg_key = hatchery_node::WG_PRIVATE_KEY_ENV,
+                    wg_addr = hatchery_node::WG_ADDRESS_ENV,
+                    wg_peer_addr = hatchery_node::WG_PEER_ADDRESS_ENV,
+                    wg_peer_key = hatchery_node::WG_PEER_KEY_ENV,
+                    wg_listen = hatchery_node::WG_LISTEN_PORT_ENV,
+                    wg_endpoint = hatchery_node::WG_PEER_ENDPOINT_ENV,
                 );
                 return;
             }
@@ -336,28 +336,29 @@ async fn main() {
     if install_provider_clis {
         install_missing_provider_clis().unwrap_or_else(|error| fail(&error));
     }
-    #[cfg(feature = "kit")]
     {
-        // Link the four cores into this process. Does not start a browser,
+        // Link the enabled cores into this process. Does not start a browser,
         // provider CLI, or tunnel, and does not read secrets.
-        let _linked = gate4agent_node::force_link();
-        tracing::info!(cores = ?gate4agent_node::linked_core_names(), "node kit");
-        // Automatic mailbox: same daemon as the standalone mail4agent binary.
-        // Bare builds do not compile this path.
-        let _mailbox = gate4agent_node::start_mailbox().unwrap_or_else(|error| {
+        let _linked = hatchery_node::force_link();
+        tracing::info!(cores = ?hatchery_node::linked_core_names(), "node kit");
+    }
+    // Automatic mailbox: same daemon as the standalone mail4agent binary.
+    #[cfg(feature = "m4a")]
+    {
+        let _mailbox = hatchery_node::start_mailbox().unwrap_or_else(|error| {
             fail(&format!("mail4agent mailbox: {error}"))
         });
         tracing::info!("node kit mailbox started");
     }
     #[cfg(feature = "wireguard")]
-    if let Some(wg) = gate4agent_node::node_wg_from_env().unwrap_or_else(|error| fail(&error)) {
+    if let Some(wg) = hatchery_node::node_wg_from_env().unwrap_or_else(|error| fail(&error)) {
         tracing::info!(
             interface = %wg.interface_name,
             listen_port = wg.listen_port,
             dials_peer = wg.peer_endpoint.is_some(),
             "bringing up kernel wireguard node<->c2 peer"
         );
-        gate4agent_node::bring_up_node_wireguard(&wg)
+        hatchery_node::bring_up_node_wireguard(&wg)
             .unwrap_or_else(|error| fail(&error.to_string()));
     }
     let server = NodeServer::new(config).unwrap_or_else(|error| fail(&error.to_string()));
@@ -555,7 +556,7 @@ fn fail(message: &str) -> ! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gate4agent_node::NodeServerError;
+    use hatchery_node::NodeServerError;
 
     #[test]
     fn node_history_is_disabled_without_explicit_history_root() {

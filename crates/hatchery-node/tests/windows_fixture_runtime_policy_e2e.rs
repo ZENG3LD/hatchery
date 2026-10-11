@@ -1,10 +1,10 @@
 #![cfg(windows)]
 
-use gate4agent_node::protocol::{
+use hatchery_node::protocol::{
     AgentId, ClientRole, NodeFailureCode, NodeId, NodeRequest, NodeResponse, NodeSnapshot,
     ProviderRuntimeMode, SessionAddress, SessionMode, SessionRecordId, WorkspaceId,
 };
-use gate4agent_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
+use hatchery_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
 use gate4agent_node_wire::{LocalNodeClient, NodeClientError};
 use gate4agent_types::{SessionStatus, TerminalControl, TerminalSize};
 use std::path::{Path, PathBuf};
@@ -237,7 +237,7 @@ async fn windows_fixture_raw_provider_runtime_policy_preserves_pty_and_rejects_s
     .await;
     assert_raw_address_invariant(&running, &session, 0);
     assert!(running.session_records.iter().all(|record| {
-        record.state != gate4agent_node::protocol::ManagedSessionState::IdentityPending
+        record.state != hatchery_node::protocol::ManagedSessionState::IdentityPending
     }));
     assert_no_durable_managed_records(&state_path);
 

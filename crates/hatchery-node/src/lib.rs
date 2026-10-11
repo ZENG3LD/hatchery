@@ -32,14 +32,14 @@ mod workspace_file_unix;
 mod dig2_station_lease;
 #[cfg(feature = "dig2-station-probe")]
 mod dig2_station_probe;
-#[cfg(feature = "kit")]
 mod kit;
 #[cfg(feature = "wireguard")]
 pub(crate) use gate4agent_node_core::kit_wireguard;
 mod network_allowlist_catalog;
 pub(crate) use gate4agent_node_core::platform;
-#[cfg(feature = "kit")]
-pub use kit::{force_link, linked_core_names, start_mailbox};
+pub use kit::{force_link, linked_core_names};
+#[cfg(feature = "m4a")]
+pub use kit::start_mailbox;
 #[cfg(feature = "wireguard")]
 pub use kit_wireguard::{
     bring_up_node_wireguard, node_wg_from_env, NodeWgPeerConfig, NodeWgPeerError,
@@ -105,7 +105,7 @@ pub use gate4agent_node_protocol as protocol;
 #[cfg(test)]
 mod kit_manifest {
     #[test]
-    fn default_features_mention_four_cores_and_bare_excludes_them() {
+    fn default_features_are_the_full_kit() {
         let manifest = include_str!("../Cargo.toml");
         let features = manifest
             .split("[features]")
@@ -119,25 +119,22 @@ mod kit_manifest {
             "default build must include the kit"
         );
         let kit = feature_array(features, "kit");
-        for core in [
-            "dep:dig2browser",
-            "dep:mail4agent",
-            "dep:claude-session-restore",
-            "dep:codex-session-restore",
-            "dep:grok-session-restore",
-            "dep:kimi-session-restore",
-            "wireguard",
-        ] {
+        for core in ["m4a", "d2b", "session-restore", "wireguard", "memory"] {
             assert!(
                 kit.iter().any(|item| item == core),
                 "kit feature missing {core}: {kit:?}"
             );
         }
-        let bare = feature_array(features, "bare");
         assert!(
-            bare.is_empty(),
-            "bare must not enable kit cores, got {bare:?}"
+            !features.contains("bare = "),
+            "there is no light mode"
         );
+        let m4a = feature_array(features, "m4a");
+        assert_eq!(m4a, ["dep:mail4agent"]);
+        let d2b = feature_array(features, "d2b");
+        assert_eq!(d2b, ["dep:dig2browser"]);
+        let wg = feature_array(features, "wireguard");
+        assert_eq!(wg, ["gate4agent-node-core/wireguard"]);
         let code = manifest
             .lines()
             .map(|line| line.split('#').next().unwrap_or(""))
@@ -145,7 +142,7 @@ mod kit_manifest {
             .join("\n");
         assert!(
             !code.contains("hatchery-tui") && !code.contains("hatchery_tui"),
-            "node kit must not depend on the hatchery TUI"
+            "node must not depend on the hatchery TUI"
         );
         assert!(manifest.contains("path = \"../../../dig2browser\""));
         assert!(manifest.contains("mail4agent = { version = \"0.4\""));
@@ -198,8 +195,9 @@ mod deploy_artifacts {
     #[test]
     fn dockerfile_and_build_script_are_mode2() {
         let dockerfile = include_str!("../deploy/node/Dockerfile");
-        assert!(dockerfile.contains("cargo build --locked --release -p gate4agent-node"));
+        assert!(dockerfile.contains("cargo build --locked --release -p hatchery-node"));
         assert!(dockerfile.contains("ENTRYPOINT [\"gate4agent-node\"]"));
+        assert!(dockerfile.contains("COPY gate4agent"));
         assert!(dockerfile.contains("COPY dig2browser"));
         assert!(!dockerfile.contains("COPY mail4agent"));
         assert!(dockerfile.contains("COPY session-restore"));
@@ -210,6 +208,7 @@ mod deploy_artifacts {
         let build = include_str!("../deploy/node/docker-build.sh");
         assert!(build.contains("docker build"));
         assert!(build.contains("gate4agent-node:kit"));
+        assert!(build.contains("copy_tree \"$WS/gate4agent\""));
         assert!(build.contains("copy_tree \"$WS/dig2browser\""));
         assert!(!build.contains("copy_tree \"$WS/mail4agent\""));
         assert!(build.contains("copy_tree \"$WS/session-restore\""));
@@ -240,6 +239,6 @@ mod deploy_artifacts {
         assert!(readme.contains("Mode 1 — service"));
         assert!(readme.contains("Mode 2 — container"));
         assert!(readme.contains("Mode 3 — QEMU guest"));
-        assert!(readme.contains("--no-default-features --features bare"));
+        assert!(readme.contains("no light mode"));
     }
 }

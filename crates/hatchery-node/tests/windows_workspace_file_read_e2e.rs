@@ -1,6 +1,6 @@
 #![cfg(windows)]
 
-use gate4agent_node::protocol::{
+use hatchery_node::protocol::{
     read_json_frame_limited_body_timeout, write_json_frame_limited, ClientAuthentication,
     ClientFrame, ClientHello, ClientRole, NodeFailureCode, NodeId, NodeRequest, NodeResponse,
     RepositoryPath, RequestEnvelope, ServerFrame, WorkspaceEntryKind, WorkspaceFileContent,
@@ -9,7 +9,7 @@ use gate4agent_node::protocol::{
     MAX_WORKSPACE_FILE_BYTES, NODE_WORKSPACE_ENTRY_CREATE_CAPABILITY,
     NODE_WORKSPACE_FILE_READ_CAPABILITY,
 };
-use gate4agent_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
+use hatchery_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
 use gate4agent_node_wire::{
     auth_proof, random_nonce, AuthDirection, NamedPipeNodeClient, NodeClientError,
 };

@@ -1,21 +1,15 @@
-# gate4agent node kit
+# hatchery-node kit (binary `gate4agent-node`)
 
-Default `gate4agent-node` is the standard kit. Feature `kit` (on by default) links:
+Default build is the full kit. Feature `kit` (on by default) links:
 
 1. `dig2browser` — path `../../../dig2browser` (local node browser machine; not the crates.io 0.5.0 tarball)
 2. `mail4agent` — crates.io `0.4` (lib face; no sibling checkout needed)
 3. session-restore — `claude-session-restore` and `codex-session-restore` 0.1.3 from crates.io; `grok-session-restore` and `kimi-session-restore` path deps because crates.io 0.1.3 is binary-only
 4. kernel WireGuard — feature `wireguard`, `ip link add type wireguard` / `wg`. Node and C2 are peers (either side may dial). Not the UDP+ChaCha mesh underlay, not `open_wireguard_daemon_stub`, and not HQ.
 
-`bare` builds a node with those cores off:
+Features: `m4a`, `d2b`, `session-restore`, `wireguard` (-> `gate4agent-node-core/wireguard`) and `memory` (a tool the agent calls; the node never starts a memory daemon). `kit` enables all of them and is the default. There is no light mode (no bare build); a subset can be built with `--no-default-features --features ...` for diagnostics.
 
-```
-cargo build -p gate4agent-node --no-default-features --features bare
-```
-
-`cargo build -p gate4agent-node --features bare` without `--no-default-features` is a build error (kit and bare together).
-
-`hatchery-git` is an optional extra and is not default. It does not depend on hatchery-tui or any hatchery crate. Hatchery git helpers are not part of the core kit.
+The binary is still named `gate4agent-node`: agents see the g4a surface plus provider tools, nothing hatchery-specific.
 
 Provider CLIs (`claude`, `codex`, `kimi`, `grok`) are packages. They are not copied credentials.
 The node flag `--install-provider-clis` is **off by default**. When set (or when

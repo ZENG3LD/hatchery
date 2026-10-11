@@ -1,11 +1,11 @@
 #![cfg(windows)]
 
-use gate4agent_node::protocol::{
+use hatchery_node::protocol::{
     AgentId, ClientRole, ManagedSessionRecord, ManagedSessionState, NodeFailureCode, NodeId,
     NodeEvent, NodeRequest, NodeResponse, OpaqueHostPath, SessionMode, SessionRecordId, WorkspaceId,
     NODE_STATE_SCHEMA_V1, NODE_STATE_SCHEMA_V2,
 };
-use gate4agent_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
+use hatchery_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
 use gate4agent_node_wire::{NamedPipeNodeClient, NodeClientError};
 use gate4agent_types::{ControlEventKind, SessionStatus, TerminalControl, TerminalSize};
 use std::io::Read;
@@ -165,7 +165,7 @@ async fn connect(
     }
 }
 
-async fn snapshot(client: &mut NamedPipeNodeClient) -> gate4agent_node::protocol::NodeSnapshot {
+async fn snapshot(client: &mut NamedPipeNodeClient) -> hatchery_node::protocol::NodeSnapshot {
     let NodeResponse::Snapshot { snapshot, .. } = client
         .request(NodeRequest::Snapshot)
         .await
@@ -642,7 +642,7 @@ fn live_challenge(provider: &AgentId, phase: &str) -> (String, String) {
 
 async fn wait_live_terminal_stable(
     client: &mut NamedPipeNodeClient,
-    address: &gate4agent_node::protocol::SessionAddress,
+    address: &hatchery_node::protocol::SessionAddress,
 ) {
     let deadline = Instant::now() + Duration::from_secs(30);
     let mut last_sequence = None;
@@ -705,7 +705,7 @@ async fn connect_live(
 
 async fn wait_live_marker(
     client: &mut NamedPipeNodeClient,
-    address: &gate4agent_node::protocol::SessionAddress,
+    address: &hatchery_node::protocol::SessionAddress,
     marker: &str,
 ) {
     let deadline = Instant::now() + Duration::from_secs(180);

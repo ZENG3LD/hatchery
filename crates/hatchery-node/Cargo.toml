@@ -1,12 +1,15 @@
+[workspace]
+
 [package]
-name = "gate4agent-node"
-version = "0.4.8"
+name = "hatchery-node"
+version = "0.1.0"
 edition = "2021"
-description = "Native gate4agent node server: wraps providers and owns PTY/inline sessions, the file browser, local git, and worktrees for its machine"
 license = "MIT"
+repository = "https://github.com/ZENG3LD/hatchery"
+description = "Hatchery node: the complete node kit over the gate4agent transport (PTY/inline sessions, file browser, local git, worktrees, mailbox, browser station, session restore)"
 
 [lib]
-name = "gate4agent_node"
+name = "hatchery_node"
 
 [[bin]]
 name = "gate4agent-node"
@@ -25,15 +28,15 @@ claude-session-restore = { version = "0.1.3", optional = true }
 codex-session-restore = { version = "0.1.3", optional = true }
 grok-session-restore = { path = "../../../session-restore/crates/grok-session-restore", version = "0.1.3", optional = true }
 kimi-session-restore = { path = "../../../session-restore/crates/kimi-session-restore", version = "0.1.3", optional = true }
-gate4agent-adapters = { path = "../gate4agent-adapters", version = "0.4.8" }
-gate4agent-catalog = { path = "../gate4agent-catalog", version = "0.4.8" }
-gate4agent-handle = { path = "../gate4agent-handle", version = "0.4.8" }
-gate4agent-node-core = { path = "../gate4agent-node-core", version = "0.4.8" }
-gate4agent-node-protocol = { path = "../gate4agent-node-protocol", version = "0.4.8" }
-gate4agent-node-wire = { path = "../gate4agent-node-wire", version = "0.4.8" }
-gate4agent-runtime-native = { path = "../gate4agent-runtime-native", version = "0.4.8" }
-gate4agent-testkit = { path = "../gate4agent-testkit", optional = true, version = "0.4.8" }
-gate4agent-types = { path = "../gate4agent-types", version = "0.4.8" }
+gate4agent-adapters = { version = "0.4.8" }
+gate4agent-catalog = { version = "0.4.8" }
+gate4agent-handle = { version = "0.4.8" }
+gate4agent-node-core = { version = "0.4.8" }
+gate4agent-node-protocol = { version = "0.4.8" }
+gate4agent-node-wire = { version = "0.4.8" }
+gate4agent-runtime-native = { version = "0.4.8" }
+gate4agent-testkit = { optional = true, version = "0.4.8" }
+gate4agent-types = { version = "0.4.8" }
 ring = "=0.17.14"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -57,34 +60,63 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [features]
-# Default node is the standard kit (four cores on).
-# `bare` does not subtract features by itself. Strip the cores with:
-#   cargo build -p gate4agent-node --no-default-features --features bare
-# Enabling `kit` and `bare` together is a build error (see build.rs).
+# Full kit by default: there is no light mode.
 default = ["kit"]
-kit = [
-    "dep:dig2browser",
-    "dep:mail4agent",
+kit = ["m4a", "d2b", "session-restore", "wireguard", "memory"]
+# Mailbox (mail4agent 0.4): started automatically by the node binary.
+m4a = ["dep:mail4agent"]
+# Local browser machine (dig2browser).
+d2b = ["dep:dig2browser"]
+# claude / codex / grok / kimi session restore.
+session-restore = [
     "dep:claude-session-restore",
     "dep:codex-session-restore",
     "dep:grok-session-restore",
     "dep:kimi-session-restore",
-    "wireguard",
 ]
-# Kernel WireGuard for node↔C2. Either peer may dial. Not the UDP+ChaCha mesh
-# underlay and not open_wireguard_daemon_stub. HQ is not part of this kit.
-# The driver may be replaced later; this build calls `ip link` / `wg`.
+# Kernel WireGuard for node<->C2. Either peer may dial. Not the UDP+ChaCha mesh
+# underlay and not open_wireguard_daemon_stub. The driver may be replaced later;
+# this build calls `ip link` / `wg`.
 wireguard = ["gate4agent-node-core/wireguard"]
-# Node with dig2browser, mail4agent, session-restore, and WireGuard OFF.
-bare = []
-# Optional extra, not core, not default. Hatchery git helpers may be wired
-# here later. This feature does not depend on hatchery-tui or any hatchery crate.
-hatchery-git = []
+# Memory is exposed to agents only as a tool the agent chooses to call; the
+# node never starts a memory daemon. Reserved: the tool registration lands with
+# the memory4agent dependency; no code is gated on it yet.
+memory = []
 fixture = ["dep:gate4agent-testkit", "gate4agent-node-wire/fixture"]
 # Cheap dig2browser-station named-pipe path reachability probe + node-local
-# exclusive BrowserStationLease. The kit's dig2browser crate dep is separate
-# (feature `kit`). Feature off keeps browser_profile_id stub echo.
+# exclusive BrowserStationLease. The dig2browser crate dep itself is feature `d2b`.
+# Feature off keeps browser_profile_id stub echo.
 dig2-station-probe = []
 
 [dev-dependencies]
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+
+# Local preparation only. Every gate4agent crate resolves to the sibling
+# gate4agent checkout (branch migrate/node-core-extract: carries
+# gate4agent-node-core and the HQ client). Do not publish with this table:
+# at the publish step it is removed and the crates.io 0.5.x releases are used.
+[patch.crates-io]
+gate4agent-adapters = { path = "../../../gate4agent/crates/gate4agent-adapters" }
+gate4agent-bidi-relay = { path = "../../../gate4agent/crates/gate4agent-bidi-relay" }
+gate4agent-build-stamp = { path = "../../../gate4agent/crates/gate4agent-build-stamp" }
+gate4agent-c2 = { path = "../../../gate4agent/crates/gate4agent-c2" }
+gate4agent-c2-client = { path = "../../../gate4agent/crates/gate4agent-c2-client" }
+gate4agent-c2-protocol = { path = "../../../gate4agent/crates/gate4agent-c2-protocol" }
+gate4agent-catalog = { path = "../../../gate4agent/crates/gate4agent-catalog" }
+gate4agent-engine = { path = "../../../gate4agent/crates/gate4agent-engine" }
+gate4agent-handle = { path = "../../../gate4agent/crates/gate4agent-handle" }
+gate4agent-kernel = { path = "../../../gate4agent/crates/gate4agent-kernel" }
+gate4agent-node-core = { path = "../../../gate4agent/crates/gate4agent-node-core" }
+gate4agent-node-protocol = { path = "../../../gate4agent/crates/gate4agent-node-protocol" }
+gate4agent-node-wire = { path = "../../../gate4agent/crates/gate4agent-node-wire" }
+gate4agent-provider-ports = { path = "../../../gate4agent/crates/gate4agent-provider-ports" }
+gate4agent-pty = { path = "../../../gate4agent/crates/gate4agent-pty" }
+gate4agent-runtime-native = { path = "../../../gate4agent/crates/gate4agent-runtime-native" }
+gate4agent-shell-capabilities = { path = "../../../gate4agent/crates/gate4agent-shell-capabilities" }
+gate4agent-shell-history = { path = "../../../gate4agent/crates/gate4agent-shell-history" }
+gate4agent-shell-native = { path = "../../../gate4agent/crates/gate4agent-shell-native" }
+gate4agent-shell-one-shot = { path = "../../../gate4agent/crates/gate4agent-shell-one-shot" }
+gate4agent-testkit = { path = "../../../gate4agent/crates/gate4agent-testkit" }
+gate4agent-tool-engine = { path = "../../../gate4agent/crates/gate4agent-tool-engine" }
+gate4agent-tool-protocol = { path = "../../../gate4agent/crates/gate4agent-tool-protocol" }
+gate4agent-types = { path = "../../../gate4agent/crates/gate4agent-types" }

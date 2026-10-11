@@ -1,6 +1,6 @@
 #![cfg(windows)]
 
-use gate4agent_node::protocol::{
+use hatchery_node::protocol::{
     read_json_frame_limited_body_timeout, write_json_frame_limited, AgentId, CapabilityId,
     ClientAuthentication, ClientCompatibilityOffer, ClientFrame, ClientHello, ClientRole,
     FrameError, LocalTransportKind, NodeEvent, NodeFailureCode, NodeId, NodeRequest, NodeResponse,
@@ -9,7 +9,7 @@ use gate4agent_node::protocol::{
     MAX_NODE_FRAME_BYTES, MAX_NODE_HELLO_FRAME_BYTES, MAX_NODE_TEXT_BYTES,
     NODE_COMPATIBILITY_METADATA_CAPABILITY, BUILD_STAMP,
 };
-use gate4agent_node::{NodeServer, NodeServerConfig, NodeServerError, WorkspaceConfig};
+use hatchery_node::{NodeServer, NodeServerConfig, NodeServerError, WorkspaceConfig};
 use gate4agent_node_wire::{
     auth_proof, negotiated_auth_proof, proofs_match, random_nonce, AuthDirection,
     NamedPipeNodeClient, NodeClientError,
@@ -892,7 +892,7 @@ async fn windows_fixture_extracted_named_pipe_client_preserves_auth_snapshot_eve
 
     let stale = SessionAddress {
         workspace_id: session.workspace_id.clone(),
-        session: gate4agent_node::protocol::SessionKey {
+        session: hatchery_node::protocol::SessionKey {
             instance_id: session.session.instance_id,
             generation: SessionGeneration(session.session.generation.0 + 1),
         },
@@ -1762,7 +1762,7 @@ async fn windows_fixture_named_pipe_inspection_preserves_git_rename_path_identit
         rename
             .previous_path
             .as_ref()
-            .and_then(gate4agent_node::protocol::RepositoryPath::as_utf8),
+            .and_then(hatchery_node::protocol::RepositoryPath::as_utf8),
         Some("previous name.rs"),
     );
     assert!(!inspection.git.truncated, "{:?}", inspection.git.diagnostic);

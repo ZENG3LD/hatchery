@@ -1,7 +1,7 @@
 #![cfg(windows)]
 
 use gate4agent_catalog::EnvMutation;
-use gate4agent_node::protocol::{
+use hatchery_node::protocol::{
     AdapterId, AgentId, CapabilityId, ClientRole, ManagedWorktreeLeaseState,
     ManagedWorktreeRetention, ManagedWorktreeSpawnRequest, NodeId, NodeRequest, NodeResponse,
     NodeSnapshot, SessionAddress, SessionMode, SpawnBundleDigest, SpawnBundleId,
@@ -12,7 +12,7 @@ use gate4agent_node::protocol::{
     WorktreeProfileRevision, WorkspaceId, NODE_HISTORY_CONTEXT_PACK_CAPABILITY,
     SPAWN_RUNTIME_RAW_PTY_LIFECYCLE,
 };
-use gate4agent_node::{
+use hatchery_node::{
     protect_bundle_source_tree_fixture, HistorySourceLayout, ManagedWorktreeProfile,
     NativeHistoryConfig, NativeHistoryRoot, NodeBundle, NodeEnvironmentProfile,
     NodeSecretReference, NodeSecretResolveError, NodeSecretResolver, NodeSecretValue,
@@ -517,7 +517,7 @@ async fn discover_load_export(
     expected_session_id: &str,
     expected_provider: &str,
     private_values: &[&str],
-) -> gate4agent_node::protocol::ResolvedContextPackReceipt {
+) -> hatchery_node::protocol::ResolvedContextPackReceipt {
     let discovered = client
         .request(NodeRequest::DiscoverHistory {
             session: source.clone(),
@@ -874,7 +874,7 @@ fn managed_spawn_request(
     node_id: &NodeId,
     workspace_id: &WorkspaceId,
     profile_id: &SpawnProfileId,
-    context_id: gate4agent_node::protocol::SpawnContextId,
+    context_id: hatchery_node::protocol::SpawnContextId,
 ) -> ManagedWorktreeSpawnRequest {
     ManagedWorktreeSpawnRequest {
         worktree_profile_id: WorktreeProfileId::new("context-review").unwrap(),

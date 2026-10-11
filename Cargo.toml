@@ -25,6 +25,9 @@ members = [
     "crates/hatchery-tui",
     "crates/hatchery-bidi-client",
 ]
+# hatchery-node is its own workspace: its dig2browser/mail4agent stack pins a
+# different native sqlite than the harness crates (cargo `links` conflict).
+exclude = ["crates/hatchery-node"]
 
 [workspace.package]
 version = "0.1.0"
