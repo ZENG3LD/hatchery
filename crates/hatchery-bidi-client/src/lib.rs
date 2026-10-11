@@ -293,9 +293,12 @@ pub async fn pull_login(
     }
     let mut after = before.clone();
     let mut saw_diff = false;
-    let post_deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    let post_deadline = tokio::time::Instant::now() + Duration::from_secs(30);
     let mut extra = 0usize;
-    while extra < 12 && tokio::time::Instant::now() < post_deadline {
+    // The relay now keeps every frame for a late peer, so frames that were
+    // queued before the click may precede the first post-click frame: read
+    // until a changed frame arrives or the deadline passes.
+    while !saw_diff && tokio::time::Instant::now() < post_deadline {
         let timed = tokio::time::timeout(
             Duration::from_secs(8),
             next_timed_png(&mut ws, &mut pending_capture),

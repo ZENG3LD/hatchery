@@ -128,3 +128,37 @@ async fn overflow_drops_oldest_counts_and_warns() {
     assert!(seen.contains("WARN session=p5"), "{seen}");
     assert!(seen.contains("total_dropped=12"), "{seen}");
 }
+
+#[tokio::test]
+async fn input_reaches_a_node_that_keeps_streaming_to_a_late_hq() {
+    let addr = start().await;
+    open_session(addr, "p6").await;
+    let node = ws(addr, "p6", "node").await;
+    let (mut node_tx, mut node_rx) = node.split();
+    let streamer = tokio::spawn(async move {
+        for i in 0..200u8 {
+            if node_tx.send(Message::binary(payload(i, 19_580))).await.is_err() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    });
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await; // ~40 frames pile up for hq
+    let mut hq = ws(addr, "p6", "hq").await;
+    for _ in 0..5 {
+        next_bin(&mut hq).await;
+    }
+    let click = payload(9, 20);
+    hq.send(Message::binary(click.clone())).await.unwrap();
+    let got = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            if let Some(Ok(Message::Binary(b))) = node_rx.next().await {
+                return b.to_vec();
+            }
+        }
+    })
+    .await
+    .expect("click did not reach the node");
+    assert_eq!(got, click);
+    streamer.abort();
+}

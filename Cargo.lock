@@ -1734,7 +1734,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-bidi-client"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "futures-util",
  "tokio",
@@ -1743,7 +1743,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-bidi-relay"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "futures-util",
  "sha2",
@@ -1753,7 +1753,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-c2"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-node-wire",
