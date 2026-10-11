@@ -33,8 +33,7 @@ pub fn force_link() -> usize {
     }
     #[cfg(feature = "m4a")]
     {
-        let mail: fn() -> Result<mail4agent::MailboxJoinHandle, mail4agent::MainError> =
-            mail4agent::spawn;
+        let mail: fn() -> Result<(), mail4agent::MainError> = mail4agent::run;
         acc = acc.wrapping_add(mail as usize);
     }
     #[cfg(feature = "session-restore")]
@@ -65,8 +64,42 @@ pub fn force_link() -> usize {
 /// Start the mail4agent mailbox on a background thread (`m4a` only).
 /// Same daemon the standalone `mail4agent` binary runs.
 #[cfg(feature = "m4a")]
-pub fn start_mailbox() -> Result<mail4agent::MailboxJoinHandle, mail4agent::MainError> {
-    mail4agent::spawn()
+///
+/// The daemon's own failure (for example a bootstrap refusal) is logged and
+/// visible through [`MailboxHandle::is_finished`]; it is never swallowed.
+pub fn start_mailbox() -> Result<MailboxHandle, mail4agent::MainError> {
+    let join = std::thread::Builder::new()
+        .name("mail4agent".to_owned())
+        .spawn(|| {
+            let result = mail4agent::run();
+            if let Err(error) = &result {
+                tracing::error!(%error, "mail4agent mailbox stopped");
+            }
+            result
+        })
+        .map_err(mail4agent::MainError::Runtime)?;
+    Ok(MailboxHandle { join })
+}
+
+/// Handle of the background mailbox thread.
+#[cfg(feature = "m4a")]
+pub struct MailboxHandle {
+    join: std::thread::JoinHandle<Result<(), mail4agent::MainError>>,
+}
+
+#[cfg(feature = "m4a")]
+impl MailboxHandle {
+    /// True once the mailbox thread has returned (it only returns on failure).
+    pub fn is_finished(&self) -> bool {
+        self.join.is_finished()
+    }
+
+    /// Block until the mailbox thread ends and return its result.
+    pub fn join(self) -> Result<(), mail4agent::MainError> {
+        self.join.join().unwrap_or_else(|_| {
+            Err(mail4agent::MainError::Runtime(std::io::Error::other("mail4agent thread panicked")))
+        })
+    }
 }
 
 #[cfg(test)]
@@ -95,8 +128,7 @@ mod tests {
     #[cfg(feature = "m4a")]
     #[test]
     fn kit_exposes_mailbox_automaton_entry() {
-        let start: fn() -> Result<mail4agent::MailboxJoinHandle, mail4agent::MainError> =
-            start_mailbox;
+        let start: fn() -> Result<MailboxHandle, mail4agent::MainError> = start_mailbox;
         assert!(start as usize != 0);
     }
 }

@@ -40,6 +40,8 @@ pub(crate) use gate4agent_node_core::platform;
 pub use kit::{force_link, linked_core_names};
 #[cfg(feature = "m4a")]
 pub use kit::start_mailbox;
+#[cfg(feature = "m4a")]
+pub use kit::MailboxHandle;
 #[cfg(feature = "wireguard")]
 pub use kit_wireguard::{
     bring_up_node_wireguard, node_wg_from_env, NodeWgPeerConfig, NodeWgPeerError,

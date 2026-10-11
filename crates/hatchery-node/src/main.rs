@@ -345,9 +345,16 @@ async fn main() {
     // Automatic mailbox: same daemon as the standalone mail4agent binary.
     #[cfg(feature = "m4a")]
     {
-        let _mailbox = hatchery_node::start_mailbox().unwrap_or_else(|error| {
+        let mailbox = hatchery_node::start_mailbox().unwrap_or_else(|error| {
             fail(&format!("mail4agent mailbox: {error}"))
         });
+        // The daemon runs on its own thread; a bootstrap refusal or a bind
+        // failure ends it within moments. Report that instead of "started".
+        std::thread::sleep(std::time::Duration::from_millis(750));
+        if mailbox.is_finished() {
+            let error = mailbox.join().err().map_or_else(|| "mailbox exited".to_owned(), |e| e.to_string());
+            fail(&format!("mail4agent mailbox: {error}"));
+        }
         tracing::info!("node kit mailbox started");
     }
     #[cfg(feature = "wireguard")]
