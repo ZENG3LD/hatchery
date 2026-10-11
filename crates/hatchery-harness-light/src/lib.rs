@@ -15,7 +15,7 @@
 //! ```no_run
 //! # async fn example() -> Result<(), hatchery_harness_light::HarnessLightError> {
 //! let running = hatchery_harness_light::start_harness_light(
-//!     r"\\.\pipe\gate4agent-c2",
+//!     r"\\.\pipe\hatchery-c2",
 //!     "c2-token",
 //! ).await?;
 //! let _endpoint = running.operator_endpoint();
@@ -38,8 +38,8 @@ use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use gate4agent_c2_client::{C2ReconnectingEventReceiver, C2ReconnectingHandle};
-use gate4agent_c2_protocol::C2Topology;
+use hatchery_c2_client::{C2ReconnectingEventReceiver, C2ReconnectingHandle};
+use hatchery_c2_protocol::C2Topology;
 use hatchery_harness_api::{
     HarnessOperatorApiError, HarnessOperatorCredential, HarnessOperatorEnvelopeV1,
     HarnessOperatorEventV1, HarnessOperatorHostErrorV1, HarnessOperatorReplyV1,
@@ -250,7 +250,7 @@ pub async fn start_harness_light(
     c2_token: &str,
 ) -> Result<HarnessLightRunning, HarnessLightError> {
     let (control, events) =
-        gate4agent_c2_client::connect_local_reconnecting(c2_endpoint, c2_token).await
+        hatchery_c2_client::connect_local_reconnecting(c2_endpoint, c2_token).await
             .map_err(HarnessLightError::C2Connect)?;
     finish_harness_light(control, events).await
 }
@@ -260,16 +260,16 @@ pub async fn start_harness_light(
 /// Not a hop through a node. The unix [`start_harness_light`] path is unchanged.
 #[cfg(unix)]
 pub async fn start_harness_light_wg(
-    config: gate4agent_c2_client::HqWgClientConfig,
+    config: hatchery_c2_client::HqWgClientConfig,
     c2_token: &str,
 ) -> Result<HarnessLightRunning, HarnessLightError> {
     let control_addr = config.control_addr().map_err(HarnessLightError::WireGuard)?;
     let bring_up = config.clone();
-    tokio::task::spawn_blocking(move || gate4agent_c2_client::bring_up_hq_wireguard(&bring_up))
+    tokio::task::spawn_blocking(move || hatchery_c2_client::bring_up_hq_wireguard(&bring_up))
         .await
         .map_err(HarnessLightError::Join)?
         .map_err(HarnessLightError::WireGuard)?;
-    let (control, events) = gate4agent_c2_client::connect_tunnel_reconnecting(control_addr, c2_token)
+    let (control, events) = hatchery_c2_client::connect_tunnel_reconnecting(control_addr, c2_token)
         .await
         .map_err(HarnessLightError::C2Connect)?;
     finish_harness_light(control, events).await

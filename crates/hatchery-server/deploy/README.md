@@ -10,7 +10,7 @@ One supervisor process hosts the subservices. Everything is configured by enviro
 
 `kit` (all of the above) is the default; there is no light mode.
 
-Why processes: the harness (rusqlite 0.31), m4a (mail4agent 0.4) and memory4agent (rusqlite 0.32, bundled sqlite) cannot share one native sqlite in a single dependency graph, so this crate is its own workspace and embeds only m4a.
+Why processes: the harness and memory4agent are standalone services with their own sqlite and lifecycle (memory4agent pins rusqlite 0.32 and a tree-sitter C stack), so the server supervises them as child processes and embeds only m4a. The control endpoint env (`HATCHERY_SERVER_CONTROL_LISTEN`, `HATCHERY_SERVER_CONTROL_TOKEN`) is the same pair the node-side `g4a_memory_start` tool reads.
 
 ## Control (loopback)
 

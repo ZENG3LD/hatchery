@@ -1,8 +1,6 @@
-[workspace]
-
 [package]
 name = "hatchery-server"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
@@ -15,10 +13,8 @@ name = "hatchery_server"
 name = "hatchery-server"
 path = "src/main.rs"
 
-# Separate workspace: the harness (rusqlite 0.31), m4a (mail4agent 0.4) and
-# memory4agent (rusqlite 0.32, bundled sqlite) cannot share one native sqlite in
-# one dependency graph. The server therefore hosts the harness and memory as
-# supervised processes and embeds only the m4a library.
+# The harness and memory run as supervised processes; only the m4a library is
+# embedded. (All crates now share one native sqlite, rusqlite 0.36.)
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -28,7 +24,7 @@ toml = "0.8"
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-m4a-agent = { version = "0.4", optional = true }
+m4a-agent = { version = "0.4.8", optional = true }
 
 [features]
 # Full kit by default: there is no light mode.

@@ -13,4 +13,4 @@ CLI: `hatchery-c2ctl` (package `hatchery-c2-client`).
 
 ## Lineage
 
-These crates were moved from gate4agent (`gate4agent-c2`, `gate4agent-c2-client`, `gate4agent-c2-protocol`, history preserved from gate4agent branch `migrate/node-core-extract` at 579a8ad). The gate4agent 0.4.8 releases stay frozen on crates.io. The C2 <-> node integration tests live in `crates/hatchery-node/tests/c2_*.rs` (node and C2 resolve different native sqlite stacks, so the node workspace is separate and consumes C2 as a dev-dependency).
+These crates were moved from gate4agent (`gate4agent-c2`, `gate4agent-c2-client`, `gate4agent-c2-protocol`, history preserved from gate4agent branch `migrate/node-core-extract` at 579a8ad). The gate4agent 0.4.8 releases stay frozen on crates.io. The C2 <-> node integration tests live in `crates/hatchery-node/tests/c2_*.rs` (the node consumes C2 as a dev-dependency).

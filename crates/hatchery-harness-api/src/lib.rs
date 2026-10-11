@@ -2522,7 +2522,7 @@ pub enum HarnessOperatorRequestV1 {
         // field, and every caller that simply does not care, is unchanged.
         // `Some(_)` is the one way `Moderate`/`ReadOnly`/`Unmanaged` becomes
         // reachable on a session spawned through this wire at all -- see
-        // `gate4agent-node`'s `require_session_runtime_policy` doc and
+        // `hatchery-node`'s `require_session_runtime_policy` doc and
         // `HostPolicy::Yolo`'s own doc for why `FullAuto` alone left the
         // whole permission-deferral path dead code in production.
         #[serde(default)]
@@ -4622,7 +4622,7 @@ pub struct HarnessRuntimeInventoryV1 {
     pub managed_session_count: usize,
     pub managed_sessions_truncated: bool,
     /// Lifetime count of managed session records the node's own retention
-    /// sweep has retired (mirrors `gate4agent_c2_protocol::SlimNodeInventory::
+    /// sweep has retired (mirrors `hatchery_c2_protocol::SlimNodeInventory::
     /// retired_count`). Additive and informational only, `#[serde(default)]`
     /// so a payload from before this field existed still deserializes.
     #[serde(default)]
@@ -4639,7 +4639,7 @@ pub struct HarnessRuntimeInventoryV1 {
 }
 
 /// Same liveness-first rationale and exact rank table as c2-protocol's own
-/// `managed_session_liveness_rank` (`gate4agent_c2_protocol::SlimNodeInventory`
+/// `managed_session_liveness_rank` (`hatchery_c2_protocol::SlimNodeInventory`
 /// page-cut ordering): `Live` ranks first, `IdentityPending` next, `Dormant`
 /// next, terminal `Unavailable` last. The producer orders a page by this
 /// rank before the `MAX_C2_MANAGED_SESSIONS_PER_NODE` cut, so a page is
@@ -5706,7 +5706,7 @@ pub enum HarnessOperatorHostErrorV1 {
     // which this variant exists to carry through to the operator instead of
     // collapsing into a bare `Unavailable`/`Deadline` that names neither
     // (see the `spawn_session_with_deadline` commit-wait loop in
-    // `gate4agent-node`'s `server.rs`, which used to lose exactly this
+    // `hatchery-node`'s `server.rs`, which used to lose exactly this
     // reason to a blind commit-deadline poll). This is why the enum gave up
     // `Copy` -- every other variant is a bare tag, but the whole point here
     // is not making the operator already know what it asked for; it is
@@ -8607,7 +8607,7 @@ mod tests {
         assert!(rank_out_of_order.validate().is_err());
     }
 
-    /// Slice R (`gate4agent-node`'s session-record retention sweep):
+    /// Slice R (`hatchery-node`'s session-record retention sweep):
     /// `retired_count` is additive, defaults to `0` for a pre-existing
     /// payload that never had it, and round-trips intact once a producer
     /// sets a real, nonzero value.

@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-observation-engine"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
@@ -11,10 +11,10 @@ description = "Bounded in-memory reducer projecting gate4agent observation ingre
 name = "hatchery_observation_engine"
 
 [dependencies]
-gate4agent-node-protocol = { version = "0.4.8" }
-gate4agent-types = { version = "0.4.8" }
-hatchery-observation-api = { version = "0.1.0", path = "../hatchery-observation-api" }
-hatchery-observation-protocol = { version = "0.1.0", path = "../hatchery-observation-protocol" }
+gate4agent-node-protocol = { version = "0.5.0" }
+gate4agent-types = { version = "0.5.0" }
+hatchery-observation-api = { version = "0.2.0", path = "../hatchery-observation-api" }
+hatchery-observation-protocol = { version = "0.2.0", path = "../hatchery-observation-protocol" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 tracing = "0.1"

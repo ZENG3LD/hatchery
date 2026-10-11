@@ -19,7 +19,7 @@ use crossterm::{
     style::Print,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use gate4agent_c2_protocol::{
+use hatchery_c2_protocol::{
     C2RelayRoute, C2SessionSnapshot, C2SessionStatus, C2WorkspaceSnapshot,
 };
 use gate4agent_node_protocol::{
@@ -613,7 +613,7 @@ enum WorkerUpdate {
 }
 
 enum WorkspaceSnapshotUpdate {
-    C2(gate4agent_c2_protocol::C2WorkspaceSnapshot),
+    C2(hatchery_c2_protocol::C2WorkspaceSnapshot),
 }
 
 /// The one piece of `C2ApplyState` (pre-cutover: c2 snapshot/event admission

@@ -2355,7 +2355,7 @@ impl HarnessService {
     pub fn expire_unbound_continuation_on_incarnation_change(
         &mut self,
         continuation_ref: &HarnessContinuationRef,
-        current_route: &gate4agent_c2_protocol::NodeRoute,
+        current_route: &hatchery_c2_protocol::NodeRoute,
         now_unix_ms: u64,
     ) -> Result<HarnessApplyOutcome, HarnessServiceError> {
         self.ensure_healthy()?;
@@ -2483,7 +2483,7 @@ impl HarnessService {
                 "continuation lease does not match exact exported authority",
             ));
         }
-        let route = gate4agent_c2_protocol::NodeRoute {
+        let route = hatchery_c2_protocol::NodeRoute {
             node_id: gate4agent_node_protocol::NodeId::new(context.node_id.as_str())
                 .map_err(|_| HarnessServiceError::InvalidDispatchContext(
                     "continuation lease has invalid Node id",
@@ -2650,7 +2650,7 @@ impl HarnessService {
             &spec,
             &fingerprint,
         )?;
-        let route = gate4agent_c2_protocol::NodeRoute {
+        let route = hatchery_c2_protocol::NodeRoute {
             node_id: gate4agent_node_protocol::NodeId::new(context.node_id.as_str())
                 .map_err(|_| HarnessServiceError::InvalidDispatchContext(
                     "ordinary spawn lease has invalid Node id",
@@ -2976,7 +2976,7 @@ impl HarnessService {
     pub(crate) fn issue_delivery_staging_lease(
         &self,
         delivery_ref: &HarnessDeliveryRef,
-        route: gate4agent_c2_protocol::NodeRoute,
+        route: hatchery_c2_protocol::NodeRoute,
         compiled: CompiledDeliveryBundleV2,
     ) -> Result<c2::PreparedDeliveryStageLease, HarnessServiceError> {
         self.ensure_healthy()?;
@@ -4422,7 +4422,7 @@ impl HarnessService {
             &spec,
             &fingerprint,
         )?;
-        let route = gate4agent_c2_protocol::NodeRoute {
+        let route = hatchery_c2_protocol::NodeRoute {
             node_id: gate4agent_node_protocol::NodeId::new(context.node_id.as_str())
                 .map_err(|_| HarnessServiceError::HarnessMcpArmRouteInvalid {
                     operation_id: current.operation_id.clone(),
@@ -4506,7 +4506,7 @@ impl HarnessService {
     pub async fn revoke_and_abort_harness_mcp_reservation(
         &mut self,
         adapter: &c2::HarnessC2Adapter,
-        route: &gate4agent_c2_protocol::NodeRoute,
+        route: &hatchery_c2_protocol::NodeRoute,
         reservation_id: &HarnessMcpReservationId,
         revoked_at_unix_ms: u64,
     ) -> Result<(), HarnessServiceError> {
@@ -4577,7 +4577,7 @@ impl HarnessService {
 
     pub(crate) fn authorize_harness_mcp_call(
         &self,
-        route: &gate4agent_c2_protocol::NodeRoute,
+        route: &hatchery_c2_protocol::NodeRoute,
         reservation_id: &HarnessMcpReservationId,
         activation_digest: &HarnessMcpActivationDigest,
         record_id: &SessionRecordId,
@@ -4634,7 +4634,7 @@ fn prepared_scheduled_spawn_dispatch(
     engine: &HarnessEngine,
     issued_launches: &BTreeMap<HarnessOperationId, HarnessTaskLaunchIssuanceV1>,
     plan: &dispatch::HarnessLaunchPlanV1,
-    route: gate4agent_c2_protocol::NodeRoute,
+    route: hatchery_c2_protocol::NodeRoute,
     operation: &HarnessOperationV1,
     spec: SpawnSpec,
     fingerprint: HarnessRequestDigest,
@@ -10762,7 +10762,7 @@ mod tests {
             operation, context, &spec, reservation_id.clone(), grant_id,
             HarnessRevision::new(1).unwrap(), 1_000,
         ).unwrap();
-        let route = gate4agent_c2_protocol::NodeRoute {
+        let route = hatchery_c2_protocol::NodeRoute {
             node_id: NodeId::new("node-a").unwrap(),
             expected_incarnation_id: NodeIncarnationId::from_bytes([7; 16]),
         };
@@ -10903,7 +10903,7 @@ mod tests {
             HarnessRevision::new(1).unwrap(),
             1_000,
         ).unwrap();
-        let route = gate4agent_c2_protocol::NodeRoute {
+        let route = hatchery_c2_protocol::NodeRoute {
             node_id: NodeId::new("node-a").unwrap(),
             expected_incarnation_id: NodeIncarnationId::from_bytes([7; 16]),
         };
@@ -11485,7 +11485,7 @@ mod tests {
             1_000,
         ).unwrap();
 
-        let route = gate4agent_c2_protocol::NodeRoute {
+        let route = hatchery_c2_protocol::NodeRoute {
             node_id: NodeId::new("node-a").unwrap(),
             expected_incarnation_id: NodeIncarnationId::from_bytes([7; 16]),
         };
@@ -12041,7 +12041,7 @@ mod tests {
             13,
         ).unwrap();
         revoke_grant(&mut service, &grant_id, '9', 21);
-        let route = gate4agent_c2_protocol::NodeRoute {
+        let route = hatchery_c2_protocol::NodeRoute {
             node_id: NodeId::new("node-a").unwrap(),
             expected_incarnation_id: NodeIncarnationId::from_bytes([7; 16]),
         };
@@ -12116,7 +12116,7 @@ mod tests {
             HarnessRevision::new(3).unwrap(),
             23,
         ).is_err());
-        let changed_route = gate4agent_c2_protocol::NodeRoute {
+        let changed_route = hatchery_c2_protocol::NodeRoute {
             node_id: NodeId::new("node-a").unwrap(),
             expected_incarnation_id: NodeIncarnationId::from_bytes([8; 16]),
         };

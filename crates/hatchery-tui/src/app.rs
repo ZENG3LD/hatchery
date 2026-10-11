@@ -4,7 +4,7 @@ use std::fmt;
 use std::rc::Rc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use gate4agent_c2_protocol::C2RelayRoute;
+use hatchery_c2_protocol::C2RelayRoute;
 use gate4agent_node_protocol::{
     AgentProgressCurrentV1, AgentProgressV1, GitSnapshot, GitWorktreeSnapshot, HostDirectoryEntry, HostDirectoryListing, LaunchInventory,
     ManagedSessionState, ManagedWorktreeLeaseSnapshot, ManagedWorktreeSpawnReceipt,

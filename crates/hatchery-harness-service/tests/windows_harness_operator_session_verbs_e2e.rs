@@ -34,7 +34,7 @@
 //! `NodeRequest::Paste` handler requires `ProviderRuntimeRequirement::
 //! SemanticPrompt`, which this fixture's plain PTY-echo `AgentSpec` (no
 //! declared semantic PTY adapter) never admits -- the same policy gate
-//! `windows_fixture_runtime_policy_e2e.rs` (gate4agent-node) already proves
+//! `windows_fixture_runtime_policy_e2e.rs` (hatchery-node) already proves
 //! rejects a semantic `NodeRequest::Prompt`/`Paste`/`ResumeWithPrompt` under
 //! a raw-PTY-only policy. So this fixture's session can only ever prove
 //! `PasteSession` relays the node's rejection faithfully end to end, not
@@ -49,8 +49,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use gate4agent_c2_client::C2Client;
+use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use hatchery_c2_client::C2Client;
 use hatchery_harness_api::{
     HarnessHostPathV1, HarnessOperatorCredential, HarnessOperatorHostErrorV1,
     HarnessRuntimeSessionAddressV1,
@@ -62,10 +62,10 @@ use hatchery_harness_service::{
     runtime::{start_harness_host_with_operator_and_catalogs, HarnessRuntimeCatalogs},
     HarnessService,
 };
-use gate4agent_node::protocol::{
+use hatchery_node::protocol::{
     NodeId, SessionMode, SpawnProfileDefaults, SpawnProfileId, SpawnProfileRevision, WorkspaceId,
 };
-use gate4agent_node::{NodeServer, NodeServerConfig, SpawnProfileRegistry, WorkspaceConfig};
+use hatchery_node::{NodeServer, NodeServerConfig, SpawnProfileRegistry, WorkspaceConfig};
 use hatchery_observation_service::ObservationService;
 use gate4agent_types::{AgentId, TerminalSize};
 use tokio::time::{sleep, timeout};
@@ -163,7 +163,7 @@ async fn wait_online(client: &C2Client, node_id: &NodeId) {
     timeout(Duration::from_secs(10), async {
         loop {
             if client.status().await.ok().and_then(|status| status.nodes.get(node_id)
-                .map(|node| node.transport == gate4agent_c2::protocol::NodeTransportState::Online))
+                .map(|node| node.transport == hatchery_c2::protocol::NodeTransportState::Online))
                 == Some(true)
             {
                 break;

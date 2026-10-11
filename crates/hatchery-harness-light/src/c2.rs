@@ -9,12 +9,12 @@
 //! session-verb relay, and opening a second, separate C2 connection
 //! alongside it would hold two authenticated operator sessions against the
 //! same C2 for no reason). This crate instead owns one `C2ReconnectingHandle`
-//! directly (`gate4agent-c2-client`, the same primitive
+//! directly (`hatchery-c2-client`, the same primitive
 //! `HarnessC2Adapter::connect` itself wraps) and reimplements these two
 //! small, pure read-path helpers against it.
 
-use gate4agent_c2_client::{C2LinkState, C2ReconnectingHandle};
-use gate4agent_c2_protocol::{C2NodeResponse, C2NodeSnapshot, C2Topology, NodeRoute, NodeTransportState};
+use hatchery_c2_client::{C2LinkState, C2ReconnectingHandle};
+use hatchery_c2_protocol::{C2NodeResponse, C2NodeSnapshot, C2Topology, NodeRoute, NodeTransportState};
 use gate4agent_node_protocol::{NodeId, NodeRequest};
 use tokio::sync::Mutex;
 
@@ -97,7 +97,7 @@ pub(crate) async fn fetch_snapshot(
 /// spawn refresh, *and* the live `Control`/`SessionRecordUpserted` events
 /// the node emits for that same spawn each trigger their own. Firing these
 /// concurrently over the one shared `C2ReconnectingHandle` was observed (via
-/// a live-instrumented run) to occasionally trip `gate4agent-c2-client`'s own
+/// a live-instrumented run) to occasionally trip `hatchery-c2-client`'s own
 /// control-owner loop into treating an unmatched reply as fatal and tearing
 /// the underlying physical connection down.
 ///

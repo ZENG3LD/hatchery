@@ -1,9 +1,9 @@
 # Mode 2 — node as a container. Builds the standard kit (default features).
 # Does not provision secrets, tokens, or WireGuard private keys.
 #
-# Build context is a directory that contains these siblings:
-#   hatchery/   gate4agent/   dig2browser/   session-restore/
-# `deploy/node/docker-build.sh` stages that context (it excludes target/ and .git).
+# Build context: a directory holding the hatchery checkout as `hatchery/`; every
+# dependency resolves from crates.io. `deploy/node/docker-build.sh` stages it
+# (it excludes target/ and .git).
 #
 #   ./crates/hatchery-node/deploy/node/docker-build.sh
 #
@@ -14,9 +14,6 @@
 FROM rust:bookworm AS build
 WORKDIR /src
 COPY hatchery /src/hatchery
-COPY gate4agent /src/gate4agent
-COPY dig2browser /src/dig2browser
-COPY session-restore /src/session-restore
 WORKDIR /src/hatchery
 RUN cargo build --locked --release -p hatchery-node
 

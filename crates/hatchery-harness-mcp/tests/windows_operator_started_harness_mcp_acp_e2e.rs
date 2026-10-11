@@ -39,7 +39,7 @@
 //! (`hatchery-harness-mcp`'s own `[[bin]]`, `src/bin/
 //! acp_fixture_agent.rs`): a minimal real ACP v1 agent over stdio,
 //! launched through `NodeServer::new_harness_mcp_acp_launcher_fixture`
-//! (`gate4agent-node/src/server.rs`). That constructor is the fix for a
+//! (`hatchery-node/src/server.rs`). That constructor is the fix for a
 //! defect this file's own earlier revision measured live: `NodeServer::
 //! new_harness_mcp_proxy_fixture` unconditionally sets `config.
 //! fixture_raw_pty_runtime = true`, which tears out the live
@@ -74,8 +74,8 @@ use std::{
     time::{Duration, Instant as StdInstant, SystemTime, UNIX_EPOCH},
 };
 
-use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use gate4agent_c2_client::C2Client;
+use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use hatchery_c2_client::C2Client;
 use hatchery_harness_client::{
     HarnessOperatorClient, HarnessOperatorCredential, HarnessOperatorMutationOutcomeV1,
     HarnessReplaceTaskExecutionSpecRequestV2, HarnessReviewedTaskLaunchSelectionV1,
@@ -98,7 +98,7 @@ use hatchery_harness_service::{
     runtime::{start_harness_host_with_operator_and_catalogs, HarnessRuntimeCatalogs},
     HarnessMcpReservationStateV1, HarnessService,
 };
-use gate4agent_node::{
+use hatchery_node::{
     protocol::{
         NodeId, SessionMode, SpawnProfileDefaults, SpawnProfileId, SpawnProfileRevision,
         WorkspaceId,
@@ -177,7 +177,7 @@ async fn wait_online(client: &C2Client, node_id: &NodeId) {
         loop {
             if client.status().await.is_ok_and(|status| {
                 status.nodes.get(node_id).is_some_and(|node| {
-                    node.transport == gate4agent_c2::protocol::NodeTransportState::Online
+                    node.transport == hatchery_c2::protocol::NodeTransportState::Online
                 })
             }) { return; }
             sleep(Duration::from_millis(20)).await;

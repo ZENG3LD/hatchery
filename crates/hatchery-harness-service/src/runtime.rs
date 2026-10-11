@@ -47,7 +47,7 @@ use crate::terminal::{
     HOST_TERMINAL_SUBSCRIBER_LIMIT, HOST_TERMINAL_SUBSCRIBER_QUEUE_CAPACITY,
 };
 use hatchery_harness_delivery::DeliveryCatalogV2;
-use gate4agent_c2_protocol::{
+use hatchery_c2_protocol::{
     C2ManagedSessionRecord, C2NodeEvent, C2SessionStatus,
     NodeRoute, RoutedNodeEvent,
 };
@@ -183,7 +183,7 @@ const HOST_RUN_READ_RESPONSE_DEADLINE: Duration = Duration::from_secs(12);
 const HOST_RUN_CONTEXT_SOURCE_RESPONSE_DEADLINE: Duration = Duration::from_secs(12);
 // `NodeRequest::Input`/`Resize` fall into c2-client's default 10s relay
 // deadline, `Stop` gets an explicit 15s; both get `RELAY_REPLY_HEADROOM`
-// (5s) on top (`control_request_deadline`, gate4agent-c2-client/runtime.rs).
+// (5s) on top (`control_request_deadline`, hatchery-c2-client/runtime.rs).
 // This outer bound stays above the worst case (Stop, 20s) with margin, per
 // the "outer bound never below inner timeout" discipline the other harness
 // read families already follow above.
@@ -2250,7 +2250,7 @@ fn dispatching_start_error_result(error: &HarnessRuntimeError) -> CoordinatorSpa
 fn harness_mcp_arm_finish_result(error: &HarnessC2Error) -> CoordinatorSpawnResult {
     match error {
         HarnessC2Error::HarnessMcpRejected { .. } => CoordinatorSpawnResult::Failed,
-        HarnessC2Error::HarnessMcpTransport(gate4agent_c2_client::C2ControlError::Protocol(_)) => {
+        HarnessC2Error::HarnessMcpTransport(hatchery_c2_client::C2ControlError::Protocol(_)) => {
             CoordinatorSpawnResult::Failed
         }
         _ => CoordinatorSpawnResult::OutcomeUnknown(Some(error.to_string())),
@@ -3192,7 +3192,7 @@ fn start_run_context_source_worker(
 fn map_run_context_source_error(error: HarnessC2Error) -> HarnessOperatorHostErrorV1 {
     match error {
         HarnessC2Error::RunContextSourceEnqueue(
-            gate4agent_c2_client::C2ControlError::QueueFull,
+            hatchery_c2_client::C2ControlError::QueueFull,
         ) => HarnessOperatorHostErrorV1::Busy,
         HarnessC2Error::RunContextSourceEnqueue(_)
         | HarnessC2Error::RunContextSourceTransport(_)
@@ -3240,7 +3240,7 @@ fn map_run_read_error(error: HarnessC2Error) -> HarnessOperatorHostErrorV1 {
     match error {
         HarnessC2Error::InvalidRunReadRequest => HarnessOperatorHostErrorV1::InvalidRequest,
         HarnessC2Error::RunReadUnbound => HarnessOperatorHostErrorV1::Conflict,
-        HarnessC2Error::RunReadEnqueue(gate4agent_c2_client::C2ControlError::QueueFull) => {
+        HarnessC2Error::RunReadEnqueue(hatchery_c2_client::C2ControlError::QueueFull) => {
             HarnessOperatorHostErrorV1::Busy
         }
         HarnessC2Error::RunReadEnqueue(_)
@@ -3309,7 +3309,7 @@ fn map_node_workspace_read_error(error: HarnessC2Error) -> HarnessOperatorHostEr
         HarnessC2Error::InvalidNodeWorkspaceReadRequest => {
             HarnessOperatorHostErrorV1::InvalidRequest
         }
-        HarnessC2Error::NodeWorkspaceReadEnqueue(gate4agent_c2_client::C2ControlError::QueueFull) => {
+        HarnessC2Error::NodeWorkspaceReadEnqueue(hatchery_c2_client::C2ControlError::QueueFull) => {
             HarnessOperatorHostErrorV1::Busy
         }
         HarnessC2Error::NodeWorkspaceReadEnqueue(_)
@@ -3382,7 +3382,7 @@ fn map_node_workspace_write_error(error: HarnessC2Error) -> HarnessOperatorHostE
         HarnessC2Error::InvalidNodeWorkspaceWriteRequest => {
             HarnessOperatorHostErrorV1::InvalidRequest
         }
-        HarnessC2Error::NodeWorkspaceWriteEnqueue(gate4agent_c2_client::C2ControlError::QueueFull) => {
+        HarnessC2Error::NodeWorkspaceWriteEnqueue(hatchery_c2_client::C2ControlError::QueueFull) => {
             HarnessOperatorHostErrorV1::Busy
         }
         HarnessC2Error::NodeWorkspaceWriteEnqueue(_)
@@ -3449,7 +3449,7 @@ fn map_session_spawn_error(error: HarnessC2Error) -> HarnessOperatorHostErrorV1 
         | HarnessC2Error::RelayReconnecting => HarnessOperatorHostErrorV1::Unavailable,
         HarnessC2Error::IncarnationChanged { .. } => HarnessOperatorHostErrorV1::Conflict,
         HarnessC2Error::SpawnProfileUnavailable(_) => HarnessOperatorHostErrorV1::NotFound,
-        HarnessC2Error::SpawnEnqueue(gate4agent_c2_client::C2ControlError::QueueFull) => {
+        HarnessC2Error::SpawnEnqueue(hatchery_c2_client::C2ControlError::QueueFull) => {
             HarnessOperatorHostErrorV1::Busy
         }
         HarnessC2Error::SpawnEnqueue(_) => HarnessOperatorHostErrorV1::Unavailable,
@@ -3459,7 +3459,7 @@ fn map_session_spawn_error(error: HarnessC2Error) -> HarnessOperatorHostErrorV1 
 }
 
 /// The transport a `HarnessExecutionModeV1` requests -- exact mirror of
-/// `gate4agent-node`'s own `SessionMode` -> `TransportKind` match (`server.rs`)
+/// `hatchery-node`'s own `SessionMode` -> `TransportKind` match (`server.rs`)
 /// one layer further out, kept in the wire's own `HarnessRuntimeTransportV1`
 /// vocabulary rather than the node's. Only needed to name the transport a
 /// rejected spawn asked for (`map_session_spawn_node_failure`'s
@@ -3543,13 +3543,13 @@ fn map_session_spawn_node_failure(
 /// `PasteSession` against an ACP or inline session DOES add one code of its
 /// own that reaches here, though: `NodeFailureCode::TurnInFlight` (the
 /// node's own turn-admission gate -- see `require_session_runtime_policy`
-/// in `gate4agent-node`'s `server.rs`), bucketed as `Conflict` below like
+/// in `hatchery-node`'s `server.rs`), bucketed as `Conflict` below like
 /// every other "current session state disallows this request" code already
 /// is, not folded into `Internal`.
 fn map_session_control_error(error: HarnessC2Error) -> HarnessOperatorHostErrorV1 {
     match error {
         HarnessC2Error::InvalidSessionControlRequest => HarnessOperatorHostErrorV1::InvalidRequest,
-        HarnessC2Error::SessionControlEnqueue(gate4agent_c2_client::C2ControlError::QueueFull) => {
+        HarnessC2Error::SessionControlEnqueue(hatchery_c2_client::C2ControlError::QueueFull) => {
             HarnessOperatorHostErrorV1::Busy
         }
         HarnessC2Error::SessionControlEnqueue(_)
@@ -3606,7 +3606,7 @@ fn map_session_record_mutation_error(error: HarnessC2Error) -> HarnessOperatorHo
             HarnessOperatorHostErrorV1::InvalidRequest
         }
         HarnessC2Error::SessionRecordMutationEnqueue(
-            gate4agent_c2_client::C2ControlError::QueueFull,
+            hatchery_c2_client::C2ControlError::QueueFull,
         ) => HarnessOperatorHostErrorV1::Busy,
         HarnessC2Error::SessionRecordMutationEnqueue(_)
         | HarnessC2Error::SessionRecordMutationTransport(_)
@@ -3659,7 +3659,7 @@ fn map_host_directory_browse_error(error: HarnessC2Error) -> HarnessOperatorHost
             HarnessOperatorHostErrorV1::InvalidRequest
         }
         HarnessC2Error::HostDirectoryBrowseEnqueue(
-            gate4agent_c2_client::C2ControlError::QueueFull,
+            hatchery_c2_client::C2ControlError::QueueFull,
         ) => HarnessOperatorHostErrorV1::Busy,
         HarnessC2Error::HostDirectoryBrowseEnqueue(_)
         | HarnessC2Error::HostDirectoryBrowseTransport(_)
@@ -3715,7 +3715,7 @@ fn map_resource_mutation_error(error: HarnessC2Error) -> HarnessOperatorHostErro
     match error {
         HarnessC2Error::InvalidResourceMutationRequest => HarnessOperatorHostErrorV1::InvalidRequest,
         HarnessC2Error::ResourceMutationEnqueue(
-            gate4agent_c2_client::C2ControlError::QueueFull,
+            hatchery_c2_client::C2ControlError::QueueFull,
         ) => HarnessOperatorHostErrorV1::Busy,
         HarnessC2Error::ResourceMutationEnqueue(_)
         | HarnessC2Error::ResourceMutationTransport(_)
@@ -3777,7 +3777,7 @@ fn map_native_history_error(error: HarnessC2Error) -> HarnessOperatorHostErrorV1
             HarnessOperatorHostErrorV1::InvalidRequest
         }
         HarnessC2Error::NativeHistoryEnqueue(
-            gate4agent_c2_client::C2ControlError::QueueFull,
+            hatchery_c2_client::C2ControlError::QueueFull,
         ) => HarnessOperatorHostErrorV1::Busy,
         HarnessC2Error::NativeHistoryEnqueue(_)
         | HarnessC2Error::NativeHistoryTransport(_)
@@ -8323,7 +8323,7 @@ impl HarnessRuntimeInventoryCache {
             observed_at_unix_ms,
             event_sequence: resync.event_sequence(),
             inventory: redact_runtime_inventory(
-                gate4agent_c2_protocol::SlimNodeInventory::from_c2_snapshot(resync.snapshot()),
+                hatchery_c2_protocol::SlimNodeInventory::from_c2_snapshot(resync.snapshot()),
             ),
         };
         let changed = self.nodes.get(&route.node_id) != Some(&node);
@@ -8728,7 +8728,7 @@ fn project_run_correlation(
 /// fanned out to every currently
 /// polling/subscribed peer with no per-recipient variation.
 pub fn redact_runtime_inventory(
-    inventory: gate4agent_c2_protocol::SlimNodeInventory,
+    inventory: hatchery_c2_protocol::SlimNodeInventory,
 ) -> HarnessRuntimeInventoryV1 {
     let enabled_providers = inventory.enabled_providers.into_iter()
         .map(|provider| provider.as_str().to_owned())
@@ -8745,22 +8745,22 @@ pub fn redact_runtime_inventory(
                 gate4agent_types::TransportKind::Acp => HarnessRuntimeTransportV1::Acp,
             },
             status: match session.status {
-                gate4agent_c2_protocol::SlimSessionStatus::Registered => {
+                hatchery_c2_protocol::SlimSessionStatus::Registered => {
                     HarnessRuntimeSessionStatusV1::Registered
                 }
-                gate4agent_c2_protocol::SlimSessionStatus::Starting => {
+                hatchery_c2_protocol::SlimSessionStatus::Starting => {
                     HarnessRuntimeSessionStatusV1::Starting
                 }
-                gate4agent_c2_protocol::SlimSessionStatus::Running => {
+                hatchery_c2_protocol::SlimSessionStatus::Running => {
                     HarnessRuntimeSessionStatusV1::Running
                 }
-                gate4agent_c2_protocol::SlimSessionStatus::Stopping => {
+                hatchery_c2_protocol::SlimSessionStatus::Stopping => {
                     HarnessRuntimeSessionStatusV1::Stopping
                 }
-                gate4agent_c2_protocol::SlimSessionStatus::Exited => {
+                hatchery_c2_protocol::SlimSessionStatus::Exited => {
                     HarnessRuntimeSessionStatusV1::Exited
                 }
-                gate4agent_c2_protocol::SlimSessionStatus::Failed => {
+                hatchery_c2_protocol::SlimSessionStatus::Failed => {
                     HarnessRuntimeSessionStatusV1::Failed
                 }
             },
@@ -12155,7 +12155,7 @@ fn apply_context_pack_receipt_for_record(
 fn apply_snapshot_context_pack_receipts(
     harness: &mut HarnessService,
     route: &NodeRoute,
-    snapshot: &gate4agent_c2_protocol::C2NodeSnapshot,
+    snapshot: &hatchery_c2_protocol::C2NodeSnapshot,
     received_at_ms: u64,
 ) -> Result<Vec<hatchery_harness_protocol::HarnessRunId>, HarnessRuntimeError> {
     if snapshot.node_id != route.node_id {
@@ -12172,7 +12172,7 @@ fn apply_snapshot_context_pack_receipts(
 
 /// Steady-state path: reacts to the live `SessionRecordUpserted` event a
 /// Node publishes the moment `set_exported_context` commits a record's
-/// `exported_context` (`gate4agent-node/src/server.rs`'s
+/// `exported_context` (`hatchery-node/src/server.rs`'s
 /// `set_exported_context` -> `publish_record`), so a run's own
 /// `context_pack` lands within the very same live event that carried the
 /// export while the route stays healthy — no reconnect or resync required.
@@ -12363,8 +12363,8 @@ fn apply_snapshot_lifecycle(
     harness: &mut HarnessService,
     route: &NodeRoute,
     event_sequence: u64,
-    snapshot: &gate4agent_c2_protocol::C2NodeSnapshot,
-    lifecycle_control_events: &[gate4agent_c2_protocol::C2NodeEventEnvelope],
+    snapshot: &hatchery_c2_protocol::C2NodeSnapshot,
+    lifecycle_control_events: &[hatchery_c2_protocol::C2NodeEventEnvelope],
     received_at_ms: u64,
 ) -> Result<EngineTouch, HarnessRuntimeError> {
     if event_sequence == 0 {
@@ -12406,7 +12406,7 @@ fn apply_snapshot_lifecycle(
 fn replay_contains_exact_lifecycle(
     run: &hatchery_harness_protocol::HarnessRunV1,
     route: &NodeRoute,
-    events: &[gate4agent_c2_protocol::C2NodeEventEnvelope],
+    events: &[hatchery_c2_protocol::C2NodeEventEnvelope],
 ) -> bool {
     events.iter().any(|event| {
         exact_bound_control_lifecycle(
@@ -12426,7 +12426,7 @@ fn replay_contains_exact_lifecycle(
 fn exact_snapshot_lifecycle(
     run: &hatchery_harness_protocol::HarnessRunV1,
     route: &NodeRoute,
-    snapshot: &gate4agent_c2_protocol::C2NodeSnapshot,
+    snapshot: &hatchery_c2_protocol::C2NodeSnapshot,
 ) -> Option<(HarnessLifecycleEventKindV1, HarnessLifecycleProjectionV1)> {
     let binding = run.binding.as_ref()?;
     let HarnessSessionIdentityV1::Managed { record_id, active_session: Some(active) } =
@@ -12494,7 +12494,7 @@ fn apply_replayed_lifecycle_events(
     harness: &mut HarnessService,
     route: &NodeRoute,
     eviction_gap_sequence: Option<u64>,
-    events: &[gate4agent_c2_protocol::C2NodeEventEnvelope],
+    events: &[hatchery_c2_protocol::C2NodeEventEnvelope],
     received_at_ms: u64,
 ) -> Result<EngineTouch, HarnessRuntimeError> {
     let mut touch = EngineTouch::default();
@@ -12812,7 +12812,7 @@ pub enum HarnessRuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gate4agent_c2_protocol::{
+    use hatchery_c2_protocol::{
         C2ControlEvent, C2ControlEventKind, C2ManagedSessionRecord,
         C2NodeEventEnvelope, C2NodeSnapshot,
         C2SessionSnapshot, C2SessionStatus, C2WorkspaceSnapshot,
@@ -12848,7 +12848,7 @@ mod tests {
         AgentId, AgentInstanceId, ApprovalLevel, ProviderActivity, PtyScreenState, SessionGeneration,
         TerminalSize, TransportKind,
     };
-    use gate4agent_c2_protocol::{SlimNodeInventory, SlimSession, SlimSessionStatus, SlimWorkspace};
+    use hatchery_c2_protocol::{SlimNodeInventory, SlimSession, SlimSessionStatus, SlimWorkspace};
 
     fn database_path() -> PathBuf {
         let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
@@ -16500,7 +16500,7 @@ mod tests {
     fn specialized_delivery_failure_classifies_transport_as_unknown_and_local_as_failed() {
         assert_eq!(
             delivery_pre_dispatch_result(&HarnessC2Error::DeliveryTransport(
-                gate4agent_c2_client::C2ControlError::Closed,
+                hatchery_c2_client::C2ControlError::Closed,
             )),
             CoordinatorPreDispatchResult::OutcomeUnknown,
         );
@@ -16535,7 +16535,7 @@ mod tests {
         assert_eq!(
             dispatch_start_pre_dispatch_result(&HarnessRuntimeError::C2(
                 HarnessC2Error::ContextExportTransport(
-                    gate4agent_c2_client::C2ControlError::Closed,
+                    hatchery_c2_client::C2ControlError::Closed,
                 ),
             )),
             CoordinatorPreDispatchResult::OutcomeUnknown,
@@ -16669,7 +16669,7 @@ mod tests {
         assert!(matches!(
             dispatching_start_error_result(&HarnessRuntimeError::C2(
                 HarnessC2Error::HarnessMcpArmEnqueue(
-                    gate4agent_c2_client::C2ControlError::QueueFull,
+                    hatchery_c2_client::C2ControlError::QueueFull,
                 ),
             )),
             CoordinatorSpawnResult::Failed,
@@ -16677,7 +16677,7 @@ mod tests {
         assert!(matches!(
             dispatching_start_error_result(&HarnessRuntimeError::C2(
                 HarnessC2Error::SpawnEnqueue(
-                    gate4agent_c2_client::C2ControlError::Closed,
+                    hatchery_c2_client::C2ControlError::Closed,
                 ),
             )),
             CoordinatorSpawnResult::Failed,
@@ -16697,7 +16697,7 @@ mod tests {
         // not a genuine lost reply.
         assert!(matches!(
             harness_mcp_arm_finish_result(&HarnessC2Error::HarnessMcpTransport(
-                gate4agent_c2_client::C2ControlError::Protocol(
+                hatchery_c2_client::C2ControlError::Protocol(
                     "harness MCP read proxy capability was not negotiated".to_owned(),
                 ),
             )),
@@ -16705,15 +16705,15 @@ mod tests {
         ));
         assert!(matches!(
             harness_mcp_arm_finish_result(&HarnessC2Error::HarnessMcpTransport(
-                gate4agent_c2_client::C2ControlError::Closed,
+                hatchery_c2_client::C2ControlError::Closed,
             )),
             CoordinatorSpawnResult::OutcomeUnknown(_),
         ));
         // A named connection loss stays OutcomeUnknown and its cause
         // survives into the reason text `apply_spawn_result` logs.
         match harness_mcp_arm_finish_result(&HarnessC2Error::HarnessMcpTransport(
-            gate4agent_c2_client::C2ControlError::ConnectionLost {
-                reason: gate4agent_c2_client::C2ConnectionLossReason::PipeClosed,
+            hatchery_c2_client::C2ControlError::ConnectionLost {
+                reason: hatchery_c2_client::C2ConnectionLossReason::PipeClosed,
             },
         )) {
             CoordinatorSpawnResult::OutcomeUnknown(Some(reason)) => {
@@ -16820,7 +16820,7 @@ mod tests {
         assert!(workers.try_start());
         assert_eq!(
             map_native_history_error(HarnessC2Error::NativeHistoryEnqueue(
-                gate4agent_c2_client::C2ControlError::QueueFull,
+                hatchery_c2_client::C2ControlError::QueueFull,
             )),
             HarnessOperatorHostErrorV1::Busy,
         );
@@ -16860,7 +16860,7 @@ mod tests {
         assert_eq!(HOST_RUN_READ_RESPONSE_DEADLINE, Duration::from_secs(12));
         assert_eq!(
             map_run_read_error(HarnessC2Error::RunReadEnqueue(
-                gate4agent_c2_client::C2ControlError::QueueFull,
+                hatchery_c2_client::C2ControlError::QueueFull,
             )),
             HarnessOperatorHostErrorV1::Busy,
         );
@@ -16907,7 +16907,7 @@ mod tests {
         );
         assert_eq!(
             map_node_workspace_read_error(HarnessC2Error::NodeWorkspaceReadEnqueue(
-                gate4agent_c2_client::C2ControlError::QueueFull,
+                hatchery_c2_client::C2ControlError::QueueFull,
             )),
             HarnessOperatorHostErrorV1::Busy,
         );
@@ -16965,7 +16965,7 @@ mod tests {
         );
         assert_eq!(
             map_node_workspace_write_error(HarnessC2Error::NodeWorkspaceWriteEnqueue(
-                gate4agent_c2_client::C2ControlError::QueueFull,
+                hatchery_c2_client::C2ControlError::QueueFull,
             )),
             HarnessOperatorHostErrorV1::Busy,
         );
@@ -17034,7 +17034,7 @@ mod tests {
 
         assert_eq!(
             map_session_spawn_error(HarnessC2Error::SpawnEnqueue(
-                gate4agent_c2_client::C2ControlError::QueueFull,
+                hatchery_c2_client::C2ControlError::QueueFull,
             )),
             HarnessOperatorHostErrorV1::Busy,
         );
@@ -17150,7 +17150,7 @@ mod tests {
 
         assert_eq!(
             map_session_control_error(HarnessC2Error::SessionControlEnqueue(
-                gate4agent_c2_client::C2ControlError::QueueFull,
+                hatchery_c2_client::C2ControlError::QueueFull,
             )),
             HarnessOperatorHostErrorV1::Busy,
         );

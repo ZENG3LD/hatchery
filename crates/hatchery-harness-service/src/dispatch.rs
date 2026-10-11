@@ -7,7 +7,7 @@ use hatchery_harness_protocol::{
     HarnessSessionIdentityV1, HarnessTaskId, HarnessTaskStateV1, HarnessTaskV1,
     HarnessWorktreeIntentV1, SessionGrantId,
 };
-use gate4agent_c2_protocol::{C2ControlEventKind, C2NodeEvent, RoutedNodeEvent};
+use hatchery_c2_protocol::{C2ControlEventKind, C2NodeEvent, RoutedNodeEvent};
 use gate4agent_catalog::{approval_level_resolution, ApprovalLevelResolution};
 use gate4agent_node_protocol::{
     DeliveryComponentKindV2, DeliveryRelativePathV2, DeliveryScopeV2,
@@ -777,7 +777,7 @@ fn approval_level_slug(level: ApprovalLevel) -> &'static str {
 ///   `harness_mcp: GrantBound`. Reaches the door for a provider whose ACP
 ///   transport has no working permission mechanism at all (kimi) by
 ///   relying on the same PTY-env overlay the Node already installs for
-///   `SessionMode::Pty` (`gate4agent-node::server`).
+///   `SessionMode::Pty` (`hatchery-node::server`).
 ///
 /// `grant` stays `Operator` for all three shapes: `is_ordinary_dispatch`
 /// admits `GrantBound` exactly when paired with `Operator`
@@ -791,12 +791,12 @@ fn approval_level_slug(level: ApprovalLevel) -> &'static str {
 ///
 /// - `Plain` and `HarnessMcpPty` (both `Pty`): deliberately `Clear`, not
 ///   `TaskBody`. The Node's `ProviderRuntimeRequirement` derivation
-///   (`gate4agent-node::provider_runtime`) treats any resolved prompt in
+///   (`hatchery-node::provider_runtime`) treats any resolved prompt in
 ///   `Pty` mode as `SemanticPrompt`, which only admits a provider whose
 ///   runtime probe verifies semantic/structured-prompt readiness -- a raw
 ///   PTY-only provider (no semantic adapter) is rejected outright and the
 ///   spawn never starts. The admission is keyed on `mode` alone
-///   (`gate4agent-node::server`'s `(SessionMode::Pty, has_prompt)` match),
+///   (`hatchery-node::server`'s `(SessionMode::Pty, has_prompt)` match),
 ///   never on `harness_mcp`, so the door sibling carries exactly the same
 ///   admission risk as the plain plan it shares a transport with. The
 ///   advertised runtime inventory (`HarnessRuntimeSpawnProfileSummaryV1`)
@@ -812,7 +812,7 @@ fn approval_level_slug(level: ApprovalLevel) -> &'static str {
 ///   admission path to carry `TaskBody` safely.
 /// - `HarnessMcpAcp` (`Acp`): `TaskBody`. Under `Acp` mode the Node
 ///   resolves the SAME `ProviderRuntimeRequirement::Acp` regardless of
-///   whether a prompt is present (`gate4agent-node::server::
+///   whether a prompt is present (`hatchery-node::server::
 ///   spawn_session_with_deadline`'s `(SessionMode::Acp, _)` arm), so
 ///   `TaskBody` carries no equivalent admission risk here -- and it is the
 ///   whole point of the sibling: an ACP session dispatched with harness MCP

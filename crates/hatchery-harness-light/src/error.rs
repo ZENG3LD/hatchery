@@ -11,7 +11,7 @@
 //! this is a deliberate, documented light-local reimplementation rather than
 //! a promotion).
 
-use gate4agent_c2_client::C2ControlError;
+use hatchery_c2_client::C2ControlError;
 use hatchery_harness_api::{
     HarnessOperatorApiError, HarnessOperatorHostErrorV1, HarnessRuntimeTransportV1,
 };
@@ -29,7 +29,7 @@ pub enum HarnessLightError {
     C2Connect(C2ControlError),
     #[cfg(unix)]
     #[error("harness-light failed to bring up the HQ WireGuard client: {0}")]
-    WireGuard(gate4agent_c2_client::HqWgClientError),
+    WireGuard(hatchery_c2_client::HqWgClientError),
     #[error("harness-light failed to mint the operator credential: {0}")]
     Credential(#[from] CredentialMintError),
     #[error("harness-light failed to bind the operator endpoint: {0}")]

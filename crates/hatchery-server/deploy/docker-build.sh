@@ -11,5 +11,4 @@ copy_tree() {
   tar -C "$1" --exclude target --exclude .git --exclude node_modules -cf - . | tar -C "$2" -xf -
 }
 copy_tree "$REPO" "$STAGE/hatchery"
-copy_tree "$WS/gate4agent" "$STAGE/gate4agent"
 docker build -f "$STAGE/hatchery/crates/hatchery-server/deploy/Dockerfile" -t hatchery-server:latest "$@" "$STAGE"

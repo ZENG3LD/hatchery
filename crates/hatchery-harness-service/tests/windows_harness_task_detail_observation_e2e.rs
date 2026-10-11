@@ -8,9 +8,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use gate4agent_c2::protocol::NodeTransportState;
-use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use gate4agent_c2_client::C2Client;
+use hatchery_c2::protocol::NodeTransportState;
+use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use hatchery_c2_client::C2Client;
 use hatchery_harness_api::{
     ActivityClassV1, ActivityStateV1, FeatureObservationStateV1,
     HarnessOperatorCredential, HarnessOperatorMutationOutcomeV1,
@@ -39,11 +39,11 @@ use hatchery_harness_service::{
     },
     HarnessService,
 };
-use gate4agent_node::protocol::{
+use hatchery_node::protocol::{
     NodeId, SessionMode, SpawnProfileDefaults, SpawnProfileId,
     SpawnProfileRevision, WorkspaceId,
 };
-use gate4agent_node::{NodeServer, NodeServerConfig, SpawnProfileRegistry, WorkspaceConfig};
+use hatchery_node::{NodeServer, NodeServerConfig, SpawnProfileRegistry, WorkspaceConfig};
 use hatchery_observation_service::ObservationService;
 use gate4agent_types::{AgentId, TerminalSize};
 use tokio::time::{sleep, timeout};

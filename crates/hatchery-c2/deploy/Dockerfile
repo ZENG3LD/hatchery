@@ -1,12 +1,9 @@
-# C2 as a container. Build context: a directory with these siblings
-#   hatchery/   gate4agent/
-# (gate4agent is resolved through the workspace [patch.crates-io] until the
-# publish step). `deploy/docker-build.sh` stages the context.
+# C2 as a container. Build context: a directory holding the hatchery checkout as
+# `hatchery/`; dependencies resolve from crates.io. `deploy/docker-build.sh` stages it.
 # No token or key is baked into the image; pass them at run time.
 FROM rust:bookworm AS build
 WORKDIR /src
 COPY hatchery /src/hatchery
-COPY gate4agent /src/gate4agent
 WORKDIR /src/hatchery
 RUN cargo build --locked --release -p hatchery-c2 -p hatchery-c2-client
 

@@ -27,6 +27,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use thiserror::Error;
 
+mod memory_door;
+pub use memory_door::{MemoryDoor, MEMORY_START_TOOL};
+
 pub const MCP_PROTOCOL_VERSION_CURRENT: &str = "2025-11-25";
 pub const MCP_PROTOCOL_VERSION_COMPATIBLE: &str = "2025-06-18";
 pub const HARNESS_MCP_ENDPOINT_ENV: &str = "GATE4AGENT_HARNESS_READ_ENDPOINT";
@@ -265,12 +268,21 @@ impl From<LocalSessionHarnessMcpError> for HarnessMcpBackendError {
 enum McpState { AwaitInitialize, AwaitInitialized, Ready }
 
 pub struct HarnessMcpServer<B> {
+    memory_door: Option<MemoryDoor>,
     backend: B,
     state: McpState,
 }
 
 impl<B: HarnessMcpBackend> HarnessMcpServer<B> {
-    pub fn new(backend: B) -> Self { Self { backend, state: McpState::AwaitInitialize } }
+    pub fn new(backend: B) -> Self {
+        Self { backend, state: McpState::AwaitInitialize, memory_door: MemoryDoor::from_env() }
+    }
+
+    /// Replace the memory door (tests, embedders).
+    pub fn with_memory_door(mut self, door: Option<MemoryDoor>) -> Self {
+        self.memory_door = door;
+        self
+    }
 
     pub fn handle_line(&mut self, line: &[u8]) -> Option<Vec<u8>> {
         let response = self.handle_line_inner(line);
@@ -382,10 +394,13 @@ impl<B: HarnessMcpBackend> HarnessMcpServer<B> {
         if context.validate().is_err() {
             return rpc_error(id, -32603, "harness read unavailable");
         }
-        let tools = tool_definitions()
+        let mut tools = tool_definitions()
             .into_iter()
             .filter(|tool| context.allowed_tool_ids.iter().any(|allowed| allowed == tool["name"].as_str().unwrap_or_default()))
             .collect::<Vec<_>>();
+        if self.memory_door.is_some() {
+            tools.push(MemoryDoor::tool_definition());
+        }
         rpc_result(id, json!({ "tools": tools }))
     }
 
@@ -408,6 +423,18 @@ impl<B: HarnessMcpBackend> HarnessMcpServer<B> {
             return rpc_error(id, -32603, "harness read unavailable");
         }
         let name = strip_server_prefix(&params.name);
+        if name == MEMORY_START_TOOL {
+            let Some(door) = self.memory_door.as_ref() else {
+                return rpc_error(id, -32601, "method not found");
+            };
+            return match door.start() {
+                Ok(started) => rpc_result(id, json!({
+                    "content": [{ "type": "text", "text": started.to_string() }],
+                    "isError": false
+                })),
+                Err(()) => tool_error(id, "memory unavailable"),
+            };
+        }
         if !context.allowed_tool_ids.iter().any(|allowed| allowed == name)
             || !(HARNESS_READ_TOOL_IDS.contains(&name) || HARNESS_WRITE_TOOL_IDS.contains(&name))
         {
@@ -1223,6 +1250,38 @@ mod tests {
         let encoded = serde_json::to_vec(&value).unwrap();
         let response = server.handle_line(&encoded).expect("response");
         serde_json::from_slice(response.strip_suffix(b"\n").unwrap()).unwrap()
+    }
+
+    #[test]
+    fn memory_door_tool_is_listed_and_callable_only_when_configured() {
+        use std::io::{Read, Write};
+        // Without a door the tool is neither listed nor callable.
+        let mut plain = HarnessMcpServer::new(fixture()).with_memory_door(None);
+        initialize(&mut plain);
+        let listed = request(&mut plain, json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}));
+        assert!(!listed["result"]["tools"].as_array().unwrap().iter().any(|t| t["name"] == MEMORY_START_TOOL));
+        let denied = request(&mut plain, json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":MEMORY_START_TOOL,"arguments":{}}}));
+        assert_eq!(denied["error"]["code"], -32601);
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let host = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf).unwrap();
+            stream.write_all(b"HTTP/1.1 200 OK\r\n\r\n{\"port\":18201,\"state\":\"running\"}").unwrap();
+        });
+        let door = MemoryDoor::new(addr, "node-token".into());
+        let mut server = HarnessMcpServer::new(fixture()).with_memory_door(door);
+        initialize(&mut server);
+        let listed = request(&mut server, json!({"jsonrpc":"2.0","id":2,"method":"tools/list"}));
+        assert!(listed["result"]["tools"].as_array().unwrap().iter().any(|t| t["name"] == MEMORY_START_TOOL));
+        let called = request(&mut server, json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":MEMORY_START_TOOL,"arguments":{}}}));
+        assert_eq!(called["result"]["isError"], false);
+        let text = called["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("http://127.0.0.1:18201/mcp"), "{text}");
+        assert!(!text.contains("node-token"));
+        host.join().unwrap();
     }
 
     #[test]

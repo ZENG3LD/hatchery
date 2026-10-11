@@ -258,7 +258,7 @@ mod tests {
             "--observation-db",
             "observation.sqlite",
             "--c2-endpoint",
-            r"\\.\pipe\gate4agent-c2",
+            r"\\.\pipe\hatchery-c2",
             "--read-bind",
             "127.0.0.1:0",
         ]

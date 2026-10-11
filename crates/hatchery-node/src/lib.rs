@@ -144,8 +144,10 @@ mod kit_manifest {
             !code.contains("hatchery-tui") && !code.contains("hatchery_tui"),
             "node must not depend on the hatchery TUI"
         );
-        assert!(manifest.contains("path = \"../../../dig2browser\""));
-        assert!(manifest.contains("mail4agent = { version = \"0.4\""));
+        assert!(manifest.contains("dig2browser = { version = \"0.5.3\""));
+        assert!(manifest.contains("mail4agent = { version = \"0.4.8\""));
+        assert!(!manifest.contains("[patch.crates-io]"), "published state has no patch table");
+        assert!(!manifest.contains("../../../"), "no path dependency leaves the workspace");
         assert!(manifest.contains("claude-session-restore = { version = \"0.1.3\""));
         assert!(manifest.contains("codex-session-restore = { version = \"0.1.3\""));
         assert!(manifest.contains("grok-session-restore"));
@@ -197,10 +199,8 @@ mod deploy_artifacts {
         let dockerfile = include_str!("../deploy/node/Dockerfile");
         assert!(dockerfile.contains("cargo build --locked --release -p hatchery-node"));
         assert!(dockerfile.contains("ENTRYPOINT [\"gate4agent-node\"]"));
-        assert!(dockerfile.contains("COPY gate4agent"));
-        assert!(dockerfile.contains("COPY dig2browser"));
         assert!(!dockerfile.contains("COPY mail4agent"));
-        assert!(dockerfile.contains("COPY session-restore"));
+        assert!(!dockerfile.contains("COPY gate4agent"), "crates.io only: no sibling checkouts");
         assert!(
             !dockerfile.contains("GATE4AGENT_NODE_TOKEN"),
             "image must not bake a node token"
@@ -208,10 +208,7 @@ mod deploy_artifacts {
         let build = include_str!("../deploy/node/docker-build.sh");
         assert!(build.contains("docker build"));
         assert!(build.contains("gate4agent-node:kit"));
-        assert!(build.contains("copy_tree \"$WS/gate4agent\""));
-        assert!(build.contains("copy_tree \"$WS/dig2browser\""));
         assert!(!build.contains("copy_tree \"$WS/mail4agent\""));
-        assert!(build.contains("copy_tree \"$WS/session-restore\""));
     }
 
     #[test]

@@ -1,8 +1,8 @@
-use gate4agent_c2_client::{
+use hatchery_c2_client::{
     connect_local_reconnecting, C2ControlError, C2LinkState, C2PendingRequest,
     C2ReconnectingEventReceiver, C2ReconnectingHandle,
 };
-use gate4agent_c2_protocol::{
+use hatchery_c2_protocol::{
     C2GitWorktreeSnapshot, C2ManagedSessionRecord, C2NodeEventEnvelope, C2NodeResponse,
     C2NodeSnapshot, C2Topology, C2WorkspaceInspection, C2WorkspaceSnapshot,
     NodeRoute, NodeTransportState, RoutedNodeEvent,
@@ -1501,7 +1501,7 @@ fn validate_harness_mcp_arm_response(
     expected_reservation_id: &HarnessMcpReservationId,
     expected_activation_digest: &HarnessMcpActivationDigest,
     expected_expires_at_unix_ms: u64,
-    routed: gate4agent_c2_protocol::RoutedNodeResponse,
+    routed: hatchery_c2_protocol::RoutedNodeResponse,
 ) -> Result<(), HarnessC2Error> {
     if routed.node_id != route.node_id
         || routed.incarnation_id != route.expected_incarnation_id
@@ -1873,16 +1873,16 @@ fn build_observation_resync(
         return Err(HarnessC2Error::InvalidObservationResync);
     }
     let lifecycle_control_events = events.iter()
-        .filter(|event| matches!(event.event, gate4agent_c2_protocol::C2NodeEvent::Control { .. }))
+        .filter(|event| matches!(event.event, hatchery_c2_protocol::C2NodeEvent::Control { .. }))
         .cloned()
         .collect();
     let events = events.into_iter()
         .filter(|event| {
             matches!(
                 event.event,
-                gate4agent_c2_protocol::C2NodeEvent::Control { .. }
-                    | gate4agent_c2_protocol::C2NodeEvent::AgentStream { .. }
-                    | gate4agent_c2_protocol::C2NodeEvent::SessionRecordHistorySummarized { .. }
+                hatchery_c2_protocol::C2NodeEvent::Control { .. }
+                    | hatchery_c2_protocol::C2NodeEvent::AgentStream { .. }
+                    | hatchery_c2_protocol::C2NodeEvent::SessionRecordHistorySummarized { .. }
             )
         })
         .collect();
@@ -4928,7 +4928,7 @@ impl PendingManagedWorktreeSpawnDispatch {
 
 fn correlate_spawn_response(
     correlation: SpawnResponseCorrelation,
-    routed: Result<gate4agent_c2_protocol::RoutedNodeResponse, C2ControlError>,
+    routed: Result<hatchery_c2_protocol::RoutedNodeResponse, C2ControlError>,
 ) -> Result<SpawnDispatchOutcome, HarnessC2Error> {
         let routed = match routed {
             Ok(response) => response,
@@ -4998,7 +4998,7 @@ fn correlate_spawn_response(
 
 fn correlate_managed_worktree_spawn_response(
     correlation: ManagedWorktreeSpawnResponseCorrelation,
-    routed: Result<gate4agent_c2_protocol::RoutedNodeResponse, C2ControlError>,
+    routed: Result<hatchery_c2_protocol::RoutedNodeResponse, C2ControlError>,
 ) -> Result<ManagedWorktreeSpawnDispatchOutcome, HarnessC2Error> {
     let routed = match routed {
         Ok(response) => response,
@@ -6439,7 +6439,7 @@ impl HarnessC2Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gate4agent_c2_protocol::C2TopologyNode;
+    use hatchery_c2_protocol::C2TopologyNode;
     use gate4agent_node_protocol::{
         CapabilityId, ContextPackLineageReceipt, HostDirectoryEntry, NodeIncarnationId,
         ResolvedBundleReceipt, ResolvedContextPackReceipt,
@@ -6480,7 +6480,7 @@ mod tests {
         C2TopologyNode {
             node_id: NodeId::new(node_id).unwrap(),
             endpoint: format!(r"\\.\pipe\{node_id}"),
-            relay_route: gate4agent_c2_protocol::C2RelayRoute::LocalIpc,
+            relay_route: hatchery_c2_protocol::C2RelayRoute::LocalIpc,
             transport,
             current_incarnation_id: incarnation,
             provider_contracts: Vec::new(),
@@ -6539,7 +6539,7 @@ mod tests {
         with_bundle: bool,
         with_context: bool,
         with_harness_mcp: bool,
-    ) -> (SpawnResponseCorrelation, gate4agent_c2_protocol::RoutedNodeResponse) {
+    ) -> (SpawnResponseCorrelation, hatchery_c2_protocol::RoutedNodeResponse) {
         let mut spec = explicit_spec();
         let bundle = with_bundle.then(|| ResolvedBundleReceipt {
             id: SpawnBundleId::new("bundle-specialized").unwrap(),
@@ -6648,7 +6648,7 @@ mod tests {
                 expected_environment_profile: None,
                 expected_proxy,
             },
-            gate4agent_c2_protocol::RoutedNodeResponse {
+            hatchery_c2_protocol::RoutedNodeResponse {
                 node_id: route.node_id,
                 incarnation_id: route.expected_incarnation_id,
                 response: Ok(response),
@@ -6712,7 +6712,7 @@ mod tests {
     ) -> (
         PreparedManagedWorktreeSpawnDispatch,
         ManagedWorktreeSpawnResponseCorrelation,
-        gate4agent_c2_protocol::RoutedNodeResponse,
+        hatchery_c2_protocol::RoutedNodeResponse,
     ) {
         let mut spec = explicit_spec();
         spec.target.worktree_id = None;
@@ -6787,7 +6787,7 @@ mod tests {
                 },
             },
         );
-        let routed = gate4agent_c2_protocol::RoutedNodeResponse {
+        let routed = hatchery_c2_protocol::RoutedNodeResponse {
             node_id: route.node_id,
             incarnation_id: route.expected_incarnation_id,
             response: Ok(C2NodeResponse::ManagedWorktreeSpawnAccepted {
@@ -6984,7 +6984,7 @@ mod tests {
             expected_environment_profile: None,
             expected_proxy: None,
         };
-        let routed = gate4agent_c2_protocol::RoutedNodeResponse {
+        let routed = hatchery_c2_protocol::RoutedNodeResponse {
             node_id: route.node_id,
             incarnation_id: route.expected_incarnation_id,
             response: Ok(C2NodeResponse::SpawnSpecAccepted { receipt }),
@@ -7105,7 +7105,7 @@ mod tests {
             "sha256:{}",
             "b".repeat(64),
         )).unwrap();
-        let exact = gate4agent_c2_protocol::RoutedNodeResponse {
+        let exact = hatchery_c2_protocol::RoutedNodeResponse {
             node_id: route.node_id.clone(),
             incarnation_id: route.expected_incarnation_id,
             response: Ok(C2NodeResponse::Armed {
@@ -7731,7 +7731,7 @@ mod tests {
         };
         let control = |sequence, kind| C2NodeEventEnvelope {
             sequence,
-            event: gate4agent_c2_protocol::C2NodeEvent::Control {
+            event: hatchery_c2_protocol::C2NodeEvent::Control {
                 address: SessionAddress {
                     workspace_id: WorkspaceId::new("primary").unwrap(),
                     session: SessionKey {
@@ -7739,7 +7739,7 @@ mod tests {
                         generation: SessionGeneration(1),
                     },
                 },
-                event: gate4agent_c2_protocol::C2ControlEvent {
+                event: hatchery_c2_protocol::C2ControlEvent {
                     sequence,
                     command_id: None,
                     instance_id: AgentInstanceId(7),
@@ -7756,16 +7756,16 @@ mod tests {
             5,
             observation_snapshot(&route.node_id),
             vec![
-                control(5, gate4agent_c2_protocol::C2ControlEventKind::Running),
+                control(5, hatchery_c2_protocol::C2ControlEventKind::Running),
                 C2NodeEventEnvelope {
                     sequence: 6,
-                    event: gate4agent_c2_protocol::C2NodeEvent::WorkspaceRemoved {
+                    event: hatchery_c2_protocol::C2NodeEvent::WorkspaceRemoved {
                         workspace_id: WorkspaceId::new("old").unwrap(),
                     },
                 },
                 control(
                     7,
-                    gate4agent_c2_protocol::C2ControlEventKind::Exited {
+                    hatchery_c2_protocol::C2ControlEventKind::Exited {
                         exit_code: Some(0),
                         forced: false,
                     },
@@ -8066,7 +8066,7 @@ mod tests {
                 kind: WorkspaceEntryKind::File,
             }],
             tree_truncated: false,
-            git: gate4agent_c2_protocol::C2GitSnapshot {
+            git: hatchery_c2_protocol::C2GitSnapshot {
                 is_repository: true,
                 branch: Some("main".to_owned()),
                 status: vec![
@@ -8084,7 +8084,7 @@ mod tests {
                     },
                 ],
                 recent_commits: Vec::new(),
-                worktrees: vec![gate4agent_c2_protocol::C2GitWorktreeSnapshot {
+                worktrees: vec![hatchery_c2_protocol::C2GitWorktreeSnapshot {
                     path: OpaqueHostPath::utf8(canary.to_owned()).unwrap(),
                     head: "0".repeat(40),
                     branch: Some("main".to_owned()),
@@ -8268,7 +8268,7 @@ mod tests {
                 kind: WorkspaceEntryKind::File,
             }],
             tree_truncated: false,
-            git: gate4agent_c2_protocol::C2GitSnapshot {
+            git: hatchery_c2_protocol::C2GitSnapshot {
                 is_repository: true,
                 branch: Some("main".to_owned()),
                 status: Vec::new(),
@@ -8298,7 +8298,7 @@ mod tests {
                 workspace_id: WorkspaceId::new("workspace-b").unwrap(),
                 entries: Vec::new(),
                 tree_truncated: false,
-                git: gate4agent_c2_protocol::C2GitSnapshot {
+                git: hatchery_c2_protocol::C2GitSnapshot {
                     is_repository: false,
                     branch: None,
                     status: Vec::new(),

@@ -563,6 +563,8 @@ mod tests {
         assert_eq!(explicit_history_config(Vec::new()).unwrap(), None);
     }
 
+    // The sample root is a Windows drive path; parsing it on unix exits the process.
+    #[cfg(windows)]
     #[test]
     fn explicit_history_root_remains_the_only_history_authority() {
         let root =

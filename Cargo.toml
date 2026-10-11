@@ -27,23 +27,12 @@ members = [
     "crates/hatchery-c2-protocol",
     "crates/hatchery-c2-client",
     "crates/hatchery-c2",
+    "crates/hatchery-node",
+    "crates/hatchery-server",
 ]
-# hatchery-node is its own workspace: its dig2browser/mail4agent stack pins a
-# different native sqlite than the harness crates (cargo `links` conflict).
-exclude = ["crates/hatchery-node", "crates/hatchery-server"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
-
-# Local preparation only: HQ WireGuard client dial lives in the gate4agent
-# tree. Do not publish. Versions stay 0.4.8.
-[patch.crates-io]
-gate4agent-build-stamp = { path = "../gate4agent/crates/gate4agent-build-stamp" }
-gate4agent-c2-client = { path = "../gate4agent/crates/gate4agent-c2-client" }
-gate4agent-c2-protocol = { path = "../gate4agent/crates/gate4agent-c2-protocol" }
-gate4agent-node-protocol = { path = "../gate4agent/crates/gate4agent-node-protocol" }
-gate4agent-node-wire = { path = "../gate4agent/crates/gate4agent-node-wire" }
-gate4agent-types = { path = "../gate4agent/crates/gate4agent-types" }

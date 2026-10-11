@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-observation-service"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
@@ -11,13 +11,13 @@ description = "Single-writer durable authority combining the gate4agent observat
 name = "hatchery_observation_service"
 
 [dependencies]
-hatchery-observation-api = { version = "0.1.0", path = "../hatchery-observation-api" }
-hatchery-observation-engine = { version = "0.1.0", path = "../hatchery-observation-engine" }
-hatchery-observation-store = { version = "0.1.0", path = "../hatchery-observation-store" }
+hatchery-observation-api = { version = "0.2.0", path = "../hatchery-observation-api" }
+hatchery-observation-engine = { version = "0.2.0", path = "../hatchery-observation-engine" }
+hatchery-observation-store = { version = "0.2.0", path = "../hatchery-observation-store" }
 thiserror = "2"
 
 [dev-dependencies]
-gate4agent-node-protocol = { version = "0.4.8" }
-hatchery-observation-protocol = { version = "0.1.0", path = "../hatchery-observation-protocol" }
-gate4agent-types = { version = "0.4.8" }
-rusqlite = { version = "0.31", features = ["bundled"] }
+gate4agent-node-protocol = { version = "0.5.0" }
+hatchery-observation-protocol = { version = "0.2.0", path = "../hatchery-observation-protocol" }
+gate4agent-types = { version = "0.5.0" }
+rusqlite = { version = "0.36", features = ["bundled"] }

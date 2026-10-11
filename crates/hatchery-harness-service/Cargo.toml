@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-harness-service"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
@@ -11,27 +11,24 @@ description = "Single-writer SQLite authority and operator host for the hatchery
 name = "hatchery_harness_service"
 
 [dependencies]
-gate4agent-c2-client = { version = "0.4.8" }
-gate4agent-c2-protocol = { version = "0.4.8" }
-gate4agent-catalog = { version = "0.4.8" }
-hatchery-harness-api = { version = "0.1.0", path = "../hatchery-harness-api" }
-hatchery-harness-engine = { version = "0.1.0", path = "../hatchery-harness-engine" }
-hatchery-harness-delivery = { version = "0.1.0", path = "../hatchery-harness-delivery" }
-hatchery-harness-protocol = { version = "0.1.0", path = "../hatchery-harness-protocol" }
-gate4agent-node-protocol = { version = "0.4.8" }
-gate4agent-node-wire = { version = "0.4.8" }
-hatchery-observation-api = { version = "0.1.0", path = "../hatchery-observation-api" }
-hatchery-observation-engine = { version = "0.1.0", path = "../hatchery-observation-engine" }
-hatchery-observation-protocol = { version = "0.1.0", path = "../hatchery-observation-protocol" }
-hatchery-observation-service = { version = "0.1.0", path = "../hatchery-observation-service" }
-# HQ messenger surface: harness consumes mail4agent as a client dependency
-# (extraction plan mailbox-service-extraction-…-2026-09-16).
-# Real client is crates.io 0.1.2 (0.1.0 was a placeholder; 0.1.1 of the
-# mail4agent package was already taken). No sibling path, no git pin.
-mail4agent-client = "0.1.2"
-mail4agent-api = "0.1.2"
-gate4agent-types = { version = "0.4.8" }
-rusqlite = { version = "0.31", features = ["bundled"] }
+hatchery-c2-client = { version = "0.2.0", path = "../hatchery-c2-client" }
+hatchery-c2-protocol = { version = "0.2.0", path = "../hatchery-c2-protocol" }
+gate4agent-catalog = { version = "0.5.0" }
+hatchery-harness-api = { version = "0.2.0", path = "../hatchery-harness-api" }
+hatchery-harness-engine = { version = "0.2.0", path = "../hatchery-harness-engine" }
+hatchery-harness-delivery = { version = "0.2.0", path = "../hatchery-harness-delivery" }
+hatchery-harness-protocol = { version = "0.2.0", path = "../hatchery-harness-protocol" }
+gate4agent-node-protocol = { version = "0.5.0" }
+gate4agent-node-wire = { version = "0.5.0" }
+hatchery-observation-api = { version = "0.2.0", path = "../hatchery-observation-api" }
+hatchery-observation-engine = { version = "0.2.0", path = "../hatchery-observation-engine" }
+hatchery-observation-protocol = { version = "0.2.0", path = "../hatchery-observation-protocol" }
+hatchery-observation-service = { version = "0.2.0", path = "../hatchery-observation-service" }
+# HQ messenger surface: the harness consumes mail4agent as a client dependency.
+mail4agent-client = "0.4.8"
+mail4agent-api = "0.4.8"
+gate4agent-types = { version = "0.5.0" }
+rusqlite = { version = "0.36", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -41,9 +38,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ring = "=0.17.14"
 
 [dev-dependencies]
-gate4agent-c2 = { version = "0.4.8" }
-hatchery-harness-client = { version = "0.1.0", path = "../hatchery-harness-client" }
-gate4agent-node = { version = "0.4.8", features = ["fixture"] }
+hatchery-c2 = { version = "0.2.0", path = "../hatchery-c2" }
+hatchery-harness-client = { version = "0.2.0", path = "../hatchery-harness-client" }
+hatchery-node = { version = "0.2.0", path = "../hatchery-node", features = ["fixture"] }
 ring = "=0.17.14"
 
 [target.'cfg(windows)'.dev-dependencies]

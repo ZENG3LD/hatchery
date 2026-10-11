@@ -12,7 +12,7 @@ const C2_TOKEN_ENV: &str = "GATE4AGENT_C2_TOKEN";
 enum LightAttach {
     Unix(String),
     #[cfg(unix)]
-    WireGuard(gate4agent_c2_client::HqWgClientConfig),
+    WireGuard(hatchery_c2_client::HqWgClientConfig),
 }
 
 struct LightStartup {
@@ -210,8 +210,8 @@ fn read_token(read_secret: &mut impl FnMut(&str) -> Result<String, String>) -> R
 }
 
 #[cfg(unix)]
-fn wg_config(wg: WgCli) -> Result<gate4agent_c2_client::HqWgClientConfig, String> {
-    use gate4agent_c2_client::{HqWgAllowedIp, HqWgClientConfig, HqWgPeer};
+fn wg_config(wg: WgCli) -> Result<hatchery_c2_client::HqWgClientConfig, String> {
+    use hatchery_c2_client::{HqWgAllowedIp, HqWgClientConfig, HqWgPeer};
     use std::net::IpAddr;
     use std::path::PathBuf;
 
@@ -397,14 +397,14 @@ mod tests {
             &[
                 "hatchery-tui-light",
                 "--c2-control",
-                r"\\.\pipe\gate4agent-c2",
+                r"\\.\pipe\hatchery-c2",
                 "--style",
                 "gate",
             ],
             &[(C2_TOKEN_ENV, "c2-token")],
         ).unwrap();
         match &startup.attach {
-            LightAttach::Unix(endpoint) => assert_eq!(endpoint, r"\\.\pipe\gate4agent-c2"),
+            LightAttach::Unix(endpoint) => assert_eq!(endpoint, r"\\.\pipe\hatchery-c2"),
             #[cfg(unix)]
             LightAttach::WireGuard(_) => panic!("unix mode expected"),
         }
@@ -456,7 +456,7 @@ mod tests {
         let allowed = parse(&allowed, &[(C2_TOKEN_ENV, "token")]).err().unwrap();
         assert_eq!(allowed, "HQ WireGuard allowed IPs must be only the single C2 tunnel address");
 
-        let both = ["hatchery-tui-light", "--c2-control", "/tmp/gate4agent-c2.sock", "--wg-client"];
+        let both = ["hatchery-tui-light", "--c2-control", "/tmp/hatchery-c2.sock", "--wg-client"];
         let both = parse(&both, &[]).err().unwrap();
         assert_eq!(both, "unix --c2-control and --wg-client are alternatives");
     }
@@ -467,7 +467,7 @@ mod tests {
             &[
                 "hatchery-tui-light",
                 "--c2-control",
-                r"\\.\pipe\gate4agent-c2",
+                r"\\.\pipe\hatchery-c2",
                 "--cwd",
                 r"C:\work",
             ],

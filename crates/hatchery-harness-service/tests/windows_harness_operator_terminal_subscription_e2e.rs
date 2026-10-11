@@ -13,7 +13,7 @@
 //!
 //! Asserts two things: the pushed `TerminalFrame` carries the exact session
 //! and real PTY bytes (the fixture agent's own `fixture-ready>` banner, the
-//! same stable checkpoint `gate4agent-c2`'s own
+//! same stable checkpoint `hatchery-c2`'s own
 //! `windows_fixture_terminal_frame_push_e2e.rs` already uses to prove a real
 //! terminal frame reaches a downstream consumer), and that a SECOND,
 //! ordinary `TerminalRead` poll against the same session -- the fallback
@@ -28,8 +28,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use gate4agent_c2_client::C2Client;
+use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use hatchery_c2_client::C2Client;
 use hatchery_harness_api::{
     HarnessOperatorCredential, HarnessOperatorTerminalEventV1, HARNESS_TERMINAL_PAGE_LIMIT_MAX,
 };
@@ -39,10 +39,10 @@ use hatchery_harness_service::{
     runtime::{start_harness_host_with_operator_and_catalogs, HarnessRuntimeCatalogs},
     HarnessService,
 };
-use gate4agent_node::protocol::{
+use hatchery_node::protocol::{
     NodeId, SessionMode, SpawnProfileDefaults, SpawnProfileId, SpawnProfileRevision, WorkspaceId,
 };
-use gate4agent_node::{NodeServer, NodeServerConfig, SpawnProfileRegistry, WorkspaceConfig};
+use hatchery_node::{NodeServer, NodeServerConfig, SpawnProfileRegistry, WorkspaceConfig};
 use hatchery_observation_service::ObservationService;
 use gate4agent_types::{AgentId, TerminalSize};
 use tokio::{
@@ -143,7 +143,7 @@ async fn wait_online(client: &C2Client, node_id: &NodeId) {
     timeout(Duration::from_secs(10), async {
         loop {
             if client.status().await.ok().and_then(|status| status.nodes.get(node_id)
-                .map(|node| node.transport == gate4agent_c2::protocol::NodeTransportState::Online))
+                .map(|node| node.transport == hatchery_c2::protocol::NodeTransportState::Online))
                 == Some(true)
             {
                 break;
@@ -278,7 +278,7 @@ async fn windows_harness_operator_terminal_subscription_pushes_the_rings_newest_
     // operator_event_subscription_e2e.rs`/`windows_harness_operator_session_
     // verbs_e2e.rs` already exercise) -- its scripted `fixture-ready>` banner
     // is the same stable, real-PTY checkpoint `windows_fixture_terminal_
-    // frame_push_e2e.rs` (gate4agent-c2) already uses to prove a real
+    // frame_push_e2e.rs` (hatchery-c2) already uses to prove a real
     // terminal frame reaches a downstream consumer.
     let session = client.spawn_session(
         node_id.as_str().to_owned(),
