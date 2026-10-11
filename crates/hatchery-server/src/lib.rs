@@ -5,6 +5,8 @@ pub mod control;
 pub mod error;
 #[cfg(feature = "harness")]
 pub mod harness;
+#[cfg(feature = "m4a")]
+pub mod m4a;
 pub mod subservice;
 pub mod supervisor;
 
@@ -22,6 +24,13 @@ pub fn build_subservices(config: &ServerConfig) -> Vec<Box<dyn Subservice>> {
         if let Some(bin) = config.harness_bin.clone() {
             services.push(Box::new(harness::HarnessSubservice::new(bin, config.harness_args.clone())));
         }
+    }
+    #[cfg(feature = "m4a")]
+    if config.m4a_enabled {
+        services.push(Box::new(m4a::M4aSubservice::new(
+            &config.data_dir,
+            config.m4a_master_key_var.clone(),
+        )));
     }
     let _ = config;
     services
