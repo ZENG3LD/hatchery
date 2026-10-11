@@ -90,3 +90,19 @@ async fn control_health_open_mutation_needs_bearer() {
 async fn control_refuses_non_loopback_bind() {
     let _ = control::bind("0.0.0.0:0".parse().unwrap()).await;
 }
+
+#[cfg(feature = "memory")]
+#[tokio::test]
+async fn memory_is_registered_but_never_autostarted() {
+    let config = hatchery_server::ServerConfig::resolve(
+        Default::default(),
+        |name| (name == "HATCHERY_SERVER_DATA_DIR").then(|| "/nonexistent-data".to_owned()),
+    )
+    .unwrap();
+    let supervisor = Supervisor::new(hatchery_server::build_subservices(&config));
+    assert!(supervisor.start_autostart().is_empty());
+    let statuses = supervisor.statuses();
+    let memory = statuses.iter().find(|s| s.name == "memory").expect("memory registered");
+    assert_eq!(memory.state, State::Stopped);
+    assert!(memory.port.is_none());
+}

@@ -7,6 +7,8 @@ pub mod error;
 pub mod harness;
 #[cfg(feature = "m4a")]
 pub mod m4a;
+#[cfg(feature = "memory")]
+pub mod memory;
 pub mod subservice;
 pub mod supervisor;
 
@@ -32,6 +34,11 @@ pub fn build_subservices(config: &ServerConfig) -> Vec<Box<dyn Subservice>> {
             config.m4a_master_key_var.clone(),
         )));
     }
+    #[cfg(feature = "memory")]
+    services.push(Box::new(memory::MemorySubservice::new(
+        config.memory_bin.clone(),
+        &config.data_dir,
+    )));
     let _ = config;
     services
 }

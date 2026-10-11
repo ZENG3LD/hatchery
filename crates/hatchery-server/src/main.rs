@@ -25,7 +25,7 @@ async fn main() {
         .unwrap_or_else(|error| fail(&format!("control listener: {error}")));
     tracing::info!("hatchery-server control listening (loopback)");
     let serving = tokio::spawn(control::serve(listener, supervisor.clone(), config.control_token.clone()));
-    let _ = tokio::signal::ctrl_c().await;
+    shutdown_signal().await;
     tracing::info!("shutting down");
     supervisor.stop_all();
     serving.abort();
@@ -34,4 +34,19 @@ async fn main() {
 fn fail(message: &str) -> ! {
     eprintln!("hatchery-server: {message}");
     std::process::exit(2);
+}
+
+#[cfg(unix)]
+async fn shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut term = signal(SignalKind::terminate()).expect("sigterm handler");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = term.recv() => {}
+    }
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
 }
