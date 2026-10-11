@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-bidi-client"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 license = "MIT"
 
@@ -9,6 +9,7 @@ repository = "https://github.com/ZENG3LD/hatchery"
 
 [dependencies]
 futures-util = "0.3"
+sha2 = "0.10"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
 tokio-tungstenite = "0.26"
 

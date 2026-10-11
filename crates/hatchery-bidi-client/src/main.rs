@@ -13,6 +13,8 @@ async fn main() {
     let mut after = None;
     let mut clock = None;
     let mut min_frames = 5usize;
+    let mut steps_raw: Option<String> = None;
+    let mut out_dir: Option<PathBuf> = None;
     let mut clicks: Vec<(f64, f64, MouseButton)> = Vec::new();
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -28,10 +30,12 @@ async fn main() {
                     .parse()
                     .unwrap_or_else(|_| fail("--min-frames is not an integer"));
             }
+            "--steps" => steps_raw = Some(need("--steps", args.next())),
+            "--out-dir" => out_dir = Some(PathBuf::from(need("--out-dir", args.next()))),
             "--click" => clicks.push(parse_click(&need("--click", args.next()))),
             "--help" | "-h" => {
                 eprintln!(
-                    "hatchery-bidi --c2 http://HOST:PORT --session ID --out FILE [--click X,Y,left]"
+                    "hatchery-bidi --c2 http://HOST:PORT --session ID --out FILE [--click X,Y,left] | --steps 'wait:5;shot:NAME;click:X,Y;scroll:X,Y,DX,DY;key:Enter;text:abc;nav:URL' --out-dir DIR"
                 );
                 return;
             }
@@ -40,6 +44,15 @@ async fn main() {
     }
     let c2 = c2.unwrap_or_else(|| fail("--c2 is required"));
     let session = session.unwrap_or_else(|| fail("--session is required"));
+    if let Some(raw) = steps_raw {
+        let out_dir = out_dir.unwrap_or_else(|| fail("--out-dir is required with --steps"));
+        let steps = hatchery_bidi_client::parse_steps(&raw).unwrap_or_else(|err| fail(&err.to_string()));
+        let log = hatchery_bidi_client::run_steps(&c2, &session, &steps, &out_dir)
+            .await
+            .unwrap_or_else(|err| fail(&err.to_string()));
+        println!("{}", log.join("\n"));
+        return;
+    }
     if before.is_some() || after.is_some() {
         let before = before.unwrap_or_else(|| fail("--before is required"));
         let after = after.unwrap_or_else(|| fail("--after is required"));

@@ -411,3 +411,168 @@ mod tests {
             .collect()
     }
 }
+
+const KIND_KEY: u8 = 2;
+const KIND_SCROLL: u8 = 3;
+const KIND_NAV: u8 = 4;
+const KIND_TEXT: u8 = 5;
+const KEY_PRESS: u8 = 3;
+
+/// Press one key by DOM name (`Enter`, `Tab`, `Escape`, ...) or a single printable character.
+pub fn encode_key(key: &str) -> Result<Vec<u8>, ClientError> {
+    let bytes = key.as_bytes();
+    if bytes.is_empty() || bytes.len() > 64 {
+        return Err(ClientError("key length must be 1..=64".into()));
+    }
+    let mut out = vec![WIRE_VERSION, KIND_KEY, KEY_PRESS, bytes.len() as u8];
+    out.extend_from_slice(bytes);
+    Ok(out)
+}
+
+/// Wheel scroll at (x, y) with CSS-pixel deltas.
+pub fn encode_scroll(x: f64, y: f64, dx: f64, dy: f64) -> Vec<u8> {
+    let mut out = vec![WIRE_VERSION, KIND_SCROLL, 0];
+    for v in [x, y, dx, dy] {
+        out.extend_from_slice(&(v as f32).to_le_bytes());
+    }
+    out
+}
+
+fn encode_text_like(kind: u8, value: &str) -> Result<Vec<u8>, ClientError> {
+    let bytes = value.as_bytes();
+    if bytes.is_empty() || bytes.len() > 2048 {
+        return Err(ClientError("value length must be 1..=2048".into()));
+    }
+    let mut out = vec![WIRE_VERSION, kind];
+    out.extend_from_slice(&(bytes.len() as u16).to_le_bytes());
+    out.extend_from_slice(bytes);
+    Ok(out)
+}
+
+/// Navigate the node's page to a URL.
+pub fn encode_navigate(url: &str) -> Result<Vec<u8>, ClientError> {
+    encode_text_like(KIND_NAV, url)
+}
+
+/// Type text into the focused element, one character at a time.
+pub fn encode_text(text: &str) -> Result<Vec<u8>, ClientError> {
+    encode_text_like(KIND_TEXT, text)
+}
+
+/// One HQ action in a browse session.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Step {
+    /// Keep receiving frames for this many seconds.
+    Wait(f64),
+    /// Write the newest received frame to `<out_dir>/<name>.png` and log its SHA-256.
+    Shot(String),
+    Click(f64, f64),
+    Scroll { x: f64, y: f64, dx: f64, dy: f64 },
+    Key(String),
+    Text(String),
+    Navigate(String),
+}
+
+/// Parse `wait:5;shot:01-name;click:640,360;scroll:640,400,0,500;key:Enter;text:abc;nav:https://...`.
+pub fn parse_steps(raw: &str) -> Result<Vec<Step>, ClientError> {
+    let mut steps = Vec::new();
+    for item in raw.split(';').map(str::trim).filter(|s| !s.is_empty()) {
+        let (kind, value) = item.split_once(':').unwrap_or((item, ""));
+        let nums = |n: usize| -> Result<Vec<f64>, ClientError> {
+            let v: Vec<f64> = value.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+            if v.len() == n { Ok(v) } else { Err(ClientError(format!("{kind} needs {n} numbers"))) }
+        };
+        steps.push(match kind {
+            "wait" => Step::Wait(value.parse().map_err(|_| ClientError("wait needs seconds".into()))?),
+            "shot" => Step::Shot(value.to_owned()),
+            "click" => { let v = nums(2)?; Step::Click(v[0], v[1]) }
+            "scroll" => { let v = nums(4)?; Step::Scroll { x: v[0], y: v[1], dx: v[2], dy: v[3] } }
+            "key" => Step::Key(value.to_owned()),
+            "text" => Step::Text(value.to_owned()),
+            "nav" => Step::Navigate(value.to_owned()),
+            other => return Err(ClientError(format!("unknown step {other}"))),
+        });
+    }
+    Ok(steps)
+}
+
+/// Run steps against a live browse session. Frames that were queued while HQ was away are
+/// skipped before every shot so the PNG shows the page as it is now. Returns one log line per
+/// step (sent byte counts, frame sizes and SHA-256 only).
+pub async fn run_steps(
+    c2_http: &str,
+    session: &str,
+    steps: &[Step],
+    out_dir: &std::path::Path,
+) -> Result<Vec<String>, ClientError> {
+    use sha2::{Digest, Sha256};
+    std::fs::create_dir_all(out_dir).map_err(|e| ClientError(e.to_string()))?;
+    let endpoints = c2_endpoints(c2_http, session)?;
+    open_session(&endpoints.post_url).await?;
+    let mut ws = connect_ws(&endpoints.ws_url).await?;
+    let mut latest: Option<Vec<u8>> = None;
+    let mut log = Vec::new();
+    // Receive until `until`, keeping the newest PNG.
+    async fn absorb(ws: &mut Ws, latest: &mut Option<Vec<u8>>, secs: f64) -> Result<(), ClientError> {
+        let end = tokio::time::Instant::now() + Duration::from_millis((secs * 1000.0) as u64);
+        while let Ok(Some(msg)) = tokio::time::timeout_at(end, ws.next()).await {
+            match msg {
+                Ok(Message::Binary(b)) if b.starts_with(&[0x89, b'P', b'N', b'G']) => *latest = Some(b.to_vec()),
+                Ok(Message::Close(_)) | Err(_) => return Err(ClientError("stream closed".into())),
+                Ok(_) => {}
+            }
+        }
+        Ok(())
+    }
+    for step in steps {
+        let line = match step {
+            Step::Wait(secs) => {
+                absorb(&mut ws, &mut latest, *secs).await?;
+                format!("wait {secs}s")
+            }
+            Step::Shot(name) => {
+                // Drain the backlog quickly, then take what arrives next as the current page.
+                absorb(&mut ws, &mut latest, 1.2).await?;
+                let png = latest.clone().ok_or_else(|| ClientError("no frame received yet".into()))?;
+                let path = out_dir.join(format!("{name}.png"));
+                std::fs::write(&path, &png).map_err(|e| ClientError(e.to_string()))?;
+                let digest: String = Sha256::digest(&png).iter().map(|b| format!("{b:02x}")).collect();
+                format!("shot {name} bytes={} sha256={digest}", png.len())
+            }
+            other => {
+                let (wire, what) = match other {
+                    Step::Click(x, y) => (encode_click(*x, *y, MouseButton::Left), format!("click {x},{y}")),
+                    Step::Scroll { x, y, dx, dy } => (encode_scroll(*x, *y, *dx, *dy), format!("scroll at {x},{y} by {dx},{dy}")),
+                    Step::Key(k) => (encode_key(k)?, format!("key {k}")),
+                    Step::Text(t) => (encode_text(t)?, format!("text {t:?}")),
+                    Step::Navigate(u) => (encode_navigate(u)?, format!("nav {u}")),
+                    _ => unreachable!(),
+                };
+                ws.send(Message::binary(wire.clone()))
+                    .await
+                    .map_err(|e| ClientError(format!("send failed: {e}")))?;
+                let digest: String = Sha256::digest(&wire).iter().map(|b| format!("{b:02x}")).collect();
+                absorb(&mut ws, &mut latest, 0.1).await?;
+                format!("send {what} bytes={} sha256={digest}", wire.len())
+            }
+        };
+        eprintln!("[hatchery-bidi] {line}");
+        log.push(line);
+    }
+    Ok(log)
+}
+
+#[cfg(test)]
+mod browse_tests {
+    use super::*;
+
+    #[test]
+    fn steps_parse_and_encode() {
+        let steps = parse_steps("wait:2;shot:a;click:10,20;scroll:1,2,0,300;key:Enter;text:hi;nav:https://example.org/").unwrap();
+        assert_eq!(steps.len(), 7);
+        assert_eq!(encode_scroll(1.0, 2.0, 0.0, 300.0).len(), 19);
+        assert_eq!(encode_key("Enter").unwrap()[3], 5);
+        assert_eq!(encode_navigate("https://example.org/").unwrap()[1], 4);
+        assert!(parse_steps("click:1").is_err());
+    }
+}
