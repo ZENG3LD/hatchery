@@ -1,18 +1,18 @@
 #![cfg(windows)]
 
-use gate4agent_c2::protocol::{
+use hatchery_c2::protocol::{
     C2NodeEvent, C2NodeResponse, C2RelayFailureCode, NodeId, NodeRoute, NodeTransportState,
     PathStyle, BUILD_STAMP, C2_COMPATIBILITY_METADATA_CAPABILITY,
     C2_OPAQUE_UNIX_PATH_CAPABILITY, C2_REPOSITORY_PATH_CAPABILITY,
     C2_PROVIDER_CONTRACT_MANIFEST_CAPABILITY, C2_WORKSPACE_FILE_READ_CAPABILITY,
     RepositoryPath, WorkspaceFileContent,
 };
-use gate4agent_c2_client::{connect_local, C2Client, C2ControlError};
-use gate4agent_node::protocol::{
+use hatchery_c2_client::{connect_local, C2Client, C2ControlError};
+use hatchery_node::protocol::{
     AgentId, ClientRole, ManagedSessionState, NodeFailureCode, NodeRequest,
     NodeResponse, OpaqueHostPath, SessionMode, SessionTaskTargetV1, WorkspaceId,
 };
-use gate4agent_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
+use hatchery_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
 use gate4agent_node_wire::NamedPipeNodeClient;
 use gate4agent_types::{ProviderSessionIdentity, ProviderSessionKey, TerminalSize};
 use std::os::windows::process::CommandExt;
@@ -93,8 +93,8 @@ fn durable_node_config(
 
 async fn wait_status(
     client: &C2Client,
-    predicate: impl Fn(&gate4agent_c2::protocol::StatusResponse) -> bool,
-) -> gate4agent_c2::protocol::StatusResponse {
+    predicate: impl Fn(&hatchery_c2::protocol::StatusResponse) -> bool,
+) -> hatchery_c2::protocol::StatusResponse {
     timeout(Duration::from_secs(10), async {
         loop {
             if let Ok(status) = client.status().await {
@@ -115,7 +115,7 @@ async fn wait_http(address: std::net::SocketAddr, token: &str) -> C2Client {
     }).await.expect("C2 child did not expose health")
 }
 
-fn route(status: &gate4agent_c2::protocol::StatusResponse, node_id: &NodeId) -> NodeRoute {
+fn route(status: &hatchery_c2::protocol::StatusResponse, node_id: &NodeId) -> NodeRoute {
     NodeRoute {
         node_id: node_id.clone(),
         expected_incarnation_id: status.nodes[node_id].cursor.expect("node cursor").incarnation_id,
@@ -168,7 +168,7 @@ async fn windows_real_two_node_c2_control_relay_routes_commands_events_and_prese
     let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let c2_addr = reservation.local_addr().unwrap();
     drop(reservation);
-    let mut command = Command::new(env!("CARGO_BIN_EXE_gate4agent-c2"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_hatchery-c2"));
     command.args([
         "--api-listen", &c2_addr.to_string(),
         "--control-endpoint", &control_endpoint,
@@ -649,7 +649,7 @@ async fn windows_real_multi_node_task_correlation_survives_restart_and_rejects_s
     let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let c2_addr = reservation.local_addr().unwrap();
     drop(reservation);
-    let mut command = Command::new(env!("CARGO_BIN_EXE_gate4agent-c2"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_hatchery-c2"));
     command.args([
         "--api-listen", &c2_addr.to_string(),
         "--control-endpoint", &control_endpoint,

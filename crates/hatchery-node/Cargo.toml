@@ -89,7 +89,11 @@ fixture = ["dep:gate4agent-testkit", "gate4agent-node-wire/fixture"]
 dig2-station-probe = []
 
 [dev-dependencies]
-tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+# C2 <-> node integration tests (tests/c2_*.rs): C2 and the node are equal peers.
+hatchery-c2 = { path = "../hatchery-c2", version = "0.1.0" }
+hatchery-c2-client = { path = "../hatchery-c2-client", version = "0.1.0" }
+vt100 = "0.16"
 
 # Local preparation only. Every gate4agent crate resolves to the sibling
 # gate4agent checkout (branch migrate/node-core-extract: carries
@@ -99,9 +103,6 @@ tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-threa
 gate4agent-adapters = { path = "../../../gate4agent/crates/gate4agent-adapters" }
 gate4agent-bidi-relay = { path = "../../../gate4agent/crates/gate4agent-bidi-relay" }
 gate4agent-build-stamp = { path = "../../../gate4agent/crates/gate4agent-build-stamp" }
-gate4agent-c2 = { path = "../../../gate4agent/crates/gate4agent-c2" }
-gate4agent-c2-client = { path = "../../../gate4agent/crates/gate4agent-c2-client" }
-gate4agent-c2-protocol = { path = "../../../gate4agent/crates/gate4agent-c2-protocol" }
 gate4agent-catalog = { path = "../../../gate4agent/crates/gate4agent-catalog" }
 gate4agent-engine = { path = "../../../gate4agent/crates/gate4agent-engine" }
 gate4agent-handle = { path = "../../../gate4agent/crates/gate4agent-handle" }

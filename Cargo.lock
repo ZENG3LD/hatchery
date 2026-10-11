@@ -1054,6 +1054,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "hatchery-c2"
+version = "0.1.0"
+dependencies = [
+ "gate4agent-node-protocol",
+ "gate4agent-node-wire",
+ "gate4agent-types",
+ "hatchery-c2-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "hatchery-c2-client"
+version = "0.1.0"
+dependencies = [
+ "gate4agent-node-protocol",
+ "gate4agent-node-wire",
+ "gate4agent-types",
+ "hatchery-c2-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "hatchery-c2-protocol"
+version = "0.1.0"
+dependencies = [
+ "gate4agent-build-stamp",
+ "gate4agent-node-protocol",
+ "gate4agent-types",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "hatchery-harness-api"
 version = "0.1.0"
 dependencies = [

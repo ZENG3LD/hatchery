@@ -1,7 +1,7 @@
 #[cfg(any(windows, unix))]
-use gate4agent_c2::{default_c2_control_endpoint, C2Config, C2NodeConfig, C2Running};
+use hatchery_c2::{default_c2_control_endpoint, C2Config, C2NodeConfig, C2Running};
 #[cfg(any(windows, unix))]
-use gate4agent_c2::protocol::{NodeId, DEFAULT_C2_API_LISTEN, MAX_C2_NODES};
+use hatchery_c2::protocol::{NodeId, DEFAULT_C2_API_LISTEN, MAX_C2_NODES};
 #[cfg(any(windows, unix))]
 use std::collections::BTreeSet;
 

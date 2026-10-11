@@ -1,12 +1,12 @@
 #![cfg(windows)]
 
-use gate4agent_c2::protocol::{
+use hatchery_c2::protocol::{
     C2ManagedSessionRecord, C2NodeResponse, C2NodeSnapshot, C2SessionStatus, NodeId,
     NodeRoute, NodeTransportState, C2_SPAWN_SPEC_DEFAULTS_OVERRIDES_CAPABILITY,
 };
-use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use gate4agent_c2_client::{connect_local, C2Client, C2ControlHandle};
-use gate4agent_node::protocol::{
+use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use hatchery_c2_client::{connect_local, C2Client, C2ControlHandle};
+use hatchery_node::protocol::{
     CapabilityId, ManagedSessionState, NodeFailureCode, NodeRequest, SessionAddress,
     SessionMode, SpawnBundleId, SpawnContextId, SpawnDeadlineMs, SpawnEnvironmentProfileId,
     SpawnFieldProvenance, SpawnIdempotencyKey, SpawnOverride, SpawnOverrides,
@@ -14,7 +14,7 @@ use gate4agent_node::protocol::{
     SpawnRequiredCapabilities, SpawnSpec, SpawnTarget, WorkspaceId,
     SPAWN_RUNTIME_RAW_PTY_LIFECYCLE,
 };
-use gate4agent_node::{NodeServer, NodeServerConfig, SpawnProfileRegistry, WorkspaceConfig};
+use hatchery_node::{NodeServer, NodeServerConfig, SpawnProfileRegistry, WorkspaceConfig};
 use gate4agent_types::{AgentId, TerminalSize, TransportKind};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -156,7 +156,7 @@ fn assert_live_raw_inventory_record(
 async fn wait_unavailable_record(
     control: &C2ControlHandle,
     route: &NodeRoute,
-    record_id: &gate4agent_node::protocol::SessionRecordId,
+    record_id: &hatchery_node::protocol::SessionRecordId,
     expected_name: &str,
 ) -> C2ManagedSessionRecord {
     timeout(Duration::from_secs(10), async {

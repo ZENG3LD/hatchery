@@ -1292,6 +1292,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "hatchery-c2"
+version = "0.1.0"
+dependencies = [
+ "gate4agent-node-protocol",
+ "gate4agent-node-wire",
+ "hatchery-c2-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "hatchery-c2-client"
+version = "0.1.0"
+dependencies = [
+ "gate4agent-node-protocol",
+ "gate4agent-node-wire",
+ "gate4agent-types",
+ "hatchery-c2-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "hatchery-c2-protocol"
+version = "0.1.0"
+dependencies = [
+ "gate4agent-build-stamp",
+ "gate4agent-node-protocol",
+ "gate4agent-types",
+ "serde",
+]
+
+[[package]]
 name = "hatchery-node"
 version = "0.1.0"
 dependencies = [
@@ -1308,6 +1348,8 @@ dependencies = [
  "gate4agent-testkit",
  "gate4agent-types",
  "grok-session-restore",
+ "hatchery-c2",
+ "hatchery-c2-client",
  "kimi-session-restore",
  "libc",
  "mail4agent",
@@ -1318,6 +1360,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "vt100",
  "windows-sys 0.61.2",
 ]
 
@@ -4049,16 +4092,4 @@ dependencies = [
 
 [[patch.unused]]
 name = "gate4agent-bidi-relay"
-version = "0.4.8"
-
-[[patch.unused]]
-name = "gate4agent-c2"
-version = "0.4.8"
-
-[[patch.unused]]
-name = "gate4agent-c2-client"
-version = "0.4.8"
-
-[[patch.unused]]
-name = "gate4agent-c2-protocol"
 version = "0.4.8"

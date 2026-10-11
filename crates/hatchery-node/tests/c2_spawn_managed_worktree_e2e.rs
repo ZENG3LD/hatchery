@@ -1,13 +1,13 @@
 #![cfg(windows)]
 
-use gate4agent_c2::protocol::{
+use hatchery_c2::protocol::{
     C2ManagedSessionRecord, C2NodeEvent, C2NodeResponse, C2NodeSnapshot, C2SessionStatus,
     NodeId, NodeRoute, NodeTransportState, RoutedNodeEvent,
     C2_MANAGED_WORKTREE_LIFECYCLE_CAPABILITY, C2_TERMINAL_FRAME_EVENTS_CAPABILITY,
 };
-use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use gate4agent_c2_client::{connect_local, C2Client, C2ControlHandle};
-use gate4agent_node::protocol::{
+use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use hatchery_c2_client::{connect_local, C2Client, C2ControlHandle};
+use hatchery_node::protocol::{
     CapabilityId, ManagedSessionState, ManagedWorktreeCleanupFailure,
     ManagedWorktreeLeaseSnapshot, ManagedWorktreeLeaseState, ManagedWorktreeRetention,
     ManagedWorktreeSpawnRequest, NodeFailureCode, NodeRequest, SessionAddress, SessionMode,
@@ -15,7 +15,7 @@ use gate4agent_node::protocol::{
     SpawnRequiredCapabilities, SpawnSpec, SpawnTarget, WorktreeProfileId,
     WorktreeProfileRevision, WorkspaceId, SPAWN_RUNTIME_RAW_PTY_LIFECYCLE,
 };
-use gate4agent_node::{
+use hatchery_node::{
     ManagedWorktreeProfile, NodeServer, NodeServerConfig, WorkspaceConfig,
     WorktreeServiceMode,
 };
@@ -198,7 +198,7 @@ fn spawn_request(node_id: &NodeId, workspace_id: &WorkspaceId) -> ManagedWorktre
             },
             profile_id: SpawnProfileId::new("default").unwrap(),
             expected_profile_revision:
-                gate4agent_node::protocol::SpawnProfileRevision::new("builtin-v1").unwrap(),
+                hatchery_node::protocol::SpawnProfileRevision::new("builtin-v1").unwrap(),
             overrides: SpawnOverrides {
                 provider: SpawnOverride::Set {
                     value: agent("claude"),
@@ -366,7 +366,7 @@ fn session_count(snapshot: &C2NodeSnapshot) -> usize {
 fn find_session<'a>(
     snapshot: &'a C2NodeSnapshot,
     address: &SessionAddress,
-) -> Option<&'a gate4agent_c2::protocol::C2SessionSnapshot> {
+) -> Option<&'a hatchery_c2::protocol::C2SessionSnapshot> {
     snapshot
         .workspaces
         .iter()
@@ -391,7 +391,7 @@ fn find_lease<'a>(
 
 fn find_record<'a>(
     snapshot: &'a C2NodeSnapshot,
-    record_id: &gate4agent_node::protocol::SessionRecordId,
+    record_id: &hatchery_node::protocol::SessionRecordId,
 ) -> Option<&'a C2ManagedSessionRecord> {
     snapshot
         .session_records

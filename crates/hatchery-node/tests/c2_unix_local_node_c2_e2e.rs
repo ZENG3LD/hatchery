@@ -1,15 +1,15 @@
 #![cfg(unix)]
 
-use gate4agent_c2::protocol::{
+use hatchery_c2::protocol::{
     C2NodeResponse, C2RelayFailureCode, NodeId, NodeRoute, NodeTransportState,
 };
-use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use gate4agent_c2_client::{connect_local, C2Client, C2ControlError};
-use gate4agent_node::protocol::{
+use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use hatchery_c2_client::{connect_local, C2Client, C2ControlError};
+use hatchery_node::protocol::{
     AgentId, ClientRole, NodeFailureCode, NodeRequest, NodeResponse, OpaqueHostPath,
     SessionMode, WorkspaceId,
 };
-use gate4agent_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
+use hatchery_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
 use gate4agent_node_wire::LocalNodeClient;
 use gate4agent_types::TerminalSize;
 use std::fs;
@@ -78,7 +78,7 @@ fn node_config(node_id: &NodeId, endpoint: &str, token: &str) -> NodeServerConfi
 }
 
 fn route(
-    status: &gate4agent_c2::protocol::StatusResponse,
+    status: &hatchery_c2::protocol::StatusResponse,
     node_id: &NodeId,
 ) -> NodeRoute {
     NodeRoute {
@@ -92,8 +92,8 @@ fn route(
 
 async fn wait_status(
     client: &C2Client,
-    predicate: impl Fn(&gate4agent_c2::protocol::StatusResponse) -> bool,
-) -> gate4agent_c2::protocol::StatusResponse {
+    predicate: impl Fn(&hatchery_c2::protocol::StatusResponse) -> bool,
+) -> hatchery_c2::protocol::StatusResponse {
     timeout(Duration::from_secs(10), async {
         loop {
             if let Ok(status) = client.status().await {
@@ -109,8 +109,8 @@ async fn wait_status(
 }
 
 async fn stop_node(
-    shutdown: gate4agent_node::NodeShutdownHandle,
-    task: tokio::task::JoinHandle<Result<(), gate4agent_node::NodeServerError>>,
+    shutdown: hatchery_node::NodeShutdownHandle,
+    task: tokio::task::JoinHandle<Result<(), hatchery_node::NodeServerError>>,
 ) {
     shutdown.request_shutdown().await.unwrap();
     timeout(Duration::from_secs(5), task)

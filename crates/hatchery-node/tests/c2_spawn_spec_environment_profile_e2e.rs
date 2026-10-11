@@ -1,21 +1,21 @@
 #![cfg(windows)]
 
-use gate4agent_c2::protocol::{
+use hatchery_c2::protocol::{
     C2ManagedSessionRecord, C2NodeEvent, C2NodeResponse, C2NodeSnapshot, C2SessionStatus,
     NodeId, NodeRoute, NodeTransportState, RoutedNodeEvent,
     C2_CHILD_ENVIRONMENT_PROFILE_CAPABILITY, C2_TERMINAL_FRAME_EVENTS_CAPABILITY,
 };
-use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use gate4agent_c2_client::{connect_local, C2Client, C2ControlHandle};
+use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use hatchery_c2_client::{connect_local, C2Client, C2ControlHandle};
 use gate4agent_catalog::EnvMutation;
-use gate4agent_node::protocol::{
+use hatchery_node::protocol::{
     CapabilityId, ManagedSessionState, NodeRequest, SessionAddress, SessionMode,
     SpawnDeadlineMs, SpawnEnvironmentProfileId, SpawnEnvironmentProfileRevision,
     SpawnFieldProvenance, SpawnIdempotencyKey, SpawnOverride, SpawnOverrides,
     SpawnProfileDefaults, SpawnProfileId, SpawnProfileRevision, SpawnRequiredCapabilities,
     SpawnSpec, SpawnTarget, WorkspaceId, SPAWN_RUNTIME_RAW_PTY_LIFECYCLE,
 };
-use gate4agent_node::{
+use hatchery_node::{
     NodeEnvironmentProfile, NodeServer, NodeServerConfig, SpawnProfileRegistry, WorkspaceConfig,
 };
 use gate4agent_runtime_native::{

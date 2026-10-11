@@ -1,12 +1,12 @@
 #![cfg(windows)]
 
-use gate4agent_c2::protocol::{
+use hatchery_c2::protocol::{
     C2ManagedSessionRecord, C2NodeEvent, C2NodeResponse, C2NodeSnapshot, C2SessionStatus,
     NodeId, NodeRoute, NodeTransportState,
 };
-use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use gate4agent_c2_client::{connect_local, C2Client, C2ControlHandle};
-use gate4agent_node::protocol::{
+use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use hatchery_c2_client::{connect_local, C2Client, C2ControlHandle};
+use hatchery_node::protocol::{
     AdapterId, CapabilityId, ClientRole, ManagedSessionState, ManagedWorktreeRetention,
     ManagedWorktreeSpawnRequest, NodeEvent, NodeFailureCode, NodeRequest, ServerFrame,
     SessionAddress, SessionMode, SpawnDeadlineMs, SpawnFieldProvenance, SpawnIdempotencyKey,
@@ -15,7 +15,7 @@ use gate4agent_node::protocol::{
     WorktreeProfileRevision, WorkspaceId, MAX_NODE_TERMINAL_BYTES,
     SPAWN_RUNTIME_RAW_PTY_LIFECYCLE,
 };
-use gate4agent_node::{
+use hatchery_node::{
     HistorySourceLayout, ManagedWorktreeProfile, NativeHistoryConfig, NativeHistoryRoot,
     NodeServer, NodeServerConfig, SpawnProfileRegistry, WorkspaceConfig, WorktreeServiceMode,
 };
@@ -994,7 +994,7 @@ async fn snapshot(control: &C2ControlHandle, route: &NodeRoute) -> C2NodeSnapsho
 fn find_session<'a>(
     snapshot: &'a C2NodeSnapshot,
     address: &SessionAddress,
-) -> Option<&'a gate4agent_c2::protocol::C2SessionSnapshot> {
+) -> Option<&'a hatchery_c2::protocol::C2SessionSnapshot> {
     snapshot
         .workspaces
         .iter()

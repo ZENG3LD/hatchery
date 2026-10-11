@@ -1,12 +1,12 @@
 #![cfg(windows)]
 
-use gate4agent_c2::protocol::{
+use hatchery_c2::protocol::{
     C2ManagedSessionRecord, C2NodeEvent, C2NodeResponse, C2NodeSnapshot, C2SessionStatus,
     NodeId, NodeRoute, NodeTransportState,
 };
-use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use gate4agent_c2_client::{connect_local, C2Client, C2ControlHandle};
-use gate4agent_node::protocol::{
+use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use hatchery_c2_client::{connect_local, C2Client, C2ControlHandle};
+use hatchery_node::protocol::{
     AdapterId, CapabilityId, ManagedSessionState, ManagedWorktreeLeaseState,
     ManagedWorktreeRetention, ManagedWorktreeSpawnRequest, NodeRequest, SessionAddress,
     SessionMode, SpawnDeadlineMs, SpawnFieldProvenance, SpawnIdempotencyKey, SpawnOverride,
@@ -15,7 +15,7 @@ use gate4agent_node::protocol::{
     SpawnSpec, SpawnTarget, WorktreeProfileId, WorktreeProfileRevision, WorkspaceId,
     SPAWN_RUNTIME_STRUCTURED_PROMPT,
 };
-use gate4agent_node::{
+use hatchery_node::{
     HistorySourceLayout, ManagedWorktreeProfile, NativeHistoryConfig, NativeHistoryRoot,
     NodeEnvironmentProfile, NodeSecretReference, NodeSecretResolveError, NodeSecretResolver,
     NodeSecretValue, NodeServer, NodeServerConfig, NodeSessionFile,
@@ -591,7 +591,7 @@ async fn snapshot(control: &C2ControlHandle, route: &NodeRoute) -> C2NodeSnapsho
 fn find_session<'a>(
     snapshot: &'a C2NodeSnapshot,
     address: &SessionAddress,
-) -> Option<&'a gate4agent_c2::protocol::C2SessionSnapshot> {
+) -> Option<&'a hatchery_c2::protocol::C2SessionSnapshot> {
     snapshot
         .workspaces
         .iter()
@@ -680,7 +680,7 @@ async fn discover_newest_history(
 async fn wait_inventory_name(
     client: &C2Client,
     node_id: &NodeId,
-    record_id: &gate4agent_node::protocol::SessionRecordId,
+    record_id: &hatchery_node::protocol::SessionRecordId,
     source_workspace_id: &WorkspaceId,
     expected_name: &str,
 ) {
@@ -753,7 +753,7 @@ fn managed_target_request(
     workspace_id: &WorkspaceId,
     spawn_profile_id: &SpawnProfileId,
     spawn_profile_revision: &SpawnProfileRevision,
-    context_id: gate4agent_node::protocol::SpawnContextId,
+    context_id: hatchery_node::protocol::SpawnContextId,
     prompt: String,
 ) -> ManagedWorktreeSpawnRequest {
     ManagedWorktreeSpawnRequest {

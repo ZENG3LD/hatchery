@@ -1,6 +1,6 @@
 //! Bounded typed HTTP/1.1 client for the local Gate4Agent C2 observer API.
 
-use gate4agent_c2_protocol::{HealthResponse, ReadyResponse, StatusResponse, MAX_C2_RESPONSE_BYTES};
+use hatchery_c2_protocol::{HealthResponse, ReadyResponse, StatusResponse, MAX_C2_RESPONSE_BYTES};
 use serde::de::DeserializeOwned;
 use std::io;
 use std::net::SocketAddr;

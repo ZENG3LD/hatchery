@@ -1,10 +1,10 @@
 #![cfg(unix)]
 
-use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use gate4agent_c2::protocol::{
+use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use hatchery_c2::protocol::{
     NodeId, NodeTransportState, PathEncoding, PathStyle,
 };
-use gate4agent_c2_client::connect_local;
+use hatchery_c2_client::connect_local;
 use std::fs;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::{Path, PathBuf};

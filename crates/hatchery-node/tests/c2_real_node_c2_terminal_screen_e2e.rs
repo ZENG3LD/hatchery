@@ -1,13 +1,13 @@
 #![cfg(any(windows, unix))]
 
-use gate4agent_c2::protocol::{
+use hatchery_c2::protocol::{
     C2NodeResponse, C2NodeSnapshot, C2SessionSnapshot, C2SessionStatus, NodeId, NodeRoute,
     NodeTransportState,
 };
-use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use gate4agent_c2_client::{connect_local, C2Client, C2ControlHandle};
-use gate4agent_node::protocol::{NodeRequest, SessionMode, WorkspaceId};
-use gate4agent_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
+use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use hatchery_c2_client::{connect_local, C2Client, C2ControlHandle};
+use hatchery_node::protocol::{NodeRequest, SessionMode, WorkspaceId};
+use hatchery_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
 use gate4agent_types::{AgentId, AgentInstanceId, TerminalFrame, TerminalSize};
 #[cfg(windows)]
 use std::ffi::OsStr;

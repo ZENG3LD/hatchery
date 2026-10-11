@@ -9,4 +9,4 @@ pub use runtime::{
     C2ShutdownHandle, C2Timings, DEFAULT_C2_CONTROL_ENDPOINT,
 };
 
-pub use gate4agent_c2_protocol as protocol;
+pub use hatchery_c2_protocol as protocol;

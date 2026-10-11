@@ -30,7 +30,7 @@ use crate::runtime::{
     C2PendingRequest, EVENT_CAPACITY, HARNESS_MCP_EVENT_CAPACITY,
 };
 use std::net::SocketAddr;
-use gate4agent_c2_protocol::{C2Topology, NodeRequest, NodeRoute, RoutedNodeEvent, RoutedNodeResponse};
+use hatchery_c2_protocol::{C2Topology, NodeRequest, NodeRoute, RoutedNodeEvent, RoutedNodeResponse};
 use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -39,7 +39,7 @@ use tokio::sync::{mpsc, watch};
 /// Backoff durations for a transient reconnect failure, indexed by
 /// `failures - 1` (`failures` starts at 1 on the first failed attempt).
 /// Same VALUES as `gate4agent-c2/src/runtime.rs`'s
-/// `C2Timings::default().transient_backoffs` -- `gate4agent-c2-client`
+/// `C2Timings::default().transient_backoffs` -- `hatchery-c2-client`
 /// cannot depend on that type (the dependency direction is the other way),
 /// so this module defines its own constant with the same numbers by
 /// deliberate choice, not the same type.
@@ -101,7 +101,7 @@ pub enum C2LinkState {
 /// The C2 control token, retained for the reconnect supervisor's entire
 /// lifetime. Never `Clone`, never formatted with `{}` -- mirrors
 /// `HarnessOperatorCredential` (`hatchery-harness-api/src/lib.rs`) and
-/// `C2Client`'s own redacted `Debug` (`gate4agent-c2-client/src/lib.rs`).
+/// `C2Client`'s own redacted `Debug` (`hatchery-c2-client/src/lib.rs`).
 struct ReconnectToken(String);
 
 impl fmt::Debug for ReconnectToken {
@@ -572,7 +572,7 @@ async fn connect_reconnecting(
 mod tests {
     use super::*;
     use crate::runtime::{c2_proof, client_compatibility_offer};
-    use gate4agent_c2_protocol::{
+    use hatchery_c2_protocol::{
         AgentId, ArchitectureId, C2AuthDirection, C2ClientFrame, C2Hello, C2NodeEvent,
         C2NodeResponse, C2NodeSnapshot, C2ReplyEnvelope, C2RelayRoute, C2RequestEnvelope,
         C2ServerChallenge, C2ServerFrame, C2TopologyNode, HostDescriptor,
@@ -594,7 +594,7 @@ mod tests {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
         format!(
-            r"\\.\pipe\gate4agent-c2-client-reconnect-{}-{now}-{}",
+            r"\\.\pipe\hatchery-c2-client-reconnect-{}-{now}-{}",
             std::process::id(),
             NEXT.fetch_add(1, Ordering::Relaxed),
         )

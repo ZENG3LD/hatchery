@@ -1,15 +1,15 @@
 #![cfg(windows)]
 
-use gate4agent_c2::protocol::{
+use hatchery_c2::protocol::{
     C2NodeEvent, C2NodeResponse, C2NodeSnapshot, C2SessionStatus, NodeId, NodeRoute,
     NodeTransportState, RoutedNodeEvent, C2_CHILD_ENVIRONMENT_PROFILE_CAPABILITY,
     C2_MANAGED_WORKTREE_LIFECYCLE_CAPABILITY, C2_SESSION_BUNDLE_MATERIALIZATION_CAPABILITY,
     C2_TERMINAL_FRAME_EVENTS_CAPABILITY,
 };
-use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use gate4agent_c2_client::{connect_local, C2Client, C2ControlHandle};
+use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use hatchery_c2_client::{connect_local, C2Client, C2ControlHandle};
 use gate4agent_catalog::EnvMutation;
-use gate4agent_node::protocol::{
+use hatchery_node::protocol::{
     CapabilityId, ManagedWorktreeLeaseId, ManagedWorktreeLeaseSnapshot,
     ManagedWorktreeLeaseState, ManagedWorktreeRetention, ManagedWorktreeSpawnRequest,
     NodeFailureCode, NodeRequest, SessionAddress, SessionMode, SpawnBundleDigest, SpawnBundleId,
@@ -19,7 +19,7 @@ use gate4agent_node::protocol::{
     SpawnRequiredCapabilities, SpawnSpec, SpawnTarget, WorktreeProfileId, WorktreeProfileRevision,
     WorkspaceId, SPAWN_RUNTIME_RAW_PTY_LIFECYCLE,
 };
-use gate4agent_node::{
+use hatchery_node::{
     ManagedWorktreeProfile, NodeBundle, NodeBundleError, NodeEnvironmentProfile,
     NodeSecretReference, NodeSecretResolveError, NodeSecretResolver, NodeSecretValue,
     NodeSessionMaterializationProfile, NodeSessionPathBinding, NodeSessionPathClass, NodeServer,
@@ -931,7 +931,7 @@ async fn spawn_managed_codex_bundle_isolated_home_is_private_and_cleaned_end_to_
     assert_eq!(receipt.spawn.bundle_id.as_ref().unwrap().as_str(), BUNDLE_ID);
     assert_eq!(
         receipt.spawn.bundle,
-        Some(gate4agent_node::protocol::ResolvedBundleReceipt {
+        Some(hatchery_node::protocol::ResolvedBundleReceipt {
             id: SpawnBundleId::new(BUNDLE_ID).unwrap(),
             revision: SpawnBundleRevision::new(BUNDLE_REVISION).unwrap(),
             digest: SpawnBundleDigest::new(BUNDLE_DIGEST).unwrap(),
@@ -947,7 +947,7 @@ async fn spawn_managed_codex_bundle_isolated_home_is_private_and_cleaned_end_to_
             .environment_profile
             .as_ref()
             .expect("Codex bundle receipt omitted its isolated environment profile"),
-        &gate4agent_node::protocol::ResolvedEnvironmentProfileReceipt {
+        &hatchery_node::protocol::ResolvedEnvironmentProfileReceipt {
             profile_id: environment_profile_id.clone(),
             profile_revision: environment_profile_revision.clone(),
             network_allowlist: None,

@@ -1,19 +1,19 @@
 #![cfg(windows)]
 
-use gate4agent_c2::protocol::{
+use hatchery_c2::protocol::{
     C2NodeEvent, C2NodeResponse, C2NodeSnapshot, C2SessionStatus, NodeId, NodeRoute,
     NodeTransportState, RoutedNodeEvent, C2_TERMINAL_FRAME_EVENTS_CAPABILITY,
     C2_WORKTREE_SELECTION_CAPABILITY,
 };
-use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use gate4agent_c2_client::{connect_local, C2Client, C2ControlHandle};
-use gate4agent_node::protocol::{
+use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use hatchery_c2_client::{connect_local, C2Client, C2ControlHandle};
+use hatchery_node::protocol::{
     CapabilityId, NodeFailureCode, NodeRequest, OpaqueHostPath, SessionAddress, SessionMode,
     SpawnDeadlineMs, SpawnIdempotencyKey, SpawnOverride, SpawnOverrides, SpawnProfileId,
     SpawnRequiredCapabilities, SpawnSpec, SpawnTarget, WorkspaceId,
     SPAWN_RUNTIME_RAW_PTY_LIFECYCLE,
 };
-use gate4agent_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
+use hatchery_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
 use gate4agent_types::{AgentId, TerminalControl, TerminalSize, TransportKind};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -169,7 +169,7 @@ fn session_count(snapshot: &C2NodeSnapshot) -> usize {
 fn find_session<'a>(
     snapshot: &'a C2NodeSnapshot,
     address: &SessionAddress,
-) -> Option<&'a gate4agent_c2::protocol::C2SessionSnapshot> {
+) -> Option<&'a hatchery_c2::protocol::C2SessionSnapshot> {
     snapshot
         .workspaces
         .iter()
@@ -308,7 +308,7 @@ fn spawn_spec(
         },
         profile_id: SpawnProfileId::new("default").unwrap(),
         expected_profile_revision:
-            gate4agent_node::protocol::SpawnProfileRevision::new("builtin-v1").unwrap(),
+            hatchery_node::protocol::SpawnProfileRevision::new("builtin-v1").unwrap(),
         overrides: SpawnOverrides {
             provider: SpawnOverride::Set {
                 value: agent("claude"),

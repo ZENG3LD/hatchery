@@ -1,16 +1,16 @@
 #![cfg(windows)]
 
-use gate4agent_c2::protocol::{
+use hatchery_c2::protocol::{
     C2NodeEvent, C2NodeResponse, NodeId, NodeRoute, NodeTransportState,
     C2_TERMINAL_FRAME_EVENTS_CAPABILITY,
 };
-use gate4agent_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use gate4agent_c2_client::{connect_local, C2Client, C2EventReceiver};
-use gate4agent_node::protocol::{
+use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
+use hatchery_c2_client::{connect_local, C2Client, C2EventReceiver};
+use hatchery_node::protocol::{
     ClientRole, NodeEvent, NodeRequest, ServerFrame, SessionAddress, SessionMode, WorkspaceId,
     NODE_TERMINAL_FRAME_EVENTS_CAPABILITY,
 };
-use gate4agent_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
+use hatchery_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
 use gate4agent_node_wire::NamedPipeNodeClient;
 use gate4agent_types::{AgentId, TerminalControl, TerminalFrame, TerminalSize};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -98,7 +98,7 @@ async fn wait_routed_terminal_frame(
     node_id: &NodeId,
     address: &SessionAddress,
     expected_text: &str,
-) -> gate4agent_c2::protocol::RoutedNodeEvent {
+) -> hatchery_c2::protocol::RoutedNodeEvent {
     timeout(Duration::from_secs(15), async {
         loop {
             let event = events

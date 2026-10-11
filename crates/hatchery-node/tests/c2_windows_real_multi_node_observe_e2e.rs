@@ -1,11 +1,11 @@
 #![cfg(windows)]
 
-use gate4agent_c2::protocol::{
+use hatchery_c2::protocol::{
     GapKind, NodeFreshness, NodeId, NodeTransportState, ProviderRuntimeMode,
 };
-use gate4agent_c2_client::{C2Client, C2ClientError};
-use gate4agent_node::protocol::{ClientRole, NodeRequest, OpaqueHostPath, WorkspaceId};
-use gate4agent_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
+use hatchery_c2_client::{C2Client, C2ClientError};
+use hatchery_node::protocol::{ClientRole, NodeRequest, OpaqueHostPath, WorkspaceId};
+use hatchery_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
 use gate4agent_node_wire::NamedPipeNodeClient;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::process::Stdio;
@@ -51,8 +51,8 @@ fn node_config(node_id: &str, endpoint: &str, token: &str) -> NodeServerConfig {
 async fn status_until(
     client: &C2Client,
     deadline: Duration,
-    predicate: impl Fn(&gate4agent_c2::protocol::StatusResponse) -> bool,
-) -> gate4agent_c2::protocol::StatusResponse {
+    predicate: impl Fn(&hatchery_c2::protocol::StatusResponse) -> bool,
+) -> hatchery_c2::protocol::StatusResponse {
     timeout(deadline, async {
         loop {
             if let Ok(status) = client.status().await {
@@ -94,7 +94,7 @@ async fn windows_real_multi_node_observe_only_c2_survives_partial_loss_restart_a
     let reservation = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let c2_addr = reservation.local_addr().unwrap();
     drop(reservation);
-    let mut command = Command::new(env!("CARGO_BIN_EXE_gate4agent-c2"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_hatchery-c2"));
     command.args([
         "--api-listen", &c2_addr.to_string(),
         "--control-endpoint", &control_endpoint,
@@ -128,12 +128,12 @@ async fn windows_real_multi_node_observe_only_c2_survives_partial_loss_restart_a
         let inventory = initial.nodes[node_id].inventory.as_ref().unwrap();
         assert_eq!(
             inventory.enabled_providers,
-            [gate4agent_node::protocol::AgentId::new("claude").unwrap()],
+            [hatchery_node::protocol::AgentId::new("claude").unwrap()],
         );
         assert_eq!(inventory.provider_runtime_statuses.as_slice().len(), 1);
         assert_eq!(
             inventory.provider_runtime_statuses.as_slice()[0].provider(),
-            &gate4agent_node::protocol::AgentId::new("claude").unwrap(),
+            &hatchery_node::protocol::AgentId::new("claude").unwrap(),
         );
         assert_eq!(
             inventory.provider_runtime_statuses.as_slice()[0].mode(),

@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use gate4agent_c2_client::{connect_local, C2ControlHandle};
-use gate4agent_c2_protocol::{
+use hatchery_c2_client::{connect_local, C2ControlHandle};
+use hatchery_c2_protocol::{
     C2NodeResponse, C2NodeSnapshot, C2SessionSnapshot, C2SessionStatus, NodeRoute,
     NodeTransportState, RoutedNodeResponse,
 };
@@ -101,7 +101,7 @@ enum SeedError {
 }
 
 fn usage() -> &'static str {
-    "usage: gate4agent-c2ctl seed-vendor-pty --c2-control ENDPOINT --node NODE_ID --workspace WORKSPACE_ID --provider PROVIDER_ID [--provider ...]\n\
+    "usage: hatchery-c2ctl seed-vendor-pty --c2-control ENDPOINT --node NODE_ID --workspace WORKSPACE_ID --provider PROVIDER_ID [--provider ...]\n\
      token env: GATE4AGENT_C2_TOKEN"
 }
 
@@ -508,7 +508,7 @@ fn main() {
             }
         }
         Err(error) => {
-            eprintln!("gate4agent-c2ctl: {error}");
+            eprintln!("hatchery-c2ctl: {error}");
             std::process::exit(1);
         }
     }
@@ -517,7 +517,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gate4agent_c2_protocol::C2WorkspaceSnapshot;
+    use hatchery_c2_protocol::C2WorkspaceSnapshot;
     use gate4agent_node_protocol::{NodeIncarnationId, SessionAddress, SessionKey};
     use gate4agent_types::{
         AgentId, AgentInstanceId, OperatorGateKind, OperatorGateState, ProviderActivity,
@@ -611,7 +611,7 @@ mod tests {
     fn seed_vendor_pty_args_use_only_env_secret_and_preserve_requested_provider_order() {
         let parsed = parse_args_from(
             &args(&[
-                "gate4agent-c2ctl",
+                "hatchery-c2ctl",
                 "seed-vendor-pty",
                 "--c2-control",
                 "fixture-control",
