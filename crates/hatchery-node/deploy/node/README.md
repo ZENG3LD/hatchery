@@ -2,9 +2,9 @@
 
 Default build is the full kit. Feature `kit` (on by default) links:
 
-1. `dig2browser` — path `../../../dig2browser` (local node browser machine; not the crates.io 0.5.0 tarball)
+1. `dig2browser` — crates.io `0.5.3` (local node browser machine)
 2. `mail4agent` — crates.io `0.4.8` (lib face; no sibling checkout needed)
-3. session-restore — `claude-session-restore` and `codex-session-restore` 0.1.3 from crates.io; `grok-session-restore` and `kimi-session-restore` path deps because crates.io 0.1.3 is binary-only
+3. session-restore — `claude-session-restore` and `codex-session-restore` 0.1.3, `grok-session-restore` and `kimi-session-restore` 0.1.4, all from crates.io
 4. kernel WireGuard — feature `wireguard`, `ip link add type wireguard` / `wg`. Node and C2 are peers (either side may dial). Not the UDP+ChaCha mesh underlay, not `open_wireguard_daemon_stub`, and not HQ.
 
 Features: `m4a`, `d2b`, `session-restore`, `wireguard` (-> `gate4agent-node-core/wireguard`) and `memory` (a tool the agent calls; the node never starts a memory daemon). `kit` enables all of them and is the default. There is no light mode (no bare build); a subset can be built with `--no-default-features --features ...` for diagnostics.
