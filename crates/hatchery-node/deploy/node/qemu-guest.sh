@@ -108,6 +108,9 @@ seeds = [
     "kernel/drivers/net/virtio_net.ko",
     "kernel/fs/9p/9p.ko",
     "kernel/net/9p/9pnet_virtio.ko",
+    # egress kill-switch (nftables); stateless rules need no conntrack
+    "kernel/crypto/crc32c_generic.ko",
+    "kernel/net/netfilter/nf_tables.ko",
 ]
 ordered, vis = [], set()
 def walk(name):
@@ -146,7 +149,14 @@ if [ -z "$APK_DIR" ]; then
     libelf-0.191-r0.apk \
     zlib-1.3.2-r0.apk \
     zstd-libs-1.5.6-r0.apk \
-    wireguard-tools-wg-1.0.20210914-r4.apk
+    wireguard-tools-wg-1.0.20210914-r4.apk \
+    nftables-1.0.9-r2.apk \
+    gmp-6.3.0-r1.apk \
+    jansson-2.14-r4.apk \
+    libnftnl-1.2.6-r0.apk \
+    readline-8.2.10-r0.apk \
+    libncursesw-6.4_p20240420-r2.apk \
+    ncurses-terminfo-base-6.4_p20240420-r2.apk
   do
     if [ ! -s "$APK_DIR/$p" ]; then
       curl -fL --retry 3 -o "$APK_DIR/$p" "$ALPINE_MIRROR/main/x86_64/$p"
@@ -254,7 +264,7 @@ list=/mnt/kit/modules/list
 while IFS= read -r name; do
   [ -n "$name" ] || continue
   case "$name" in
-    virtio_net.ko|9p.ko|9pnet.ko|9pnet_virtio.ko|netfs.ko|fscache.ko|failover.ko|net_failover.ko) continue ;;
+    virtio_net.ko|9p.ko|9pnet.ko|9pnet_virtio.ko|netfs.ko|fscache.ko|failover.ko|net_failover.ko|nf_tables.ko|nfnetlink.ko|libcrc32c.ko|crc32c_generic.ko) continue ;;
   esac
   if ! insmod "/mnt/kit/modules/$name" 2>/tmp/insmod.err; then
     echo "INSMOD_FAIL $name $(cat /tmp/insmod.err 2>/dev/null)" > /dev/ttyS0
@@ -267,9 +277,16 @@ else
 fi
 ENDLOAD
 chmod 0755 "$SHARE/load-wireguard.sh"
+# Unprivileged account for provider sessions (the node itself keeps running as root).
+grep -q '^agent:' "$ROOT/etc/passwd" 2>/dev/null || {
+  echo 'agent:x:1000:1000:agent:/home/agent:/bin/sh' >> "$ROOT/etc/passwd"
+  echo 'agent:x:1000:' >> "$ROOT/etc/group"
+}
 mkdir -p "$ROOT/modules"
 cp "$MODROOT"/*.ko "$ROOT/modules/"
 cp "$MODROOT/list" "$ROOT/modules/list"
+cp "$HERE/qemu-isolated-boot.sh" "$SHARE/isolated-boot.sh"
+chmod 0755 "$SHARE/isolated-boot.sh"
 cat > "$ROOT/init" << 'ENDINIT'
 #!/bin/sh
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
@@ -330,7 +347,11 @@ if [ -f /mnt/kit/node.env ]; then
   . /mnt/kit/node.env
   set +a
 fi
-if [ -x /mnt/kit/bin/gate4agent-node ]; then
+if [ "${HATCHERY_GUEST_ISOLATION:-0}" = 1 ]; then
+  # Isolated guest: enroll, drop the provisioning share, kill-switch, unprivileged agents.
+  cp /mnt/kit/isolated-boot.sh /tmp/isolated-boot.sh
+  /bin/sh /tmp/isolated-boot.sh
+elif [ -x /mnt/kit/bin/gate4agent-node ]; then
   echo "NODE_START" > /dev/ttyS0
   mkdir -p /tmp/ws /tmp/state /tmp/home /run/gate4agent
   chmod 0700 /run/gate4agent

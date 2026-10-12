@@ -45,7 +45,11 @@ fn list(items: &[&str]) -> Vec<String> {
 impl Default for Policy {
     fn default() -> Self {
         Self {
-            neutral: Grants { mailbox: false, rooms: list(&["lobby"]), capabilities: list(&["heartbeat"]) },
+            neutral: Grants {
+                mailbox: false,
+                rooms: list(&["lobby"]),
+                capabilities: list(&["heartbeat"]),
+            },
             member: Grants {
                 mailbox: true,
                 rooms: list(&["lobby", "general"]),
@@ -62,7 +66,8 @@ impl Default for Policy {
 
 impl Policy {
     pub fn from_json(text: &str) -> Result<Self, PolicyError> {
-        let policy: Self = serde_json::from_str(text).map_err(|e| PolicyError::Parse(e.to_string()))?;
+        let policy: Self =
+            serde_json::from_str(text).map_err(|e| PolicyError::Parse(e.to_string()))?;
         policy.validate()?;
         Ok(policy)
     }
@@ -93,7 +98,10 @@ impl Policy {
     }
 
     pub fn allows(&self, status: NodeStatus, capability: &str) -> bool {
-        self.grants(status).capabilities.iter().any(|c| c == capability)
+        self.grants(status)
+            .capabilities
+            .iter()
+            .any(|c| c == capability)
     }
 }
 
@@ -104,7 +112,9 @@ mod tests {
     #[test]
     fn defaults_grow_with_status_and_out_statuses_are_empty() {
         let p = Policy::default();
-        assert!(p.allows(NodeStatus::Neutral, "heartbeat") && !p.allows(NodeStatus::Neutral, "attach"));
+        assert!(
+            p.allows(NodeStatus::Neutral, "heartbeat") && !p.allows(NodeStatus::Neutral, "attach")
+        );
         assert!(p.allows(NodeStatus::Member, "attach") && !p.allows(NodeStatus::Member, "tasks"));
         assert!(p.allows(NodeStatus::Trusted, "tasks") && p.allows(NodeStatus::Trusted, "tools"));
         for s in [NodeStatus::Suspended, NodeStatus::Revoked] {
@@ -122,12 +132,18 @@ mod tests {
 
     #[test]
     fn typos_and_unknown_capabilities_are_rejected() {
-        assert!(matches!(Policy::from_json(r#"{"membr":{}}"#), Err(PolicyError::Parse(_))));
+        assert!(matches!(
+            Policy::from_json(r#"{"membr":{}}"#),
+            Err(PolicyError::Parse(_))
+        ));
         assert_eq!(
             Policy::from_json(r#"{"neutral":{"capabilities":["hearbeat"]}}"#),
             Err(PolicyError::UnknownCapability("hearbeat".into()))
         );
         // suspended and revoked cannot be configured
-        assert!(matches!(Policy::from_json(r#"{"revoked":{"capabilities":["attach"]}}"#), Err(PolicyError::Parse(_))));
+        assert!(matches!(
+            Policy::from_json(r#"{"revoked":{"capabilities":["attach"]}}"#),
+            Err(PolicyError::Parse(_))
+        ));
     }
 }

@@ -128,7 +128,24 @@ pub fn apply_kill_switch(ks: &KillSwitch) -> Result<&'static str, IsolationError
     };
     // Replace our own table atomically if it already exists.
     let ruleset = format!("table inet {t}\ndelete table inet {t}\n{}", ks.nft_ruleset(), t = KillSwitch::TABLE);
-    let nft = feed("nft", &["-f", "-"], &ruleset);
+    // A file, not stdin: minimal guests have no /dev/stdin link.
+    let rules_file = std::env::temp_dir().join(format!("hatchery-killswitch-{}.nft", std::process::id()));
+    std::fs::write(&rules_file, &ruleset).map_err(|e| fail(e.to_string()))?;
+    let nft = Command::new("nft")
+        .arg("-f")
+        .arg(&rules_file)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| format!("nft: {e}"))
+        .and_then(|out| {
+            if out.status.success() {
+                Ok(())
+            } else {
+                Err(format!("nft failed: {}", String::from_utf8_lossy(&out.stderr).trim()))
+            }
+        });
+    let _ = std::fs::remove_file(&rules_file);
     match nft {
         Ok(()) => {
             let list = Command::new("nft")

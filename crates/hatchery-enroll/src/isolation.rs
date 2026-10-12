@@ -84,7 +84,11 @@ impl IsolationProfile {
     }
 
     /// Operator overrides from the environment-style flags: `Some` replaces the default.
-    pub fn with_overrides(mut self, kill_switch: Option<bool>, agents_unprivileged: Option<bool>) -> Self {
+    pub fn with_overrides(
+        mut self,
+        kill_switch: Option<bool>,
+        agents_unprivileged: Option<bool>,
+    ) -> Self {
         if let Some(value) = kill_switch {
             self.kill_switch = value;
         }
@@ -116,12 +120,19 @@ impl KillSwitch {
     pub fn new(interface: &str, endpoint: &str) -> Result<Self, KillSwitchError> {
         let valid = !interface.is_empty()
             && interface.len() <= 15
-            && interface.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
+            && interface
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
         if !valid {
             return Err(KillSwitchError::InvalidInterface);
         }
-        let endpoint: SocketAddr = endpoint.parse().map_err(|_| KillSwitchError::EndpointNotLiteral)?;
-        Ok(Self { interface: interface.to_owned(), endpoint })
+        let endpoint: SocketAddr = endpoint
+            .parse()
+            .map_err(|_| KillSwitchError::EndpointNotLiteral)?;
+        Ok(Self {
+            interface: interface.to_owned(),
+            endpoint,
+        })
     }
 
     pub fn interface(&self) -> &str {
@@ -168,7 +179,9 @@ impl KillSwitch {
 
     /// The same policy for hosts that only have iptables (`iptables-restore`, IPv4 endpoint only).
     pub fn iptables_restore(&self) -> Option<String> {
-        let IpAddr::V4(ip) = self.endpoint.ip() else { return None };
+        let IpAddr::V4(ip) = self.endpoint.ip() else {
+            return None;
+        };
         let port = self.endpoint.port();
         let wg = &self.interface;
         Some(format!(
@@ -188,11 +201,17 @@ mod tests {
     #[test]
     fn kinds_default_to_the_isolation_the_plan_names() {
         let local = IsolationProfile::for_kind(NodeKind::Local);
-        assert!(!local.kill_switch && !local.agents_unprivileged && local.tunnel == TunnelMode::External);
+        assert!(
+            !local.kill_switch
+                && !local.agents_unprivileged
+                && local.tunnel == TunnelMode::External
+        );
         let qemu = IsolationProfile::for_kind(NodeKind::Qemu);
         assert!(qemu.kill_switch && qemu.agents_unprivileged && qemu.drop_provisioning_share);
         let docker = IsolationProfile::for_kind(NodeKind::Docker);
-        assert!(docker.kill_switch && docker.agents_unprivileged && !docker.drop_provisioning_share);
+        assert!(
+            docker.kill_switch && docker.agents_unprivileged && !docker.drop_provisioning_share
+        );
         let remote = IsolationProfile::for_kind(NodeKind::Remote);
         assert!(!remote.kill_switch && remote.agents_unprivileged);
         let relaxed = qemu.with_overrides(Some(false), None);
@@ -214,20 +233,40 @@ mod tests {
 
     #[test]
     fn hostnames_and_odd_interface_names_are_refused() {
-        assert_eq!(KillSwitch::new("hatch0", "c2.example:51820"), Err(KillSwitchError::EndpointNotLiteral));
-        assert_eq!(KillSwitch::new("a b", "10.0.0.1:1"), Err(KillSwitchError::InvalidInterface));
-        assert_eq!(KillSwitch::new("wg0\"; accept; \"", "10.0.0.1:1"), Err(KillSwitchError::InvalidInterface));
-        assert_eq!(KillSwitch::new("", "10.0.0.1:1"), Err(KillSwitchError::InvalidInterface));
-        assert_eq!(KillSwitch::new("0123456789abcdef", "10.0.0.1:1"), Err(KillSwitchError::InvalidInterface));
+        assert_eq!(
+            KillSwitch::new("hatch0", "c2.example:51820"),
+            Err(KillSwitchError::EndpointNotLiteral)
+        );
+        assert_eq!(
+            KillSwitch::new("a b", "10.0.0.1:1"),
+            Err(KillSwitchError::InvalidInterface)
+        );
+        assert_eq!(
+            KillSwitch::new("wg0\"; accept; \"", "10.0.0.1:1"),
+            Err(KillSwitchError::InvalidInterface)
+        );
+        assert_eq!(
+            KillSwitch::new("", "10.0.0.1:1"),
+            Err(KillSwitchError::InvalidInterface)
+        );
+        assert_eq!(
+            KillSwitch::new("0123456789abcdef", "10.0.0.1:1"),
+            Err(KillSwitchError::InvalidInterface)
+        );
     }
 
     #[test]
     fn ipv6_endpoint_uses_ip6_and_iptables_variant_is_v4_only() {
         let v6 = KillSwitch::new("wg0", "[fd00::1]:51820").unwrap();
-        assert!(v6.nft_ruleset().contains("ip6 daddr fd00::1 udp dport 51820 accept"));
+        assert!(v6
+            .nft_ruleset()
+            .contains("ip6 daddr fd00::1 udp dport 51820 accept"));
         assert!(v6.iptables_restore().is_none());
         let v4 = KillSwitch::new("wg0", "192.0.2.1:51820").unwrap();
         let ipt = v4.iptables_restore().unwrap();
-        assert!(ipt.contains(":OUTPUT DROP") && ipt.contains("-d 192.0.2.1/32 -p udp --dport 51820 -j ACCEPT"));
+        assert!(
+            ipt.contains(":OUTPUT DROP")
+                && ipt.contains("-d 192.0.2.1/32 -p udp --dport 51820 -j ACCEPT")
+        );
     }
 }
