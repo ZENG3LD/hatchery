@@ -55,6 +55,8 @@ async fn main() {
                 .unwrap_or_else(|error| fail(&format!("--enroll-listen is invalid: {error}")))),
             "--enroll-registry" => enroll.registry = Some(required_value("--enroll-registry", args.next()).into()),
             "--enroll-open" => enroll.open = true,
+            // Status -> capability policy (JSON). Also HATCHERY_POLICY_FILE.
+            "--policy" => enroll.policy = Some(required_value("--policy", args.next()).into()),
             "--enroll-pool" => {
                 let value = required_value("--enroll-pool", args.next());
                 let (ip, prefix) = value.split_once('/').unwrap_or_else(|| fail("--enroll-pool requires C2_TUNNEL_IP/PREFIX"));
@@ -78,7 +80,7 @@ async fn main() {
             }
             "--help" | "-h" => {
                 print_help();
-                println!("enrollment: --enroll-listen ADDR --enroll-registry FILE --enroll-pool C2_TUNNEL_IP/PREFIX [--enroll-wg-interface IF] [--enroll-wg-endpoint HOST:PORT] [--enroll-wg-public-key KEY] [--enroll-rate PER_MINUTE] [--enroll-open]  (default: one-time operator code required; --enroll-open disables the code)");
+                println!("enrollment: --enroll-listen ADDR --enroll-registry FILE --enroll-pool C2_TUNNEL_IP/PREFIX [--enroll-wg-interface IF] [--enroll-wg-endpoint HOST:PORT] [--enroll-wg-public-key KEY] [--enroll-rate PER_MINUTE] [--enroll-open] [--policy FILE]  (default: one-time operator code required; --enroll-open disables the code)");
                 println!("API token: {C2_TOKEN_ENV}; node tokens: GATE4AGENT_NODE_TOKEN_<NORMALIZED_NODE_ID>");
                 return;
             }
@@ -226,6 +228,7 @@ struct EnrollArgs {
     wg_endpoint: Option<String>,
     wg_public_key: Option<String>,
     rate: Option<u32>,
+    policy: Option<std::path::PathBuf>,
 }
 
 impl EnrollArgs {
@@ -236,6 +239,7 @@ impl EnrollArgs {
         config.registry_path = self.registry.clone();
         config.require_code = !self.open;
         config.pool = self.pool;
+        config.policy_path = self.policy.clone().or_else(|| std::env::var_os("HATCHERY_POLICY_FILE").map(Into::into));
         if let Some(rate) = self.rate {
             config.rate_limit_per_minute = rate;
         }

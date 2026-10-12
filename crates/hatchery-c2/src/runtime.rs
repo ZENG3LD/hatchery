@@ -406,17 +406,32 @@ enum RelayCommand {
 /// Relay endpoints by node. Nodes can be added while C2 runs (enrollment), so readers take a
 /// snapshot per operation instead of holding a fixed map.
 #[derive(Clone)]
-struct RelayRegistry(Arc<std::sync::RwLock<Arc<BTreeMap<NodeId, RelayEndpoint>>>>);
+struct RelayRegistry {
+    map: Arc<std::sync::RwLock<Arc<BTreeMap<NodeId, RelayEndpoint>>>>,
+    gate: Option<Arc<dyn crate::enroll_service::CapabilityGate>>,
+}
 
 impl RelayRegistry {
     fn new(initial: BTreeMap<NodeId, RelayEndpoint>) -> Self {
-        Self(Arc::new(std::sync::RwLock::new(Arc::new(initial))))
+        Self { map: Arc::new(std::sync::RwLock::new(Arc::new(initial))), gate: None }
+    }
+    /// May the operator drive and observe this node? Token nodes are not governed by policy.
+    fn allows(&self, node_id: &NodeId, capability: &str) -> bool {
+        self.gate.as_ref().and_then(|gate| gate.allows(node_id.as_str(), capability)).unwrap_or(true)
+    }
+    /// Heartbeat-only nodes show liveness but no inventory.
+    fn redact(&self, status: &mut StatusResponse) {
+        for (id, node) in status.nodes.iter_mut() {
+            if !self.allows(id, "attach") {
+                node.inventory = None;
+            }
+        }
     }
     fn snapshot(&self) -> Arc<BTreeMap<NodeId, RelayEndpoint>> {
-        Arc::clone(&self.0.read().expect("relay registry lock"))
+        Arc::clone(&self.map.read().expect("relay registry lock"))
     }
     fn insert(&self, node_id: NodeId, endpoint: RelayEndpoint) {
-        let mut guard = self.0.write().expect("relay registry lock");
+        let mut guard = self.map.write().expect("relay registry lock");
         let mut next = (**guard).clone();
         next.insert(node_id, endpoint);
         *guard = Arc::new(next);
@@ -433,6 +448,7 @@ struct RelayEndpoint {
 #[derive(Clone)]
 struct OperatorHub {
     sink: Arc<Mutex<Option<OperatorEventSink>>>,
+    gate: Arc<Mutex<Option<Arc<dyn crate::enroll_service::CapabilityGate>>>>,
 }
 
 #[derive(Clone)]
@@ -444,7 +460,11 @@ struct OperatorEventSink {
 }
 
 impl OperatorHub {
-    fn new() -> Self { Self { sink: Arc::new(Mutex::new(None)) } }
+    fn new() -> Self { Self { sink: Arc::new(Mutex::new(None)), gate: Arc::new(Mutex::new(None)) } }
+
+    fn set_gate(&self, gate: Arc<dyn crate::enroll_service::CapabilityGate>) {
+        *self.gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(gate);
+    }
 
     fn attach(&self, sink: OperatorEventSink) {
         *self.sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(sink);
@@ -465,6 +485,11 @@ impl OperatorHub {
     }
 
     fn publish(&self, event: RoutedNodeEvent) {
+        // Events of a node whose status does not hold `attach` never reach the operator.
+        let gate = self.gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
+        if gate.is_some_and(|gate| gate.allows(event.node_id.as_str(), "attach") == Some(false)) {
+            return;
+        }
         let sink = self.sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(sink) = sink.as_ref() {
             if control::queue_operator_event(&sink.outbound, &sink.budget, event).is_err() {
@@ -629,7 +654,7 @@ async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch:
     }
     let static_ids: BTreeSet<NodeId> = static_routes.keys().cloned().collect();
     let call_home_routes: CallHomeRoutes = Arc::new(Mutex::new(static_routes));
-    let relay_senders = RelayRegistry::new(relay_senders);
+    let mut relay_senders = RelayRegistry::new(relay_senders);
     // Enrollment: registry, listener, runtime node adds.
     let mut enroll_events = None;
     let mut enroll_service = None;
@@ -638,6 +663,8 @@ async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch:
             .map_err(|error| C2Error::Api(io::Error::other(error.to_string())))?;
         let enroll_listener = TcpListener::bind(enrollment.listen).await?;
         tasks.spawn(crate::enroll_service::serve_enroll(enroll_listener, Arc::clone(&service), shutdown.clone()));
+        relay_senders.gate = Some(Arc::clone(&service) as Arc<dyn crate::enroll_service::CapabilityGate>);
+        hub.set_gate(Arc::clone(&service) as Arc<dyn crate::enroll_service::CapabilityGate>);
         enroll_events = Some(events);
         enroll_service = Some(service);
     }
@@ -696,12 +723,23 @@ async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch:
                     Some(crate::enroll_service::EnrollEvent::Enrolled(id)) => {
                         if let Ok(node_id) = NodeId::new(id) { spawner.spawn_enrolled(&node_id, &shutdown, &mut tasks); }
                     }
-                    Some(crate::enroll_service::EnrollEvent::StatusChanged(id, status)) => {
-                        use crate::enrollment::NodeStatus;
-                        if matches!(status, NodeStatus::Suspended | NodeStatus::Revoked) {
-                            if let Ok(node_id) = NodeId::new(id) {
+                    Some(crate::enroll_service::EnrollEvent::StatusChanged(id, _)) => {
+                        // A node that no longer holds the heartbeat capability is dropped.
+                        if let Ok(node_id) = NodeId::new(id) {
+                            if !relay_senders.allows(&node_id, "heartbeat") {
                                 if let Some(endpoint) = relay_senders.snapshot().get(&node_id) {
                                     endpoint.force_disconnect.send_modify(|generation| *generation = generation.wrapping_add(1));
+                                }
+                            }
+                        }
+                    }
+                    Some(crate::enroll_service::EnrollEvent::PolicyChanged) => {
+                        if let Some(service) = &enroll_service {
+                            for id in service.nodes_without("heartbeat") {
+                                if let Ok(node_id) = NodeId::new(id) {
+                                    if let Some(endpoint) = relay_senders.snapshot().get(&node_id) {
+                                        endpoint.force_disconnect.send_modify(|generation| *generation = generation.wrapping_add(1));
+                                    }
                                 }
                             }
                         }
@@ -2699,7 +2737,16 @@ fn route(request: Request, token: &str, status: &StatusResponse, enroll: Option<
         }
         "/status" => {
             if !authorized(request.authorization.as_deref(), token) { Response::plain(401, "Unauthorized").authenticate() }
-            else { Response::json(200, status) }
+            else {
+                // Nodes whose status does not hold `attach` show liveness only.
+                let mut shown = status.clone();
+                if let Some(service) = enroll {
+                    for (id, node) in shown.nodes.iter_mut() {
+                        if service.allows(id.as_str(), "attach") == Some(false) { node.inventory = None; }
+                    }
+                }
+                Response::json(200, &shown)
+            }
         }
         _ => Response::plain(404, "Not Found"),
     }

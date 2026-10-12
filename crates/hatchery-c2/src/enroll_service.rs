@@ -10,7 +10,7 @@ use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use hatchery_enroll::{CallHomeChallenge, EnrollmentRequest, EnrollmentResponse, ANSWER_LEN};
+use hatchery_enroll::{CallHomeChallenge, EnrollmentRequest, EnrollmentResponse, Policy, ANSWER_LEN};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -22,6 +22,12 @@ use crate::enrollment::{EnrollmentError, EnrollmentRegistry, NodeRecord, NodeSta
 const MAX_BODY: usize = 16 * 1024;
 const IO_DEADLINE: Duration = Duration::from_secs(5);
 const DEFAULT_CODE_TTL_MS: u64 = 15 * 60 * 1000;
+
+/// Answers "may this node do X right now?" for the enforcement points in the relay.
+/// `None` means the node is not an enrolled node (a token node), which policy does not govern.
+pub trait CapabilityGate: Send + Sync {
+    fn allows(&self, node_id: &str, capability: &str) -> Option<bool>;
+}
 
 /// Adds and removes node WireGuard peers.
 pub trait PeerProvisioner: Send + Sync {
@@ -86,6 +92,8 @@ pub struct EnrollConfig {
     pub public: PublicInfo,
     /// Requests per source address per minute (applies to every request, valid or not).
     pub rate_limit_per_minute: u32,
+    /// Status -> capability policy file (JSON); `None` uses the built-in table.
+    pub policy_path: Option<std::path::PathBuf>,
 }
 
 impl EnrollConfig {
@@ -98,6 +106,7 @@ impl EnrollConfig {
             provisioner: Arc::new(NoopProvisioner),
             public: PublicInfo::default(),
             rate_limit_per_minute: 30,
+            policy_path: None,
         }
     }
 }
@@ -107,12 +116,17 @@ impl EnrollConfig {
 pub enum EnrollEvent {
     /// Make sure a relay worker exists for this node.
     Enrolled(String),
-    /// Status changed; suspended and revoked nodes are disconnected.
+    /// Status changed; nodes that lost the heartbeat capability are disconnected.
     StatusChanged(String, NodeStatus),
+    /// The policy was reloaded; nodes that no longer hold the heartbeat capability are
+    /// disconnected.
+    PolicyChanged,
 }
 
 pub struct EnrollService {
     registry: Mutex<EnrollmentRegistry>,
+    policy: std::sync::RwLock<Policy>,
+    policy_path: Option<std::path::PathBuf>,
     provisioner: Arc<dyn PeerProvisioner>,
     public: PublicInfo,
     events: mpsc::UnboundedSender<EnrollEvent>,
@@ -157,9 +171,15 @@ impl EnrollService {
         if let Some(pool) = config.pool {
             registry = registry.with_pool(pool);
         }
+        let policy = match &config.policy_path {
+            Some(path) => Policy::load(path).map_err(|e| EnrollmentError::Storage(e.to_string()))?,
+            None => Policy::default(),
+        };
         let (tx, rx) = mpsc::unbounded_channel();
         let service = Arc::new(Self {
             registry: Mutex::new(registry),
+            policy: std::sync::RwLock::new(policy),
+            policy_path: config.policy_path.clone(),
             provisioner: Arc::clone(&config.provisioner),
             public: config.public.clone(),
             events: tx,
@@ -257,7 +277,35 @@ impl EnrollService {
             }
             ("GET", ["nodes"]) => {
                 let nodes = self.registry.lock().expect("registry lock").list();
+                let policy = self.policy.read().expect("policy lock");
+                let nodes: Vec<serde_json::Value> = nodes
+                    .into_iter()
+                    .map(|n| {
+                        let grants = policy.grants(n.status);
+                        let mut value = serde_json::to_value(&n).unwrap_or_default();
+                        value["grants"] = serde_json::to_value(grants).unwrap_or_default();
+                        value
+                    })
+                    .collect();
                 HttpReply::json(200, &serde_json::json!({ "nodes": nodes }))
+            }
+            ("GET", ["policy"]) => HttpReply::json(200, &*self.policy.read().expect("policy lock")),
+            ("POST", ["policy", "reload"]) => match self.reload_policy() {
+                Ok(()) => HttpReply::json(200, &*self.policy.read().expect("policy lock")),
+                Err(message) => HttpReply::json(409, &serde_json::json!({ "error": message })),
+            },
+            ("POST", ["nodes", id, "allows"]) => {
+                #[derive(Deserialize)]
+                struct Body {
+                    capability: String,
+                }
+                match serde_json::from_slice::<Body>(body) {
+                    Ok(b) => match self.allows(id, &b.capability) {
+                        Some(allowed) => HttpReply::json(200, &serde_json::json!({ "allowed": allowed })),
+                        None => HttpReply::error(404, "unknown node"),
+                    },
+                    Err(_) => HttpReply::error(400, "body must be {\"capability\": ...}"),
+                }
             }
             ("POST", ["nodes", id, "status"]) => {
                 #[derive(Deserialize)]
@@ -291,7 +339,36 @@ impl EnrollService {
 
     /// Is this node enrolled and allowed to connect (neutral, member, trusted)?
     pub fn callhome_allowed(&self, node_id: &str) -> bool {
-        self.registry.lock().expect("registry lock").get(node_id).is_some_and(|r| is_active(r.status))
+        self.allows(node_id, "heartbeat").unwrap_or(false)
+    }
+
+    /// Policy decision for an enrolled node: its current status must hold `capability`.
+    pub fn allows(&self, node_id: &str, capability: &str) -> Option<bool> {
+        let status = self.registry.lock().expect("registry lock").get(node_id).map(|r| r.status)?;
+        Some(self.policy.read().expect("policy lock").allows(status, capability))
+    }
+
+    /// Re-read the policy file. On any error the previous policy stays in force.
+    pub fn reload_policy(&self) -> Result<(), String> {
+        let path = self.policy_path.as_ref().ok_or_else(|| "no policy file is configured".to_owned())?;
+        let next = Policy::load(path).map_err(|e| e.to_string())?;
+        *self.policy.write().expect("policy lock") = next;
+        let _ = self.events.send(EnrollEvent::PolicyChanged);
+        tracing::info!("policy reloaded");
+        Ok(())
+    }
+
+    /// Enrolled nodes whose current status no longer holds `capability`.
+    pub fn nodes_without(&self, capability: &str) -> Vec<String> {
+        let policy = self.policy.read().expect("policy lock");
+        self.registry
+            .lock()
+            .expect("registry lock")
+            .list()
+            .into_iter()
+            .filter(|r| !policy.allows(r.status, capability))
+            .map(|r| r.node_id)
+            .collect()
     }
 
     /// Run the signed call-home exchange on a socket whose announce named `node_id`.
@@ -311,8 +388,8 @@ impl EnrollService {
             .expect("registry lock")
             .verify_node_signature(node_id, &verified.material, &verified.signature_b64)
             .map_err(|e| e.to_string())?;
-        if !is_active(status) {
-            return Err("node is suspended".to_owned());
+        if !is_active(status) || !self.policy.read().expect("policy lock").allows(status, "heartbeat") {
+            return Err("node status does not permit calling home".to_owned());
         }
         Ok(verified.session_token)
     }
@@ -407,4 +484,10 @@ pub async fn read_http(stream: &mut TcpStream) -> io::Result<(String, String, Ve
     }
     body.truncate(length);
     Ok((method, path, body))
+}
+
+impl CapabilityGate for EnrollService {
+    fn allows(&self, node_id: &str, capability: &str) -> Option<bool> {
+        EnrollService::allows(self, node_id, capability)
+    }
 }

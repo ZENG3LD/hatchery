@@ -25,16 +25,7 @@ use sha2::{Digest, Sha256};
 /// Largest accepted clock difference between node and C2 for a request.
 pub const MAX_CLOCK_SKEW_MS: u64 = 5 * 60 * 1000;
 
-/// Status of an enrolled node. Every node starts `Neutral`.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NodeStatus {
-    Neutral,
-    Member,
-    Trusted,
-    Suspended,
-    Revoked,
-}
+pub use hatchery_enroll::NodeStatus;
 
 #[derive(Debug, thiserror::Error, Eq, PartialEq)]
 pub enum EnrollmentError {

@@ -405,6 +405,7 @@ where
         disconnect: disconnect_tx.clone(),
     });
     let mut hello_status = refresh_hello_status(connection_id, &relays.snapshot(), &status).await;
+    relays.redact(&mut hello_status);
     if !include_provider_contracts {
         clear_provider_contract_manifests(&mut hello_status);
     }
@@ -535,7 +536,8 @@ where
                     }
                     continue;
                 }
-                match dispatch_start(connection_id, request.request, &relays.snapshot(), &status) {
+                let permitted = relays.allows(&request.request.route.node_id, "attach");
+                match dispatch_start(connection_id, request.request, &relays.snapshot(), &status, permitted) {
                     DispatchStart::Immediate(result) => {
                         match queue_reply(&outbound_tx, &budget, C2ReplyEnvelope { request_id: request.request_id, result }).await {
                             QueueOutcome::Queued => note_reply_queued(&reply_drop_warned),
@@ -567,6 +569,7 @@ where
                 let next_topology = {
                     let latest = status.borrow_and_update();
                     let mut projected = latest.as_ref().clone();
+                    relays.redact(&mut projected);
                     if !path_capabilities.provider_ids_open {
                         retain_legacy_provider_status(&mut projected);
                     }
@@ -2370,7 +2373,15 @@ fn dispatch_start(
     request: crate::protocol::RoutedNodeRequest,
     relays: &BTreeMap<NodeId, RelayEndpoint>,
     status: &watch::Receiver<Arc<StatusResponse>>,
+    permitted: bool,
 ) -> DispatchStart {
+    if !permitted {
+        return DispatchStart::Immediate(Err(relay_failure(
+            C2RelayFailureCode::RequestForbidden,
+            "node status does not permit operator requests",
+            None,
+        )));
+    }
     if matches!(request.request, NodeRequest::AcquireController { .. } | NodeRequest::ReleaseController | NodeRequest::Shutdown) {
         return DispatchStart::Immediate(Err(relay_failure(C2RelayFailureCode::RequestForbidden, "C2 owns node controller leases and node lifecycle", None)));
     }
@@ -4313,7 +4324,7 @@ mod tests {
             },
             request: request.clone(),
         };
-        assert!(matches!(dispatch_start(77, routed, &relays, &status_rx), DispatchStart::Pending(_)));
+        assert!(matches!(dispatch_start(77, routed, &relays, &status_rx, true), DispatchStart::Pending(_)));
         let RelayCommand::Request {
             operator_connection_id,
             expected_incarnation_id,
@@ -4416,7 +4427,7 @@ mod tests {
             },
             request: request.clone(),
         };
-        assert!(matches!(dispatch_start(78, routed, &relays, &status_rx), DispatchStart::Pending(_)));
+        assert!(matches!(dispatch_start(78, routed, &relays, &status_rx, true), DispatchStart::Pending(_)));
         let RelayCommand::Request {
             operator_connection_id,
             expected_incarnation_id,
