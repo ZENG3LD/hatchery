@@ -112,7 +112,7 @@ async fn main() {
             while let Some(a) = it.next() {
                 let mut v = |n: &str| it.next().cloned().unwrap_or_else(|| fail(&format!("{n} requires a value")));
                 match a.as_str() {
-                    "--c2-enroll" => addr = Some(v("--c2-enroll").parse::<std::net::SocketAddr>().unwrap_or_else(|e| fail(&format!("--c2-enroll is invalid: {e}")))),
+                    "--c2-enroll" => addr = Some(v("--c2-enroll").pipe_resolve("--c2-enroll")),
                     "--state-dir" => dir = Some(v("--state-dir").into()),
                     "--op" => op = Some(v("--op")),
                     "--payload" => payload = v("--payload"),
@@ -182,7 +182,7 @@ async fn main() {
             "--no-wg" => no_wg = true,
             // Loopback door for agents: mail/task operations signed by this node and sent to C2.
             "--door-listen" => door_listen = Some(required_value("--door-listen", args.next()).parse().unwrap_or_else(|e| fail(&format!("--door-listen is invalid: {e}")))),
-            "--door-c2" => door_c2 = Some(required_value("--door-c2", args.next()).parse().unwrap_or_else(|e| fail(&format!("--door-c2 is invalid: {e}")))),
+            "--door-c2" => door_c2 = Some(required_value("--door-c2", args.next()).pipe_resolve("--door-c2")),
             // Egress is dropped unless it goes through the tunnel (fails closed).
             "--kill-switch" => kill_switch = true,
             // Provider sessions run as this unprivileged user; the node keeps the keys.
@@ -964,7 +964,7 @@ async fn run_build(args: &[String]) {
     while let Some(arg) = it.next() {
         let mut value = |n: &str| it.next().cloned().unwrap_or_else(|| fail(&format!("{n} requires a value")));
         match arg.as_str() {
-            "--c2-enroll" => addr = Some(value("--c2-enroll").parse::<std::net::SocketAddr>().unwrap_or_else(|e| fail(&format!("--c2-enroll is invalid: {e}")))),
+            "--c2-enroll" => addr = Some(value("--c2-enroll").pipe_resolve("--c2-enroll")),
             "--state-dir" => dir = Some(value("--state-dir").into()),
             "--recipe" => recipe = Some(value("--recipe")),
             "--trusted-signer" => signer = Some(value("--trusted-signer")),
@@ -990,5 +990,17 @@ async fn run_build(args: &[String]) {
             println!("built recipe={} sha256={} size={} signature_ok=true", receipt.recipe, receipt.artifact_sha256, receipt.artifact_size);
         }
         Err(error) => fail(&error.to_string()),
+    }
+}
+
+/// Resolve `HOST:PORT` or `IP:PORT` (enroll.example.org:18953) to one address, once at startup.
+trait PipeResolve { fn pipe_resolve(&self, flag: &str) -> std::net::SocketAddr; }
+impl PipeResolve for String {
+    fn pipe_resolve(&self, flag: &str) -> std::net::SocketAddr {
+        use std::net::ToSocketAddrs;
+        match self.to_socket_addrs() {
+            Ok(mut it) => it.find(|a| a.is_ipv4()).or_else(|| self.to_socket_addrs().ok().and_then(|mut i| i.next())).unwrap_or_else(|| fail(&format!("{flag}: {self} resolves to no address"))),
+            Err(e) => fail(&format!("{flag} is invalid: {e}")),
+        }
     }
 }
