@@ -11,6 +11,18 @@ use std::process::Command;
 
 use gate4agent_catalog::EnvMutation;
 
+/// g4a provider id -> the provider name `m4a-agent` accepts. g4a's built-in catalog is
+/// `claude`, `codex`, `grok`, `kimi`; anything else (custom agents) gets no account.
+pub fn m4a_provider(g4a_agent_id: &str) -> Option<&'static str> {
+    match g4a_agent_id {
+        "claude" => Some("claude-code"),
+        "codex" => Some("codex"),
+        "grok" => Some("grok"),
+        "kimi" => Some("kimi-code"),
+        _ => None,
+    }
+}
+
 pub const AGENT_BIN_ENV: &str = "HATCHERY_M4A_AGENT_BIN";
 pub const ACCOUNTS_ROOT_ENV: &str = "HATCHERY_M4A_ACCOUNTS_ROOT";
 
@@ -145,6 +157,15 @@ mod tests {
         let left: Vec<_> = std::fs::read_dir(acc.base()).unwrap().filter_map(Result::ok).filter(|e| e.file_name().to_string_lossy().ends_with(".cap")).collect();
         assert!(left.is_empty());
         assert!(!format!("{a:?}").contains("cap-"));
+    }
+
+    #[test]
+    fn every_builtin_g4a_provider_maps_to_an_m4a_provider() {
+        for spec in gate4agent_catalog::builtin_specs() {
+            let id = spec.id.as_str().to_string();
+            assert!(m4a_provider(&id).is_some(), "g4a provider {id} has no m4a mapping");
+        }
+        assert_eq!(m4a_provider("custom"), None);
     }
 
     #[test]

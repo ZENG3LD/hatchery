@@ -3718,31 +3718,39 @@ impl SpawnPreparer for NodeShared {
                 })?,
             )),
         };
-        // Per-session m4a account: own nick + capability for this PTY child only. The published
-        // overlay API cannot add env to an overlay that already exists, so a spawn that carries
-        // another overlay is left without an account (logged, no secret).
-        let environment_overlay = match (environment_overlay, mode, self.m4a_accounts.as_ref()) {
-            (None, SessionMode::Pty, Some(accounts)) => {
+        // Per-session m4a account: own nick + capability for this PTY child only, on its own
+        // overlay or appended to the overlay the spawn already carries.
+        let environment_overlay = match (mode, self.m4a_accounts.as_ref(), crate::m4a_accounts::m4a_provider(provider.as_str())) {
+            (SessionMode::Pty, Some(accounts), Some(m4a_provider)) => {
                 let session_key = format!("{}-{}", self.incarnation_id, instance_id.0);
-                match accounts.provision(provider.as_str(), &session_key) {
+                match accounts.provision(m4a_provider, &session_key) {
                     Ok(account) => {
+                        let identity = account.env_mutations();
+                        let merged = match environment_overlay {
+                            None => NativeInstanceLaunchOverlay::new_session_identity(provider.clone(), identity)
+                                .map(PreparedNativeLaunchOverlay::Instance),
+                            Some(PreparedNativeLaunchOverlay::Instance(mut overlay)) => {
+                                overlay.append_session_identity(identity).map(|()| PreparedNativeLaunchOverlay::Instance(overlay))
+                            }
+                            Some(PreparedNativeLaunchOverlay::Environment(mut overlay)) => {
+                                overlay.append_session_identity(identity).map(|()| PreparedNativeLaunchOverlay::Environment(overlay))
+                            }
+                        }
+                        .map_err(|_| failure(NodeFailureCode::BackendOperationFailed, "m4a session account overlay is invalid"))?;
                         tracing::info!(provider = %provider, instance_id = ?instance_id, nick = %account.nick, "m4a session account assigned at spawn");
-                        Some(PreparedNativeLaunchOverlay::Instance(
-                            NativeInstanceLaunchOverlay::new(provider.clone(), TransportKind::Pty, account.env_mutations(), Vec::new())
-                                .map_err(|_| failure(NodeFailureCode::BackendOperationFailed, "m4a session account overlay is invalid"))?,
-                        ))
+                        Some(merged)
                     }
                     Err(error) => {
                         tracing::warn!(provider = %provider, instance_id = ?instance_id, %error, "m4a session account not assigned");
-                        None
+                        environment_overlay
                     }
                 }
             }
-            (Some(overlay), SessionMode::Pty, Some(_)) => {
-                tracing::warn!(provider = %provider, instance_id = ?instance_id, "m4a session account not assigned: spawn already carries a launch overlay");
-                Some(overlay)
+            (SessionMode::Pty, Some(_), None) => {
+                tracing::warn!(provider = %provider, instance_id = ?instance_id, "m4a session account not assigned: provider has no m4a mapping");
+                environment_overlay
             }
-            (other, _, _) => other,
+            _ => environment_overlay,
         };
         let mut instance_overlay = environment_overlay
             .map(|overlay| SpawnPreparer::install_launch_overlay(self, instance_id, overlay))

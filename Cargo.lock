@@ -1290,8 +1290,7 @@ dependencies = [
 [[package]]
 name = "gate4agent"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9e88bf68e767aa5afd3768c0ed1dafa4638e9bd70772988100e256fd25e8711"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "chrono",
  "gate4agent-catalog",
@@ -1310,8 +1309,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-adapters"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "342d78c74c2740302ac4b87e4fb666b8ab1ad1ba32a1126e7c3ccadb02f1c045"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent-types",
  "serde_json",
@@ -1321,14 +1319,12 @@ dependencies = [
 [[package]]
 name = "gate4agent-build-stamp"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66e6683e4d77b59d98243dae9a9c76913a5392fc43233cc03d8c84fe0c9c2f61"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 
 [[package]]
 name = "gate4agent-catalog"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92848b8b05423c13e350964dfc7e54fc6700cb6c6a0899eeb137db2c817f5388"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1338,8 +1334,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-engine"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f8ab46485c0e2567e01c1dc76e9a6bf044bdeaf23bdb2c40aafe98918e8ecaa"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent-types",
 ]
@@ -1347,8 +1342,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-handle"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3db841897e41ca67771cf11b0655f51271beb9227f76d947b7f31f23ad20098"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent-kernel",
  "gate4agent-tool-protocol",
@@ -1359,8 +1353,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-kernel"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce53548bc354c0a2b04ef439ade50e60b256c7e4c1ef35721b924a8b07dbc335"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-engine",
@@ -1373,8 +1366,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-node-core"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07e218800758771f66c34cb71ee49c7c4fbfc7a3264a75fb12f657956677f0bd"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-runtime-native",
@@ -1388,8 +1380,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-node-protocol"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e635ae9982f4ec94e571c180be25e83061c978a3078636d36779dded1326d8e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent-build-stamp",
  "gate4agent-types",
@@ -1403,8 +1394,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-node-wire"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "374e64b6a82bc12d36aee5781127e52041bfdf10f50b1c186e0f04409b0003df"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent-node-protocol",
  "libc",
@@ -1417,8 +1407,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-provider-ports"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e46c4b1a4806111e33e154ce79a5b0ed0a5774d1cb355c9b166591fc50b72f7d"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1428,14 +1417,12 @@ dependencies = [
 [[package]]
 name = "gate4agent-pty"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ca442b2612e759fc13c17c66b7276ead4a516820e532fc8b8fcd5531ee1c37f"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 
 [[package]]
 name = "gate4agent-runtime-native"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c3131e5b15b5b3811611305d3e53710473a8a6d8d6dd0ac522447721c3ee574"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-catalog",
@@ -1454,8 +1441,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-shell-capabilities"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7a2680531c87f320bed22ef75dd495c85d9a663c331772e65e49ed8f98c5a70"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-types",
@@ -1465,8 +1451,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-shell-history"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b823f397b7dd872f2dd502020070fedd571163f29873d1fed4724374f347dd0"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-provider-ports",
@@ -1479,8 +1464,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-shell-native"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "976e3724bdd734a9ec24278555894df7a0b8044ae7a9f29152a76208e7127c27"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent",
  "gate4agent-adapters",
@@ -1497,8 +1481,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-shell-one-shot"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29481f113c7d8d33b60e0da34253044e70389b11bbd4873e1861917d51b444f7"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent",
  "gate4agent-adapters",
@@ -1510,8 +1493,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-testkit"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d4fa50e6364c479e34ce63d16ae05f1284880d61a8857562b3fdea06fd04380"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1520,8 +1502,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-tool-engine"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94efe7d0e836ab045873e4d238423814810bafe0f9adc6a14a59f33ecb3f4e62"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent-tool-protocol",
  "gate4agent-types",
@@ -1530,8 +1511,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-tool-protocol"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11723eb458d7a64a479e44e70f0a4d709388b5e7bfb0f97f63f09835e6431e58"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "gate4agent-types",
  "serde",
@@ -1540,8 +1520,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-types"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "931c67f409f5001c30f83eaaac9084cf35b474baed32f0393869d945da7856e1"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -6184,3 +6163,8 @@ dependencies = [
  "cc",
  "pkg-config",
 ]
+
+[[patch.unused]]
+name = "gate4agent-bidi-relay"
+version = "0.5.0"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
