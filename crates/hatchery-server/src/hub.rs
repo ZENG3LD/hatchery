@@ -174,6 +174,10 @@ impl Hub {
                     }
                 }
             }
+            ("POST", ["v1", "mail", "thread"]) => {
+                let mail = self.messenger.lock().expect("messenger").thread(str_field(body, "node")?, 200)?;
+                Ok(json!({ "messages": mail }))
+            }
             ("POST", ["v1", "mail", "inbox"]) => {
                 let mail = self.messenger.lock().expect("messenger").inbox(OPERATOR, 0, 100)?;
                 Ok(json!({ "messages": mail }))

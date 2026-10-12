@@ -169,6 +169,29 @@ impl Messenger {
             .collect())
     }
 
+    /// Conversation between the operator and one node, both directions, oldest first. Empty for a
+    /// node that is not a mailbox (neutral, suspended, revoked).
+    pub fn thread(&mut self, node: &str, limit: u16) -> Result<Vec<MailView>, MessengerError> {
+        self.sync()?;
+        if !self.registered.contains(node) {
+            return Ok(Vec::new());
+        }
+        let operator = Address::Direct { participant: pid(OPERATOR)? };
+        let target = Address::Direct { participant: pid(node)? };
+        let to_op = self.engine.inbox(&operator, 0, 256).map_err(map_mail)?;
+        let to_node = self.engine.inbox_of(&operator, &target, 0, 256).map_err(map_mail)?;
+        let mut all: Vec<MailView> = to_op
+            .messages
+            .into_iter()
+            .filter(|m| addr(&m.from) == node)
+            .chain(to_node.messages.into_iter().filter(|m| addr(&m.from) == OPERATOR))
+            .map(|m| MailView { message_id: m.message_id.as_str().to_owned(), from: addr(&m.from), to: addr(&m.to), subject: m.subject, body: m.body, created_at_ms: m.created_at_unix_ms })
+            .collect();
+        all.sort_by_key(|m| (m.created_at_ms, m.message_id.clone()));
+        let skip = all.len().saturating_sub(limit.clamp(1, 256) as usize);
+        Ok(all.split_off(skip))
+    }
+
     pub fn ack(&mut self, who: &str, message_id: &str) -> Result<(), MessengerError> {
         let reader = self.address(who)?;
         let id = MessageId::new(message_id).map_err(|e| MessengerError::Bad(e.to_string()))?;

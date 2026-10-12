@@ -30,6 +30,8 @@ pub struct Config {
     pub c2_token: String,
     pub server: Option<SocketAddr>,
     pub server_token: Option<String>,
+    /// Optional read-only folder of PNG screenshots shown in the Library tab.
+    pub library: Option<std::path::PathBuf>,
 }
 
 impl Config {
@@ -47,6 +49,7 @@ impl Config {
             c2_token: var("HATCHERY_HQ_C2_TOKEN").or_else(|| var("GATE4AGENT_C2_TOKEN")).ok_or("HATCHERY_HQ_C2_TOKEN is required")?,
             server: var("HATCHERY_HQ_SERVER").map(|v| v.parse().map_err(|e| format!("HATCHERY_HQ_SERVER: {e}"))).transpose()?,
             server_token: var("HATCHERY_SERVER_CONTROL_TOKEN"),
+            library: var("HATCHERY_HQ_LIBRARY").map(Into::into),
         })
     }
 }
@@ -71,6 +74,8 @@ pub fn router(config: Config) -> (Router, Shared) {
         .route("/api/nodes", get(api_nodes))
         .route("/api/c2/{*rest}", any(api_c2))
         .route("/api/s/{*rest}", any(api_server))
+        .route("/api/library", get(api_library))
+        .route("/api/library/{name}", get(api_library_file))
         .route("/api/events", get(api_events))
         .route("/api/term", get(term_ws))
         .route("/api/browser", get(browser_ws))
@@ -200,6 +205,21 @@ async fn api_nodes(State(s): State<Shared>) -> Response {
         }
     }
     json_reply(200, json!({ "ready": status.as_ref().map(|st| st["ready"].clone()), "nodes": out }).to_string().into_bytes())
+}
+
+async fn api_library(State(s): State<Shared>) -> Response {
+    let mut files: Vec<String> = s.config.library.as_ref().and_then(|d| std::fs::read_dir(d).ok()).map(|rd| rd.flatten().filter_map(|e| e.file_name().into_string().ok()).filter(|n| n.ends_with(".png") && !n.starts_with('.')).collect()).unwrap_or_default();
+    files.sort();
+    json_reply(200, json!({ "files": files }).to_string().into_bytes())
+}
+
+async fn api_library_file(State(s): State<Shared>, Path(name): Path<String>) -> Response {
+    let ok = name.ends_with(".png") && name.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')) && !name.contains("..");
+    let Some(dir) = s.config.library.as_ref().filter(|_| ok) else { return err(StatusCode::NOT_FOUND, "not found") };
+    match std::fs::read(dir.join(&name)) {
+        Ok(bytes) => ([(header::CONTENT_TYPE, "image/png")], bytes).into_response(),
+        Err(_) => err(StatusCode::NOT_FOUND, "not found"),
+    }
 }
 
 async fn api_events(State(s): State<Shared>) -> Sse<impl futures_util::Stream<Item = Result<Event, std::convert::Infallible>>> {
@@ -341,19 +361,29 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
             incoming = socket.recv() => {
                 let Some(Ok(Message::Text(text))) = incoming else { if matches!(incoming, Some(Ok(Message::Close(_))) | None | Some(Err(_))) { break } else { continue } };
                 let Ok(cmd) = serde_json::from_str::<Value>(&text) else { continue };
-                let request = match cmd["t"].as_str() {
-                    Some("data") => cmd["data"].as_str().map(|d| NodeRequest::TerminalBytes { session: session.clone(), bytes: d.as_bytes().to_vec() }),
-                    Some("prompt") => cmd["text"].as_str().map(|d| NodeRequest::TerminalBytes { session: session.clone(), bytes: format!("{d}\r").into_bytes() }),
-                    Some("resize") => Some(NodeRequest::Resize { session: session.clone(), size: TerminalSize { rows: cmd["rows"].as_u64().unwrap_or(30) as u16, columns: cmd["cols"].as_u64().unwrap_or(110) as u16 } }),
-                    Some("stop") => Some(NodeRequest::Stop { session: session.clone(), force: true }),
-                    _ => None,
+                // The node accepts at most 64 terminal bytes per request: split longer input.
+                let chunks = |bytes: Vec<u8>| -> Vec<NodeRequest> { bytes.chunks(64).map(|c| NodeRequest::TerminalBytes { session: session.clone(), bytes: c.to_vec() }).collect() };
+                let mut requests: Vec<NodeRequest> = match cmd["t"].as_str() {
+                    Some("data") => cmd["data"].as_str().map(|d| chunks(d.as_bytes().to_vec())).unwrap_or_default(),
+                    Some("prompt") => cmd["text"].as_str().map(|d| chunks(format!("{d}\r").into_bytes())).unwrap_or_default(),
+                    Some("resize") => vec![NodeRequest::Resize { session: session.clone(), size: TerminalSize { rows: cmd["rows"].as_u64().unwrap_or(30) as u16, columns: cmd["cols"].as_u64().unwrap_or(110) as u16 } }],
+                    Some("stop") => vec![NodeRequest::Stop { session: session.clone(), force: true }],
+                    _ => Vec::new(),
                 };
-                if let Some(request) = request {
-                    let stopping = matches!(request, NodeRequest::Stop { .. });
-                    let result = control.request(route.clone(), request).await;
+                if !requests.is_empty() {
+                    let mut last = None;
+                    let stopping = matches!(requests[0], NodeRequest::Stop { .. });
+                    for request in requests.drain(..) {
+                        let r = control.request(route.clone(), request).await;
+                        let failed = r.as_ref().map(|x| x.response.is_err()).unwrap_or(true);
+                        last = Some(r);
+                        if failed { break; }
+                    }
+                    let result = last.expect("at least one request");
+
                     let ok = result.as_ref().map(|r| r.response.is_ok()).unwrap_or(false);
-                    tracing::info!(op = %cmd["t"], ok, "terminal command from web HQ");
-                    let _ = socket.send(Message::text(json!({ "type": "ack", "op": cmd["t"], "ok": ok }).to_string())).await;
+                    tracing::info!(op = %cmd["t"], ok, detail = %match &result { Ok(r) => format!("{:?}", r.response).chars().take(160).collect::<String>(), Err(e) => e.to_string() }, "terminal command from web HQ");
+                    let _ = socket.send(Message::text(json!({ "type": "ack", "op": cmd["t"], "ok": ok, "detail": if ok { String::new() } else { match &result { Ok(r) => format!("{:?}", r.response), Err(e) => e.to_string() } } }).to_string())).await;
                     if stopping { break; }
                 }
             }

@@ -1,1 +1,55 @@
-<!doctype html><html><body>stub</body></html>
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Hatchery HQ</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="/vendor/xterm.css"><link rel="stylesheet" href="/style.css"></head>
+<body>
+<div id="app">
+ <aside id="side">
+  <div class="sidetop"><button class="round" id="searchbtn" title="Search">⌕</button><button class="round" id="plusbtn" title="New">+</button></div>
+  <input id="search" placeholder="Search nodes" hidden>
+  <div id="me"><div id="meav"></div><div class="mename">Hatchery HQ</div></div>
+  <div id="chats"></div>
+  <div class="sidebottom"><span id="conn" class="dot"></span><span id="connt">connecting…</span></div>
+ </aside>
+ <main id="main">
+  <header id="head"><button id="headbtn"><span id="headav"></span><span id="headname">Hatchery HQ</span></button><div id="seg"><button data-m="chat" class="on">Chat</button><button data-m="pty">PTY</button></div></header>
+  <div id="ptyview"><div id="terminal"></div></div>
+  <div id="chat"></div>
+  <div id="composer">
+   <div id="chiprow"><button id="chip" hidden></button></div>
+   <div id="pill">
+    <button class="round small" id="addbtn" title="Actions">+</button>
+    <textarea id="input" rows="1" placeholder="Message"></textarea>
+    <button class="round small ghost" id="micbtn" title="Voice (not available in web HQ yet)">🎙</button>
+    <button class="round small blue" id="sendbtn" title="Send">➤</button>
+   </div>
+   <div id="menu" hidden></div>
+  </div>
+ </main>
+ <aside id="panel">
+  <div class="paneltop"><button class="round" id="closepanel">✕</button></div>
+  <div class="panelhead"><div id="panelav"></div><div id="panelname">Hatchery HQ</div><div class="sub" id="panelsub"></div></div>
+  <div id="ptabs"></div>
+  <div id="pbody">
+   <div class="ptab" id="p-activity"></div>
+   <div class="ptab" id="p-nodes"></div>
+   <div class="ptab" id="p-terminal">
+    <div class="row"><select id="tprov"><option>claude</option><option>codex</option><option>kimi</option><option>grok</option></select>
+     <button class="btn" id="tspawn">Spawn</button><button class="btn" id="tstop">Stop</button><span class="sub" id="tinfo"></span></div>
+    <div id="miniterm"></div>
+   </div>
+   <div class="ptab" id="p-browser">
+    <div class="row"><input id="bsess" placeholder="browser session id"><button class="btn" id="bopen">Open</button></div>
+    <div class="row"><input id="burl" value="https://example.org/"><button class="btn" id="bnav">Go</button></div>
+    <div class="row"><input id="btext" placeholder="type…"><button class="btn" id="btype">Type</button><button class="btn" id="benter">Enter</button><button class="btn" id="bup">▲</button><button class="btn" id="bdown">▼</button></div>
+    <canvas id="bcanvas" width="800" height="500"></canvas><div class="sub" id="binfo"></div>
+   </div>
+   <div class="ptab" id="p-tasks"></div>
+   <div class="ptab" id="p-mail"></div>
+   <div class="ptab" id="p-library"></div>
+  </div>
+ </aside>
+</div>
+<div id="lightbox" hidden></div>
+<script src="/vendor/xterm.js"></script><script src="/app.js"></script>
+</body></html>
