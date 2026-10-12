@@ -142,6 +142,7 @@ pub struct EnrollService {
     build_host: Option<(SocketAddr, String)>,
     server_upstream: Option<(SocketAddr, String)>,
     build_nonces: Mutex<HashMap<(String, String), u64>>,
+    node_rate: Mutex<HashMap<(String, &'static str), (u64, u32)>>,
     pub listen: SocketAddr,
 }
 
@@ -198,6 +199,7 @@ impl EnrollService {
             build_host: config.build_host.clone(),
             server_upstream: config.server_upstream.clone(),
             build_nonces: Mutex::new(HashMap::new()),
+            node_rate: Mutex::new(HashMap::new()),
             listen: config.listen,
         });
         // Restart persistence: re-apply every active node's peer and recreate its worker.
@@ -272,15 +274,25 @@ impl EnrollService {
         }
     }
 
+    /// Per-node limit for signature-authenticated calls (applied after the signature checks, so
+    /// anonymous traffic cannot burn a node's budget): per minute.
+    fn node_allow(&self, node_id: &str, kind: &'static str, per_minute: u32) -> bool {
+        let now = unix_ms();
+        let mut map = self.node_rate.lock().expect("rate lock");
+        let slot = map.entry((node_id.to_owned(), kind)).or_insert((now, 0));
+        if now.saturating_sub(slot.0) >= 60_000 {
+            *slot = (now, 0);
+        }
+        slot.1 += 1;
+        slot.1 <= per_minute
+    }
+
     /// `POST /v1/build`: a node-signed request to build and sign a configured recipe.
     /// Checks, in order: shape, clock window, replay, node signature (enrolled identity key),
     /// status/capability policy (`build`), then forwards to the build host with a bearer the
     /// node never sees. Failures towards the node are generic.
     pub async fn handle_build(&self, body: &[u8], peer: IpAddr) -> HttpReply {
         use hatchery_build::wire::{HostRequest, SignedBuildRequest, MAX_SKEW_MS};
-        if !self.allow(peer) {
-            return HttpReply::error(429, "rate limited");
-        }
         let Ok(request) = serde_json::from_slice::<SignedBuildRequest>(body) else {
             return HttpReply::error(400, "malformed request");
         };
@@ -296,6 +308,9 @@ impl EnrollService {
         if verified.is_err() {
             tracing::warn!(node_id = %request.node_id, %peer, "build request refused: signature");
             return HttpReply::error(403, "refused");
+        }
+        if !self.node_allow(&request.node_id, "build", 30) {
+            return HttpReply::error(429, "rate limited");
         }
         {
             let mut seen = self.build_nonces.lock().expect("nonce lock");
@@ -331,9 +346,6 @@ impl EnrollService {
     /// server's control API with a bearer only C2 holds. The server re-checks its own ledger.
     pub async fn handle_node_call(&self, body: &[u8], peer: IpAddr) -> HttpReply {
         use hatchery_enroll::call::{capability_for, ForwardedCall, SignedCall, MAX_SKEW_MS};
-        if !self.allow(peer) {
-            return HttpReply::error(429, "rate limited");
-        }
         let Ok(call) = serde_json::from_slice::<SignedCall>(body) else {
             return HttpReply::error(400, "malformed request");
         };
@@ -348,6 +360,9 @@ impl EnrollService {
         if self.registry.lock().expect("registry lock").verify_node_message(&call.node_id, &message, &call.signature).is_err() {
             tracing::warn!(node_id = %call.node_id, %peer, "node call refused: signature");
             return HttpReply::error(403, "refused");
+        }
+        if !self.node_allow(&call.node_id, "call", 600) {
+            return HttpReply::error(429, "rate limited");
         }
         {
             let mut seen = self.build_nonces.lock().expect("nonce lock");

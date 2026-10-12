@@ -26,7 +26,8 @@ async fn main() {
     tracing::info!("hatchery-server control listening (loopback)");
     #[cfg(feature = "m4a")]
     let hub = if config.m4a_enabled && config.provision_c2_addr.is_some() {
-        match hatchery_server::hub::Hub::open(&config.data_dir) {
+        let dir = config.data_dir.clone();
+        match tokio::task::spawn_blocking(move || hatchery_server::hub::Hub::open(&dir)).await.expect("hub open task") {
             Ok(hub) => Some(std::sync::Arc::new(hub)),
             Err(error) => {
                 tracing::error!(%error, "messenger and tasks not started");

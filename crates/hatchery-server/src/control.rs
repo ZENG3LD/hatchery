@@ -86,7 +86,11 @@ async fn handle(
     let mut fp = first.split_whitespace();
     let (method, path) = (fp.next().unwrap_or(""), fp.next().unwrap_or(""));
     let (status, body) = if path.starts_with("/v1/") {
-        v1(method, path, &head, &request_body, token.as_deref(), &hub)
+        // The mailbox store blocks on its connection lock; never run it on a runtime thread.
+        let (method, path, head, hub, token) = (method.to_owned(), path.to_owned(), head.clone(), hub.clone(), token.clone());
+        tokio::task::spawn_blocking(move || v1(&method, &path, &head, &request_body, token.as_deref(), &hub))
+            .await
+            .unwrap_or(("500 Internal Server Error", json!({ "error": "internal" }).to_string()))
     } else {
         route(&head, &supervisor, token.as_deref())
     };
