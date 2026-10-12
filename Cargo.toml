@@ -28,6 +28,7 @@ members = [
     "crates/hatchery-c2-protocol",
     "crates/hatchery-enroll",
     "crates/hatchery-build",
+    "crates/hatchery-session-events",
     "crates/hatchery-hq-web",
     "crates/hatchery-c2-client",
     "crates/hatchery-c2",
