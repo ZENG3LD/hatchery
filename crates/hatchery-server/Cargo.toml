@@ -25,6 +25,7 @@ tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 m4a-agent = { version = "0.4.8", optional = true }
+hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.1" }
 
 [features]
 # Full kit by default: there is no light mode.
@@ -40,4 +41,3 @@ memory = []
 [dev-dependencies]
 tempfile = "3"
 hatchery-c2 = { path = "../hatchery-c2", version = "0.2.0" }
-hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.1" }

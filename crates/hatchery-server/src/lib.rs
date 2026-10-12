@@ -48,6 +48,7 @@ pub fn build_subservices(config: &ServerConfig) -> Vec<Box<dyn Subservice>> {
             interval: std::time::Duration::from_secs(config.provision_interval_secs),
             server_ref: config.m4a_server_ref.clone(),
             mail_domain: config.mail_domain.clone(),
+            policy_path: config.policy_path.clone(),
         })));
     }
     #[cfg(feature = "memory")]

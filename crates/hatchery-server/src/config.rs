@@ -23,6 +23,8 @@ pub const PROVISION_C2_TOKEN_VAR_ENV: &str = "HATCHERY_PROVISION_C2_TOKEN_VAR";
 pub const PROVISION_INTERVAL_ENV: &str = "HATCHERY_PROVISION_INTERVAL_SECS";
 pub const M4A_SERVER_REF_ENV: &str = "HATCHERY_M4A_SERVER_REF";
 pub const MAIL_DOMAIN_ENV: &str = "HATCHERY_MAIL_DOMAIN";
+/// Status -> capability policy (JSON), the same file C2 reads.
+pub const POLICY_FILE_ENV: &str = "HATCHERY_POLICY_FILE";
 
 /// Memory4agent listens only inside this range, on loopback.
 pub const MEMORY_PORT_MIN: u16 = 18200;
@@ -78,6 +80,7 @@ pub struct ServerConfig {
     pub provision_interval_secs: u64,
     pub m4a_server_ref: String,
     pub mail_domain: String,
+    pub policy_path: Option<PathBuf>,
 }
 
 impl ServerConfig {
@@ -142,6 +145,7 @@ impl ServerConfig {
             provision_interval_secs: env(PROVISION_INTERVAL_ENV).and_then(|v| v.parse().ok()).unwrap_or(5).max(1),
             m4a_server_ref: env(M4A_SERVER_REF_ENV).unwrap_or_else(|| "https://messenger.invalid".to_owned()),
             mail_domain: env(MAIL_DOMAIN_ENV).unwrap_or_else(|| "nodes.invalid".to_owned()),
+            policy_path: env(POLICY_FILE_ENV).filter(|v| !v.is_empty()).map(PathBuf::from),
         })
     }
 }

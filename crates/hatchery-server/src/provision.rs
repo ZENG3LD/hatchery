@@ -24,15 +24,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum NodeStatus {
-    Neutral,
-    Member,
-    Trusted,
-    Suspended,
-    Revoked,
-}
+pub use hatchery_enroll::{Grants, NodeStatus, Policy};
 
 /// What C2 tells us about a node.
 #[derive(Clone, Debug, Deserialize)]
@@ -41,34 +33,6 @@ pub struct NodeInfo {
     pub status: NodeStatus,
     #[serde(default)]
     pub kind: Option<String>,
-}
-
-/// What a status is worth on the server side (stub until the messenger and task manager exist).
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
-pub struct Grants {
-    pub mailbox: bool,
-    pub rooms: Vec<String>,
-    pub capabilities: Vec<String>,
-}
-
-/// Status -> grants. Neutral gets almost nothing; member and trusted get progressively more;
-/// suspended and revoked get nothing.
-pub fn policy(status: NodeStatus) -> Grants {
-    let list = |items: &[&str]| items.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
-    match status {
-        NodeStatus::Neutral => Grants { mailbox: false, rooms: list(&["lobby"]), capabilities: list(&["heartbeat"]) },
-        NodeStatus::Member => Grants {
-            mailbox: true,
-            rooms: list(&["lobby", "general"]),
-            capabilities: list(&["heartbeat", "mail", "m4a"]),
-        },
-        NodeStatus::Trusted => Grants {
-            mailbox: true,
-            rooms: list(&["lobby", "general", "ops"]),
-            capabilities: list(&["heartbeat", "mail", "m4a", "tasks", "tools"]),
-        },
-        NodeStatus::Suspended | NodeStatus::Revoked => Grants::default(),
-    }
 }
 
 /// One node as the server provisioned it. Public data only.
@@ -112,6 +76,7 @@ pub struct Provisioner {
     ids: IdentityStore,
     ledger_path: PathBuf,
     ledger: LedgerFile,
+    policy: Policy,
     server_ref: String,
     mail_domain: String,
 }
@@ -134,9 +99,15 @@ impl Provisioner {
             ids: IdentityStore::new(vault),
             ledger_path,
             ledger,
+            policy: Policy::default(),
             server_ref: server_ref.to_owned(),
             mail_domain: mail_domain.to_owned(),
         })
+    }
+
+    /// Replace the status -> grants policy; the next `reconcile` applies the difference.
+    pub fn set_policy(&mut self, policy: Policy) {
+        self.policy = policy;
     }
 
     pub fn entries(&self) -> Vec<LedgerEntry> {
@@ -155,8 +126,8 @@ impl Provisioner {
             if existing.as_ref().is_some_and(|e| e.status == NodeStatus::Revoked) {
                 continue; // final
             }
-            let grants = policy(node.status);
-            if existing.as_ref().is_some_and(|e| e.status == node.status && e.kind == node.kind) {
+            let grants = self.policy.grants(node.status);
+            if existing.as_ref().is_some_and(|e| e.status == node.status && e.kind == node.kind && e.grants == grants) {
                 continue;
             }
             let entry = if node.status == NodeStatus::Revoked {
@@ -277,6 +248,8 @@ pub struct ProvisionConfig {
     pub interval: Duration,
     pub server_ref: String,
     pub mail_domain: String,
+    /// Same policy file C2 enforces (`HATCHERY_POLICY_FILE`); `None` uses the built-in table.
+    pub policy_path: Option<PathBuf>,
 }
 
 /// Runs the poll loop as a supervised subservice.
@@ -326,8 +299,26 @@ impl Subservice for ProvisionSubservice {
         self.failed = None;
         let summary = Arc::clone(&self.summary);
         let interval = self.config.interval;
+        let policy_path = self.config.policy_path.clone();
         self.task = Some(tokio::spawn(async move {
+            let mut policy_stamp: Option<std::time::SystemTime> = None;
             loop {
+                // Policy reload: a changed (or newly valid) file is applied on the next pass; an
+                // invalid file keeps the previous policy and is reported.
+                let mut policy_error = None;
+                if let Some(path) = &policy_path {
+                    let stamp = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+                    if stamp != policy_stamp {
+                        match Policy::load(path) {
+                            Ok(policy) => {
+                                provisioner.set_policy(policy);
+                                policy_stamp = stamp;
+                                tracing::info!("provisioning policy loaded");
+                            }
+                            Err(error) => policy_error = Some(format!("policy file: {error}")),
+                        }
+                    }
+                }
                 let outcome = match source.fetch().await {
                     Ok(nodes) => provisioner.reconcile(&nodes).map(|changes| (nodes.len(), changes)),
                     Err(error) => Err(error),
@@ -338,7 +329,7 @@ impl Subservice for ProvisionSubservice {
                     match outcome {
                         Ok((count, changes)) => {
                             s.nodes = count;
-                            s.last_error = None;
+                            s.last_error = policy_error;
                             for change in changes {
                                 tracing::info!(?change, "node provisioned");
                             }
@@ -381,12 +372,31 @@ mod tests {
     use super::*;
     use m4a_agent::MemoryVault;
 
+    fn policy(status: NodeStatus) -> Grants {
+        Policy::default().grants(status)
+    }
+
     fn node(id: &str, status: NodeStatus) -> NodeInfo {
         NodeInfo { node_id: id.to_owned(), status, kind: Some("qemu".to_owned()) }
     }
 
     fn provisioner(dir: &Path, vault: Arc<dyn KeyVault>) -> Provisioner {
         Provisioner::new(vault, dir, "https://messenger.test", "nodes.test").unwrap()
+    }
+
+    #[test]
+    fn a_policy_change_re_grants_without_changing_status_or_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault: Arc<dyn KeyVault> = Arc::new(MemoryVault::new());
+        let mut p = provisioner(dir.path(), Arc::clone(&vault));
+        p.reconcile(&[node("n", NodeStatus::Member)]).unwrap();
+        let key = p.entry("n").unwrap().m4a_public_key.clone();
+        p.set_policy(Policy::from_json(r#"{"member":{"mailbox":false,"rooms":["general"],"capabilities":["heartbeat"]}}"#).unwrap());
+        let c = p.reconcile(&[node("n", NodeStatus::Member)]).unwrap();
+        assert_eq!(c, [Change::Updated("n".into(), NodeStatus::Member)]);
+        let e = p.entry("n").unwrap();
+        assert!(e.mailbox.is_none() && e.grants.rooms == ["general"] && e.m4a_public_key == key);
+        assert!(p.reconcile(&[node("n", NodeStatus::Member)]).unwrap().is_empty());
     }
 
     #[test]
@@ -490,6 +500,7 @@ mod tests {
             interval: Duration::from_secs(1),
             server_ref: "https://messenger.test".into(),
             mail_domain: "nodes.test".into(),
+            policy_path: None,
         };
         let (mut p, _) = ProvisionSubservice::new(config(var)).build().unwrap();
         p.reconcile(&[node("k", NodeStatus::Member)]).unwrap();

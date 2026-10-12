@@ -112,6 +112,7 @@ async fn enrollment_and_status_flips_provision_the_server_side() {
         interval: Duration::from_millis(200),
         server_ref: "https://messenger.test".into(),
         mail_domain: "nodes.test".into(),
+        policy_path: None,
     });
     service.start().unwrap();
 
