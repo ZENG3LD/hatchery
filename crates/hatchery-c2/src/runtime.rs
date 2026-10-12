@@ -386,6 +386,26 @@ enum RelayCommand {
     },
 }
 
+/// Relay endpoints by node. Nodes can be added while C2 runs (enrollment), so readers take a
+/// snapshot per operation instead of holding a fixed map.
+#[derive(Clone)]
+struct RelayRegistry(Arc<std::sync::RwLock<Arc<BTreeMap<NodeId, RelayEndpoint>>>>);
+
+impl RelayRegistry {
+    fn new(initial: BTreeMap<NodeId, RelayEndpoint>) -> Self {
+        Self(Arc::new(std::sync::RwLock::new(Arc::new(initial))))
+    }
+    fn snapshot(&self) -> Arc<BTreeMap<NodeId, RelayEndpoint>> {
+        Arc::clone(&self.0.read().expect("relay registry lock"))
+    }
+    fn insert(&self, node_id: NodeId, endpoint: RelayEndpoint) {
+        let mut guard = self.0.write().expect("relay registry lock");
+        let mut next = (**guard).clone();
+        next.insert(node_id, endpoint);
+        *guard = Arc::new(next);
+    }
+}
+
 #[derive(Clone)]
 struct RelayEndpoint {
     commands: mpsc::Sender<RelayCommand>,
@@ -544,7 +564,7 @@ async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch:
         };
         relay_receivers.push((node, commands_rx, releases_rx, force_rx, call_home_rx));
     }
-    let relay_senders = Arc::new(relay_senders);
+    let relay_senders = RelayRegistry::new(relay_senders);
     if let Some(node_listen) = config.node_listen {
         tasks.spawn(accept_call_home(node_listen, call_home_routes, shutdown.clone()));
     }
@@ -560,7 +580,7 @@ async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch:
     tasks.spawn(control::run(
         config.control_endpoint,
         config.api_token,
-        Arc::clone(&relay_senders),
+        relay_senders.clone(),
         status_rx.clone(),
         hub.clone(),
         shutdown.clone(),

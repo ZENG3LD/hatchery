@@ -157,7 +157,7 @@ impl ControlSlots {
 pub(super) async fn run(
     endpoint: String,
     token: String,
-    relays: Arc<BTreeMap<NodeId, RelayEndpoint>>,
+    relays: RelayRegistry,
     status: watch::Receiver<Arc<StatusResponse>>,
     hub: OperatorHub,
     shutdown: watch::Receiver<bool>,
@@ -170,7 +170,7 @@ pub(super) async fn run(
 async fn accept_local(
     mut listener: OwnerOnlyLocalListener,
     token: String,
-    relays: Arc<BTreeMap<NodeId, RelayEndpoint>>,
+    relays: RelayRegistry,
     status: watch::Receiver<Arc<StatusResponse>>,
     hub: OperatorHub,
     mut shutdown: watch::Receiver<bool>,
@@ -214,7 +214,7 @@ async fn accept_local(
 pub(super) async fn run_tcp(
     listen: SocketAddr,
     token: String,
-    relays: Arc<BTreeMap<NodeId, RelayEndpoint>>,
+    relays: RelayRegistry,
     status: watch::Receiver<Arc<StatusResponse>>,
     hub: OperatorHub,
     mut shutdown: watch::Receiver<bool>,
@@ -268,7 +268,7 @@ fn spawn_control<S>(
     permit: OwnedSemaphorePermit,
     slots: &ControlSlots,
     token: &str,
-    relays: &Arc<BTreeMap<NodeId, RelayEndpoint>>,
+    relays: &RelayRegistry,
     status: &watch::Receiver<Arc<StatusResponse>>,
     hub: &OperatorHub,
     shutdown: &watch::Receiver<bool>,
@@ -278,7 +278,7 @@ fn spawn_control<S>(
     let token = token.to_owned();
     let authenticated = Arc::clone(&slots.authenticated);
     let connection_ids = Arc::clone(&slots.next_connection_id);
-    let relays = Arc::clone(relays);
+    let relays = relays.clone();
     let status = status.clone();
     let hub = hub.clone();
     let connection_shutdown = shutdown.clone();
@@ -296,7 +296,7 @@ async fn serve_connection<S>(
     authenticated: Arc<Semaphore>,
     connection_ids: Arc<AtomicU64>,
     token: &str,
-    relays: Arc<BTreeMap<NodeId, RelayEndpoint>>,
+    relays: RelayRegistry,
     mut status: watch::Receiver<Arc<StatusResponse>>,
     hub: OperatorHub,
     mut shutdown: watch::Receiver<bool>,
@@ -404,7 +404,7 @@ where
         budget: Arc::clone(&budget),
         disconnect: disconnect_tx.clone(),
     });
-    let mut hello_status = refresh_hello_status(connection_id, &relays, &status).await;
+    let mut hello_status = refresh_hello_status(connection_id, &relays.snapshot(), &status).await;
     if !include_provider_contracts {
         clear_provider_contract_manifests(&mut hello_status);
     }
@@ -535,7 +535,7 @@ where
                     }
                     continue;
                 }
-                match dispatch_start(connection_id, request.request, &relays, &status) {
+                match dispatch_start(connection_id, request.request, &relays.snapshot(), &status) {
                     DispatchStart::Immediate(result) => {
                         match queue_reply(&outbound_tx, &budget, C2ReplyEnvelope { request_id: request.request_id, result }).await {
                             QueueOutcome::Queued => note_reply_queued(&reply_drop_warned),
@@ -606,7 +606,7 @@ where
     tracing::info!(connection_id, reason = %close_reason, "control connection closed");
     hub.detach(connection_id);
     dispatches.shutdown().await;
-    release_all_controllers(&relays).await;
+    release_all_controllers(&relays.snapshot()).await;
     reader_task.abort();
     writer_task.abort();
     drop(operator_permit);
@@ -623,7 +623,7 @@ async fn refresh_hello_status(
     for (node_id, observed) in &refreshed.nodes {
         let Some(cursor) = observed.cursor else { continue; };
         if observed.transport != NodeTransportState::Online { continue; }
-        let relay = relays[node_id].commands.clone();
+        let Some(relay) = relays.get(node_id).map(|endpoint| endpoint.commands.clone()) else { continue; };
         requests.spawn(async move {
             let (reply_tx, reply_rx) = oneshot::channel();
             let command = RelayCommand::Request {
