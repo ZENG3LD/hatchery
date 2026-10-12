@@ -11,7 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 
-type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+pub type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 const WIRE_VERSION: u8 = 1;
 const KIND_MOUSE: u8 = 1;
@@ -112,7 +112,7 @@ pub async fn pull_frame_and_click(
     Ok(png)
 }
 
-async fn open_session(post_url: &str) -> Result<(), ClientError> {
+pub async fn open_session(post_url: &str) -> Result<(), ClientError> {
     let rest = post_url
         .strip_prefix("http://")
         .ok_or_else(|| ClientError("HQ client opens sessions over http:// only".into()))?;
@@ -147,7 +147,7 @@ async fn open_session(post_url: &str) -> Result<(), ClientError> {
     Err(ClientError(format!("session open failed: {last}")))
 }
 
-async fn connect_ws(ws_url: &str) -> Result<Ws, ClientError> {
+pub async fn connect_ws(ws_url: &str) -> Result<Ws, ClientError> {
     let mut last = String::from("not attempted");
     for attempt in 1..=40 {
         match tokio_tungstenite::connect_async(ws_url).await {

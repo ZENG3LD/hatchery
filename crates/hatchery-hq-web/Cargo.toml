@@ -1,0 +1,32 @@
+[package]
+name = "hatchery-hq-web"
+version = "0.2.1"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/ZENG3LD/hatchery"
+description = "Web HQ for hatchery: a small loopback server that gives a browser the operator view (nodes, terminals, mail, tasks, browser frames) while keeping every token on the server side"
+
+[[bin]]
+name = "hatchery-hq-web"
+path = "src/main.rs"
+
+[lib]
+name = "hatchery_hq_web"
+
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time", "io-util"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+gate4agent-node-protocol = { version = "0.5.0" }
+gate4agent-types = { version = "0.5.0" }
+hatchery-c2-client = { path = "../hatchery-c2-client", version = "0.2.0" }
+hatchery-c2-protocol = { path = "../hatchery-c2-protocol", version = "0.2.0" }
+hatchery-bidi-client = { path = "../hatchery-bidi-client", version = "0.2.2" }
+sha2 = "0.10"
+tokio-tungstenite = "0.26"

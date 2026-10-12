@@ -7,7 +7,8 @@ use crate::provision::{read_ledger, LedgerEntry, NodeStatus};
 use crate::tasks::TaskStore;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 #[derive(Debug)]
 pub struct HubError {
@@ -35,6 +36,8 @@ pub struct Hub {
     data_dir: PathBuf,
     messenger: Mutex<Messenger>,
     tasks: Mutex<TaskStore>,
+    /// Bumped on every message sent; lets HQ long-poll for new mail instead of polling blindly.
+    mail_signal: (Mutex<u64>, Condvar),
 }
 
 fn str_field<'a>(v: &'a Value, name: &str) -> Result<&'a str, HubError> {
@@ -47,7 +50,13 @@ impl Hub {
             data_dir: data_dir.to_owned(),
             messenger: Mutex::new(Messenger::open(data_dir)?),
             tasks: Mutex::new(TaskStore::open(data_dir)?),
+            mail_signal: (Mutex::new(0), Condvar::new()),
         })
+    }
+
+    fn bump_mail(&self) {
+        *self.mail_signal.0.lock().expect("signal") += 1;
+        self.mail_signal.1.notify_all();
     }
 
     fn entry(&self, node_id: &str) -> Option<LedgerEntry> {
@@ -77,6 +86,7 @@ impl Hub {
             "mail.send" => {
                 let key = payload.get("idempotency_key").and_then(Value::as_str).map(str::to_owned);
                 let id = self.messenger.lock().expect("messenger").send(node_id, str_field(payload, "to")?, str_field(payload, "subject")?, str_field(payload, "body")?, key)?;
+                self.bump_mail();
                 Ok(json!({ "message_id": id }))
             }
             "mail.inbox" => {
@@ -140,7 +150,29 @@ impl Hub {
             }
             ("POST", ["v1", "mail", "send"]) => {
                 let id = self.messenger.lock().expect("messenger").send(OPERATOR, str_field(body, "to")?, str_field(body, "subject")?, str_field(body, "body")?, None)?;
+                self.bump_mail();
                 Ok(json!({ "message_id": id }))
+            }
+            // Long-poll for HQ: returns as soon as the operator inbox holds a message newer than
+            // `since_ms`, or after `timeout_secs` (max 30) with an empty list.
+            ("POST", ["v1", "mail", "wait"]) => {
+                let since = body.get("since_ms").and_then(Value::as_u64).unwrap_or(0);
+                let deadline = Instant::now() + Duration::from_secs(body.get("timeout_secs").and_then(Value::as_u64).unwrap_or(25).min(30));
+                loop {
+                    let seen = *self.mail_signal.0.lock().expect("signal");
+                    let mail: Vec<_> = self.messenger.lock().expect("messenger").inbox(OPERATOR, since, 100)?.into_iter().filter(|m| m.created_at_ms > since).collect();
+                    if !mail.is_empty() {
+                        return Ok(json!({ "messages": mail }));
+                    }
+                    let now = Instant::now();
+                    if now >= deadline {
+                        return Ok(json!({ "messages": [] }));
+                    }
+                    let guard = self.mail_signal.0.lock().expect("signal");
+                    if *guard == seen {
+                        let _ = self.mail_signal.1.wait_timeout(guard, deadline - now).expect("signal wait");
+                    }
+                }
             }
             ("POST", ["v1", "mail", "inbox"]) => {
                 let mail = self.messenger.lock().expect("messenger").inbox(OPERATOR, 0, 100)?;
