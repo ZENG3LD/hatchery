@@ -37,6 +37,7 @@ mod kit;
 pub(crate) use gate4agent_node_core::kit_wireguard;
 mod network_allowlist_catalog;
 pub(crate) use gate4agent_node_core::platform;
+pub mod enroll_client;
 pub use kit::{force_link, linked_core_names};
 #[cfg(feature = "m4a")]
 pub use kit::start_mailbox;

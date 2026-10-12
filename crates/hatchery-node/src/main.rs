@@ -55,9 +55,23 @@ async fn main() {
     let mut harness_mcp_helper: Option<PathBuf> = None;
     let mut network_allowlist_catalog: Option<PathBuf> = None;
     let mut session_record_retention = SessionRecordRetentionConfig::default();
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    if raw_args.first().map(String::as_str) == Some("enroll") {
+        run_enroll(&raw_args[1..]).await;
+        return;
+    }
+    let mut enrolled = false;
+    let mut enroll_state: Option<PathBuf> = None;
+    let mut no_wg = false;
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
+            // Run as an enrolled node: identity and tunnel settings come from the state
+            // written by `enroll`; call-home authenticates by signature.
+            "--enrolled" => enrolled = true,
+            "--enroll-state" => enroll_state = Some(required_value("--enroll-state", args.next()).into()),
+            // The tunnel is managed outside the node (OS WireGuard client).
+            "--no-wg" => no_wg = true,
             "--endpoint" => endpoint = required_value("--endpoint", args.next()),
             "--api-listen" => {
                 let value = required_value("--api-listen", args.next());
@@ -237,8 +251,37 @@ async fn main() {
             unknown => fail(&format!("unknown argument: {unknown}")),
         }
     }
-    let token = std::env::var(NODE_TOKEN_ENV)
-        .unwrap_or_else(|_| fail(&format!("{NODE_TOKEN_ENV} is required")));
+    let mut call_home_identity = None;
+    if enrolled {
+        let dir = enroll_state
+            .clone()
+            .or_else(hatchery_node::enroll_client::default_enroll_dir)
+            .unwrap_or_else(|| fail("no enrollment state directory (set --enroll-state)"));
+        let (identity, state) = hatchery_node::enroll_client::load_enrolled(&dir).unwrap_or_else(|error| fail(&error.to_string()));
+        if call_home.is_none() {
+            call_home = state.response.c2_call_home.as_deref().map(|addr| {
+                addr.parse().unwrap_or_else(|error| fail(&format!("stored call-home address is invalid: {error}")))
+            });
+        }
+        if !no_wg {
+            for (key, value) in hatchery_node::enroll_client::wireguard_env_from_state(&dir, &state, "hatch0") {
+                if std::env::var_os(&key).is_none() {
+                    std::env::set_var(key, value);
+                }
+            }
+        }
+        if node_id.is_none() {
+            node_id = Some(NodeId::new(state.node_id.clone()).unwrap_or_else(|error| fail(&error.to_string())));
+        }
+        call_home_identity = Some(Arc::new(identity));
+    }
+    // An enrolled node has no standing token; local clients of its own endpoint still need
+    // one, so an unset variable gets a random per-process value that is never printed.
+    let token = match std::env::var(NODE_TOKEN_ENV) {
+        Ok(value) => value,
+        Err(_) if enrolled => random_token().unwrap_or_else(|error| fail(&error)),
+        Err(_) => fail(&format!("{NODE_TOKEN_ENV} is required")),
+    };
     std::env::remove_var(NODE_TOKEN_ENV);
     let node_id = node_id.unwrap_or_else(|| fail("--node-id is required"));
     for workspace in &mut workspaces {
@@ -272,6 +315,10 @@ async fn main() {
             None => Ok(config),
         })
         .unwrap_or_else(|error| fail(&error.to_string()));
+    let config = match call_home_identity {
+        Some(identity) => config.with_call_home_identity(identity),
+        None => config,
+    };
     // Optional bridge secret — read then scrub from the process environment.
     // Never print. Distinct from NODE_TOKEN (already removed above).
     let config = match std::env::var(BRIDGE_TOKEN_ENV) {
@@ -673,5 +720,60 @@ mod tests {
             Err(other) => panic!("expected invalid root, got {other}"),
         }
         let _ = std::fs::remove_dir_all(&scratch);
+    }
+}
+
+fn random_token() -> Result<String, String> {
+    let mut bytes = [0_u8; 32];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut bytes))
+        .map_err(|error| format!("cannot create a local token: {error}"))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// `enroll --c2-enroll ADDR --node-id ID [--kind local|docker|qemu|remote] [--code CODE]
+/// [--state-dir DIR]`: generate keys locally and send the signed request. The one-time code
+/// may also come from `HATCHERY_ENROLL_CODE` (kept out of argv and shell history).
+async fn run_enroll(args: &[String]) {
+    let mut addr: Option<std::net::SocketAddr> = None;
+    let mut id: Option<String> = None;
+    let mut kind = hatchery_enroll::NodeKind::Local;
+    let mut code = std::env::var("HATCHERY_ENROLL_CODE").ok();
+    let mut dir = hatchery_node::enroll_client::default_enroll_dir();
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        let mut value = |name: &str| it.next().cloned().unwrap_or_else(|| fail(&format!("{name} requires a value")));
+        match arg.as_str() {
+            "--c2-enroll" => addr = Some(value("--c2-enroll").parse().unwrap_or_else(|e| fail(&format!("--c2-enroll is invalid: {e}")))),
+            "--node-id" => id = Some(value("--node-id")),
+            "--code" => code = Some(value("--code")),
+            "--state-dir" => dir = Some(value("--state-dir").into()),
+            "--kind" => {
+                kind = match value("--kind").as_str() {
+                    "local" => hatchery_enroll::NodeKind::Local,
+                    "docker" => hatchery_enroll::NodeKind::Docker,
+                    "qemu" => hatchery_enroll::NodeKind::Qemu,
+                    "remote" => hatchery_enroll::NodeKind::Remote,
+                    _ => fail("--kind must be local, docker, qemu or remote"),
+                }
+            }
+            other => fail(&format!("unknown enroll argument: {other}")),
+        }
+    }
+    let addr = addr.unwrap_or_else(|| fail("--c2-enroll is required"));
+    let id = id.unwrap_or_else(|| fail("--node-id is required"));
+    let dir = dir.unwrap_or_else(|| fail("no state directory (set --state-dir)"));
+    match hatchery_node::enroll_client::enroll(addr, &id, kind, code.as_deref(), &dir).await {
+        Ok(state) => {
+            let r = &state.response;
+            println!(
+                "enrolled node_id={} status={} tunnel_ip={} (state in {}; keys never leave this host)",
+                r.node_id,
+                r.status,
+                r.tunnel_ip.as_deref().unwrap_or("-"),
+                dir.display()
+            );
+        }
+        Err(error) => fail(&error.to_string()),
     }
 }

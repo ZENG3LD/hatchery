@@ -1959,6 +1959,7 @@ dependencies = [
  "grok-session-restore",
  "hatchery-c2",
  "hatchery-c2-client",
+ "hatchery-enroll",
  "kimi-session-restore",
  "libc",
  "mail4agent",

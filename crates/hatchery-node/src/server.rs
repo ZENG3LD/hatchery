@@ -1052,6 +1052,10 @@ pub struct NodeServerConfig {
     /// A relay to CALL, rather than wait to be called by. `None` keeps the
     /// node purely a listener, which is what it has always been.
     call_home: Option<std::net::SocketAddr>,
+    /// When set, call-home authenticates by signing the relay's challenge with this
+    /// identity (enrolled node) and falls back to the token handshake against a relay
+    /// that sends no challenge.
+    call_home_identity: Option<Arc<hatchery_enroll::NodeIdentity>>,
     pub node_id: NodeId,
     pub workspaces: Vec<WorkspaceConfig>,
     access_token: String,
@@ -1139,6 +1143,7 @@ impl NodeServerConfig {
             bridge_token: None,
             bridge_underlay: None,
             call_home: None,
+            call_home_identity: None,
             node_id,
             workspaces,
             access_token,
@@ -1254,6 +1259,12 @@ impl NodeServerConfig {
         }
         self.call_home = Some(relay);
         Ok(self)
+    }
+
+    /// Authenticate call-home with a node-held identity instead of a standing token.
+    pub fn with_call_home_identity(mut self, identity: Arc<hatchery_enroll::NodeIdentity>) -> Self {
+        self.call_home_identity = Some(identity);
+        self
     }
 
     pub fn with_state_path(
@@ -2460,6 +2471,7 @@ try { $contextHash = ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadA
         // hook ingress.
         let endpoint = config.endpoint.clone();
         let call_home = config.call_home;
+        let call_home_identity = config.call_home_identity.clone();
         let api_listen = config.api_listen;
         let bridge_listen = config.bridge_listen;
         let bridge_underlay = config.bridge_underlay;
@@ -2479,7 +2491,7 @@ try { $contextHash = ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadA
                 Arc::clone(&shared),
                 shutdown_timeout,
             );
-            let accept_loop = accept_connections(&endpoint, call_home, accept_shared);
+            let accept_loop = accept_connections(&endpoint, call_home, call_home_identity, accept_shared);
             let api_loop = http_api::run(api_listen, api_shared);
             let bridge_loop = browser_bridge::run(bridge_listen, bridge_auth, bridge_shared, bridge_underlay);
             tokio::pin!(runtime_loop);
@@ -12699,6 +12711,7 @@ fn agent_stream_chunk_kind_label(kind: &AgentStreamChunkKindV1) -> &'static str 
 async fn accept_connections(
     endpoint: &str,
     call_home: Option<std::net::SocketAddr>,
+    identity: Option<Arc<hatchery_enroll::NodeIdentity>>,
     shared: Arc<NodeShared>,
 ) -> Result<(), NodeServerError> {
     let mut connections = JoinSet::new();
@@ -12707,7 +12720,7 @@ async fn accept_connections(
         Some(relay) => {
             let listener =
                 accept_connections_inner(endpoint, Arc::clone(&shared), &mut connections);
-            let dialler = call_home_loop(relay, Arc::clone(&shared));
+            let dialler = call_home_loop(relay, identity, Arc::clone(&shared));
             tokio::pin!(listener);
             tokio::pin!(dialler);
             tokio::select! {
@@ -12750,6 +12763,7 @@ const CALL_HOME_BACKOFFS_MS: [u64; 5] = [500, 1_000, 2_000, 4_000, 8_000];
 /// node's local endpoint down with it; the only way out is shutdown.
 async fn call_home_loop(
     relay: std::net::SocketAddr,
+    identity: Option<Arc<hatchery_enroll::NodeIdentity>>,
     shared: Arc<NodeShared>,
 ) -> Result<(), NodeServerError> {
     let mut failures = 0_usize;
@@ -12763,7 +12777,7 @@ async fn call_home_loop(
             }
             _ = shared.shutdown_notify.notified() => return Ok(()),
         };
-        match dial_relay_and_serve(relay, Arc::clone(&shared), permit).await {
+        match dial_relay_and_serve(relay, identity.as_deref(), Arc::clone(&shared), permit).await {
             Ok(()) => {
                 // A clean end is the relay hanging up, which it does on
                 // its own restart. Reconnect immediately rather than
@@ -12794,6 +12808,7 @@ async fn call_home_loop(
 /// One call-home attempt: connect, name this node, then serve.
 async fn dial_relay_and_serve(
     relay: std::net::SocketAddr,
+    identity: Option<&hatchery_enroll::NodeIdentity>,
     shared: Arc<NodeShared>,
     preauth_permit: OwnedSemaphorePermit,
 ) -> Result<(), NodeServerError> {
@@ -12808,7 +12823,31 @@ async fn dial_relay_and_serve(
         .await
         .map_err(|error| NodeServerError::Handshake(error.to_string()))?;
     tracing::info!(node_id = %shared.node_id, %relay, "announced this node to the relay");
-    serve_connection(stream, shared, preauth_permit).await
+    let mut session_token = None;
+    if let Some(identity) = identity {
+        // An enrolled relay answers the announce with a signed-call-home challenge; a
+        // token-mode relay sends its wire hello instead. Peek to tell them apart
+        // without consuming either.
+        let mut magic = [0_u8; 4];
+        let peeked = timeout(Duration::from_secs(10), stream.peek(&mut magic))
+            .await
+            .map_err(|_| NodeServerError::Handshake("relay sent nothing after the announce".to_owned()))?
+            .map_err(NodeServerError::CallHomeTransport)?;
+        if peeked == 4 && &magic == hatchery_enroll::CHALLENGE_MAGIC {
+            let mut frame = [0_u8; hatchery_enroll::CHALLENGE_LEN];
+            timeout(Duration::from_secs(5), tokio::io::AsyncReadExt::read_exact(&mut stream, &mut frame))
+                .await
+                .map_err(|_| NodeServerError::Handshake("relay challenge timed out".to_owned()))?
+                .map_err(NodeServerError::CallHomeTransport)?;
+            let (answer, token) = identity
+                .answer_challenge(shared.node_id.as_str(), &frame)
+                .map_err(|error| NodeServerError::Handshake(error.to_string()))?;
+            tokio::io::AsyncWriteExt::write_all(&mut stream, &answer).await.map_err(NodeServerError::CallHomeTransport)?;
+            tracing::info!(node_id = %shared.node_id, "answered the relay's signed call-home challenge");
+            session_token = Some(token);
+        }
+    }
+    serve_connection(stream, shared, session_token, preauth_permit).await
 }
 
 async fn accept_connections_inner(
@@ -12834,7 +12873,7 @@ async fn accept_connections_inner(
         };
         let connection_shared = Arc::clone(&shared);
         connections.spawn(async move {
-            serve_connection(server, connection_shared, preauth_permit).await
+            serve_connection(server, connection_shared, None, preauth_permit).await
         });
         if shared.shutdown.load(Ordering::Acquire) {
             return Ok(());
@@ -12852,11 +12891,14 @@ async fn accept_connections_inner(
 async fn serve_connection<S>(
     mut pipe: S,
     shared: Arc<NodeShared>,
+    session_token: Option<String>,
     preauth_permit: OwnedSemaphorePermit,
 ) -> Result<(), NodeServerError>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
 {
+    // A signed call-home connection authenticates with its own per-connection token.
+    let auth_token: &[u8] = session_token.as_deref().map_or(shared.access_token.as_bytes(), str::as_bytes);
     let hello_frame = timeout(
         Duration::from_millis(AUTH_FRAME_TIMEOUT_MS),
         read_json_frame_limited_body_timeout(
@@ -12889,7 +12931,7 @@ where
     let server_nonce = random_nonce().map_err(NodeServerError::Authentication)?;
     let server_proof = match (hello.compatibility.as_ref(), compatibility.as_ref()) {
         (Some(offer), Some(selected)) => negotiated_auth_proof(
-            shared.access_token.as_bytes(),
+            auth_token,
             AuthDirection::Server,
             hello.role,
             &hello.client_nonce,
@@ -12898,7 +12940,7 @@ where
             selected,
         ),
         (None, None) => auth_proof(
-            shared.access_token.as_bytes(),
+            auth_token,
             AuthDirection::Server,
             hello.role,
             &hello.client_nonce,
@@ -12933,7 +12975,7 @@ where
     };
     let expected_client_proof = match (hello.compatibility.as_ref(), compatibility.as_ref()) {
         (Some(offer), Some(selected)) => negotiated_auth_proof(
-            shared.access_token.as_bytes(),
+            auth_token,
             AuthDirection::Client,
             hello.role,
             &hello.client_nonce,
@@ -12942,7 +12984,7 @@ where
             selected,
         ),
         (None, None) => auth_proof(
-            shared.access_token.as_bytes(),
+            auth_token,
             AuthDirection::Client,
             hello.role,
             &hello.client_nonce,
