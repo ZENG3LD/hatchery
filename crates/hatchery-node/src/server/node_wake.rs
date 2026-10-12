@@ -15,7 +15,7 @@ use std::sync::Arc;
 use gate4agent_wake::hosted::{plan_hosted_wake, HostedSessions, HostedTarget, HostedWake};
 use gate4agent_wake::{ProviderKind, WakeLetter};
 
-use crate::wake_pipeline::{deliver_routine, route, Route, RoutineLetter, SessionShape};
+use crate::wake_pipeline::{deliver_routine, launch_spawn_profile, route, Route, RoutineLetter, SessionShape};
 
 use super::*;
 
@@ -71,7 +71,8 @@ impl NodeWake {
                     SessionAddress { workspace_id: b.workspace_id.clone(), session: SessionKey { instance_id, generation: b.generation } },
                 );
             }
-            targets.insert(nick.clone(), HostedTarget { nick, provider, live: binding.is_some(), spawn_allowed: false });
+            let spawn_allowed = self.policy.spawn_profile(&nick).is_some();
+            targets.insert(nick.clone(), HostedTarget { nick, provider, live: binding.is_some(), spawn_allowed });
         }
         (Snapshot(targets), addresses)
     }
@@ -111,12 +112,32 @@ impl NodeWake {
                         return Err(why);
                     }
                     Route::Routine(_) => return Err("unexpected routine route for a live session".into()),
+                    Route::Spawn(_) => return Err("unexpected spawn route for a live session".into()),
                 }
                 tracing::info!(nick = %nick, "letter woke a live session");
                 Ok("submitted")
             }
-            HostedWake::Spawn { .. } => Err("spawn on letter is not enabled on this node".into()),
+            HostedWake::Spawn { nick, .. } => match self.policy.spawn_profile(&nick).cloned() {
+                Some(profile) => {
+                    tokio::task::spawn_blocking(move || launch_spawn_profile(&profile))
+                        .await
+                        .map_err(|_| "spawn profile task failed".to_owned())?
+                        .map_err(|e| e)?;
+                    tracing::info!(nick = %nick, "letter woke an offline session via spawn profile");
+                    Ok("spawned")
+                }
+                None => Err("spawn on letter is not enabled on this node".into()),
+            },
             HostedWake::Refuse(why) => match route(&self.policy, &letter.nick, SessionShape::None) {
+                Route::Spawn(profile) => {
+                    let nick = letter.nick.clone();
+                    tokio::task::spawn_blocking(move || launch_spawn_profile(&profile))
+                        .await
+                        .map_err(|_| "spawn profile task failed".to_owned())?
+                        .map_err(|e| e)?;
+                    tracing::info!(nick = %nick, "letter woke an offline session via spawn profile");
+                    Ok("spawned")
+                }
                 Route::Routine(target) => {
                     let routine_letter = RoutineLetter {
                         to: letter.nick.clone(),

@@ -126,7 +126,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -137,7 +137,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -984,7 +984,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.3",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1057,7 +1057,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1290,7 +1290,7 @@ dependencies = [
 [[package]]
 name = "gate4agent"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "chrono",
  "gate4agent-catalog",
@@ -1309,7 +1309,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-adapters"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-types",
  "serde_json",
@@ -1319,12 +1319,12 @@ dependencies = [
 [[package]]
 name = "gate4agent-build-stamp"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 
 [[package]]
 name = "gate4agent-catalog"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1334,7 +1334,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-engine"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-types",
 ]
@@ -1342,7 +1342,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-handle"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-kernel",
  "gate4agent-tool-protocol",
@@ -1353,7 +1353,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-kernel"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-engine",
@@ -1366,7 +1366,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-node-core"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-runtime-native",
@@ -1380,7 +1380,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-node-protocol"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-build-stamp",
  "gate4agent-types",
@@ -1394,7 +1394,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-node-wire"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-node-protocol",
  "libc",
@@ -1407,7 +1407,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-provider-ports"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1417,12 +1417,12 @@ dependencies = [
 [[package]]
 name = "gate4agent-pty"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 
 [[package]]
 name = "gate4agent-runtime-native"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-catalog",
@@ -1441,7 +1441,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-shell-capabilities"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-types",
@@ -1451,7 +1451,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-shell-history"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-provider-ports",
@@ -1464,7 +1464,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-shell-native"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent",
  "gate4agent-adapters",
@@ -1481,7 +1481,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-shell-one-shot"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent",
  "gate4agent-adapters",
@@ -1493,7 +1493,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-testkit"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1502,7 +1502,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-tool-engine"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-tool-protocol",
  "gate4agent-types",
@@ -1511,7 +1511,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-tool-protocol"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-types",
  "serde",
@@ -1520,7 +1520,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-types"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -1529,12 +1529,15 @@ dependencies = [
 [[package]]
 name = "gate4agent-wake"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
  "tungstenite 0.29.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2711,7 +2714,7 @@ dependencies = [
 [[package]]
 name = "m4a-agent"
 version = "0.4.7"
-source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#e6aad9362af144c3beb8d1ccfb718ce35e5518e8"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -2732,7 +2735,7 @@ dependencies = [
 [[package]]
 name = "m4a-seam"
 version = "0.4.7"
-source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#e6aad9362af144c3beb8d1ccfb718ce35e5518e8"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -2746,7 +2749,7 @@ dependencies = [
 [[package]]
 name = "mail4agent"
 version = "0.4.7"
-source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#e6aad9362af144c3beb8d1ccfb718ce35e5518e8"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "axum",
  "clap",
@@ -2773,7 +2776,7 @@ dependencies = [
 [[package]]
 name = "mail4agent-api"
 version = "0.4.7"
-source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#e6aad9362af144c3beb8d1ccfb718ce35e5518e8"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "serde",
  "serde_json",
@@ -2782,7 +2785,7 @@ dependencies = [
 [[package]]
 name = "mail4agent-attest"
 version = "0.4.7"
-source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#e6aad9362af144c3beb8d1ccfb718ce35e5518e8"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "libc",
  "sysinfo",
@@ -2793,7 +2796,7 @@ dependencies = [
 [[package]]
 name = "mail4agent-client"
 version = "0.4.7"
-source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#e6aad9362af144c3beb8d1ccfb718ce35e5518e8"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "mail4agent-api",
  "reqwest",
@@ -2806,7 +2809,7 @@ dependencies = [
 [[package]]
 name = "mail4agent-core"
 version = "0.4.7"
-source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#e6aad9362af144c3beb8d1ccfb718ce35e5518e8"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "getrandom 0.2.17",
  "hex",
@@ -2823,7 +2826,7 @@ dependencies = [
 [[package]]
 name = "mail4agent-messenger"
 version = "0.4.7"
-source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#e6aad9362af144c3beb8d1ccfb718ce35e5518e8"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -2839,7 +2842,7 @@ dependencies = [
 [[package]]
 name = "mail4agent-store-sqlite"
 version = "0.4.7"
-source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#e6aad9362af144c3beb8d1ccfb718ce35e5518e8"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "mail4agent-api",
  "mail4agent-core",
@@ -2854,7 +2857,7 @@ dependencies = [
 [[package]]
 name = "mail4agent-vodozemac"
 version = "0.4.7"
-source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#e6aad9362af144c3beb8d1ccfb718ce35e5518e8"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "aes",
  "arrayvec",
@@ -3062,7 +3065,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3494,7 +3497,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3872,7 +3875,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4237,7 +4240,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4392,7 +4395,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.5",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6135,4 +6138,4 @@ dependencies = [
 [[patch.unused]]
 name = "gate4agent-bidi-relay"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#3a4575621dfd6da2d5a88630e8882d589857d305"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"

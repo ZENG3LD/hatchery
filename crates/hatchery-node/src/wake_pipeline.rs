@@ -9,6 +9,7 @@
 //! {
 //!   "terminal_typing": ["<nick>"],
 //!   "routines": { "<nick>": { "credential_command": ["<program>", "<arg>"] } },
+//!   "spawn_profiles": { "<nick>": { "provider": "kimi", "command": ["<program>"] } },
 //!   "node_mail_to": "<nick>"
 //! }
 //! ```
@@ -20,7 +21,8 @@
 //!   deliver API (`gate4agent_wake::routine`). The routine URL and key come from the operator's
 //!   `credential_command` (stdout: `{"url": "...", "key": "..."}`), are kept in memory for the one
 //!   call and are never logged.
-//! - Spawning a session for a letter is off (no launch profiles yet).
+//! - Offline wake: a nick with a `spawn_profiles` entry launches that preconfigured command
+//!   (fixed argv; the letter never becomes an argument).
 //!
 //! Nothing here embeds a host, key or name; all of it comes from the policy file.
 
@@ -40,6 +42,19 @@ pub struct RoutineTarget {
     pub credential_command: Vec<String>,
 }
 
+/// Preconfigured launch for an offline nick. The letter never becomes an argv entry.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SpawnProfile {
+    /// Provider id (`kimi`, `codex`, `claude`, `grok`, `cursor`).
+    pub provider: String,
+    /// Fixed program and arguments. No letter text is appended.
+    pub command: Vec<String>,
+    /// Optional working directory.
+    #[serde(default)]
+    pub cwd: Option<String>,
+}
+
 /// The operator's letter policy for this node. The default delivers to live sessions only.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -50,6 +65,9 @@ pub struct WakePolicy {
     /// Nicks delivered through a routine webhook.
     #[serde(default)]
     pub routines: BTreeMap<String, RoutineTarget>,
+    /// Nicks that may be launched from a fixed profile when no session is live.
+    #[serde(default)]
+    pub spawn_profiles: BTreeMap<String, SpawnProfile>,
     /// Where this node's own mailbox letters go (a nick in `routines`). Unset: the node-mail
     /// host action is off.
     #[serde(default)]
@@ -71,7 +89,23 @@ impl WakePolicy {
                 return Err(format!("wake policy: routine {nick:?} has an empty credential_command"));
             }
         }
+        for (nick, p) in &policy.spawn_profiles {
+            if p.command.is_empty() {
+                return Err(format!("wake policy: spawn profile {nick:?} has an empty command"));
+            }
+            if p.provider.trim().is_empty() {
+                return Err(format!("wake policy: spawn profile {nick:?} has an empty provider"));
+            }
+            if gate4agent_wake::ProviderKind::parse(&p.provider).is_none() {
+                return Err(format!("wake policy: spawn profile {nick:?} has unknown provider {:?}", p.provider));
+            }
+        }
         Ok(policy)
+    }
+
+    /// Whether `nick` may be launched from a spawn profile when offline.
+    pub fn spawn_profile(&self, nick: &str) -> Option<&SpawnProfile> {
+        self.spawn_profiles.get(nick)
     }
 
     /// The terminal capability for `nick`: may a letter be typed into its PTY?
@@ -100,6 +134,8 @@ pub enum Route {
     TerminalTyping,
     /// One routine POST via g4a.
     Routine(RoutineTarget),
+    /// Launch a preconfigured offline profile (fixed argv; no letter args).
+    Spawn(SpawnProfile),
     /// Nothing; safe to log. The letter stays in the sender-side inbox.
     Refuse(String),
 }
@@ -110,11 +146,29 @@ pub fn route(policy: &WakePolicy, nick: &str, shape: SessionShape) -> Route {
         SessionShape::Semantic => Route::Deliver,
         SessionShape::RawTerminal if policy.terminal_granted(nick) => Route::TerminalTyping,
         SessionShape::RawTerminal => Route::Refuse(format!("{nick}: raw terminal session; typing a letter needs a terminal grant")),
-        SessionShape::None => match policy.routines.get(nick) {
-            Some(target) => Route::Routine(target.clone()),
-            None => Route::Refuse(format!("{nick}: no session of this node")),
-        },
+        SessionShape::None => {
+            if let Some(target) = policy.routines.get(nick) {
+                Route::Routine(target.clone())
+            } else if let Some(profile) = policy.spawn_profiles.get(nick) {
+                Route::Spawn(profile.clone())
+            } else {
+                Route::Refuse(format!("{nick}: no session of this node"))
+            }
+        }
     }
+}
+
+/// Runs a spawn profile's fixed command. The letter is not passed on argv (or at all).
+/// `Ok(())` when the process started; the caller does not wait for the provider turn.
+pub fn launch_spawn_profile(profile: &SpawnProfile) -> Result<(), String> {
+    let (program, args) = profile.command.split_first().ok_or("empty spawn command")?;
+    let mut cmd = Command::new(program);
+    cmd.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    if let Some(cwd) = profile.cwd.as_deref().filter(|c| !c.is_empty()) {
+        cmd.current_dir(cwd);
+    }
+    cmd.spawn().map_err(|e| format!("spawn profile: {}", e.kind()))?;
+    Ok(())
 }
 
 const CREDENTIAL_TIMEOUT: Duration = Duration::from_secs(15);
@@ -281,6 +335,10 @@ mod tests {
         WakePolicy {
             terminal_typing: ["typist".to_string()].into(),
             routines: [("web-bot".to_string(), RoutineTarget { credential_command: cmd })].into(),
+            spawn_profiles: [(
+                "kimi-home".to_string(),
+                SpawnProfile { provider: "kimi".into(), command: vec!["true".into()], cwd: None },
+            )].into(),
             node_mail_to: Some("web-bot".into()),
         }
     }
@@ -293,7 +351,46 @@ mod tests {
         assert!(matches!(route(&p, "other", SessionShape::RawTerminal), Route::Refuse(_)), "typing needs a grant");
         assert!(matches!(route(&WakePolicy::default(), "typist", SessionShape::RawTerminal), Route::Refuse(_)), "default policy refuses typing");
         assert!(matches!(route(&p, "web-bot", SessionShape::None), Route::Routine(_)));
+        assert!(matches!(route(&p, "kimi-home", SessionShape::None), Route::Spawn(_)));
         assert!(matches!(route(&p, "ghost", SessionShape::None), Route::Refuse(_)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_profile_launches_fixed_argv_without_the_letter() {
+        let dir = std::env::temp_dir().join(format!("hn-spawn-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let marker = dir.join("launched");
+        let script = dir.join("fake-provider.sh");
+        let script_body = format!(
+            "#!/bin/sh\necho \"$0\" \"$@\" > {marker}\n",
+            marker = marker.display()
+        );
+        std::fs::write(&script, script_body).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let profile = SpawnProfile {
+            provider: "kimi".into(),
+            command: vec![script.display().to_string(), "--resume".into(), "sess-1".into()],
+            cwd: Some(dir.display().to_string()),
+        };
+        let letter_body = "SECRET-LETTER-BODY-MUST-NOT-REACH-ARGV";
+        launch_spawn_profile(&profile).expect("spawn");
+        for _ in 0..50 {
+            if marker.is_file() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let argv = std::fs::read_to_string(&marker).expect("marker");
+        assert!(argv.contains("--resume") && argv.contains("sess-1"), "{argv}");
+        assert!(!argv.contains(letter_body), "letter leaked into argv: {argv}");
+        let mut p = policy_with(vec!["true".into()]);
+        p.spawn_profiles.insert("web-bot".into(), profile.clone());
+        assert!(matches!(route(&p, "web-bot", SessionShape::None), Route::Routine(_)));
+        let _ = letter_body;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -307,9 +404,12 @@ mod tests {
         assert!(WakePolicy::load(&f).is_err());
         std::fs::write(&f, r#"{"bogus":1}"#).unwrap();
         assert!(WakePolicy::load(&f).is_err(), "unknown keys are refused");
-        std::fs::write(&f, r#"{"routines":{"x":{"credential_command":["c"]}},"node_mail_to":"x","terminal_typing":["t"]}"#).unwrap();
+        std::fs::write(&f, r#"{"spawn_profiles":{"k":{"provider":"nope","command":["true"]}}}"#).unwrap();
+        assert!(WakePolicy::load(&f).is_err(), "unknown provider refused");
+        std::fs::write(&f, r#"{"routines":{"x":{"credential_command":["c"]}},"node_mail_to":"x","terminal_typing":["t"],"spawn_profiles":{"kimi-home":{"provider":"kimi","command":["true"]}}}"#).unwrap();
         let p = WakePolicy::load(&f).unwrap();
         assert!(p.terminal_granted("t") && !p.terminal_granted("x"));
+        assert!(p.spawn_profile("kimi-home").is_some());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
