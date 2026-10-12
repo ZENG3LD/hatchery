@@ -2015,6 +2015,7 @@ dependencies = [
  "kimi-session-restore",
  "libc",
  "mail4agent",
+ "reqwest",
  "ring",
  "serde",
  "serde_json",
