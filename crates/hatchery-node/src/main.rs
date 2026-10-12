@@ -883,11 +883,11 @@ fn random_token() -> Result<String, String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-/// `enroll --c2-enroll ADDR --node-id ID [--kind local|docker|qemu|remote] [--code CODE]
+/// `enroll --c2-enroll https://HOST|ADDR --node-id ID [--kind local|docker|qemu|remote] [--code CODE]
 /// [--state-dir DIR]`: generate keys locally and send the signed request. The one-time code
 /// may also come from `HATCHERY_ENROLL_CODE` (kept out of argv and shell history).
 async fn run_enroll(args: &[String]) {
-    let mut addr: Option<std::net::SocketAddr> = None;
+    let mut addr: Option<hatchery_node::enroll_client::EnrollTarget> = None;
     let mut id: Option<String> = None;
     let mut kind = hatchery_enroll::NodeKind::Local;
     let mut code = std::env::var("HATCHERY_ENROLL_CODE").ok();
@@ -896,7 +896,7 @@ async fn run_enroll(args: &[String]) {
     while let Some(arg) = it.next() {
         let mut value = |name: &str| it.next().cloned().unwrap_or_else(|| fail(&format!("{name} requires a value")));
         match arg.as_str() {
-            "--c2-enroll" => addr = Some(value("--c2-enroll").parse().unwrap_or_else(|e| fail(&format!("--c2-enroll is invalid: {e}")))),
+            "--c2-enroll" => addr = Some(hatchery_node::enroll_client::EnrollTarget::parse(&value("--c2-enroll")).unwrap_or_else(|e| fail(&format!("--c2-enroll is invalid: {e}")))),
             "--node-id" => id = Some(value("--node-id")),
             "--code" => code = Some(value("--code")),
             "--state-dir" => dir = Some(value("--state-dir").into()),
@@ -915,7 +915,12 @@ async fn run_enroll(args: &[String]) {
     let addr = addr.unwrap_or_else(|| fail("--c2-enroll is required"));
     let id = id.unwrap_or_else(|| fail("--node-id is required"));
     let dir = dir.unwrap_or_else(|| fail("no state directory (set --state-dir)"));
-    match hatchery_node::enroll_client::enroll(addr, &id, kind, code.as_deref(), &dir).await {
+    if let hatchery_node::enroll_client::EnrollTarget::Plain(a) = &addr {
+        if code.is_some() && !a.ip().is_loopback() {
+            eprintln!("warning: the one-time code goes to {a} in the clear; use --c2-enroll https://HOST (a C2 with --enroll-tls-only burns codes sent this way)");
+        }
+    }
+    match hatchery_node::enroll_client::enroll_to(&addr, &id, kind, code.as_deref(), &dir).await {
         Ok(state) => {
             let r = &state.response;
             println!(

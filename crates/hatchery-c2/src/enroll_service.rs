@@ -86,6 +86,9 @@ pub struct EnrollConfig {
     pub registry_path: Option<std::path::PathBuf>,
     /// Default true: enrollment only with a one-time operator code.
     pub require_code: bool,
+    /// Code enrollments only from a loopback peer (the TLS proxy on this host). A code sent in
+    /// the clear from any other peer is burned (it was exposed) and the request refused.
+    pub tls_only: bool,
     pub pool: Option<TunnelPool>,
     /// Where nodes POST their enrollment request.
     pub listen: SocketAddr,
@@ -106,6 +109,7 @@ impl EnrollConfig {
         Self {
             registry_path: None,
             require_code: true,
+            tls_only: false,
             pool: None,
             listen,
             provisioner: Arc::new(NoopProvisioner),
@@ -139,6 +143,7 @@ pub struct EnrollService {
     events: mpsc::UnboundedSender<EnrollEvent>,
     rate: Mutex<HashMap<IpAddr, (Instant, u32)>>,
     rate_limit: u32,
+    tls_only: bool,
     build_host: Option<(SocketAddr, String)>,
     server_upstream: Option<(SocketAddr, String)>,
     build_nonces: Mutex<HashMap<(String, String), u64>>,
@@ -196,6 +201,7 @@ impl EnrollService {
             events: tx,
             rate: Mutex::new(HashMap::new()),
             rate_limit: config.rate_limit_per_minute.max(1),
+            tls_only: config.tls_only,
             build_host: config.build_host.clone(),
             server_upstream: config.server_upstream.clone(),
             build_nonces: Mutex::new(HashMap::new()),
@@ -243,6 +249,13 @@ impl EnrollService {
         let Ok(request) = serde_json::from_slice::<EnrollmentRequest>(body) else {
             return HttpReply::error(400, "malformed request");
         };
+        if self.tls_only && !peer.is_loopback() {
+            if let Some(code) = request.code.as_deref() {
+                let burned = self.registry.lock().expect("registry lock").burn_code(code, unix_ms());
+                tracing::warn!(%peer, burned, "plaintext enrollment refused; the exposed code was burned (use https)");
+            }
+            return HttpReply::error(403, "enrollment requires https");
+        }
         let result = self.registry.lock().expect("registry lock").submit(&request, unix_ms());
         match result {
             Ok(record) => {
@@ -641,5 +654,54 @@ pub async fn read_http(stream: &mut TcpStream) -> io::Result<(String, String, Ve
 impl CapabilityGate for EnrollService {
     fn allows(&self, node_id: &str, capability: &str) -> Option<bool> {
         EnrollService::allows(self, node_id, capability)
+    }
+}
+
+#[cfg(test)]
+mod tls_only_tests {
+    use super::*;
+    use hatchery_enroll::{NodeIdentity, NodeKind};
+
+    fn code(service: &EnrollService) -> String {
+        let reply = service.handle_operator("POST", "/v1/enroll/codes", b"{}");
+        assert_eq!(reply.status, 200);
+        serde_json::from_slice::<serde_json::Value>(&reply.body).unwrap()["code"].as_str().unwrap().to_owned()
+    }
+
+    fn request(dir: &std::path::Path, id: &str, code: &str) -> Vec<u8> {
+        let identity = NodeIdentity::load_or_create(dir).unwrap();
+        serde_json::to_vec(&identity.sign_request(id, NodeKind::Local, Some(code), unix_ms()).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_code_sent_in_the_clear_is_refused_and_burned_while_the_proxy_path_works() {
+        let dir = std::env::temp_dir().join(format!("c2-tls-only-{}", std::process::id()));
+        let mut config = EnrollConfig::new("127.0.0.1:0".parse().unwrap());
+        config.tls_only = true;
+        let (service, _events) = EnrollService::start(&config).unwrap();
+        let public: IpAddr = "203.0.113.9".parse().unwrap();
+        let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+
+        let leaked = code(&service);
+        let body = request(&dir.join("a"), "alpha", &leaked);
+        assert_eq!(service.handle_enroll(&body, public).status, 403);
+        // The exposed code no longer works even through the proxy.
+        let body = request(&dir.join("a"), "alpha", &leaked);
+        assert_eq!(service.handle_enroll(&body, loopback).status, 403);
+
+        let fresh = code(&service);
+        let body = request(&dir.join("b"), "beta", &fresh);
+        assert_eq!(service.handle_enroll(&body, loopback).status, 200);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn without_the_flag_plaintext_still_enrolls() {
+        let dir = std::env::temp_dir().join(format!("c2-tls-off-{}", std::process::id()));
+        let (service, _events) = EnrollService::start(&EnrollConfig::new("127.0.0.1:0".parse().unwrap())).unwrap();
+        let c = code(&service);
+        let body = request(&dir, "gamma", &c);
+        assert_eq!(service.handle_enroll(&body, "203.0.113.9".parse().unwrap()).status, 200);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

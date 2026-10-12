@@ -140,6 +140,16 @@ impl EnrollmentRegistry {
         Err(EnrollmentError::Storage("tunnel address pool is exhausted".to_owned()))
     }
 
+    /// Invalidates `code` if it is still unused (it was seen in the clear). True when one was.
+    pub fn burn_code(&mut self, code: &str, now_ms: u64) -> bool {
+        let burned = self.state.codes.remove(&hash_hex(code.as_bytes())).is_some();
+        if burned {
+            self.audit(now_ms, "c2", "burn_code:plaintext".to_owned());
+            let _ = self.save();
+        }
+        burned
+    }
+
     /// Operator: create a one-time enrollment code valid for `ttl_ms`. The code is
     /// returned once; only its hash is stored.
     pub fn issue_code(&mut self, now_ms: u64, ttl_ms: u64, actor: &str) -> Result<String, EnrollmentError> {

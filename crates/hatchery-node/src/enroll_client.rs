@@ -48,6 +48,39 @@ fn unix_ms() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
 
+/// Where to send the enrollment request.
+#[derive(Clone, Debug)]
+pub enum EnrollTarget {
+    /// Plain TCP (loopback rigs, old C2s). The one-time code crosses the network in the clear.
+    Plain(std::net::SocketAddr),
+    /// `https://host[:port]`: the C2's TLS front (certificate verified against the WebPKI roots,
+    /// host name checked, no redirects). The code is only ever sent encrypted.
+    Https(String),
+}
+
+impl EnrollTarget {
+    /// `https://...` or `HOST:PORT`. Plain `http://` is refused: it adds nothing over HOST:PORT
+    /// and looks safer than it is.
+    pub fn parse(value: &str) -> Result<Self, String> {
+        if let Some(rest) = value.strip_prefix("https://") {
+            let host = rest.trim_end_matches('/');
+            if host.is_empty() || host.contains('/') || host.contains('@') {
+                return Err("https target must be https://HOST[:PORT]".into());
+            }
+            return Ok(Self::Https(format!("https://{host}")));
+        }
+        if value.starts_with("http://") {
+            return Err("use https://HOST or HOST:PORT, not http://".into());
+        }
+        {
+            use std::net::ToSocketAddrs;
+            let mut addrs: Vec<_> = value.to_socket_addrs().map_err(|e| format!("{value}: {e}"))?.collect();
+            addrs.sort_by_key(|a| !a.is_ipv4());
+            addrs.into_iter().next().map(Self::Plain).ok_or_else(|| format!("{value} resolves to no address"))
+        }
+    }
+}
+
 /// Generate (or load) the keys, send the signed request, store the public answer.
 pub async fn enroll(
     enroll_addr: std::net::SocketAddr,
@@ -56,10 +89,24 @@ pub async fn enroll(
     code: Option<&str>,
     state_dir: &Path,
 ) -> Result<EnrolledState, EnrollClientError> {
+    enroll_to(&EnrollTarget::Plain(enroll_addr), node_id, kind, code, state_dir).await
+}
+
+/// [`enroll`] to any [`EnrollTarget`].
+pub async fn enroll_to(
+    target: &EnrollTarget,
+    node_id: &str,
+    kind: NodeKind,
+    code: Option<&str>,
+    state_dir: &Path,
+) -> Result<EnrolledState, EnrollClientError> {
     let identity = NodeIdentity::load_or_create(state_dir).map_err(|e| EnrollClientError::State(e.to_string()))?;
     let request = identity.sign_request(node_id, kind, code, unix_ms()).map_err(|e| EnrollClientError::State(e.to_string()))?;
     let body = serde_json::to_vec(&request).map_err(|e| EnrollClientError::State(e.to_string()))?;
-    let reply = post(enroll_addr, "/v1/enroll", &body).await?;
+    let reply = match target {
+        EnrollTarget::Plain(addr) => post(*addr, "/v1/enroll", &body).await?,
+        EnrollTarget::Https(base) => post_https(base, "/v1/enroll", body).await?,
+    };
     if reply.0 != 200 {
         return Err(EnrollClientError::Refused);
     }
@@ -187,6 +234,26 @@ pub fn wireguard_env_from_state(state_dir: &Path, state: &EnrolledState, interfa
     out
 }
 
+async fn post_https(base: &str, path: &str, body: Vec<u8>) -> Result<(u16, Vec<u8>), EnrollClientError> {
+    let client = reqwest::Client::builder()
+        .use_rustls_tls()
+        .https_only(true)
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| EnrollClientError::Transport(e.to_string()))?;
+    let response = client
+        .post(format!("{base}{path}"))
+        .header("content-type", "application/json")
+        .body(body)
+        .send()
+        .await
+        .map_err(|e| EnrollClientError::Transport(format!("https: {e}")))?;
+    let status = response.status().as_u16();
+    let bytes = response.bytes().await.map_err(|e| EnrollClientError::Transport(e.to_string()))?;
+    Ok((status, bytes.to_vec()))
+}
+
 async fn post(addr: std::net::SocketAddr, path: &str, body: &[u8]) -> Result<(u16, Vec<u8>), EnrollClientError> {
     let io = async {
         let mut stream = TcpStream::connect(addr).await?;
@@ -212,4 +279,19 @@ async fn post(addr: std::net::SocketAddr, path: &str, body: &[u8]) -> Result<(u1
         .and_then(|s| s.parse().ok())
         .ok_or_else(|| EnrollClientError::Reply("bad status line".to_owned()))?;
     Ok((status, raw[split + 4..].to_vec()))
+}
+
+#[cfg(test)]
+mod target_tests {
+    use super::EnrollTarget;
+
+    #[test]
+    fn https_and_plain_targets_parse_and_http_is_refused() {
+        assert!(matches!(EnrollTarget::parse("https://enroll.hatchery.fyi"), Ok(EnrollTarget::Https(u)) if u == "https://enroll.hatchery.fyi"));
+        assert!(matches!(EnrollTarget::parse("https://enroll.example:8443/"), Ok(EnrollTarget::Https(u)) if u == "https://enroll.example:8443"));
+        assert!(matches!(EnrollTarget::parse("127.0.0.1:18421"), Ok(EnrollTarget::Plain(_))));
+        assert!(EnrollTarget::parse("http://enroll.example").is_err());
+        assert!(EnrollTarget::parse("https://user@host").is_err());
+        assert!(EnrollTarget::parse("https://host/path").is_err());
+    }
 }

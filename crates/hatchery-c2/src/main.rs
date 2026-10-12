@@ -55,6 +55,9 @@ async fn main() {
                 .unwrap_or_else(|error| fail(&format!("--enroll-listen is invalid: {error}")))),
             "--enroll-registry" => enroll.registry = Some(required_value("--enroll-registry", args.next()).into()),
             "--enroll-open" => enroll.open = true,
+            // Accept code enrollments only from loopback (a TLS-terminating proxy on this host);
+            // a code that arrives in the clear from elsewhere is burned and refused.
+            "--enroll-tls-only" => enroll.tls_only = true,
             // Status -> capability policy (JSON). Also HATCHERY_POLICY_FILE.
             "--server-upstream" => enroll.server_upstream = Some(required_value("--server-upstream", args.next()).parse()
                 .unwrap_or_else(|error| fail(&format!("--server-upstream is invalid: {error}")))),
@@ -84,7 +87,7 @@ async fn main() {
             }
             "--help" | "-h" => {
                 print_help();
-                println!("enrollment: --enroll-listen ADDR --enroll-registry FILE --enroll-pool C2_TUNNEL_IP/PREFIX [--enroll-wg-interface IF] [--enroll-wg-endpoint HOST:PORT] [--enroll-wg-public-key KEY] [--enroll-rate PER_MINUTE] [--enroll-open] [--policy FILE] [--build-host ADDR (bearer in HATCHERY_BUILD_TOKEN)] [--server-upstream ADDR (bearer in HATCHERY_SERVER_CONTROL_TOKEN)]  (default: one-time operator code required; --enroll-open disables the code)");
+                println!("enrollment: --enroll-listen ADDR --enroll-registry FILE --enroll-pool C2_TUNNEL_IP/PREFIX [--enroll-wg-interface IF] [--enroll-wg-endpoint HOST:PORT] [--enroll-wg-public-key KEY] [--enroll-rate PER_MINUTE] [--enroll-open] [--enroll-tls-only] [--policy FILE] [--build-host ADDR (bearer in HATCHERY_BUILD_TOKEN)] [--server-upstream ADDR (bearer in HATCHERY_SERVER_CONTROL_TOKEN)]  (default: one-time operator code required; --enroll-open disables the code)");
                 println!("API token: {C2_TOKEN_ENV}; node tokens: GATE4AGENT_NODE_TOKEN_<NORMALIZED_NODE_ID>");
                 return;
             }
@@ -227,6 +230,7 @@ struct EnrollArgs {
     listen: Option<std::net::SocketAddr>,
     registry: Option<std::path::PathBuf>,
     open: bool,
+    tls_only: bool,
     pool: Option<hatchery_c2::enrollment::TunnelPool>,
     wg_interface: Option<String>,
     wg_endpoint: Option<String>,
@@ -244,6 +248,7 @@ impl EnrollArgs {
         let mut config = EnrollConfig::new(listen);
         config.registry_path = self.registry.clone();
         config.require_code = !self.open;
+        config.tls_only = self.tls_only;
         config.pool = self.pool;
         config.policy_path = self.policy.clone().or_else(|| std::env::var_os("HATCHERY_POLICY_FILE").map(Into::into));
         if let Some(rate) = self.rate {
