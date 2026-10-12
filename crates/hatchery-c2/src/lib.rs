@@ -10,3 +10,8 @@ pub use runtime::{
 };
 
 pub use hatchery_c2_protocol as protocol;
+
+/// Node enrollment registry (phase P1 of the enrollment and fleet plan): signed
+/// enrollment requests, a neutral first status, operator-driven status changes
+/// and key/signature node authentication. Not yet wired into the relay runtime.
+pub mod enrollment;
