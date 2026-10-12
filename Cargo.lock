@@ -1290,7 +1290,7 @@ dependencies = [
 [[package]]
 name = "gate4agent"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "chrono",
  "gate4agent-catalog",
@@ -1309,7 +1309,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-adapters"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent-types",
  "serde_json",
@@ -1319,12 +1319,12 @@ dependencies = [
 [[package]]
 name = "gate4agent-build-stamp"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 
 [[package]]
 name = "gate4agent-catalog"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1334,7 +1334,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-engine"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent-types",
 ]
@@ -1342,7 +1342,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-handle"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent-kernel",
  "gate4agent-tool-protocol",
@@ -1353,7 +1353,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-kernel"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-engine",
@@ -1366,7 +1366,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-node-core"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-runtime-native",
@@ -1380,7 +1380,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-node-protocol"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent-build-stamp",
  "gate4agent-types",
@@ -1394,7 +1394,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-node-wire"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent-node-protocol",
  "libc",
@@ -1407,7 +1407,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-provider-ports"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1417,12 +1417,12 @@ dependencies = [
 [[package]]
 name = "gate4agent-pty"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 
 [[package]]
 name = "gate4agent-runtime-native"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-catalog",
@@ -1441,7 +1441,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-shell-capabilities"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-types",
@@ -1451,7 +1451,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-shell-history"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-provider-ports",
@@ -1464,7 +1464,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-shell-native"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent",
  "gate4agent-adapters",
@@ -1481,7 +1481,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-shell-one-shot"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent",
  "gate4agent-adapters",
@@ -1493,7 +1493,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-testkit"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1502,7 +1502,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-tool-engine"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent-tool-protocol",
  "gate4agent-types",
@@ -1511,7 +1511,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-tool-protocol"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "gate4agent-types",
  "serde",
@@ -1520,10 +1520,21 @@ dependencies = [
 [[package]]
 name = "gate4agent-types"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "gate4agent-wake"
+version = "0.5.0"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tungstenite 0.29.0",
 ]
 
 [[package]]
@@ -1995,6 +2006,7 @@ dependencies = [
  "gate4agent-runtime-native",
  "gate4agent-testkit",
  "gate4agent-types",
+ "gate4agent-wake",
  "grok-session-restore",
  "hatchery-build",
  "hatchery-c2",
@@ -6167,4 +6179,4 @@ dependencies = [
 [[patch.unused]]
 name = "gate4agent-bidi-relay"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fsession-account-env#93a83ff392b4a26051a10997679d6539a8b6d84b"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"

@@ -207,6 +207,7 @@ use tokio::task::{AbortHandle, JoinSet};
 use tokio::time::{sleep, timeout};
 
 mod http_api;
+pub mod node_wake;
 
 mod browser_bridge;
 
@@ -1440,6 +1441,13 @@ impl gate4agent_runtime_native::NativeChildEnvironmentResolver
 }
 
 impl NodeServer {
+    /// The letter-wake handle for the door, when m4a accounts are on. `token` is what callers
+    /// must present.
+    pub fn wake_handle(&self, token: String) -> Option<node_wake::NodeWake> {
+        self.shared.m4a_accounts.as_ref()?;
+        Some(node_wake::NodeWake::new(Arc::clone(&self.shared), token))
+    }
+
     pub fn new(config: NodeServerConfig) -> Result<Self, NodeServerError> {
         let catalog = active_registry()?;
         Self::new_with_registry(config, catalog)
@@ -3082,6 +3090,8 @@ struct NodeShared {
     session_environment_materializer: Option<SessionEnvironmentMaterializer>,
     /// Per-session m4a accounts assigned at spawn (see [`crate::m4a_accounts`]).
     m4a_accounts: Option<crate::m4a_accounts::M4aSessionAccounts>,
+    /// nick -> the session that holds that m4a account (for letter wakes).
+    m4a_live: Mutex<BTreeMap<String, (AgentInstanceId, AgentId)>>,
     materializations: Mutex<BTreeMap<MaterializationId, MaterializationOwnershipRecord>>,
     spawn_idempotency: Mutex<SpawnIdempotencyCache>,
     managed_spawn_replays:
@@ -3738,6 +3748,10 @@ impl SpawnPreparer for NodeShared {
                         }
                         .map_err(|_| failure(NodeFailureCode::BackendOperationFailed, "m4a session account overlay is invalid"))?;
                         tracing::info!(provider = %provider, instance_id = ?instance_id, nick = %account.nick, "m4a session account assigned at spawn");
+                        self.m4a_live
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .insert(account.nick.clone(), (instance_id, provider.clone()));
                         Some(merged)
                     }
                     Err(error) => {
@@ -3939,6 +3953,7 @@ impl NodeShared {
             native_session_catalog,
             session_environment_materializer,
             m4a_accounts: crate::m4a_accounts::M4aSessionAccounts::from_env(),
+            m4a_live: Mutex::new(BTreeMap::new()),
             materializations: Mutex::new(
                 materializations
                     .into_iter()

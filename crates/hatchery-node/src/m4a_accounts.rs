@@ -35,6 +35,9 @@ pub struct M4aSessionAccounts {
 /// One session's account as handed to its child: nick and capability only.
 pub struct SessionAccount {
     pub nick: String,
+    /// The provider session key the account is bound to (also given to the session as
+    /// `M4A_SESSION_ID`, so its own inbox commands address the right account).
+    pub session_id: String,
     cap: String,
 }
 
@@ -58,6 +61,7 @@ impl SessionAccount {
         vec![
             EnvMutation { key: OsString::from("M4A_NICK"), value: Some(OsString::from(&self.nick)) },
             EnvMutation { key: OsString::from("M4A_SESSION_CAP"), value: Some(OsString::from(&self.cap)) },
+            EnvMutation { key: OsString::from("M4A_SESSION_ID"), value: Some(OsString::from(&self.session_id)) },
         ]
     }
 }
@@ -65,6 +69,30 @@ impl SessionAccount {
 impl M4aSessionAccounts {
     pub fn new(bin: impl Into<PathBuf>, base: impl Into<PathBuf>) -> Self {
         Self { bin: bin.into(), base: base.into() }
+    }
+
+    /// The node's letter-wake token (`<root>/.node-wake-token`, 0600), created on first use.
+    pub fn wake_token(&self) -> Result<String, String> {
+        let path = self.base.join(".node-wake-token");
+        if let Ok(t) = std::fs::read_to_string(&path) {
+            if t.trim().len() >= 32 {
+                return Ok(t.trim().to_owned());
+            }
+        }
+        std::fs::create_dir_all(&self.base).map_err(|e| format!("accounts root: {}", e.kind()))?;
+        let mut raw = [0u8; 24];
+        getrandom(&mut raw)?;
+        let token: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        use std::io::Write;
+        opts.open(&path).and_then(|mut f| f.write_all(token.as_bytes())).map_err(|e| format!("wake token: {}", e.kind()))?;
+        Ok(token)
     }
 
     pub fn from_env() -> Option<Self> {
@@ -103,7 +131,7 @@ impl M4aSessionAccounts {
         if cap.trim().is_empty() || cap.contains('\n') {
             return Err("capability is malformed".into());
         }
-        Ok(SessionAccount { nick, cap })
+        Ok(SessionAccount { nick, session_id: session_key.to_owned(), cap })
     }
 }
 
@@ -151,7 +179,8 @@ mod tests {
         assert_ne!(a.nick, b.nick);
         let env = a.env_mutations();
         let keys: Vec<_> = env.iter().map(|m| m.key.to_string_lossy().into_owned()).collect();
-        assert_eq!(keys, ["M4A_NICK", "M4A_SESSION_CAP"]);
+        assert_eq!(keys, ["M4A_NICK", "M4A_SESSION_CAP", "M4A_SESSION_ID"]);
+        assert_eq!(env[2].value.as_deref(), Some(std::ffi::OsStr::new("inc-1")));
         assert_ne!(env[1].value, b.env_mutations()[1].value);
         // The one-shot cap file is gone and the cap is not in Debug output.
         let left: Vec<_> = std::fs::read_dir(acc.base()).unwrap().filter_map(Result::ok).filter(|e| e.file_name().to_string_lossy().ends_with(".cap")).collect();
@@ -166,6 +195,20 @@ mod tests {
             assert!(m4a_provider(&id).is_some(), "g4a provider {id} has no m4a mapping");
         }
         assert_eq!(m4a_provider("custom"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn wake_token_is_private_stable_and_long() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("node-wake-token-{}", std::process::id()));
+        let a = M4aSessionAccounts::new("/bin/false", &dir);
+        let t1 = a.wake_token().unwrap();
+        assert_eq!(t1.len(), 48);
+        assert_eq!(a.wake_token().unwrap(), t1);
+        let mode = std::fs::metadata(dir.join(".node-wake-token")).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

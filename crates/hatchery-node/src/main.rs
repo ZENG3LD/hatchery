@@ -561,7 +561,10 @@ async fn main() {
             fail("--door-listen must be a loopback address");
         }
         let listener = tokio::net::TcpListener::bind(listen).await.unwrap_or_else(|e| fail(&format!("--door-listen: {e}")));
-        tokio::spawn(hatchery_node::door::serve(listener, c2, identity, id));
+        let wake = hatchery_node::m4a_accounts::M4aSessionAccounts::from_env()
+            .and_then(|a| a.wake_token().map_err(|e| tracing::warn!(error = %e, "letter wake off")).ok())
+            .and_then(|token| server.wake_handle(token));
+        tokio::spawn(hatchery_node::door::serve(listener, c2, identity, id, wake));
     } else if door_listen.is_some() || door_c2.is_some() {
         fail("--door-listen and --door-c2 need each other and --enrolled");
     }
