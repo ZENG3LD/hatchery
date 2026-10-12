@@ -10,9 +10,9 @@ use serde::{Deserialize, Serialize};
 use crate::NodeStatus;
 
 /// Capabilities the policy can grant. `heartbeat` = may call home and be seen alive,
-/// `attach` = operator may attach sessions and see inventory, `tasks`/`tools` = task and tool
+/// `attach` = operator may attach sessions and see inventory, `build` = may request a remote build+sign, `tasks`/`tools` = task and tool
 /// access (consumers check them through the C2 operator API), `mail`/`m4a` = messaging.
-pub const KNOWN_CAPABILITIES: &[&str] = &["heartbeat", "attach", "mail", "m4a", "tasks", "tools"];
+pub const KNOWN_CAPABILITIES: &[&str] = &["heartbeat", "attach", "mail", "m4a", "tasks", "tools", "build"];
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -34,7 +34,7 @@ pub struct Policy {
 pub enum PolicyError {
     #[error("policy file is not valid: {0}")]
     Parse(String),
-    #[error("unknown capability '{0}' (known: heartbeat, attach, mail, m4a, tasks, tools)")]
+    #[error("unknown capability '{0}' (known: heartbeat, attach, mail, m4a, tasks, tools, build)")]
     UnknownCapability(String),
 }
 
@@ -58,7 +58,7 @@ impl Default for Policy {
             trusted: Grants {
                 mailbox: true,
                 rooms: list(&["lobby", "general", "ops"]),
-                capabilities: list(&["heartbeat", "attach", "mail", "m4a", "tasks", "tools"]),
+                capabilities: list(&["heartbeat", "attach", "mail", "m4a", "tasks", "tools", "build"]),
             },
         }
     }
@@ -117,6 +117,7 @@ mod tests {
         );
         assert!(p.allows(NodeStatus::Member, "attach") && !p.allows(NodeStatus::Member, "tasks"));
         assert!(p.allows(NodeStatus::Trusted, "tasks") && p.allows(NodeStatus::Trusted, "tools"));
+        assert!(p.allows(NodeStatus::Trusted, "build") && !p.allows(NodeStatus::Member, "build"));
         for s in [NodeStatus::Suspended, NodeStatus::Revoked] {
             assert_eq!(p.grants(s), Grants::default());
             assert!(!p.allows(s, "heartbeat"));

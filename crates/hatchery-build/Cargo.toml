@@ -1,0 +1,32 @@
+[package]
+name = "hatchery-build"
+version = "0.2.1"
+edition = "2021"
+repository = "https://github.com/ZENG3LD/hatchery"
+description = "Remote build and sign service for hatchery nodes: admission by node status, recipes only, signing keys stay on the build host"
+license = "MIT"
+
+[lib]
+name = "hatchery_build"
+
+[[bin]]
+name = "hatchery-build-host"
+path = "src/main.rs"
+
+[dependencies]
+hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.1" }
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+async-trait = "0.1"
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time", "sync", "process", "macros", "signal"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

@@ -254,6 +254,20 @@ impl NodeIdentity {
         Ok(me)
     }
 
+    /// Load only the signing identity (for a node whose tunnel is set up by a privileged helper
+    /// and which therefore never needs, or reads, the WireGuard private key). The returned
+    /// identity carries a throwaway WireGuard secret that is never written anywhere.
+    pub fn load_signing_only(dir: &Path) -> Result<Self, EnrollError> {
+        let text = std::fs::read_to_string(Self::identity_path(dir))
+            .map_err(|e| EnrollError::Storage(e.to_string()))?;
+        Ok(Self::from_seeds(decode_key32(text.trim())?, random32()?))
+    }
+
+    /// Sign arbitrary bytes with the node identity (callers add their own domain prefix).
+    pub fn sign_bytes(&self, message: &[u8]) -> String {
+        B64.encode(self.identity.sign(message).to_bytes())
+    }
+
     /// Build and sign an enrollment request.
     pub fn sign_request(
         &self,
