@@ -16,6 +16,8 @@ path = "src/main.rs"
 
 [dependencies]
 hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.1" }
+hatchery-build = { path = "../hatchery-build", version = "0.2.1" }
+base64 = "0.22"
 # Standard kit cores, all from crates.io: dig2browser 0.5 (browser machine and
 # stream), mail4agent 0.4 (lib face), session-restore libraries 0.1.x.
 dig2browser = { version = "0.5.3", optional = true, default-features = false }

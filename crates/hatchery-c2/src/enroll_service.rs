@@ -21,6 +21,7 @@ use crate::enrollment::{EnrollmentError, EnrollmentRegistry, NodeRecord, NodeSta
 
 const MAX_BODY: usize = 16 * 1024;
 const IO_DEADLINE: Duration = Duration::from_secs(5);
+const BUILD_DEADLINE: Duration = Duration::from_secs(20 * 60);
 const DEFAULT_CODE_TTL_MS: u64 = 15 * 60 * 1000;
 
 /// Answers "may this node do X right now?" for the enforcement points in the relay.
@@ -94,6 +95,8 @@ pub struct EnrollConfig {
     pub rate_limit_per_minute: u32,
     /// Status -> capability policy file (JSON); `None` uses the built-in table.
     pub policy_path: Option<std::path::PathBuf>,
+    /// Build host to forward admitted `POST /v1/build` requests to, and the bearer it expects.
+    pub build_host: Option<(SocketAddr, String)>,
 }
 
 impl EnrollConfig {
@@ -107,6 +110,7 @@ impl EnrollConfig {
             public: PublicInfo::default(),
             rate_limit_per_minute: 30,
             policy_path: None,
+            build_host: None,
         }
     }
 }
@@ -132,6 +136,8 @@ pub struct EnrollService {
     events: mpsc::UnboundedSender<EnrollEvent>,
     rate: Mutex<HashMap<IpAddr, (Instant, u32)>>,
     rate_limit: u32,
+    build_host: Option<(SocketAddr, String)>,
+    build_nonces: Mutex<HashMap<(String, String), u64>>,
     pub listen: SocketAddr,
 }
 
@@ -185,6 +191,8 @@ impl EnrollService {
             events: tx,
             rate: Mutex::new(HashMap::new()),
             rate_limit: config.rate_limit_per_minute.max(1),
+            build_host: config.build_host.clone(),
+            build_nonces: Mutex::new(HashMap::new()),
             listen: config.listen,
         });
         // Restart persistence: re-apply every active node's peer and recreate its worker.
@@ -255,6 +263,60 @@ impl EnrollService {
                     EnrollmentError::Revoked => HttpReply::error(403, "refused"),
                     _ => HttpReply::error(403, "refused"),
                 }
+            }
+        }
+    }
+
+    /// `POST /v1/build`: a node-signed request to build and sign a configured recipe.
+    /// Checks, in order: shape, clock window, replay, node signature (enrolled identity key),
+    /// status/capability policy (`build`), then forwards to the build host with a bearer the
+    /// node never sees. Failures towards the node are generic.
+    pub async fn handle_build(&self, body: &[u8], peer: IpAddr) -> HttpReply {
+        use hatchery_build::wire::{HostRequest, SignedBuildRequest, MAX_SKEW_MS};
+        if !self.allow(peer) {
+            return HttpReply::error(429, "rate limited");
+        }
+        let Ok(request) = serde_json::from_slice::<SignedBuildRequest>(body) else {
+            return HttpReply::error(400, "malformed request");
+        };
+        if !request.well_formed() {
+            return HttpReply::error(400, "malformed request");
+        }
+        let now = unix_ms();
+        if now.abs_diff(request.ts_ms) > MAX_SKEW_MS {
+            return HttpReply::error(403, "refused");
+        }
+        let message = SignedBuildRequest::signing_bytes(&request.node_id, &request.recipe, request.source_ref.as_deref(), request.ts_ms, &request.nonce);
+        let verified = self.registry.lock().expect("registry lock").verify_node_message(&request.node_id, &message, &request.signature);
+        if verified.is_err() {
+            tracing::warn!(node_id = %request.node_id, %peer, "build request refused: signature");
+            return HttpReply::error(403, "refused");
+        }
+        {
+            let mut seen = self.build_nonces.lock().expect("nonce lock");
+            seen.retain(|_, ts| now.abs_diff(*ts) <= MAX_SKEW_MS * 2);
+            if seen.insert((request.node_id.clone(), request.nonce.clone()), request.ts_ms).is_some() {
+                tracing::warn!(node_id = %request.node_id, "build request refused: replay");
+                return HttpReply::error(403, "refused");
+            }
+        }
+        if self.allows(&request.node_id, "build") != Some(true) {
+            tracing::warn!(node_id = %request.node_id, "build request refused: status does not hold build");
+            return HttpReply::error(403, "refused");
+        }
+        let Some((addr, bearer)) = &self.build_host else {
+            return HttpReply::error(503, "build service unavailable");
+        };
+        let forward = HostRequest { node_id: request.node_id.clone(), recipe: request.recipe.clone(), source_ref: request.source_ref.clone() };
+        let payload = serde_json::to_vec(&forward).unwrap_or_default();
+        match hatchery_build::http::post(*addr, "/v1/build", Some(bearer), &payload, BUILD_DEADLINE).await {
+            Ok((status, body)) => {
+                tracing::info!(node_id = %request.node_id, recipe = %request.recipe, status, "build forwarded");
+                HttpReply { status, body }
+            }
+            Err(error) => {
+                tracing::warn!(node_id = %request.node_id, cause = %error, "build host unreachable");
+                HttpReply::error(502, "build service unavailable")
             }
         }
     }
@@ -411,16 +473,22 @@ pub async fn serve_enroll(listener: TcpListener, service: Arc<EnrollService>, mu
         let service = Arc::clone(&service);
         tokio::spawn(async move {
             let _permit = permit;
-            let _ = timeout(IO_DEADLINE * 2, serve_one(stream, peer.ip(), &service)).await;
+            let _ = serve_one(stream, peer.ip(), &service).await;
         });
     }
 }
 
 async fn serve_one(mut stream: TcpStream, peer: IpAddr, service: &EnrollService) -> io::Result<()> {
-    let reply = match read_http(&mut stream).await {
-        Ok((method, path, body)) if method == "POST" && path == "/v1/enroll" => service.handle_enroll(&body, peer),
-        Ok(_) => HttpReply::error(404, "not found"),
-        Err(_) => HttpReply::error(400, "bad request"),
+    let request = timeout(IO_DEADLINE * 2, read_http(&mut stream)).await;
+    let reply = match request {
+        Ok(Ok((method, path, body))) if method == "POST" && path == "/v1/enroll" => service.handle_enroll(&body, peer),
+        Ok(Ok((method, path, body))) if method == "POST" && path == "/v1/build" => {
+            timeout(BUILD_DEADLINE + IO_DEADLINE, service.handle_build(&body, peer))
+                .await
+                .unwrap_or_else(|_| HttpReply::error(504, "build timed out"))
+        }
+        Ok(Ok(_)) => HttpReply::error(404, "not found"),
+        _ => HttpReply::error(400, "bad request"),
     };
     let reason = match reply.status {
         200 => "OK",
@@ -428,6 +496,9 @@ async fn serve_one(mut stream: TcpStream, peer: IpAddr, service: &EnrollService)
         403 => "Forbidden",
         404 => "Not Found",
         429 => "Too Many Requests",
+        422 => "Unprocessable Entity",
+        502 => "Bad Gateway",
+        504 => "Gateway Timeout",
         _ => "Service Unavailable",
     };
     let head = format!(

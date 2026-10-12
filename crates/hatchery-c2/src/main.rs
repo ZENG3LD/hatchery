@@ -56,6 +56,8 @@ async fn main() {
             "--enroll-registry" => enroll.registry = Some(required_value("--enroll-registry", args.next()).into()),
             "--enroll-open" => enroll.open = true,
             // Status -> capability policy (JSON). Also HATCHERY_POLICY_FILE.
+            "--build-host" => enroll.build_host = Some(required_value("--build-host", args.next()).parse()
+                .unwrap_or_else(|error| fail(&format!("--build-host is invalid: {error}")))),
             "--policy" => enroll.policy = Some(required_value("--policy", args.next()).into()),
             "--enroll-pool" => {
                 let value = required_value("--enroll-pool", args.next());
@@ -80,7 +82,7 @@ async fn main() {
             }
             "--help" | "-h" => {
                 print_help();
-                println!("enrollment: --enroll-listen ADDR --enroll-registry FILE --enroll-pool C2_TUNNEL_IP/PREFIX [--enroll-wg-interface IF] [--enroll-wg-endpoint HOST:PORT] [--enroll-wg-public-key KEY] [--enroll-rate PER_MINUTE] [--enroll-open] [--policy FILE]  (default: one-time operator code required; --enroll-open disables the code)");
+                println!("enrollment: --enroll-listen ADDR --enroll-registry FILE --enroll-pool C2_TUNNEL_IP/PREFIX [--enroll-wg-interface IF] [--enroll-wg-endpoint HOST:PORT] [--enroll-wg-public-key KEY] [--enroll-rate PER_MINUTE] [--enroll-open] [--policy FILE] [--build-host ADDR (bearer in HATCHERY_BUILD_TOKEN)]  (default: one-time operator code required; --enroll-open disables the code)");
                 println!("API token: {C2_TOKEN_ENV}; node tokens: GATE4AGENT_NODE_TOKEN_<NORMALIZED_NODE_ID>");
                 return;
             }
@@ -229,6 +231,7 @@ struct EnrollArgs {
     wg_public_key: Option<String>,
     rate: Option<u32>,
     policy: Option<std::path::PathBuf>,
+    build_host: Option<std::net::SocketAddr>,
 }
 
 impl EnrollArgs {
@@ -261,6 +264,11 @@ impl EnrollArgs {
             config.provisioner = std::sync::Arc::new(WgCli { interface: interface.clone() });
         }
         config.public = public;
+        if let Some(addr) = self.build_host {
+            // The bearer the build host expects; only C2 holds it (never a node).
+            let token = std::env::var("HATCHERY_BUILD_TOKEN").unwrap_or_else(|_| fail("HATCHERY_BUILD_TOKEN is required with --build-host"));
+            config.build_host = Some((addr, token));
+        }
         Some(config)
     }
 }

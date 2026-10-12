@@ -69,6 +69,11 @@ async fn main() {
                 Err(message) => fail(&message),
             }
         }
+        // build --c2-enroll ADDR --state-dir DIR --recipe NAME --trusted-signer KEY --out FILE [--source-ref REF]
+        Some("build") => {
+            run_build(&raw_args[1..]).await;
+            return;
+        }
         // kill-switch --wg-if IF --endpoint IP:PORT [--apply]  (prints the ruleset, or installs it)
         Some("kill-switch") => {
             run_kill_switch(&raw_args[1..]);
@@ -859,5 +864,42 @@ fn run_kill_switch(args: &[String]) {
         fail("kill-switch --apply is Linux only");
     } else {
         print!("{}", ks.nft_ruleset());
+    }
+}
+
+/// Remote build: ask C2 (signed with this node's identity) to build and sign a recipe on the
+/// build host; write the verified artifact. No signing key or build credential is involved here.
+async fn run_build(args: &[String]) {
+    let (mut addr, mut dir, mut recipe, mut signer, mut out, mut source_ref) = (None, hatchery_node::enroll_client::default_enroll_dir(), None, None, None, None);
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        let mut value = |n: &str| it.next().cloned().unwrap_or_else(|| fail(&format!("{n} requires a value")));
+        match arg.as_str() {
+            "--c2-enroll" => addr = Some(value("--c2-enroll").parse::<std::net::SocketAddr>().unwrap_or_else(|e| fail(&format!("--c2-enroll is invalid: {e}")))),
+            "--state-dir" => dir = Some(value("--state-dir").into()),
+            "--recipe" => recipe = Some(value("--recipe")),
+            "--trusted-signer" => signer = Some(value("--trusted-signer")),
+            "--out" => out = Some(value("--out")),
+            "--source-ref" => source_ref = Some(value("--source-ref")),
+            other => fail(&format!("unknown build argument: {other}")),
+        }
+    }
+    let dir: PathBuf = dir.unwrap_or_else(|| fail("no state directory (set --state-dir)"));
+    let (identity, state) = hatchery_node::enroll_client::load_enrolled_signing_only(&dir).unwrap_or_else(|e| fail(&e.to_string()));
+    let result = hatchery_node::enroll_client::request_build(
+        addr.unwrap_or_else(|| fail("--c2-enroll is required")),
+        &identity,
+        &state.node_id,
+        &recipe.unwrap_or_else(|| fail("--recipe is required")),
+        source_ref.as_deref(),
+        &signer.unwrap_or_else(|| fail("--trusted-signer is required")),
+    )
+    .await;
+    match result {
+        Ok((receipt, artifact)) => {
+            std::fs::write(out.unwrap_or_else(|| fail("--out is required")), &artifact).unwrap_or_else(|e| fail(&e.to_string()));
+            println!("built recipe={} sha256={} size={} signature_ok=true", receipt.recipe, receipt.artifact_sha256, receipt.artifact_size);
+        }
+        Err(error) => fail(&error.to_string()),
     }
 }

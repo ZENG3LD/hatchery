@@ -79,6 +79,65 @@ pub fn load_enrolled(state_dir: &Path) -> Result<(NodeIdentity, EnrolledState), 
     Ok((identity, state))
 }
 
+/// Load the identity for signing only (no WireGuard key is read) and the enrolled state.
+/// For a node whose tunnel is brought up by a privileged helper.
+pub fn load_enrolled_signing_only(state_dir: &Path) -> Result<(NodeIdentity, EnrolledState), EnrollClientError> {
+    let identity = NodeIdentity::load_signing_only(state_dir).map_err(|e| EnrollClientError::State(e.to_string()))?;
+    let bytes = std::fs::read(state_dir.join(ENROLLMENT_FILE))
+        .map_err(|_| EnrollClientError::State("not enrolled yet: run `enroll` first".to_owned()))?;
+    let state = serde_json::from_slice(&bytes).map_err(|e| EnrollClientError::State(e.to_string()))?;
+    Ok((identity, state))
+}
+
+/// Ask C2 to build and sign a configured recipe on the build host. The node proves who it is
+/// with its identity key; it holds no build-host credential and never sees a signing key.
+/// The receipt is checked against `trusted_signer` (the operator-provided public key of the
+/// build host) and the artifact against the signed hash before it is returned.
+pub async fn request_build(
+    c2_enroll: std::net::SocketAddr,
+    identity: &NodeIdentity,
+    node_id: &str,
+    recipe: &str,
+    source_ref: Option<&str>,
+    trusted_signer: &str,
+) -> Result<(hatchery_build::BuildReceipt, Vec<u8>), EnrollClientError> {
+    use base64::Engine;
+    use hatchery_build::wire::SignedBuildRequest;
+    let ts_ms = unix_ms();
+    let mut raw = [0_u8; 12];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut raw))
+        .map_err(|e| EnrollClientError::State(e.to_string()))?;
+    let nonce: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+    let message = SignedBuildRequest::signing_bytes(node_id, recipe, source_ref, ts_ms, &nonce);
+    let request = SignedBuildRequest {
+        node_id: node_id.to_owned(),
+        recipe: recipe.to_owned(),
+        source_ref: source_ref.map(str::to_owned),
+        ts_ms,
+        nonce,
+        signature: identity.sign_bytes(&message),
+    };
+    let body = serde_json::to_vec(&request).map_err(|e| EnrollClientError::State(e.to_string()))?;
+    let (status, reply) = hatchery_build::http::post(c2_enroll, "/v1/build", None, &body, Duration::from_secs(25 * 60))
+        .await
+        .map_err(|e| EnrollClientError::Transport(e.to_string()))?;
+    match status {
+        200 => {}
+        403 => return Err(EnrollClientError::Refused),
+        other => return Err(EnrollClientError::Reply(format!("{other}: {}", String::from_utf8_lossy(&reply).chars().take(200).collect::<String>()))),
+    }
+    let response: hatchery_build::BuildResponse = serde_json::from_slice(&reply).map_err(|e| EnrollClientError::Reply(e.to_string()))?;
+    let artifact = base64::engine::general_purpose::STANDARD
+        .decode(&response.artifact_b64)
+        .map_err(|e| EnrollClientError::Reply(e.to_string()))?;
+    response
+        .receipt
+        .verify(trusted_signer, Some(&artifact))
+        .map_err(|e| EnrollClientError::Reply(format!("receipt rejected: {e}")))?;
+    Ok((response.receipt, artifact))
+}
+
 /// Environment the kernel WireGuard bring-up reads, from the enrolled state. Only variables
 /// that are unset are filled. Returns the call-home address when the answer carries one.
 pub fn wireguard_env_from_state(state_dir: &Path, state: &EnrolledState, interface: &str) -> Vec<(String, String)> {

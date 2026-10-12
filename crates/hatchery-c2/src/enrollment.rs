@@ -239,6 +239,17 @@ impl EnrollmentRegistry {
         Ok(record.status)
     }
 
+    /// Verify a node's signature over a message that carries its own domain prefix (for
+    /// requests other than call-home). Revoked and unknown nodes never verify.
+    pub fn verify_node_message(&self, node_id: &str, message: &[u8], signature_b64: &str) -> Result<NodeStatus, EnrollmentError> {
+        let record = self.state.nodes.get(node_id).ok_or(EnrollmentError::Unknown)?;
+        if record.status == NodeStatus::Revoked {
+            return Err(EnrollmentError::Revoked);
+        }
+        verify_signature(&record.identity_public_key, message, signature_b64).map_err(map_verify)?;
+        Ok(record.status)
+    }
+
     fn audit(&mut self, at_ms: u64, actor: &str, action: String) {
         self.state.audit.push(AuditEntry { at_ms, actor: actor.to_owned(), action });
     }
