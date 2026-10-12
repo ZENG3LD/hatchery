@@ -3,7 +3,9 @@
 //! m4a only hands a letter over (its `M4A_LETTER_HOOK`); the node knows which of its sessions
 //! owns the addressed nick (it assigned that account at spawn) and asks g4a
 //! (`gate4agent_wake::hosted`) what to do. A live session gets the framed prompt as its next
-//! turn; anything else is refused and m4a keeps the letter in its durable inbox.
+//! turn; the node's policy ([`crate::wake_pipeline`]) gates everything else: typing into a raw
+//! terminal needs an explicit terminal grant, a nick bound to a routine gets one routine POST via
+//! g4a, and anything else is refused (m4a keeps the letter in its durable inbox).
 //! Callers present the node's wake token (a 0600 file next to the accounts root), so another
 //! local user cannot type into a session through the door.
 
@@ -12,6 +14,8 @@ use std::sync::Arc;
 
 use gate4agent_wake::hosted::{plan_hosted_wake, HostedSessions, HostedTarget, HostedWake};
 use gate4agent_wake::{ProviderKind, WakeLetter};
+
+use crate::wake_pipeline::{deliver_routine, route, Route, RoutineLetter, SessionShape};
 
 use super::*;
 
@@ -27,6 +31,7 @@ pub struct NodeLetter {
 pub struct NodeWake {
     shared: Arc<NodeShared>,
     token: Arc<str>,
+    policy: Arc<crate::wake_pipeline::WakePolicy>,
 }
 
 struct Snapshot(BTreeMap<String, HostedTarget>);
@@ -42,8 +47,8 @@ fn kind_of(agent: &AgentId) -> Option<ProviderKind> {
 }
 
 impl NodeWake {
-    pub(super) fn new(shared: Arc<NodeShared>, token: String) -> Self {
-        Self { shared, token: token.into() }
+    pub(super) fn new(shared: Arc<NodeShared>, token: String, policy: Arc<crate::wake_pipeline::WakePolicy>) -> Self {
+        Self { shared, token: token.into(), policy }
     }
 
     /// Constant-time check of the caller's token.
@@ -84,20 +89,57 @@ impl NodeWake {
                     tracing::warn!(nick = %nick, code = ?e.code, "letter wake input refused");
                     "session did not take the turn".to_owned()
                 };
-                if self.shared.require_session_runtime_policy(&address, ProviderRuntimeRequirement::SemanticPrompt).is_ok() {
-                    let action = InputAction::SubmitPrompt(PromptPayload { text: prompt, framing: prompt_framing(&agent) });
-                    self.shared.dispatch_input_bounded(&address, action).await.map_err(refused)?;
+                let shape = if self.shared.require_session_runtime_policy(&address, ProviderRuntimeRequirement::SemanticPrompt).is_ok() {
+                    SessionShape::Semantic
                 } else {
-                    // Raw terminal providers: type the prompt as one line, then Enter.
-                    let text = prompt.replace(['\n', '\r'], " ");
-                    self.shared.dispatch_input_bounded(&address, InputAction::TerminalText(TerminalText { text })).await.map_err(refused)?;
-                    self.shared.dispatch_input_bounded(&address, InputAction::TerminalControl(TerminalControl::ControlM)).await.map_err(refused)?;
+                    SessionShape::RawTerminal
+                };
+                match route(&self.policy, &nick, shape) {
+                    Route::Deliver => {
+                        let action = InputAction::SubmitPrompt(PromptPayload { text: prompt, framing: prompt_framing(&agent) });
+                        self.shared.dispatch_input_bounded(&address, action).await.map_err(refused)?;
+                    }
+                    Route::TerminalTyping => {
+                        // Terminal capability, granted explicitly for this nick: type the prompt
+                        // as one line, then Enter.
+                        let text = prompt.replace(['\n', '\r'], " ");
+                        self.shared.dispatch_input_bounded(&address, InputAction::TerminalText(TerminalText { text })).await.map_err(refused)?;
+                        self.shared.dispatch_input_bounded(&address, InputAction::TerminalControl(TerminalControl::ControlM)).await.map_err(refused)?;
+                    }
+                    Route::Refuse(why) => {
+                        tracing::info!(nick = %nick, "letter not typed: no terminal grant");
+                        return Err(why);
+                    }
+                    Route::Routine(_) => return Err("unexpected routine route for a live session".into()),
                 }
                 tracing::info!(nick = %nick, "letter woke a live session");
                 Ok("submitted")
             }
             HostedWake::Spawn { .. } => Err("spawn on letter is not enabled on this node".into()),
-            HostedWake::Refuse(why) => Err(why),
+            HostedWake::Refuse(why) => match route(&self.policy, &letter.nick, SessionShape::None) {
+                Route::Routine(target) => {
+                    let routine_letter = RoutineLetter {
+                        to: letter.nick.clone(),
+                        from: letter.from.clone(),
+                        event_id: letter.event_id.clone(),
+                        subject: None,
+                        room: None,
+                        body: letter.body.clone(),
+                        reply: None,
+                        note: None,
+                    };
+                    let nick = letter.nick.clone();
+                    match tokio::task::spawn_blocking(move || deliver_routine(&target, &routine_letter)).await {
+                        Ok(Ok(_)) => {
+                            tracing::info!(nick = %nick, "letter delivered to a routine");
+                            Ok("routine")
+                        }
+                        Ok(Err(e)) => Err(e),
+                        Err(_) => Err("routine delivery task failed".into()),
+                    }
+                }
+                _ => Err(why),
+            },
         }
     }
 }

@@ -169,6 +169,7 @@ async fn main() {
     let mut no_wg = false;
     let mut door_listen: Option<std::net::SocketAddr> = None;
     let mut door_c2: Option<std::net::SocketAddr> = None;
+    let mut wake_policy_path: Option<PathBuf> = None;
     let mut kill_switch = std::env::var("HATCHERY_KILL_SWITCH").is_ok_and(|v| v == "1");
     let mut run_as: Option<String> = std::env::var("HATCHERY_RUN_AS").ok().filter(|v| !v.is_empty());
     let mut args = std::env::args().skip(1);
@@ -183,6 +184,8 @@ async fn main() {
             // Loopback door for agents: mail/task operations signed by this node and sent to C2.
             "--door-listen" => door_listen = Some(required_value("--door-listen", args.next()).parse().unwrap_or_else(|e| fail(&format!("--door-listen is invalid: {e}")))),
             "--door-c2" => door_c2 = Some(required_value("--door-c2", args.next()).pipe_resolve("--door-c2")),
+            // Letter pipeline policy (deliver / terminal grant / routines / node mail), JSON.
+            "--wake-policy" => wake_policy_path = Some(required_value("--wake-policy", args.next()).into()),
             // Egress is dropped unless it goes through the tunnel (fails closed).
             "--kill-switch" => kill_switch = true,
             // Provider sessions run as this unprivileged user; the node keeps the keys.
@@ -561,9 +564,21 @@ async fn main() {
             fail("--door-listen must be a loopback address");
         }
         let listener = tokio::net::TcpListener::bind(listen).await.unwrap_or_else(|e| fail(&format!("--door-listen: {e}")));
+        let policy = std::sync::Arc::new(match &wake_policy_path {
+            Some(path) => hatchery_node::wake_pipeline::WakePolicy::load(path).unwrap_or_else(|e| fail(&e)),
+            None => hatchery_node::wake_pipeline::WakePolicy::default(),
+        });
         let wake = hatchery_node::m4a_accounts::M4aSessionAccounts::from_env()
             .and_then(|a| a.wake_token().map_err(|e| tracing::warn!(error = %e, "letter wake off")).ok())
-            .and_then(|token| server.wake_handle(token));
+            .and_then(|token| server.wake_handle(token, std::sync::Arc::clone(&policy)));
+        if policy.node_mail_to.is_some() {
+            let seen = enroll_state
+                .clone()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("node-mail-seen.json");
+            let door_hint = format!("http://{listen}/door");
+            tokio::spawn(node_mail_wake(c2, std::sync::Arc::clone(&identity), id.clone(), std::sync::Arc::clone(&policy), seen, door_hint));
+        }
         tokio::spawn(hatchery_node::door::serve(listener, c2, identity, id, wake));
     } else if door_listen.is_some() || door_c2.is_some() {
         fail("--door-listen and --door-c2 need each other and --enrolled");
@@ -1010,5 +1025,45 @@ impl PipeResolve for String {
             Ok(mut it) => it.find(|a| a.is_ipv4()).or_else(|| self.to_socket_addrs().ok().and_then(|mut i| i.next())).unwrap_or_else(|| fail(&format!("{flag}: {self} resolves to no address"))),
             Err(e) => fail(&format!("{flag} is invalid: {e}")),
         }
+    }
+}
+
+/// Host action: this node's own mailbox -> the letter pipeline (policy `node_mail_to`, routine
+/// delivery through g4a). Polls every 10 s; a delivered letter is acked; nothing is logged but ids
+/// and statuses.
+async fn node_mail_wake(
+    c2: std::net::SocketAddr,
+    identity: std::sync::Arc<hatchery_enroll::NodeIdentity>,
+    node_id: String,
+    policy: std::sync::Arc<hatchery_node::wake_pipeline::WakePolicy>,
+    seen_path: PathBuf,
+    door_hint: String,
+) {
+    use hatchery_node::enroll_client::node_call;
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(hatchery_node::wake_pipeline::MailSeen::load(seen_path)));
+    tracing::info!("node-mail wake on");
+    loop {
+        match node_call(c2, &identity, &node_id, "mail.inbox", &serde_json::json!({"limit": 256})).await {
+            Ok(inbox) => {
+                let (policy, seen, hint) = (std::sync::Arc::clone(&policy), std::sync::Arc::clone(&seen), door_hint.clone());
+                let outcomes = tokio::task::spawn_blocking(move || {
+                    let mut seen = seen.lock().unwrap_or_else(|p| p.into_inner());
+                    hatchery_node::wake_pipeline::node_mail_tick(&policy, &mut seen, &inbox, Some(&hint))
+                })
+                .await
+                .unwrap_or_default();
+                for o in outcomes {
+                    match &o.result {
+                        Ok(status) => {
+                            tracing::info!(message_id = %o.message_id, status, "node mail delivered");
+                            let _ = node_call(c2, &identity, &node_id, "mail.ack", &serde_json::json!({"message_id": o.message_id})).await;
+                        }
+                        Err(why) => tracing::warn!(message_id = %o.message_id, reason = %why, "node mail not delivered; stays in the inbox"),
+                    }
+                }
+            }
+            Err(_) => tracing::warn!("node-mail wake: inbox unavailable"),
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(10)).await;
     }
 }

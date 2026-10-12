@@ -1443,9 +1443,9 @@ impl gate4agent_runtime_native::NativeChildEnvironmentResolver
 impl NodeServer {
     /// The letter-wake handle for the door, when m4a accounts are on. `token` is what callers
     /// must present.
-    pub fn wake_handle(&self, token: String) -> Option<node_wake::NodeWake> {
+    pub fn wake_handle(&self, token: String, policy: Arc<crate::wake_pipeline::WakePolicy>) -> Option<node_wake::NodeWake> {
         self.shared.m4a_accounts.as_ref()?;
-        Some(node_wake::NodeWake::new(Arc::clone(&self.shared), token))
+        Some(node_wake::NodeWake::new(Arc::clone(&self.shared), token, policy))
     }
 
     pub fn new(config: NodeServerConfig) -> Result<Self, NodeServerError> {
