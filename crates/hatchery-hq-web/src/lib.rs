@@ -26,6 +26,8 @@ use tokio::sync::broadcast;
 pub struct Config {
     pub listen: SocketAddr,
     pub c2_api: SocketAddr,
+    /// Origin of the browser byte relay (hatchery-bidi-relay); defaults to the C2 API origin.
+    pub bidi: Option<SocketAddr>,
     pub c2_control: String,
     pub c2_token: String,
     pub server: Option<SocketAddr>,
@@ -44,6 +46,7 @@ impl Config {
         }
         Ok(Self {
             listen,
+            bidi: var("HATCHERY_HQ_BIDI").and_then(|v| v.parse().ok()),
             c2_api: var("HATCHERY_HQ_C2_API").ok_or("HATCHERY_HQ_C2_API is required")?.parse().map_err(|e| format!("HATCHERY_HQ_C2_API: {e}"))?,
             c2_control: var("HATCHERY_HQ_C2_CONTROL").ok_or("HATCHERY_HQ_C2_CONTROL is required (C2 control endpoint)")?,
             c2_token: var("HATCHERY_HQ_C2_TOKEN").or_else(|| var("GATE4AGENT_C2_TOKEN")).ok_or("HATCHERY_HQ_C2_TOKEN is required")?,
@@ -432,7 +435,7 @@ async fn browser_session(mut socket: WebSocket, s: Shared, session: String) -> R
     if !session.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')) {
         return Err("bad session id".into());
     }
-    let endpoints = bidi::c2_endpoints(&format!("http://{}", s.config.c2_api), &session).map_err(|e| e.to_string())?;
+    let endpoints = bidi::c2_endpoints(&format!("http://{}", s.config.bidi.unwrap_or(s.config.c2_api)), &session).map_err(|e| e.to_string())?;
     bidi::open_session(&endpoints.post_url).await.map_err(|e| e.to_string())?;
     let upstream_ws = bidi::connect_ws(&endpoints.ws_url).await.map_err(|e| e.to_string())?;
     let (mut up_tx, mut up_rx) = upstream_ws.split();

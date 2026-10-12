@@ -167,7 +167,7 @@ const TABS = [['activity', 'Activity'], ['nodes', 'Nodes'], ['terminal', 'Termin
 function renderPanelHead() { $('#panelav').innerHTML = avatar(chatName(S.chat), 'big'); $('#panelname').textContent = chatName(S.chat); const n = S.nodes.find((x) => x.node_id === S.chat); $('#panelsub').textContent = n ? `${n.kind} · ${n.status} · ${n.online ? 'online' : 'offline'}` : 'operator'; }
 function openPanel(tab) { S.panel = true; $('#panel').classList.add('open'); setTab(tab || S.tab); renderPanelHead(); }
 function setTab(tab) {
-  S.tab = tab; $('#ptabs').innerHTML = '';
+  S.tab = tab; $('#panel').classList.toggle('wide', tab === 'browser'); $('#ptabs').innerHTML = '';
   for (const [id, label] of TABS) { const b = document.createElement('button'); b.textContent = label; b.className = id === tab ? 'on' : ''; b.onclick = () => setTab(id); $('#ptabs').appendChild(b); }
   document.querySelectorAll('.ptab').forEach((t) => t.classList.toggle('on', t.id === 'p-' + tab));
   if (tab === 'activity') renderActivity(); if (tab === 'terminal') showMini(); if (tab === 'nodes') renderNodesTab(); if (tab === 'tasks') renderTasksTab(); if (tab === 'mail') renderMailTab(); if (tab === 'library') renderLibraryTab();
@@ -210,7 +210,7 @@ $('#tspawn').onclick = () => {
   tws = new WebSocket(`ws://${location.host}/api/term?${q}`);
   tws.onmessage = (m) => {
     const d = JSON.parse(m.data);
-    if (d.type === 'spawned') { S.session = d.session; S.sessionNode = node; S.sessionProv = prov; S.target = 'agent'; $('#tinfo').textContent = `${prov} on ${node}`; addLocal(node, { sys: true, text: `Agent ${prov} started on ${node}` }); if (S.chat === node) renderChip(); }
+    if (d.type === 'spawned') { S.events[node] = new Map(); S.agentState[node] = 'idle'; S.session = d.session; S.sessionNode = node; S.sessionProv = prov; S.target = 'agent'; $('#tinfo').textContent = `${prov} on ${node}`; addLocal(node, { sys: true, text: `Agent ${prov} started on ${node}` }); if (S.chat === node) renderChip(); }
     if (d.type === 'error') { $('#tinfo').textContent = d.text; addLocal(node, { sys: true, text: d.text }); }
     if (d.type === 'ack') { $('#tinfo').textContent = `${d.op}: ${d.ok ? 'ok' : 'failed'}`; if (!d.ok) { S.working[node] = 0; addLocal(node, { sys: true, text: 'Refused: ' + (/does not permit/.test(d.detail) ? 'node status does not permit operator requests (policy)' : d.detail.slice(0, 120)) }); } }
     if (d.type === 'events') onEvents(node, d.events);

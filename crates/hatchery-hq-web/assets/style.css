@@ -46,6 +46,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 #menu button:hover{background:#26262b}
 #panel{width:0;overflow:hidden;background:var(--side);border-left:1px solid var(--line);transition:width .22s ease;flex:none;display:flex;flex-direction:column}
 #panel.open{width:640px}
+#panel.open.wide{width:min(980px,62vw)}
 .paneltop{display:flex;justify-content:flex-end;padding:12px 14px;min-width:640px}
 .panelhead{display:flex;flex-direction:column;align-items:center;min-width:640px;margin-bottom:8px}
 #panelname{font-weight:700;font-size:19px;margin-top:8px}.sub{color:var(--sub);font-size:12.5px}
