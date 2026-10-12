@@ -2075,6 +2075,8 @@ version = "0.2.0"
 dependencies = [
  "hatchery-c2",
  "hatchery-enroll",
+ "hatchery-harness-mcp",
+ "hatchery-node",
  "m4a-agent",
  "mail4agent-api",
  "mail4agent-core",

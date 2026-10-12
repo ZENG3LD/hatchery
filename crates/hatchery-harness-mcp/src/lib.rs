@@ -28,6 +28,8 @@ use serde_json::{json, Value};
 use thiserror::Error;
 
 mod memory_door;
+mod work_door;
+pub use work_door::WorkDoor;
 pub use memory_door::{MemoryDoor, MEMORY_START_TOOL};
 
 pub const MCP_PROTOCOL_VERSION_CURRENT: &str = "2025-11-25";
@@ -269,18 +271,25 @@ enum McpState { AwaitInitialize, AwaitInitialized, Ready }
 
 pub struct HarnessMcpServer<B> {
     memory_door: Option<MemoryDoor>,
+    work_door: Option<WorkDoor>,
     backend: B,
     state: McpState,
 }
 
 impl<B: HarnessMcpBackend> HarnessMcpServer<B> {
     pub fn new(backend: B) -> Self {
-        Self { backend, state: McpState::AwaitInitialize, memory_door: MemoryDoor::from_env() }
+        Self { backend, state: McpState::AwaitInitialize, memory_door: MemoryDoor::from_env(), work_door: WorkDoor::from_env() }
     }
 
     /// Replace the memory door (tests, embedders).
     pub fn with_memory_door(mut self, door: Option<MemoryDoor>) -> Self {
         self.memory_door = door;
+        self
+    }
+
+    /// Replace the mail/task door (tests, embedders).
+    pub fn with_work_door(mut self, door: Option<WorkDoor>) -> Self {
+        self.work_door = door;
         self
     }
 
@@ -401,6 +410,9 @@ impl<B: HarnessMcpBackend> HarnessMcpServer<B> {
         if self.memory_door.is_some() {
             tools.push(MemoryDoor::tool_definition());
         }
+        if self.work_door.is_some() {
+            tools.extend(WorkDoor::tool_definitions());
+        }
         rpc_result(id, json!({ "tools": tools }))
     }
 
@@ -433,6 +445,16 @@ impl<B: HarnessMcpBackend> HarnessMcpServer<B> {
                     "isError": false
                 })),
                 Err(()) => tool_error(id, "memory unavailable"),
+            };
+        }
+        if WorkDoor::owns(name) {
+            let Some(door) = self.work_door.as_ref() else {
+                return rpc_error(id, -32601, "method not found");
+            };
+            let arguments = if params.arguments.is_null() { json!({}) } else { params.arguments.clone() };
+            return match door.call(name, arguments) {
+                Ok(text) => rpc_result(id, json!({ "content": [{ "type": "text", "text": text }], "isError": false })),
+                Err(()) => tool_error(id, "not available"),
             };
         }
         if !context.allowed_tool_ids.iter().any(|allowed| allowed == name)

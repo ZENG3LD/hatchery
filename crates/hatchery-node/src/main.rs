@@ -167,6 +167,8 @@ async fn main() {
     let mut enrolled = false;
     let mut enroll_state: Option<PathBuf> = None;
     let mut no_wg = false;
+    let mut door_listen: Option<std::net::SocketAddr> = None;
+    let mut door_c2: Option<std::net::SocketAddr> = None;
     let mut kill_switch = std::env::var("HATCHERY_KILL_SWITCH").is_ok_and(|v| v == "1");
     let mut run_as: Option<String> = std::env::var("HATCHERY_RUN_AS").ok().filter(|v| !v.is_empty());
     let mut args = std::env::args().skip(1);
@@ -178,6 +180,9 @@ async fn main() {
             "--enroll-state" => enroll_state = Some(required_value("--enroll-state", args.next()).into()),
             // The tunnel is managed outside the node (OS WireGuard client).
             "--no-wg" => no_wg = true,
+            // Loopback door for agents: mail/task operations signed by this node and sent to C2.
+            "--door-listen" => door_listen = Some(required_value("--door-listen", args.next()).parse().unwrap_or_else(|e| fail(&format!("--door-listen is invalid: {e}")))),
+            "--door-c2" => door_c2 = Some(required_value("--door-c2", args.next()).parse().unwrap_or_else(|e| fail(&format!("--door-c2 is invalid: {e}")))),
             // Egress is dropped unless it goes through the tunnel (fails closed).
             "--kill-switch" => kill_switch = true,
             // Provider sessions run as this unprivileged user; the node keeps the keys.
@@ -435,6 +440,7 @@ async fn main() {
             .with_managed_worktree_profile(profile)
             .unwrap_or_else(|error| fail(&error.to_string()));
     }
+    let node_id_for_door = Some(node_id.to_string());
     let state_path = default_state_path(&node_id).unwrap_or_else(|error| fail(&error.to_string()));
     let config = NodeServerConfig::new(endpoint, token, node_id, workspaces)
         .and_then(|config| config.with_state_path(&state_path))
@@ -448,6 +454,7 @@ async fn main() {
             None => Ok(config),
         })
         .unwrap_or_else(|error| fail(&error.to_string()));
+    let call_home_identity_for_door = call_home_identity.clone();
     let config = match call_home_identity {
         Some(identity) => config.with_call_home_identity(identity),
         None => config,
@@ -549,6 +556,15 @@ async fn main() {
             .unwrap_or_else(|error| fail(&error.to_string()));
     }
     let server = NodeServer::new(config).unwrap_or_else(|error| fail(&error.to_string()));
+    if let (Some(listen), Some(c2), Some(identity), Some(id)) = (door_listen, door_c2, call_home_identity_for_door.clone(), node_id_for_door.clone()) {
+        if !listen.ip().is_loopback() {
+            fail("--door-listen must be a loopback address");
+        }
+        let listener = tokio::net::TcpListener::bind(listen).await.unwrap_or_else(|e| fail(&format!("--door-listen: {e}")));
+        tokio::spawn(hatchery_node::door::serve(listener, c2, identity, id));
+    } else if door_listen.is_some() || door_c2.is_some() {
+        fail("--door-listen and --door-c2 need each other and --enrolled");
+    }
     if let Err(error) = server.run_until_ctrl_signal().await {
         fail(&error.to_string());
     }

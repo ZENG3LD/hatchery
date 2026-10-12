@@ -46,3 +46,4 @@ memory = []
 tempfile = "3"
 hatchery-c2 = { path = "../hatchery-c2", version = "0.2.0" }
 hatchery-node = { path = "../hatchery-node", version = "0.2.0", default-features = false }
+hatchery-harness-mcp = { path = "../hatchery-harness-mcp", version = "0.2.0" }

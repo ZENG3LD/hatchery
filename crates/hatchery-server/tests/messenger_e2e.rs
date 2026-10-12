@@ -273,3 +273,32 @@ async fn mail_tasks_status_and_revocation_end_to_end() {
     wait_ledger(&rig.data, "alpha", "suspended").await;
     assert!(refused(&call(&rig, &alpha, "mail.inbox", json!({})).await));
 }
+
+/// The agent path: MCP tool -> node door (signs with the node identity) -> C2 -> hub. The agent
+/// side holds no key; a neutral node's door answers "not available".
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn agent_tools_reach_the_hub_through_the_node_door() {
+    use hatchery_harness_mcp::WorkDoor;
+    let rig = rig().await;
+    let enroll_addr = rig.enroll_addr.to_string();
+    let beta = enroll(&rig.api, &enroll_addr, "beta", 20).await;
+    let gamma = enroll(&rig.api, &enroll_addr, "gamma", 30).await;
+    wait_ledger(&rig.data, "beta", "neutral").await;
+    set_status(&rig.api, "beta", "trusted").await;
+    wait_ledger(&rig.data, "beta", "trusted").await;
+    let (s, _) = http(&rig.control, "POST", "/v1/tasks", Some(CONTROL), r#"{"title":"via door","assignee":"beta"}"#).await;
+    assert_eq!(s, 200);
+
+    let mut doors = Vec::new();
+    for n in [beta, gamma] {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(hatchery_node::door::serve(listener, rig.enroll_addr, Arc::new(n.identity), n.id.to_owned()));
+        doors.push(WorkDoor::new(addr).unwrap());
+    }
+    let (beta_door, gamma_door) = (doors.remove(0), doors.remove(0));
+    let (ok, no) = tokio::task::spawn_blocking(move || (beta_door.call("g4a_tasks", json!({})), gamma_door.call("g4a_tasks", json!({})))).await.unwrap();
+    let ok: Value = serde_json::from_str(&ok.unwrap()).unwrap();
+    assert_eq!(ok["tasks"][0]["title"], "via door");
+    assert!(no.is_err(), "neutral node gets nothing through its door");
+}
