@@ -24,10 +24,10 @@ toml = "0.8"
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-m4a-agent = { version = "0.4.8", optional = true }
-mail4agent-core = { version = "0.4.8", optional = true }
-mail4agent-api = { version = "0.4.8", optional = true }
-mail4agent-store-sqlite = { version = "0.4.8", optional = true }
+m4a-agent = { git = "https://github.com/ZENG3LD/mail4agent.git", branch = "feat/pure-messenger", optional = true }
+mail4agent-core = { git = "https://github.com/ZENG3LD/mail4agent.git", branch = "feat/pure-messenger", optional = true }
+mail4agent-api = { git = "https://github.com/ZENG3LD/mail4agent.git", branch = "feat/pure-messenger", optional = true }
+mail4agent-store-sqlite = { git = "https://github.com/ZENG3LD/mail4agent.git", branch = "feat/pure-messenger", optional = true }
 rusqlite = { version = "0.36", features = ["bundled"], optional = true }
 hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.1" }
 

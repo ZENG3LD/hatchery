@@ -22,7 +22,7 @@ base64 = "0.22"
 # Standard kit cores, all from crates.io: dig2browser 0.5 (browser machine and
 # stream), mail4agent 0.4 (lib face), session-restore libraries 0.1.x.
 dig2browser = { version = "0.5.3", optional = true, default-features = false }
-mail4agent = { version = "0.4.8", optional = true, default-features = false }
+mail4agent = { git = "https://github.com/ZENG3LD/mail4agent.git", branch = "feat/pure-messenger", optional = true, default-features = false }
 claude-session-restore = { version = "0.1.3", optional = true }
 codex-session-restore = { version = "0.1.3", optional = true }
 grok-session-restore = { version = "0.1.4", optional = true }
