@@ -38,6 +38,7 @@ pub(crate) use gate4agent_node_core::kit_wireguard;
 mod network_allowlist_catalog;
 pub(crate) use gate4agent_node_core::platform;
 pub mod enroll_client;
+pub mod m4a_accounts;
 pub mod door;
 #[cfg(unix)]
 pub mod isolation;

@@ -3080,6 +3080,8 @@ struct NodeShared {
     harness_mcp_registry: Option<HarnessMcpProxyRegistry>,
     native_session_catalog: Option<Arc<Mutex<NativeSessionCatalogAuthority>>>,
     session_environment_materializer: Option<SessionEnvironmentMaterializer>,
+    /// Per-session m4a accounts assigned at spawn (see [`crate::m4a_accounts`]).
+    m4a_accounts: Option<crate::m4a_accounts::M4aSessionAccounts>,
     materializations: Mutex<BTreeMap<MaterializationId, MaterializationOwnershipRecord>>,
     spawn_idempotency: Mutex<SpawnIdempotencyCache>,
     managed_spawn_replays:
@@ -3716,6 +3718,32 @@ impl SpawnPreparer for NodeShared {
                 })?,
             )),
         };
+        // Per-session m4a account: own nick + capability for this PTY child only. The published
+        // overlay API cannot add env to an overlay that already exists, so a spawn that carries
+        // another overlay is left without an account (logged, no secret).
+        let environment_overlay = match (environment_overlay, mode, self.m4a_accounts.as_ref()) {
+            (None, SessionMode::Pty, Some(accounts)) => {
+                let session_key = format!("{}-{}", self.incarnation_id, instance_id.0);
+                match accounts.provision(provider.as_str(), &session_key) {
+                    Ok(account) => {
+                        tracing::info!(provider = %provider, instance_id = ?instance_id, nick = %account.nick, "m4a session account assigned at spawn");
+                        Some(PreparedNativeLaunchOverlay::Instance(
+                            NativeInstanceLaunchOverlay::new(provider.clone(), TransportKind::Pty, account.env_mutations(), Vec::new())
+                                .map_err(|_| failure(NodeFailureCode::BackendOperationFailed, "m4a session account overlay is invalid"))?,
+                        ))
+                    }
+                    Err(error) => {
+                        tracing::warn!(provider = %provider, instance_id = ?instance_id, %error, "m4a session account not assigned");
+                        None
+                    }
+                }
+            }
+            (Some(overlay), SessionMode::Pty, Some(_)) => {
+                tracing::warn!(provider = %provider, instance_id = ?instance_id, "m4a session account not assigned: spawn already carries a launch overlay");
+                Some(overlay)
+            }
+            (other, _, _) => other,
+        };
         let mut instance_overlay = environment_overlay
             .map(|overlay| SpawnPreparer::install_launch_overlay(self, instance_id, overlay))
             .transpose()?
@@ -3902,6 +3930,7 @@ impl NodeShared {
             harness_mcp_registry: None,
             native_session_catalog,
             session_environment_materializer,
+            m4a_accounts: crate::m4a_accounts::M4aSessionAccounts::from_env(),
             materializations: Mutex::new(
                 materializations
                     .into_iter()
