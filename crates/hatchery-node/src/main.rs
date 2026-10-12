@@ -69,6 +69,42 @@ async fn main() {
                 Err(message) => fail(&message),
             }
         }
+        // drop-privileges --user USER -- program args...  (root, once; see isolation::drop_privileges)
+        Some("drop-privileges") => {
+            let user = match (raw_args.get(1).map(String::as_str), raw_args.get(2)) {
+                (Some("--user"), Some(user)) => user.clone(),
+                _ => fail("drop-privileges needs --user USER"),
+            };
+            let rest = match raw_args.iter().position(|a| a == "--") {
+                Some(i) => &raw_args[i + 1..],
+                None => fail("drop-privileges needs `--` before the program"),
+            };
+            match hatchery_node::isolation::drop_privileges(&user, rest) {
+                Ok(never) => match never {},
+                Err(message) => fail(&message),
+            }
+        }
+        // net-up --enroll-state DIR [--wg-key FILE] [--interface IF] [--kill-switch]  (root)
+        Some("net-up") => {
+            let (mut dir, mut key, mut iface, mut ks) = (None::<PathBuf>, None::<PathBuf>, "hatch0".to_owned(), false);
+            let mut it = raw_args[1..].iter();
+            while let Some(a) = it.next() {
+                let mut v = |n: &str| it.next().cloned().unwrap_or_else(|| fail(&format!("{n} requires a value")));
+                match a.as_str() {
+                    "--enroll-state" => dir = Some(v("--enroll-state").into()),
+                    "--wg-key" => key = Some(v("--wg-key").into()),
+                    "--interface" => iface = v("--interface"),
+                    "--kill-switch" => ks = true,
+                    other => fail(&format!("unknown net-up argument: {other}")),
+                }
+            }
+            let dir = dir.unwrap_or_else(|| fail("--enroll-state is required"));
+            match hatchery_node::isolation::net_up(&dir, key.as_deref(), &iface, ks) {
+                Ok(()) => println!("net-up ok interface={iface} kill_switch={ks}"),
+                Err(message) => fail(&message),
+            }
+            return;
+        }
         // build --c2-enroll ADDR --state-dir DIR --recipe NAME --trusted-signer KEY --out FILE [--source-ref REF]
         Some("build") => {
             run_build(&raw_args[1..]).await;
@@ -300,7 +336,13 @@ async fn main() {
             .clone()
             .or_else(hatchery_node::enroll_client::default_enroll_dir)
             .unwrap_or_else(|| fail("no enrollment state directory (set --enroll-state)"));
-        let (identity, state) = hatchery_node::enroll_client::load_enrolled(&dir).unwrap_or_else(|error| fail(&error.to_string()));
+        let loaded = if no_wg {
+            // Tunnel and kill-switch were set up by `net-up`; this process never reads the WireGuard key.
+            hatchery_node::enroll_client::load_enrolled_signing_only(&dir)
+        } else {
+            hatchery_node::enroll_client::load_enrolled(&dir)
+        };
+        let (identity, state) = loaded.unwrap_or_else(|error| fail(&error.to_string()));
         if call_home.is_none() {
             call_home = state.response.c2_call_home.as_deref().map(|addr| {
                 addr.parse().unwrap_or_else(|error| fail(&format!("stored call-home address is invalid: {error}")))

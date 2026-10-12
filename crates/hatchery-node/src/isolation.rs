@@ -81,20 +81,28 @@ pub fn exec_as(user: &str, argv: &[String]) -> Result<std::convert::Infallible, 
     let account = lookup(user).map_err(|e| e.to_string())?;
     let (program, rest) = argv.split_first().ok_or("exec-as needs a program")?;
     let cuser = CString::new(user).map_err(|e| e.to_string())?;
-    // SAFETY: plain libc credential calls, checked in order: groups first, then gid, then uid.
+    // SAFETY: plain libc credential calls, in order: groups, gid, uid. A process that is not root
+    // may do this only while it holds CAP_SETUID/CAP_SETGID (see `drop_privileges`); either way
+    // the drop must be irreversible before anything is exec'd.
     unsafe {
-        if libc::geteuid() == 0 {
+        if libc::geteuid() != account.uid {
             if libc::initgroups(cuser.as_ptr(), account.gid as _) != 0
                 || libc::setgid(account.gid) != 0
                 || libc::setuid(account.uid) != 0
             {
                 return Err(format!("cannot drop privileges: {}", std::io::Error::last_os_error()));
             }
+            // A caller that already ran as a non-root user keeps its capabilities across the id
+            // change, so they are removed explicitly: nothing may survive into the session.
+            libc::prctl(libc::PR_CAP_AMBIENT, libc::PR_CAP_AMBIENT_CLEAR_ALL as libc::c_ulong, 0, 0, 0);
+            let header = CapHeader { version: 0x2008_0522, pid: 0 };
+            let none = [CapData { effective: 0, permitted: 0, inheritable: 0 }; 2];
+            if libc::syscall(libc::SYS_capset, &header as *const CapHeader, none.as_ptr()) != 0 {
+                return Err(format!("cannot clear capabilities: {}", std::io::Error::last_os_error()));
+            }
             if libc::setuid(0) == 0 {
                 return Err("privilege drop is reversible; refusing to exec".to_owned());
             }
-        } else if libc::geteuid() != account.uid {
-            return Err("exec-as needs root to switch user".to_owned());
         }
     }
     use std::os::unix::process::CommandExt;
@@ -183,4 +191,106 @@ mod tests {
         let after = wrap_registry(catalog).unwrap();
         assert_eq!(before, after.iter().map(|s| s.launch.program.clone()).collect::<Vec<_>>());
     }
+}
+
+const CAP_SETGID: u32 = 6;
+const CAP_SETUID: u32 = 7;
+
+#[repr(C)]
+struct CapHeader {
+    version: u32,
+    pid: i32,
+}
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CapData {
+    effective: u32,
+    permitted: u32,
+    inheritable: u32,
+}
+
+fn last_cap() -> u32 {
+    std::fs::read_to_string("/proc/sys/kernel/cap_last_cap").ok().and_then(|t| t.trim().parse().ok()).unwrap_or(40)
+}
+
+/// `drop-privileges --user USER -- program args...` (run as root, once, before the long-lived
+/// node starts). The program runs as USER with: no_new_privs (no su/sudo/setuid escalation), a
+/// capability bounding set of only CAP_SETUID and CAP_SETGID (so it can start sessions as another
+/// user with `exec-as`, but can never gain CAP_NET_ADMIN, so the tunnel and the kill-switch
+/// installed earlier by `net-up` stay out of its reach), and those two capabilities as ambient.
+pub fn drop_privileges(user: &str, argv: &[String]) -> Result<std::convert::Infallible, String> {
+    let account = lookup(user).map_err(|e| e.to_string())?;
+    let (program, rest) = argv.split_first().ok_or("drop-privileges needs a program")?;
+    let cuser = CString::new(user).map_err(|e| e.to_string())?;
+    // SAFETY: libc credential and capability calls, each checked; order matters (bounding set and
+    // keepcaps first, then ids, then capset, then ambient).
+    unsafe {
+        if libc::geteuid() != 0 {
+            return Err("drop-privileges needs root".to_owned());
+        }
+        if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 {
+            return Err(format!("no_new_privs: {}", std::io::Error::last_os_error()));
+        }
+        for cap in 0..=last_cap() {
+            if cap != CAP_SETUID && cap != CAP_SETGID && libc::prctl(libc::PR_CAPBSET_DROP, cap as libc::c_ulong, 0, 0, 0) != 0 {
+                return Err(format!("cannot drop capability {cap}: {}", std::io::Error::last_os_error()));
+            }
+        }
+        if libc::prctl(libc::PR_SET_KEEPCAPS, 1, 0, 0, 0) != 0 {
+            return Err(format!("keepcaps: {}", std::io::Error::last_os_error()));
+        }
+        if libc::initgroups(cuser.as_ptr(), account.gid as _) != 0 || libc::setgid(account.gid) != 0 || libc::setuid(account.uid) != 0 {
+            return Err(format!("cannot switch user: {}", std::io::Error::last_os_error()));
+        }
+        let mask = (1_u32 << CAP_SETUID) | (1_u32 << CAP_SETGID);
+        let header = CapHeader { version: 0x2008_0522, pid: 0 };
+        let data = [CapData { effective: mask, permitted: mask, inheritable: mask }, CapData { effective: 0, permitted: 0, inheritable: 0 }];
+        if libc::syscall(libc::SYS_capset, &header as *const CapHeader, data.as_ptr()) != 0 {
+            return Err(format!("capset: {}", std::io::Error::last_os_error()));
+        }
+        for cap in [CAP_SETUID, CAP_SETGID] {
+            if libc::prctl(libc::PR_CAP_AMBIENT, libc::PR_CAP_AMBIENT_RAISE as libc::c_ulong, cap as libc::c_ulong, 0, 0) != 0 {
+                return Err(format!("ambient capability {cap}: {}", std::io::Error::last_os_error()));
+            }
+        }
+    }
+    use std::os::unix::process::CommandExt;
+    let error = Command::new(program)
+        .args(rest)
+        .env("HOME", &account.home)
+        .env("USER", user)
+        .env("LOGNAME", user)
+        .exec();
+    Err(format!("cannot exec {program}: {error}"))
+}
+
+/// `net-up --enroll-state DIR [--wg-key FILE] [--interface hatch0] [--kill-switch]` (root): bring up
+/// the kernel WireGuard interface from the enrolled state and optionally install the egress
+/// kill-switch. After this the long-lived node can run unprivileged with `--no-wg`, and the
+/// WireGuard private key can live in a root-only place the node never reads.
+pub fn net_up(state_dir: &std::path::Path, wg_key: Option<&std::path::Path>, interface: &str, kill_switch: bool) -> Result<(), String> {
+    let (_, state) = crate::enroll_client::load_enrolled_signing_only(state_dir).map_err(|e| e.to_string())?;
+    let r = &state.response;
+    let need = |v: &Option<String>, n: &str| v.clone().ok_or_else(|| format!("enrolled state lacks {n}"));
+    let (addr, peer_addr) = (need(&r.tunnel_ip, "tunnel address")?, need(&r.c2_tunnel_ip, "C2 tunnel address")?);
+    let (peer_key, endpoint) = (need(&r.c2_wg_public_key, "C2 public key")?, need(&r.c2_wg_endpoint, "C2 endpoint")?);
+    let key_path = wg_key.map(std::path::Path::to_path_buf).unwrap_or_else(|| hatchery_enroll::NodeIdentity::wg_path(state_dir));
+    let run = |program: &str, args: &[&str]| -> Result<(), String> {
+        let out = Command::new(program).args(args).output().map_err(|e| format!("{program}: {e}"))?;
+        if out.status.success() { Ok(()) } else { Err(format!("{program} {} failed: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim())) }
+    };
+    if kill_switch {
+        // First, so there is no window in which the interface is up and egress is open.
+        let ks = KillSwitch::new(interface, &endpoint).map_err(|e| e.to_string())?;
+        apply_kill_switch(&ks).map_err(|e| e.to_string())?;
+    }
+    let _ = Command::new("ip").args(["link", "del", "dev", interface]).output();
+    run("ip", &["link", "add", "dev", interface, "type", "wireguard"])?;
+    let family = if peer_addr.contains(':') { 128 } else { 32 };
+    let allowed = format!("{peer_addr}/{family}");
+    run("wg", &["set", interface, "private-key", &key_path.to_string_lossy(), "peer", &peer_key, "endpoint", &endpoint, "allowed-ips", &allowed, "persistent-keepalive", "25"])?;
+    run("ip", &["addr", "replace", &format!("{addr}/{family}"), "dev", interface])?;
+    run("ip", &["link", "set", "up", "dev", interface])?;
+    run("ip", &["route", "replace", &allowed, "dev", interface])?;
+    Ok(())
 }
