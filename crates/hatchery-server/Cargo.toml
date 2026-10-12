@@ -39,3 +39,5 @@ memory = []
 
 [dev-dependencies]
 tempfile = "3"
+hatchery-c2 = { path = "../hatchery-c2", version = "0.2.0" }
+hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.1" }

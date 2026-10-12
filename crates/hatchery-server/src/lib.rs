@@ -9,6 +9,8 @@ pub mod harness;
 pub mod m4a;
 #[cfg(feature = "memory")]
 pub mod memory;
+#[cfg(feature = "m4a")]
+pub mod provision;
 pub mod subservice;
 pub mod supervisor;
 
@@ -33,6 +35,20 @@ pub fn build_subservices(config: &ServerConfig) -> Vec<Box<dyn Subservice>> {
             &config.data_dir,
             config.m4a_master_key_var.clone(),
         )));
+    }
+    #[cfg(feature = "m4a")]
+    if let (true, Some(master), Some(c2_addr)) =
+        (config.m4a_enabled, config.m4a_master_key_var.clone(), config.provision_c2_addr.clone())
+    {
+        services.push(Box::new(provision::ProvisionSubservice::new(provision::ProvisionConfig {
+            data_dir: config.data_dir.clone(),
+            master_key_var: master,
+            c2_addr,
+            c2_token_var: config.provision_c2_token_var.clone(),
+            interval: std::time::Duration::from_secs(config.provision_interval_secs),
+            server_ref: config.m4a_server_ref.clone(),
+            mail_domain: config.mail_domain.clone(),
+        })));
     }
     #[cfg(feature = "memory")]
     services.push(Box::new(memory::MemorySubservice::new(

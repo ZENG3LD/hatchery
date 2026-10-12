@@ -16,6 +16,13 @@ pub const HARNESS_BIN_ENV: &str = "HATCHERY_HARNESS_BIN";
 pub const HARNESS_ARGS_ENV: &str = "HATCHERY_HARNESS_ARGS";
 pub const MEMORY_BIN_ENV: &str = "HATCHERY_MEMORY_BIN";
 pub const M4A_MASTER_KEY_VAR_ENV: &str = "HATCHERY_M4A_MASTER_KEY_VAR";
+/// C2 operator API the provisioner polls (`host:port`, reachable on loopback or a tunnel).
+pub const PROVISION_C2_ADDR_ENV: &str = "HATCHERY_PROVISION_C2_ADDR";
+/// Name of the variable holding the C2 operator bearer (the value is never in config).
+pub const PROVISION_C2_TOKEN_VAR_ENV: &str = "HATCHERY_PROVISION_C2_TOKEN_VAR";
+pub const PROVISION_INTERVAL_ENV: &str = "HATCHERY_PROVISION_INTERVAL_SECS";
+pub const M4A_SERVER_REF_ENV: &str = "HATCHERY_M4A_SERVER_REF";
+pub const MAIL_DOMAIN_ENV: &str = "HATCHERY_MAIL_DOMAIN";
 
 /// Memory4agent listens only inside this range, on loopback.
 pub const MEMORY_PORT_MIN: u16 = 18200;
@@ -65,6 +72,12 @@ pub struct ServerConfig {
     pub memory_bin: PathBuf,
     pub m4a_enabled: bool,
     pub m4a_master_key_var: Option<String>,
+    /// Provisioning is on only when m4a is enabled and a C2 address is configured.
+    pub provision_c2_addr: Option<String>,
+    pub provision_c2_token_var: String,
+    pub provision_interval_secs: u64,
+    pub m4a_server_ref: String,
+    pub mail_domain: String,
 }
 
 impl ServerConfig {
@@ -123,6 +136,12 @@ impl ServerConfig {
                 .unwrap_or_else(|| PathBuf::from("memory4agent-server")),
             m4a_enabled: file.m4a.enabled || env(M4A_MASTER_KEY_VAR_ENV).is_some(),
             m4a_master_key_var: env(M4A_MASTER_KEY_VAR_ENV).or(file.m4a.master_key_var),
+            provision_c2_addr: env(PROVISION_C2_ADDR_ENV).filter(|v| !v.is_empty()),
+            provision_c2_token_var: env(PROVISION_C2_TOKEN_VAR_ENV)
+                .unwrap_or_else(|| "HATCHERY_PROVISION_C2_TOKEN".to_owned()),
+            provision_interval_secs: env(PROVISION_INTERVAL_ENV).and_then(|v| v.parse().ok()).unwrap_or(5).max(1),
+            m4a_server_ref: env(M4A_SERVER_REF_ENV).unwrap_or_else(|| "https://messenger.invalid".to_owned()),
+            mail_domain: env(MAIL_DOMAIN_ENV).unwrap_or_else(|| "nodes.invalid".to_owned()),
         })
     }
 }

@@ -2038,6 +2038,8 @@ dependencies = [
 name = "hatchery-server"
 version = "0.2.0"
 dependencies = [
+ "hatchery-c2",
+ "hatchery-enroll",
  "m4a-agent",
  "serde",
  "serde_json",
