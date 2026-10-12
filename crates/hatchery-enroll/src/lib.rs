@@ -22,6 +22,20 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 
+pub mod policy;
+pub use policy::{Grants, Policy, PolicyError};
+
+/// Status of an enrolled node. Every node starts `Neutral`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeStatus {
+    Neutral,
+    Member,
+    Trusted,
+    Suspended,
+    Revoked,
+}
+
 const DOMAIN_ENROLL: &[u8] = b"hatchery-enroll-v1\n";
 const DOMAIN_AUTH: &[u8] = b"hatchery-node-auth-v1\n";
 const DOMAIN_TOKEN: &[u8] = b"hatchery-session-token-v1\n";
@@ -78,6 +92,10 @@ pub struct EnrollmentRequest {
     pub nonce: String,
     /// One-time code the operator handed out.
     pub code: Option<String>,
+    /// Public half of the node's m4a key pair (base64). Optional: old nodes omit it. The
+    /// private half stays in the node's state directory and is never sent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub m4a_public_key: Option<String>,
     /// Ed25519 signature, base64, 64 bytes.
     pub signature: String,
 }
@@ -96,6 +114,13 @@ impl EnrollmentRequest {
             self.code.as_deref().unwrap_or(""),
         ] {
             out.extend_from_slice(part.as_bytes());
+            out.push(b'\n');
+        }
+        // Appended only when present so requests from nodes without the field keep the
+        // signature they always had.
+        if let Some(key) = &self.m4a_public_key {
+            out.extend_from_slice(b"m4a:");
+            out.extend_from_slice(key.as_bytes());
             out.push(b'\n');
         }
         out
@@ -168,16 +193,32 @@ fn session_token(shared: &[u8; 32], material: &[u8]) -> String {
 pub struct NodeIdentity {
     identity: SigningKey,
     wg: StaticSecret,
+    m4a: SigningKey,
 }
 
 impl NodeIdentity {
     pub fn generate() -> Result<Self, EnrollError> {
-        Ok(Self { identity: SigningKey::from_bytes(&random32()?), wg: StaticSecret::from(random32()?) })
+        Ok(Self { identity: SigningKey::from_bytes(&random32()?), wg: StaticSecret::from(random32()?), m4a: SigningKey::from_bytes(&random32()?) })
     }
 
     /// Deterministic construction for tests.
     pub fn from_seeds(identity_seed: [u8; 32], wg_seed: [u8; 32]) -> Self {
-        Self { identity: SigningKey::from_bytes(&identity_seed), wg: StaticSecret::from(wg_seed) }
+        Self {
+            identity: SigningKey::from_bytes(&identity_seed),
+            wg: StaticSecret::from(wg_seed),
+            // Derived, so tests stay deterministic; real nodes use a random key.
+            m4a: SigningKey::from_bytes(&Sha256::digest([b"m4a-test-seed".as_slice(), &identity_seed].concat()).into()),
+        }
+    }
+
+    /// Public half of the node's m4a key pair (base64).
+    pub fn m4a_public_key(&self) -> String {
+        B64.encode(self.m4a.verifying_key().to_bytes())
+    }
+
+    /// Path of the m4a private seed (never leaves the node).
+    pub fn m4a_path(dir: &Path) -> PathBuf {
+        dir.join("m4a.key")
     }
 
     pub fn identity_public_key(&self) -> String {
@@ -201,18 +242,27 @@ impl NodeIdentity {
 
     /// Load the keys from `dir`, or generate and store them (directory 0700, files 0600).
     pub fn load_or_create(dir: &Path) -> Result<Self, EnrollError> {
-        let (ip, wp) = (Self::identity_path(dir), Self::wg_path(dir));
+        let (ip, wp, mp) = (Self::identity_path(dir), Self::wg_path(dir), Self::m4a_path(dir));
         if ip.exists() && wp.exists() {
             let read = |p: &Path| -> Result<[u8; 32], EnrollError> {
                 let text = std::fs::read_to_string(p).map_err(|e| EnrollError::Storage(e.to_string()))?;
                 decode_key32(text.trim())
             };
-            return Ok(Self::from_seeds(read(&ip)?, read(&wp)?));
+            let mut me = Self::from_seeds(read(&ip)?, read(&wp)?);
+            if mp.exists() {
+                me.m4a = SigningKey::from_bytes(&read(&mp)?);
+            } else {
+                // A state directory from before the m4a key existed gets one now.
+                me.m4a = SigningKey::from_bytes(&random32()?);
+                write_private(&mp, B64.encode(me.m4a.to_bytes()).as_bytes()).map_err(|e| EnrollError::Storage(e.to_string()))?;
+            }
+            return Ok(me);
         }
         let me = Self::generate()?;
         create_private_dir(dir).map_err(|e| EnrollError::Storage(e.to_string()))?;
         write_private(&ip, B64.encode(me.identity.to_bytes()).as_bytes()).map_err(|e| EnrollError::Storage(e.to_string()))?;
         write_private(&wp, B64.encode(me.wg.to_bytes()).as_bytes()).map_err(|e| EnrollError::Storage(e.to_string()))?;
+        write_private(&mp, B64.encode(me.m4a.to_bytes()).as_bytes()).map_err(|e| EnrollError::Storage(e.to_string()))?;
         Ok(me)
     }
 
@@ -226,6 +276,7 @@ impl NodeIdentity {
             timestamp_ms: now_ms,
             nonce: random32()?.iter().map(|b| format!("{b:02x}")).collect(),
             code: code.map(str::to_owned),
+            m4a_public_key: Some(self.m4a_public_key()),
             signature: String::new(),
         };
         request.signature = B64.encode(self.identity.sign(&request.signing_bytes()).to_bytes());
@@ -352,11 +403,38 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            for p in [NodeIdentity::identity_path(&dir), NodeIdentity::wg_path(&dir)] {
+            for p in [NodeIdentity::identity_path(&dir), NodeIdentity::wg_path(&dir), NodeIdentity::m4a_path(&dir)] {
                 assert_eq!(std::fs::metadata(p).unwrap().permissions().mode() & 0o777, 0o600);
             }
             assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
         }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn m4a_key_is_stable_private_and_signed_into_the_request() {
+        let dir = std::env::temp_dir().join(format!("hatchery-enroll-m4a-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let a = NodeIdentity::load_or_create(&dir).unwrap();
+        let b = NodeIdentity::load_or_create(&dir).unwrap();
+        assert_eq!(a.m4a_public_key(), b.m4a_public_key());
+        assert_ne!(a.m4a_public_key(), a.identity_public_key());
+        let mut r = a.sign_request("x", NodeKind::Local, None, 1).unwrap();
+        assert_eq!(r.m4a_public_key.as_deref(), Some(a.m4a_public_key().as_str()));
+        verify_signature(&r.identity_public_key, &r.signing_bytes(), &r.signature).unwrap();
+        r.m4a_public_key = Some("swapped".into());
+        assert!(verify_signature(&r.identity_public_key, &r.signing_bytes(), &r.signature).is_err(), "the m4a key is covered");
+        // an old directory without m4a.key gets one, and the old request form still verifies
+        std::fs::remove_file(NodeIdentity::m4a_path(&dir)).unwrap();
+        let c = NodeIdentity::load_or_create(&dir).unwrap();
+        assert!(NodeIdentity::m4a_path(&dir).exists());
+        let mut old = c.sign_request("x", NodeKind::Local, None, 1).unwrap();
+        old.m4a_public_key = None;
+        old.signature = {
+            use base64::Engine;
+            B64.encode(c.identity.sign(&old.signing_bytes()).to_bytes())
+        };
+        verify_signature(&old.identity_public_key, &old.signing_bytes(), &old.signature).unwrap();
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
