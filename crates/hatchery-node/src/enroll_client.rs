@@ -95,7 +95,6 @@ pub fn wireguard_env_from_state(state_dir: &Path, state: &EnrolledState, interfa
     push("GATE4AGENT_WG_PEER_ADDRESS", r.c2_tunnel_ip.clone());
     push("GATE4AGENT_WG_PEER_KEY", r.c2_wg_public_key.clone());
     push("GATE4AGENT_WG_PEER_ENDPOINT", r.c2_wg_endpoint.clone());
-    push("GATE4AGENT_WG_KEEPALIVE", Some("25".to_owned()));
     out
 }
 
