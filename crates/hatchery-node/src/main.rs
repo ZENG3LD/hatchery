@@ -56,6 +56,38 @@ async fn main() {
     let mut network_allowlist_catalog: Option<PathBuf> = None;
     let mut session_record_retention = SessionRecordRetentionConfig::default();
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    match raw_args.first().map(String::as_str) {
+        Some("exec-as") => {
+            // exec-as USER -- program args...  (used by --run-as for provider sessions)
+            let user = raw_args.get(1).cloned().unwrap_or_else(|| fail("exec-as needs a user"));
+            let rest = match raw_args.iter().position(|a| a == "--") {
+                Some(i) => &raw_args[i + 1..],
+                None => fail("exec-as needs `--` before the program"),
+            };
+            match hatchery_node::isolation::exec_as(&user, rest) {
+                Ok(never) => match never {},
+                Err(message) => fail(&message),
+            }
+        }
+        // kill-switch --wg-if IF --endpoint IP:PORT [--apply]  (prints the ruleset, or installs it)
+        Some("kill-switch") => {
+            run_kill_switch(&raw_args[1..]);
+            return;
+        }
+        // isolation-profile KIND  (prints the defaults of a node kind as JSON)
+        Some("isolation-profile") => {
+            let kind = match raw_args.get(1).map(String::as_str) {
+                Some("local") => hatchery_enroll::NodeKind::Local,
+                Some("docker") => hatchery_enroll::NodeKind::Docker,
+                Some("qemu") => hatchery_enroll::NodeKind::Qemu,
+                Some("remote") => hatchery_enroll::NodeKind::Remote,
+                _ => fail("isolation-profile needs local, docker, qemu or remote"),
+            };
+            println!("{}", serde_json::to_string_pretty(&hatchery_enroll::IsolationProfile::for_kind(kind)).expect("profile serializes"));
+            return;
+        }
+        _ => {}
+    }
     if raw_args.first().map(String::as_str) == Some("enroll") {
         run_enroll(&raw_args[1..]).await;
         return;
@@ -63,6 +95,8 @@ async fn main() {
     let mut enrolled = false;
     let mut enroll_state: Option<PathBuf> = None;
     let mut no_wg = false;
+    let mut kill_switch = std::env::var("HATCHERY_KILL_SWITCH").is_ok_and(|v| v == "1");
+    let mut run_as: Option<String> = std::env::var("HATCHERY_RUN_AS").ok().filter(|v| !v.is_empty());
     let mut args = std::env::args().skip(1);
     while let Some(argument) = args.next() {
         match argument.as_str() {
@@ -72,6 +106,10 @@ async fn main() {
             "--enroll-state" => enroll_state = Some(required_value("--enroll-state", args.next()).into()),
             // The tunnel is managed outside the node (OS WireGuard client).
             "--no-wg" => no_wg = true,
+            // Egress is dropped unless it goes through the tunnel (fails closed).
+            "--kill-switch" => kill_switch = true,
+            // Provider sessions run as this unprivileged user; the node keeps the keys.
+            "--run-as" => run_as = Some(required_value("--run-as", args.next())),
             "--endpoint" => endpoint = required_value("--endpoint", args.next()),
             "--api-listen" => {
                 let value = required_value("--api-listen", args.next());
@@ -274,6 +312,23 @@ async fn main() {
             node_id = Some(NodeId::new(state.node_id.clone()).unwrap_or_else(|error| fail(&error.to_string())));
         }
         call_home_identity = Some(Arc::new(identity));
+    }
+    #[cfg(unix)]
+    {
+        if let Some(user) = run_as.take() {
+            hatchery_node::isolation::set_run_as(&user).unwrap_or_else(|error| fail(&error.to_string()));
+            std::env::remove_var("HATCHERY_RUN_AS");
+        }
+        if kill_switch {
+            let interface = std::env::var("GATE4AGENT_WG_INTERFACE").unwrap_or_else(|_| "hatch0".to_owned());
+            let endpoint = std::env::var("GATE4AGENT_WG_PEER_ENDPOINT")
+                .unwrap_or_else(|_| fail("--kill-switch needs the tunnel endpoint (enrolled state or GATE4AGENT_WG_PEER_ENDPOINT)"));
+            let ks = hatchery_enroll::KillSwitch::new(&interface, &endpoint).unwrap_or_else(|e| fail(&e.to_string()));
+            match hatchery_node::isolation::apply_kill_switch(&ks) {
+                Ok(tool) => tracing::info!(tool, interface = %interface, "egress kill-switch installed"),
+                Err(error) => fail(&error.to_string()),
+            }
+        }
     }
     // An enrolled node has no standing token; local clients of its own endpoint still need
     // one, so an unset variable gets a random per-process value that is never printed.
@@ -775,5 +830,34 @@ async fn run_enroll(args: &[String]) {
             );
         }
         Err(error) => fail(&error.to_string()),
+    }
+}
+
+fn run_kill_switch(args: &[String]) {
+    let (mut wg_if, mut endpoint, mut apply) = (None, None, false);
+    let mut it = args.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--wg-if" => wg_if = it.next().cloned(),
+            "--endpoint" => endpoint = it.next().cloned(),
+            "--apply" => apply = true,
+            other => fail(&format!("unknown kill-switch argument: {other}")),
+        }
+    }
+    let ks = hatchery_enroll::KillSwitch::new(
+        &wg_if.unwrap_or_else(|| fail("--wg-if is required")),
+        &endpoint.unwrap_or_else(|| fail("--endpoint IP:PORT is required")),
+    )
+    .unwrap_or_else(|e| fail(&e.to_string()));
+    if apply {
+        #[cfg(unix)]
+        match hatchery_node::isolation::apply_kill_switch(&ks) {
+            Ok(tool) => println!("kill-switch installed with {tool}"),
+            Err(error) => fail(&error.to_string()),
+        }
+        #[cfg(not(unix))]
+        fail("kill-switch --apply is Linux only");
+    } else {
+        print!("{}", ks.nft_ruleset());
     }
 }

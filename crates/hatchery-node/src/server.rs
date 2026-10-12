@@ -2261,6 +2261,10 @@ try { $contextHash = ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadA
                 .map_err(|_| NodeServerError::SessionEnvironmentMaterializer)
             })
             .transpose()?;
+        // Session launchers go through the unprivileged `exec-as` wrapper when run-as is set
+        // (the provider version probe above already used the original catalog).
+        #[cfg(unix)]
+        let catalog = crate::isolation::wrap_registry(catalog).map_err(NodeServerError::Registry)?;
         let native_session_catalog = config.history.clone().map(|history| {
             Arc::new(Mutex::new(NativeSessionCatalogAuthority::new(history)))
         });
