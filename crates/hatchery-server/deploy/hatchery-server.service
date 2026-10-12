@@ -10,10 +10,12 @@ Wants=network-online.target
 # the harness reads. The unit contains no address and no secret.
 EnvironmentFile=/etc/hatchery/server.env
 ExecStart=/usr/local/bin/hatchery-server
+User=hatchery
 Restart=on-failure
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
+PrivateTmp=true
 ReadWritePaths=/var/lib/hatchery
 
 [Install]

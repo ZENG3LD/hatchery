@@ -1,18 +1,25 @@
 [Unit]
-Description=C2 relay (node aggregation and command routing)
+Description=hatchery-c2 (node aggregation and command routing)
 After=network-online.target
 Wants=network-online.target
+# On a host that terminates the node WireGuard link itself, also order after and
+# require wg-quick@<interface>.service.
 
 [Service]
 # Arguments (--api-listen, --control-endpoint, --node-listen, --node ...) and
 # secrets (GATE4AGENT_C2_TOKEN, GATE4AGENT_NODE_TOKEN_<NODE_ID>) come from the
 # operator's environment file. The unit contains no address and no secret.
+User=hatchery
 EnvironmentFile=/etc/hatchery/c2.env
 ExecStart=/usr/local/bin/hatchery-c2 $C2_ARGS
+# Owner-only directory for the unix control socket: --control-endpoint /run/hatchery-c2/control.sock
+RuntimeDirectory=hatchery-c2
+RuntimeDirectoryMode=0700
 Restart=on-failure
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target

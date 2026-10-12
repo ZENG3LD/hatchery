@@ -25,3 +25,9 @@ Why processes: the harness and memory4agent are standalone services with their o
 - **QEMU**: boot a guest with the same binaries and a persistent data volume (guest recipe: `crates/hatchery-node/deploy/node/qemu-guest.sh`).
 
 Data of the memory index is a rebuildable cache; encrypt the volume at the host level (the index itself is not encrypted). The memory port must never be published to WireGuard or outside: it has no authentication.
+
+## Service on a VPS (tested layout)
+
+- Env file `/etc/hatchery/server.env` (0600) holds: `HATCHERY_SERVER_DATA_DIR`, `HATCHERY_SERVER_CONTROL_LISTEN`, `HATCHERY_SERVER_CONTROL_TOKEN`, `HATCHERY_HARNESS_BIN`, `HATCHERY_HARNESS_ARGS` (whitespace separated), `HATCHERY_MEMORY_BIN`, `GATE4AGENT_C2_TOKEN` (same value as the C2 host) and `GATE4AGENT_HARNESS_OPERATOR_TOKEN`. The operator token has a fixed shape: `g4aho_` followed by 64 lowercase hex characters (`printf 'g4aho_%s' $(openssl rand -hex 32)`).
+- The harness accepts only a *local* `--c2-endpoint` (absolute unix path or loopback), never a remote TCP address. When C2 runs on another host, expose C2's `--control-tunnel` address over a private tunnel and forward it to an owner-only unix socket on the server host: a `.socket` unit with `ListenStream=/run/hatchery-c2-proxy/control.sock`, `SocketMode=0600`, owned by the service user (directory created by `tmpfiles.d`, mode 0700), and a `.service` unit running `/lib/systemd/systemd-socket-proxyd TUNNEL_IP:PORT`. Then `--c2-endpoint /run/hatchery-c2-proxy/control.sock`.
+- Health proof: `curl -s 127.0.0.1:CONTROL_PORT/health` shows `harness: running`; `POST /sub/memory/start` (bearer = control token) shows `memory: running` on a port in 18200-18299, `stop` returns it to `stopped`.

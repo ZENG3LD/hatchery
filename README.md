@@ -1,14 +1,30 @@
 # hatchery
 
-hatchery is the operator HQ above provider nodes: harness, observation,
-and TUI for running and orchestrating CLI coding-agent sessions (first
-tier: Claude Code, Codex, Kimi, Grok). Providers, the node daemon, and C2
-live in the sibling `gate4agent` repository (see [Built on](#built-on));
-this repository keeps harness / observation / TUI / arcade. A harness —
-light or full — is the one stateful backend a client app talks to, behind
-a single app-facing protocol, adding task kanban, session context, and
-delivery on top of the c2 transport; the TUI is the current client, and it
-speaks only the harness operator wire in either mode.
+hatchery is the product: a complete, open-source kit for running and
+orchestrating CLI coding-agent sessions (Claude Code, Codex, Kimi, Grok) on
+machines you control. Everything an operator needs ships inside it:
+
+- `hatchery-node` — the machine-side daemon: PTY/inline provider sessions
+  (transport from `gate4agent` 0.5, which stays a thin byte transport), an
+  embedded `m4a` messenger mailbox, the local browser machine (`dig2browser`),
+  session restore, kernel WireGuard to C2, and the memory tool agents can ask for.
+- `hatchery-c2` — the public-edge relay: nodes call home over WireGuard, HQ
+  talks only to C2.
+- `hatchery-server` — the core-side host for subservices: harness and
+  observation, the `m4a` key vault, and `memory4agent` started on demand.
+- HQ side: harness, observation, TUI/bidi clients (web-session first, GUI later).
+
+`m4a` (messenger), `memory4agent` and `gate4agent` are dependencies inside the
+kit, not separate products you must assemble. Providers never see hatchery:
+from inside a session it looks like the provider CLI plus a few ordinary tools.
+
+Everything is configurable (local process, service, Docker, QEMU, VPS) with
+addresses, keys and tokens from the environment only; no domain, IP or key is
+compiled in. Each crate has a `deploy/` kit; the kits are tuned for a fast
+deploy of a two-host server (core + edge) and for nodes on personal machines.
+Step-by-step guides live in the documentation repository under
+`docs/hatchery/handoffs/` (server layout, local node on Linux/macOS/Windows,
+E2E evidence).
 
 ## Layers
 
