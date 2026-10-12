@@ -138,6 +138,36 @@ pub async fn request_build(
     Ok((response.receipt, artifact))
 }
 
+/// Make a signed mail/task call through C2 (`op` like `mail.send`, `task.list`). The node proves
+/// who it is with its identity key; no server credential is involved. Returns the reply JSON.
+pub async fn node_call(
+    c2_enroll: std::net::SocketAddr,
+    identity: &NodeIdentity,
+    node_id: &str,
+    op: &str,
+    payload: &serde_json::Value,
+) -> Result<serde_json::Value, EnrollClientError> {
+    use hatchery_enroll::call::SignedCall;
+    let ts_ms = unix_ms();
+    let mut raw = [0_u8; 12];
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut raw))
+        .map_err(|e| EnrollClientError::State(e.to_string()))?;
+    let nonce: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+    let payload_text = payload.to_string();
+    let message = SignedCall::signing_bytes(node_id, op, &payload_text, ts_ms, &nonce);
+    let call = SignedCall { node_id: node_id.to_owned(), op: op.to_owned(), payload: payload_text, ts_ms, nonce, signature: identity.sign_bytes(&message) };
+    let body = serde_json::to_vec(&call).map_err(|e| EnrollClientError::State(e.to_string()))?;
+    let (status, reply) = hatchery_build::http::post(c2_enroll, "/v1/node-call", None, &body, Duration::from_secs(45))
+        .await
+        .map_err(|e| EnrollClientError::Transport(e.to_string()))?;
+    match status {
+        200 => serde_json::from_slice(&reply).map_err(|e| EnrollClientError::Reply(e.to_string())),
+        403 => Err(EnrollClientError::Refused),
+        other => Err(EnrollClientError::Reply(format!("{other}: {}", String::from_utf8_lossy(&reply).chars().take(200).collect::<String>()))),
+    }
+}
+
 /// Environment the kernel WireGuard bring-up reads, from the enrolled state. Only variables
 /// that are unset are filled. Returns the call-home address when the answer carries one.
 pub fn wireguard_env_from_state(state_dir: &Path, state: &EnrolledState, interface: &str) -> Vec<(String, String)> {

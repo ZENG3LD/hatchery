@@ -25,6 +25,10 @@ tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 m4a-agent = { version = "0.4.8", optional = true }
+mail4agent-core = { version = "0.4.8", optional = true }
+mail4agent-api = { version = "0.4.8", optional = true }
+mail4agent-store-sqlite = { version = "0.4.8", optional = true }
+rusqlite = { version = "0.36", features = ["bundled"], optional = true }
 hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.1" }
 
 [features]
@@ -34,7 +38,7 @@ kit = ["harness", "m4a", "memory"]
 # harness + observation (bin hatchery-harness) as a supervised process.
 harness = []
 # m4a: key vault of the node-side messenger (m4a-agent 0.4); master key from env.
-m4a = ["dep:m4a-agent"]
+m4a = ["dep:m4a-agent", "dep:mail4agent-core", "dep:mail4agent-api", "dep:mail4agent-store-sqlite", "dep:rusqlite"]
 # memory4agent-server (crates.io memory4agent 0.3) as an on-demand loopback process.
 memory = []
 

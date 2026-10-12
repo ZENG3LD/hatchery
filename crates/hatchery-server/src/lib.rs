@@ -10,7 +10,13 @@ pub mod m4a;
 #[cfg(feature = "memory")]
 pub mod memory;
 #[cfg(feature = "m4a")]
+pub mod hub;
+#[cfg(feature = "m4a")]
+pub mod messenger;
+#[cfg(feature = "m4a")]
 pub mod provision;
+#[cfg(feature = "m4a")]
+pub mod tasks;
 pub mod subservice;
 pub mod supervisor;
 

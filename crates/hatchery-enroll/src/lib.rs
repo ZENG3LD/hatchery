@@ -23,6 +23,7 @@ use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 
 pub mod isolation;
+pub mod call;
 pub mod policy;
 pub use isolation::{IsolationProfile, KeyStore, KillSwitch, KillSwitchError, TunnelMode};
 pub use policy::{Grants, Policy, PolicyError};

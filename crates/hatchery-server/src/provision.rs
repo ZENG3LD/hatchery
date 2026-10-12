@@ -72,6 +72,19 @@ struct LedgerFile {
     nodes: BTreeMap<String, LedgerEntry>,
 }
 
+/// Read the ledger a [`Provisioner`] wrote (consumers such as the messenger and task manager).
+pub fn read_ledger(data_dir: &Path) -> Result<Vec<LedgerEntry>, ServerError> {
+    let path = data_dir.join("provision").join("ledger.json");
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            let file: LedgerFile = serde_json::from_slice(&bytes).map_err(|e| ServerError::sub("provision", format!("ledger: {e}")))?;
+            Ok(file.nodes.into_values().collect())
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 pub struct Provisioner {
     ids: IdentityStore,
     ledger_path: PathBuf,

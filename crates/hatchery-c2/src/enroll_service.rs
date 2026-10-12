@@ -97,6 +97,8 @@ pub struct EnrollConfig {
     pub policy_path: Option<std::path::PathBuf>,
     /// Build host to forward admitted `POST /v1/build` requests to, and the bearer it expects.
     pub build_host: Option<(SocketAddr, String)>,
+    /// hatchery-server control API (mail, tasks) to forward admitted node calls to, and its bearer.
+    pub server_upstream: Option<(SocketAddr, String)>,
 }
 
 impl EnrollConfig {
@@ -111,6 +113,7 @@ impl EnrollConfig {
             rate_limit_per_minute: 30,
             policy_path: None,
             build_host: None,
+            server_upstream: None,
         }
     }
 }
@@ -137,6 +140,7 @@ pub struct EnrollService {
     rate: Mutex<HashMap<IpAddr, (Instant, u32)>>,
     rate_limit: u32,
     build_host: Option<(SocketAddr, String)>,
+    server_upstream: Option<(SocketAddr, String)>,
     build_nonces: Mutex<HashMap<(String, String), u64>>,
     pub listen: SocketAddr,
 }
@@ -192,6 +196,7 @@ impl EnrollService {
             rate: Mutex::new(HashMap::new()),
             rate_limit: config.rate_limit_per_minute.max(1),
             build_host: config.build_host.clone(),
+            server_upstream: config.server_upstream.clone(),
             build_nonces: Mutex::new(HashMap::new()),
             listen: config.listen,
         });
@@ -317,6 +322,62 @@ impl EnrollService {
             Err(error) => {
                 tracing::warn!(node_id = %request.node_id, cause = %error, "build host unreachable");
                 HttpReply::error(502, "build service unavailable")
+            }
+        }
+    }
+
+    /// `POST /v1/node-call`: a node-signed mail/task operation. Same gate as builds (shape, clock,
+    /// replay, signature, status policy for the operation's capability), then forwarded to the
+    /// server's control API with a bearer only C2 holds. The server re-checks its own ledger.
+    pub async fn handle_node_call(&self, body: &[u8], peer: IpAddr) -> HttpReply {
+        use hatchery_enroll::call::{capability_for, ForwardedCall, SignedCall, MAX_SKEW_MS};
+        if !self.allow(peer) {
+            return HttpReply::error(429, "rate limited");
+        }
+        let Ok(call) = serde_json::from_slice::<SignedCall>(body) else {
+            return HttpReply::error(400, "malformed request");
+        };
+        if !call.well_formed() {
+            return HttpReply::error(400, "malformed request");
+        }
+        let now = unix_ms();
+        if now.abs_diff(call.ts_ms) > MAX_SKEW_MS {
+            return HttpReply::error(403, "refused");
+        }
+        let message = SignedCall::signing_bytes(&call.node_id, &call.op, &call.payload, call.ts_ms, &call.nonce);
+        if self.registry.lock().expect("registry lock").verify_node_message(&call.node_id, &message, &call.signature).is_err() {
+            tracing::warn!(node_id = %call.node_id, %peer, "node call refused: signature");
+            return HttpReply::error(403, "refused");
+        }
+        {
+            let mut seen = self.build_nonces.lock().expect("nonce lock");
+            seen.retain(|_, ts| now.abs_diff(*ts) <= MAX_SKEW_MS * 2);
+            if seen.insert((call.node_id.clone(), call.nonce.clone()), call.ts_ms).is_some() {
+                tracing::warn!(node_id = %call.node_id, "node call refused: replay");
+                return HttpReply::error(403, "refused");
+            }
+        }
+        let capability = capability_for(&call.op).unwrap_or("none");
+        if self.allows(&call.node_id, capability) != Some(true) {
+            tracing::warn!(node_id = %call.node_id, op = %call.op, "node call refused: status does not hold the capability");
+            return HttpReply::error(403, "refused");
+        }
+        let Some((addr, bearer)) = &self.server_upstream else {
+            return HttpReply::error(503, "service unavailable");
+        };
+        let Ok(payload) = serde_json::from_str::<serde_json::Value>(&call.payload) else {
+            return HttpReply::error(400, "malformed payload");
+        };
+        let forward = ForwardedCall { node_id: call.node_id.clone(), op: call.op.clone(), payload };
+        let bytes = serde_json::to_vec(&forward).unwrap_or_default();
+        match hatchery_build::http::post(*addr, "/v1/node-call", Some(bearer), &bytes, Duration::from_secs(30)).await {
+            Ok((status, body)) => {
+                tracing::info!(node_id = %call.node_id, op = %call.op, status, "node call forwarded");
+                HttpReply { status, body }
+            }
+            Err(error) => {
+                tracing::warn!(node_id = %call.node_id, cause = %error, "server unreachable");
+                HttpReply::error(502, "service unavailable")
             }
         }
     }
@@ -486,6 +547,11 @@ async fn serve_one(mut stream: TcpStream, peer: IpAddr, service: &EnrollService)
             timeout(BUILD_DEADLINE + IO_DEADLINE, service.handle_build(&body, peer))
                 .await
                 .unwrap_or_else(|_| HttpReply::error(504, "build timed out"))
+        }
+        Ok(Ok((method, path, body))) if method == "POST" && path == "/v1/node-call" => {
+            timeout(Duration::from_secs(45), service.handle_node_call(&body, peer))
+                .await
+                .unwrap_or_else(|_| HttpReply::error(504, "timed out"))
         }
         Ok(Ok(_)) => HttpReply::error(404, "not found"),
         _ => HttpReply::error(400, "bad request"),

@@ -105,6 +105,37 @@ async fn main() {
             }
             return;
         }
+        // call --c2-enroll ADDR --state-dir DIR --op mail.send --payload JSON
+        Some("call") => {
+            let (mut addr, mut dir, mut op, mut payload) = (None, hatchery_node::enroll_client::default_enroll_dir(), None, "{}".to_owned());
+            let mut it = raw_args[1..].iter();
+            while let Some(a) = it.next() {
+                let mut v = |n: &str| it.next().cloned().unwrap_or_else(|| fail(&format!("{n} requires a value")));
+                match a.as_str() {
+                    "--c2-enroll" => addr = Some(v("--c2-enroll").parse::<std::net::SocketAddr>().unwrap_or_else(|e| fail(&format!("--c2-enroll is invalid: {e}")))),
+                    "--state-dir" => dir = Some(v("--state-dir").into()),
+                    "--op" => op = Some(v("--op")),
+                    "--payload" => payload = v("--payload"),
+                    other => fail(&format!("unknown call argument: {other}")),
+                }
+            }
+            let dir: PathBuf = dir.unwrap_or_else(|| fail("no state directory (set --state-dir)"));
+            let (identity, state) = hatchery_node::enroll_client::load_enrolled_signing_only(&dir).unwrap_or_else(|e| fail(&e.to_string()));
+            let payload: serde_json::Value = serde_json::from_str(&payload).unwrap_or_else(|e| fail(&format!("--payload is not JSON: {e}")));
+            match hatchery_node::enroll_client::node_call(
+                addr.unwrap_or_else(|| fail("--c2-enroll is required")),
+                &identity,
+                &state.node_id,
+                &op.unwrap_or_else(|| fail("--op is required")),
+                &payload,
+            )
+            .await
+            {
+                Ok(reply) => println!("{reply}"),
+                Err(error) => fail(&error.to_string()),
+            }
+            return;
+        }
         // build --c2-enroll ADDR --state-dir DIR --recipe NAME --trusted-signer KEY --out FILE [--source-ref REF]
         Some("build") => {
             run_build(&raw_args[1..]).await;

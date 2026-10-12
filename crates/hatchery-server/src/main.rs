@@ -24,7 +24,21 @@ async fn main() {
         .await
         .unwrap_or_else(|error| fail(&format!("control listener: {error}")));
     tracing::info!("hatchery-server control listening (loopback)");
-    let serving = tokio::spawn(control::serve(listener, supervisor.clone(), config.control_token.clone()));
+    #[cfg(feature = "m4a")]
+    let hub = if config.m4a_enabled && config.provision_c2_addr.is_some() {
+        match hatchery_server::hub::Hub::open(&config.data_dir) {
+            Ok(hub) => Some(std::sync::Arc::new(hub)),
+            Err(error) => {
+                tracing::error!(%error, "messenger and tasks not started");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    #[cfg(not(feature = "m4a"))]
+    let hub = None;
+    let serving = tokio::spawn(control::serve_with_hub(listener, supervisor.clone(), config.control_token.clone(), hub));
     shutdown_signal().await;
     tracing::info!("shutting down");
     supervisor.stop_all();

@@ -56,6 +56,8 @@ async fn main() {
             "--enroll-registry" => enroll.registry = Some(required_value("--enroll-registry", args.next()).into()),
             "--enroll-open" => enroll.open = true,
             // Status -> capability policy (JSON). Also HATCHERY_POLICY_FILE.
+            "--server-upstream" => enroll.server_upstream = Some(required_value("--server-upstream", args.next()).parse()
+                .unwrap_or_else(|error| fail(&format!("--server-upstream is invalid: {error}")))),
             "--build-host" => enroll.build_host = Some(required_value("--build-host", args.next()).parse()
                 .unwrap_or_else(|error| fail(&format!("--build-host is invalid: {error}")))),
             "--policy" => enroll.policy = Some(required_value("--policy", args.next()).into()),
@@ -82,7 +84,7 @@ async fn main() {
             }
             "--help" | "-h" => {
                 print_help();
-                println!("enrollment: --enroll-listen ADDR --enroll-registry FILE --enroll-pool C2_TUNNEL_IP/PREFIX [--enroll-wg-interface IF] [--enroll-wg-endpoint HOST:PORT] [--enroll-wg-public-key KEY] [--enroll-rate PER_MINUTE] [--enroll-open] [--policy FILE] [--build-host ADDR (bearer in HATCHERY_BUILD_TOKEN)]  (default: one-time operator code required; --enroll-open disables the code)");
+                println!("enrollment: --enroll-listen ADDR --enroll-registry FILE --enroll-pool C2_TUNNEL_IP/PREFIX [--enroll-wg-interface IF] [--enroll-wg-endpoint HOST:PORT] [--enroll-wg-public-key KEY] [--enroll-rate PER_MINUTE] [--enroll-open] [--policy FILE] [--build-host ADDR (bearer in HATCHERY_BUILD_TOKEN)] [--server-upstream ADDR (bearer in HATCHERY_SERVER_CONTROL_TOKEN)]  (default: one-time operator code required; --enroll-open disables the code)");
                 println!("API token: {C2_TOKEN_ENV}; node tokens: GATE4AGENT_NODE_TOKEN_<NORMALIZED_NODE_ID>");
                 return;
             }
@@ -232,6 +234,7 @@ struct EnrollArgs {
     rate: Option<u32>,
     policy: Option<std::path::PathBuf>,
     build_host: Option<std::net::SocketAddr>,
+    server_upstream: Option<std::net::SocketAddr>,
 }
 
 impl EnrollArgs {
@@ -268,6 +271,11 @@ impl EnrollArgs {
             // The bearer the build host expects; only C2 holds it (never a node).
             let token = std::env::var("HATCHERY_BUILD_TOKEN").unwrap_or_else(|_| fail("HATCHERY_BUILD_TOKEN is required with --build-host"));
             config.build_host = Some((addr, token));
+        }
+        if let Some(addr) = self.server_upstream {
+            // hatchery-server control bearer; only C2 holds it (never a node).
+            let token = std::env::var("HATCHERY_SERVER_CONTROL_TOKEN").unwrap_or_else(|_| fail("HATCHERY_SERVER_CONTROL_TOKEN is required with --server-upstream"));
+            config.server_upstream = Some((addr, token));
         }
         Some(config)
     }
