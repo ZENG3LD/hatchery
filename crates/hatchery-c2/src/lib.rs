@@ -15,3 +15,7 @@ pub use hatchery_c2_protocol as protocol;
 /// enrollment requests, a neutral first status, operator-driven status changes
 /// and key/signature node authentication. Not yet wired into the relay runtime.
 pub mod enrollment;
+
+/// Runtime side of enrollment (listener, operator endpoints, peer provisioning, signed call-home).
+#[cfg(any(windows, unix))]
+pub mod enroll_service;

@@ -27,6 +27,7 @@ async fn main() {
         .unwrap_or_else(|error| fail(&error.to_string()));
     let mut node_listen: Option<std::net::SocketAddr> = None;
     let mut control_tunnel: Option<std::net::SocketAddr> = None;
+    let mut enroll = EnrollArgs::default();
     let mut node_args = Vec::new();
     let mut seen = BTreeSet::new();
     let mut args = std::env::args().skip(1);
@@ -49,6 +50,24 @@ async fn main() {
                 node_listen = Some(required_value("--node-listen", args.next()).parse()
                     .unwrap_or_else(|error| fail(&format!("--node-listen is invalid: {error}"))));
             }
+            // Enrollment (one-time operator code by default).
+            "--enroll-listen" => enroll.listen = Some(required_value("--enroll-listen", args.next()).parse()
+                .unwrap_or_else(|error| fail(&format!("--enroll-listen is invalid: {error}")))),
+            "--enroll-registry" => enroll.registry = Some(required_value("--enroll-registry", args.next()).into()),
+            "--enroll-open" => enroll.open = true,
+            "--enroll-pool" => {
+                let value = required_value("--enroll-pool", args.next());
+                let (ip, prefix) = value.split_once('/').unwrap_or_else(|| fail("--enroll-pool requires C2_TUNNEL_IP/PREFIX"));
+                enroll.pool = Some(hatchery_c2::enrollment::TunnelPool {
+                    c2_ip: ip.parse().unwrap_or_else(|error| fail(&format!("--enroll-pool address is invalid: {error}"))),
+                    prefix: prefix.parse().unwrap_or_else(|error| fail(&format!("--enroll-pool prefix is invalid: {error}"))),
+                });
+            }
+            "--enroll-wg-interface" => enroll.wg_interface = Some(required_value("--enroll-wg-interface", args.next())),
+            "--enroll-wg-endpoint" => enroll.wg_endpoint = Some(required_value("--enroll-wg-endpoint", args.next())),
+            "--enroll-wg-public-key" => enroll.wg_public_key = Some(required_value("--enroll-wg-public-key", args.next())),
+            "--enroll-rate" => enroll.rate = Some(required_value("--enroll-rate", args.next()).parse()
+                .unwrap_or_else(|error| fail(&format!("--enroll-rate is invalid: {error}")))),
             "--node" => {
                 if node_args.len() == MAX_C2_NODES { fail("at most 64 --node values are allowed"); }
                 let value = required_value("--node", args.next());
@@ -59,6 +78,7 @@ async fn main() {
             }
             "--help" | "-h" => {
                 print_help();
+                println!("enrollment: --enroll-listen ADDR --enroll-registry FILE --enroll-pool C2_TUNNEL_IP/PREFIX [--enroll-wg-interface IF] [--enroll-wg-endpoint HOST:PORT] [--enroll-wg-public-key KEY] [--enroll-rate PER_MINUTE] [--enroll-open]  (default: one-time operator code required; --enroll-open disables the code)");
                 println!("API token: {C2_TOKEN_ENV}; node tokens: GATE4AGENT_NODE_TOKEN_<NORMALIZED_NODE_ID>");
                 return;
             }
@@ -87,6 +107,10 @@ async fn main() {
         .and_then(|config| match control_tunnel {
             Some(listen) => config.with_control_tunnel_listen(listen),
             None => Ok(config),
+        })
+        .map(|config| match enroll.build(node_listen) {
+            Some(enrollment) => config.with_enrollment(enrollment),
+            None => config,
         })
         .and_then(|config| config.validate_call_home().map(|()| config))
         .unwrap_or_else(|error| fail(&error.to_string()));
@@ -189,4 +213,50 @@ fn print_help() {
 fn main() {
     eprintln!("hatchery-c2: this operating system has no supported local transport");
     std::process::exit(2);
+}
+
+/// Enrollment options collected from the command line.
+#[derive(Default)]
+struct EnrollArgs {
+    listen: Option<std::net::SocketAddr>,
+    registry: Option<std::path::PathBuf>,
+    open: bool,
+    pool: Option<hatchery_c2::enrollment::TunnelPool>,
+    wg_interface: Option<String>,
+    wg_endpoint: Option<String>,
+    wg_public_key: Option<String>,
+    rate: Option<u32>,
+}
+
+impl EnrollArgs {
+    fn build(&self, node_listen: Option<std::net::SocketAddr>) -> Option<hatchery_c2::enroll_service::EnrollConfig> {
+        use hatchery_c2::enroll_service::{EnrollConfig, PublicInfo, WgCli};
+        let listen = self.listen?;
+        let mut config = EnrollConfig::new(listen);
+        config.registry_path = self.registry.clone();
+        config.require_code = !self.open;
+        config.pool = self.pool;
+        if let Some(rate) = self.rate {
+            config.rate_limit_per_minute = rate;
+        }
+        let mut public = PublicInfo {
+            c2_tunnel_ip: self.pool.map(|pool| pool.c2_ip.to_string()),
+            c2_wg_endpoint: self.wg_endpoint.clone(),
+            c2_wg_public_key: self.wg_public_key.clone(),
+            c2_call_home: node_listen.map(|addr| addr.to_string()),
+        };
+        if let Some(interface) = &self.wg_interface {
+            if public.c2_wg_public_key.is_none() {
+                public.c2_wg_public_key = std::process::Command::new("wg")
+                    .args(["show", interface, "public-key"])
+                    .output()
+                    .ok()
+                    .filter(|output| output.status.success())
+                    .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_owned());
+            }
+            config.provisioner = std::sync::Arc::new(WgCli { interface: interface.clone() });
+        }
+        config.public = public;
+        Some(config)
+    }
 }

@@ -40,6 +40,7 @@ const WORKSPACE_ENTRY_CREATE_RELAY_DEADLINE: Duration =
     WORKSPACE_ENTRY_CREATE_NODE_SEMANTIC_DEADLINE.saturating_add(NODE_REQUEST_IO_HEADROOM);
 
 const HEADER_LIMIT_BYTES: usize = 16 * 1024;
+const OPERATOR_BODY_LIMIT_BYTES: usize = 16 * 1024;
 const MAX_HTTP_CONNECTIONS: usize = 16;
 const RESPONSE_BODY_LIMIT_BYTES: usize = 8 * 1024 * 1024;
 
@@ -163,14 +164,23 @@ pub struct C2Config {
     /// `None` unless at least one node is configured `accept`.
     pub node_listen: Option<SocketAddr>,
     pub timings: C2Timings,
+    /// Node enrollment (one-time code, neutral status, runtime node add). `None` keeps the
+    /// fixed `--node` set and token authentication only.
+    pub enrollment: Option<crate::enroll_service::EnrollConfig>,
 }
 
 impl C2Config {
+    /// Turn on enrollment. Requires a node-listen address (checked by `validate_call_home`).
+    pub fn with_enrollment(mut self, enrollment: crate::enroll_service::EnrollConfig) -> Self {
+        self.enrollment = Some(enrollment);
+        self
+    }
+
     pub fn new(api_listen: SocketAddr, api_token: impl Into<String>, nodes: Vec<C2NodeConfig>) -> Result<Self, C2ConfigError> {
         let api_token = api_token.into();
         if !api_listen.ip().is_loopback() { return Err(C2ConfigError::NonLoopback(api_listen)); }
         validate_token(&api_token)?;
-        if nodes.is_empty() || nodes.len() > MAX_C2_NODES { return Err(C2ConfigError::NodeCount(nodes.len())); }
+        if nodes.len() > MAX_C2_NODES { return Err(C2ConfigError::NodeCount(nodes.len())); }
         let mut ids = BTreeSet::new();
         let mut endpoints = BTreeSet::new();
         if nodes.iter().any(|node| !ids.insert(node.node_id.clone())) { return Err(C2ConfigError::DuplicateNode); }
@@ -198,6 +208,7 @@ impl C2Config {
             nodes,
             node_listen: None,
             timings: C2Timings::default(),
+            enrollment: None,
         })
     }
 
@@ -231,9 +242,13 @@ impl C2Config {
     /// startup, not at connect time, because the failure is total and
     /// permanent -- there is nothing to retry.
     pub fn validate_call_home(&self) -> Result<(), C2ConfigError> {
+        if self.nodes.is_empty() && self.enrollment.is_none() {
+            return Err(C2ConfigError::NodeCount(0));
+        }
         let waiting = self.nodes.iter().find(|node| node.route == C2NodeRoute::CallHome);
         match (waiting, self.node_listen) {
             (Some(node), None) => Err(C2ConfigError::CallHomeWithoutListener(node.node_id.clone())),
+            (None, None) if self.enrollment.is_some() => Err(C2ConfigError::EnrollmentWithoutListener),
             _ => Ok(()),
         }
     }
@@ -360,6 +375,8 @@ pub enum C2ConfigError {
     #[cfg_attr(windows, error("C2 control endpoint must be a bounded local Windows named pipe"))]
     #[cfg_attr(unix, error("C2 control endpoint must be a bounded local endpoint"))]
     InvalidControlEndpoint,
+    #[error("enrollment needs a --node-listen address for the nodes to call home on")]
+    EnrollmentWithoutListener,
     #[error("C2 control endpoint must not equal a configured node endpoint")]
     ControlEndpointConflict,
     #[error("C2 control tunnel listen must be a concrete non-unspecified address with a nonzero port, not shared with another listener: {0}")]
@@ -528,14 +545,60 @@ impl Drop for C2Running {
     }
 }
 
+/// A socket handed from the call-home listener to a node's relay worker, with the
+/// per-connection session token when the node authenticated by signature.
+type CallHomeSocket = (TcpStream, Option<String>);
+type CallHomeRoutes = Arc<Mutex<BTreeMap<NodeId, mpsc::Sender<CallHomeSocket>>>>;
+
+struct Spawner {
+    timings: C2Timings,
+    relay_senders: RelayRegistry,
+    call_home_routes: CallHomeRoutes,
+    ingress: mpsc::Sender<Attempt>,
+    status: watch::Receiver<Arc<StatusResponse>>,
+    hub: OperatorHub,
+}
+
+impl Spawner {
+    /// Create the relay worker for a runtime-enrolled node, once.
+    fn spawn_enrolled(&self, node_id: &NodeId, shutdown: &watch::Receiver<bool>, tasks: &mut JoinSet<io::Result<()>>) {
+        if self.relay_senders.snapshot().contains_key(node_id) {
+            return;
+        }
+        // The placeholder token is never used on the wire: signed call-home hands each
+        // connection its own session token.
+        let placeholder = "0".repeat(64);
+        let Ok(node) = C2NodeConfig::new(node_id.clone(), "accept", placeholder) else { return };
+        let (commands_tx, commands_rx) = mpsc::channel(8);
+        let (releases_tx, releases_rx) = mpsc::channel(1);
+        let (force_tx, force_rx) = watch::channel(0_u64);
+        let (call_home_tx, call_home_rx) = mpsc::channel(1);
+        self.call_home_routes.lock().expect("routes lock").insert(node_id.clone(), call_home_tx);
+        self.relay_senders.insert(node_id.clone(), RelayEndpoint { commands: commands_tx, releases: releases_tx, force_disconnect: force_tx });
+        tasks.spawn(node_relay_worker(
+            node,
+            self.timings,
+            commands_rx,
+            releases_rx,
+            force_rx,
+            Some(call_home_rx),
+            self.ingress.clone(),
+            self.status.clone(),
+            self.hub.clone(),
+            shutdown.clone(),
+        ));
+        tracing::info!(%node_id, "relay worker created for enrolled node");
+    }
+}
+
 async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch::Receiver<bool>) -> Result<(), C2Error> {
     let now = unix_ms();
     let nodes = config.nodes.iter().map(|node| {
         (node.node_id.clone(), initial_observed_node(node))
     }).collect();
-    let initial = Arc::new(StatusResponse { api_version: C2_API_VERSION, ready: false, observed_at_unix_ms: now, nodes });
+    let initial = Arc::new(StatusResponse { api_version: C2_API_VERSION, ready: config.nodes.is_empty(), observed_at_unix_ms: now, nodes });
     let (status_tx, status_rx) = watch::channel(initial);
-    let (ingress_tx, ingress_rx) = mpsc::channel(config.nodes.len().saturating_mul(2).max(2));
+    let (ingress_tx, ingress_rx) = mpsc::channel(config.nodes.len().saturating_mul(2).max(16));
     let mut tasks = JoinSet::new();
     let hub = OperatorHub::new();
     let mut relay_senders = BTreeMap::new();
@@ -545,7 +608,7 @@ async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch:
     // this relay, so a second socket arriving while the first is still
     // being served means the node reconnected and the relay has not
     // noticed yet -- queueing more of those would only serve them stale.
-    let mut call_home_routes: BTreeMap<NodeId, mpsc::Sender<TcpStream>> = BTreeMap::new();
+    let mut static_routes: BTreeMap<NodeId, mpsc::Sender<CallHomeSocket>> = BTreeMap::new();
     for node in config.nodes.clone() {
         let (commands_tx, commands_rx) = mpsc::channel(8);
         let (releases_tx, releases_rx) = mpsc::channel(1);
@@ -557,23 +620,44 @@ async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch:
         });
         let call_home_rx = if node.route == C2NodeRoute::CallHome {
             let (call_home_tx, call_home_rx) = mpsc::channel(1);
-            call_home_routes.insert(node.node_id.clone(), call_home_tx);
+            static_routes.insert(node.node_id.clone(), call_home_tx);
             Some(call_home_rx)
         } else {
             None
         };
         relay_receivers.push((node, commands_rx, releases_rx, force_rx, call_home_rx));
     }
+    let static_ids: BTreeSet<NodeId> = static_routes.keys().cloned().collect();
+    let call_home_routes: CallHomeRoutes = Arc::new(Mutex::new(static_routes));
     let relay_senders = RelayRegistry::new(relay_senders);
-    if let Some(node_listen) = config.node_listen {
-        tasks.spawn(accept_call_home(node_listen, call_home_routes, shutdown.clone()));
+    // Enrollment: registry, listener, runtime node adds.
+    let mut enroll_events = None;
+    let mut enroll_service = None;
+    if let Some(enrollment) = &config.enrollment {
+        let (service, events) = crate::enroll_service::EnrollService::start(enrollment)
+            .map_err(|error| C2Error::Api(io::Error::other(error.to_string())))?;
+        let enroll_listener = TcpListener::bind(enrollment.listen).await?;
+        tasks.spawn(crate::enroll_service::serve_enroll(enroll_listener, Arc::clone(&service), shutdown.clone()));
+        enroll_events = Some(events);
+        enroll_service = Some(service);
     }
-    tasks.spawn(inventory_owner(config.nodes.len(), config.timings.fresh_for, ingress_rx, status_tx, shutdown.clone()));
+    if let Some(node_listen) = config.node_listen {
+        tasks.spawn(accept_call_home(node_listen, Arc::clone(&call_home_routes), static_ids, enroll_service.clone(), shutdown.clone()));
+    }
+    tasks.spawn(inventory_owner(config.timings.fresh_for, ingress_rx, status_tx, shutdown.clone()));
     for (node, commands, releases, force_disconnect, call_home) in relay_receivers {
         tasks.spawn(node_relay_worker(node, config.timings, commands, releases, force_disconnect, call_home, ingress_tx.clone(), status_rx.clone(), hub.clone(), shutdown.clone()));
     }
+    let spawner = Spawner {
+        timings: config.timings,
+        relay_senders: relay_senders.clone(),
+        call_home_routes: Arc::clone(&call_home_routes),
+        ingress: ingress_tx.clone(),
+        status: status_rx.clone(),
+        hub: hub.clone(),
+    };
     drop(ingress_tx);
-    tasks.spawn(http_server(listener, config.api_token.clone(), config.timings.http_io_deadline, status_rx.clone(), shutdown.clone()));
+    tasks.spawn(http_server(listener, config.api_token.clone(), config.timings.http_io_deadline, status_rx.clone(), enroll_service.clone(), shutdown.clone()));
     let slots = control::ControlSlots::new();
     let tunnel_listen = config.control_tunnel_listen;
     let tunnel_token = config.api_token.clone();
@@ -590,7 +674,7 @@ async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch:
         tasks.spawn(control::run_tcp(
             listen,
             tunnel_token,
-            relay_senders,
+            relay_senders.clone(),
             status_rx,
             hub,
             shutdown.clone(),
@@ -601,6 +685,29 @@ async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch:
         tokio::select! {
             changed = shutdown.changed() => {
                 if changed.is_err() || *shutdown.borrow() { break; }
+            }
+            event = async {
+                match enroll_events.as_mut() {
+                    Some(events) => events.recv().await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                match event {
+                    Some(crate::enroll_service::EnrollEvent::Enrolled(id)) => {
+                        if let Ok(node_id) = NodeId::new(id) { spawner.spawn_enrolled(&node_id, &shutdown, &mut tasks); }
+                    }
+                    Some(crate::enroll_service::EnrollEvent::StatusChanged(id, status)) => {
+                        use crate::enrollment::NodeStatus;
+                        if matches!(status, NodeStatus::Suspended | NodeStatus::Revoked) {
+                            if let Ok(node_id) = NodeId::new(id) {
+                                if let Some(endpoint) = relay_senders.snapshot().get(&node_id) {
+                                    endpoint.force_disconnect.send_modify(|generation| *generation = generation.wrapping_add(1));
+                                }
+                            }
+                        }
+                    }
+                    None => enroll_events = None,
+                }
             }
             result = tasks.join_next() => {
                 match result {
@@ -615,6 +722,15 @@ async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch:
     }
     tasks.shutdown().await;
     Ok(())
+}
+
+fn initial_enrolled_node() -> ObservedNode {
+    ObservedNode {
+        endpoint: "call-home".to_owned(), transport_label: "call-home".to_owned(),
+        transport: NodeTransportState::Offline, freshness: NodeFreshness::Unavailable,
+        cursor: None, inventory: None, last_attempt_unix_ms: None, last_success_unix_ms: None,
+        consecutive_failures: 0, last_error: None, gaps: Vec::new(), gaps_truncated: 0,
+    }
 }
 
 fn initial_observed_node(node: &C2NodeConfig) -> ObservedNode {
@@ -689,11 +805,13 @@ struct Attempt { node_id: NodeId, at_unix_ms: u64, result: AttemptResult }
 /// the failure that is impossible to diagnose from the node's end.
 async fn accept_call_home(
     listen: SocketAddr,
-    routes: BTreeMap<NodeId, mpsc::Sender<TcpStream>>,
+    routes: CallHomeRoutes,
+    static_ids: BTreeSet<NodeId>,
+    enroll: Option<Arc<crate::enroll_service::EnrollService>>,
     mut shutdown: watch::Receiver<bool>,
 ) -> io::Result<()> {
     let listener = TcpListener::bind(listen).await?;
-    tracing::info!(%listen, waiting_nodes = routes.len(), "call-home listener bound");
+    tracing::info!(%listen, waiting_nodes = routes.lock().expect("routes lock").len(), "call-home listener bound");
     loop {
         if *shutdown.borrow() {
             return Ok(());
@@ -705,7 +823,9 @@ async fn accept_call_home(
                 continue;
             }
         };
-        let routes = routes.clone();
+        let routes = Arc::clone(&routes);
+        let static_ids = static_ids.clone();
+        let enroll = enroll.clone();
         // Off the accept loop: the preface has its own deadline, and one
         // peer that connects and then says nothing must not stop every
         // other node from being accepted meanwhile.
@@ -719,7 +839,25 @@ async fn accept_call_home(
                     return;
                 }
             };
-            let Some(sender) = routes.get(&node_id) else {
+            // Token nodes (configured with --node) keep the original path. Enrolled nodes
+            // prove their identity by signing a challenge; the exchange yields a
+            // per-connection session token for the unchanged wire handshake.
+            let mut session_token = None;
+            if !static_ids.contains(&node_id) {
+                let Some(enroll) = enroll.as_ref() else {
+                    tracing::warn!(%peer, %node_id, "call-home connection named a node this relay does not wait for");
+                    return;
+                };
+                match enroll.signed_call_home(&mut stream, node_id.as_str()).await {
+                    Ok(token) => session_token = Some(token),
+                    Err(cause) => {
+                        tracing::warn!(%peer, %node_id, %cause, "signed call-home refused");
+                        return;
+                    }
+                }
+            }
+            let sender = routes.lock().expect("routes lock").get(&node_id).cloned();
+            let Some(sender) = sender else {
                 tracing::warn!(
                     %peer,
                     %node_id,
@@ -727,7 +865,7 @@ async fn accept_call_home(
                 );
                 return;
             };
-            match sender.try_send(stream) {
+            match sender.try_send((stream, session_token)) {
                 Ok(()) => tracing::info!(%peer, %node_id, "node called home"),
                 Err(mpsc::error::TrySendError::Full(_)) => tracing::warn!(
                     %peer,
@@ -756,9 +894,9 @@ async fn accept_call_home(
 /// merely not running. The handshake that FOLLOWS is deadlined normally --
 /// a peer that connects and then stalls is a real failure.
 async fn await_call_home(
-    receiver: Option<&mut mpsc::Receiver<TcpStream>>,
+    receiver: Option<&mut mpsc::Receiver<CallHomeSocket>>,
     shutdown: &mut watch::Receiver<bool>,
-) -> Option<TcpStream> {
+) -> Option<CallHomeSocket> {
     let receiver = receiver?;
     loop {
         if *shutdown.borrow() {
@@ -779,7 +917,7 @@ async fn node_relay_worker(
     mut commands: mpsc::Receiver<RelayCommand>,
     mut releases: mpsc::Receiver<oneshot::Sender<()>>,
     mut force_disconnect: watch::Receiver<u64>,
-    mut call_home: Option<mpsc::Receiver<TcpStream>>,
+    mut call_home: Option<mpsc::Receiver<CallHomeSocket>>,
     ingress: mpsc::Sender<Attempt>,
     status: watch::Receiver<Arc<StatusResponse>>,
     hub: OperatorHub,
@@ -795,13 +933,21 @@ async fn node_relay_worker(
         // handshake over it is deadlined exactly like a dialled one.
         let adopted = if node.route == C2NodeRoute::CallHome {
             match await_call_home(call_home.as_mut(), &mut shutdown).await {
-                Some(stream) => Some(stream),
+                Some((stream, token)) => Some((stream, token)),
                 None => return Ok(()),
             }
         } else {
             None
         };
-        let connected = timeout(timings.attempt_deadline, connect_operator(&node, adopted)).await;
+        let (adopted, session_token) = match adopted {
+            Some((stream, token)) => (Some(stream), token),
+            None => (None, None),
+        };
+        let attempt_node = match session_token {
+            Some(token) => C2NodeConfig { token, ..node.clone() },
+            None => node.clone(),
+        };
+        let connected = timeout(timings.attempt_deadline, connect_operator(&attempt_node, adopted)).await;
         let mut client = match connected {
             Ok(Ok(client)) => client,
             Ok(Err(error)) => {
@@ -2282,7 +2428,7 @@ fn sanitize_node_error(error: &NodeClientError) -> (SanitizedError, bool) {
 }
 
 async fn inventory_owner(
-    configured: usize, fresh_for: Duration, mut ingress: mpsc::Receiver<Attempt>,
+    fresh_for: Duration, mut ingress: mpsc::Receiver<Attempt>,
     status: watch::Sender<Arc<StatusResponse>>, mut shutdown: watch::Receiver<bool>,
 ) -> io::Result<()> {
     let mut current = (**status.borrow()).clone();
@@ -2292,7 +2438,7 @@ async fn inventory_owner(
             attempt = ingress.recv() => {
                 let Some(attempt) = attempt else { return Ok(()); };
                 attempted.insert(attempt.node_id.clone());
-                let node = current.nodes.get_mut(&attempt.node_id).expect("configured poller node exists");
+                let node = current.nodes.entry(attempt.node_id.clone()).or_insert_with(initial_enrolled_node);
                 node.last_attempt_unix_ms = Some(attempt.at_unix_ms);
                 match attempt.result {
                     AttemptResult::Connected {
@@ -2375,7 +2521,7 @@ async fn inventory_owner(
                         node.last_error = Some(error);
                     }
                 }
-                current.ready = attempted.len() == configured;
+                current.ready = current.nodes.keys().all(|id| attempted.contains(id));
                 refresh_freshness(&mut current, fresh_for);
                 current.observed_at_unix_ms = unix_ms();
                 status.send_replace(Arc::new(current.clone()));
@@ -2454,7 +2600,9 @@ fn refresh_freshness(status: &mut StatusResponse, fresh_for: Duration) {
 
 async fn http_server(
     listener: TcpListener, token: String, io_deadline: Duration,
-    status: watch::Receiver<Arc<StatusResponse>>, mut shutdown: watch::Receiver<bool>,
+    status: watch::Receiver<Arc<StatusResponse>>,
+    enroll: Option<Arc<crate::enroll_service::EnrollService>>,
+    mut shutdown: watch::Receiver<bool>,
 ) -> io::Result<()> {
     let permits = Arc::new(Semaphore::new(MAX_HTTP_CONNECTIONS));
     let mut connections = JoinSet::new();
@@ -2465,7 +2613,8 @@ async fn http_server(
                 let Ok(permit) = Arc::clone(&permits).try_acquire_owned() else { drop(stream); continue; };
                 let token = token.clone();
                 let status = status.clone();
-                connections.spawn(async move { let _permit = permit; let _ = serve_http(stream, &token, io_deadline, &status).await; });
+                let enroll = enroll.clone();
+                connections.spawn(async move { let _permit = permit; let _ = serve_http(stream, &token, io_deadline, &status, enroll.as_deref()).await; });
             }
             changed = shutdown.changed() => if changed.is_err() || *shutdown.borrow() { break; },
         }
@@ -2475,31 +2624,31 @@ async fn http_server(
     Ok(())
 }
 
-async fn serve_http(mut stream: TcpStream, token: &str, deadline: Duration, status: &watch::Receiver<Arc<StatusResponse>>) -> io::Result<()> {
+async fn serve_http(mut stream: TcpStream, token: &str, deadline: Duration, status: &watch::Receiver<Arc<StatusResponse>>, enroll: Option<&crate::enroll_service::EnrollService>) -> io::Result<()> {
     let request = match timeout(deadline, read_request(&mut stream)).await {
         Ok(Ok(request)) => request,
         Ok(Err(ReadError::TooLarge)) => return write_response(&mut stream, deadline, Response::plain(413, "Payload Too Large")).await,
         Ok(Err(ReadError::Io(error))) => return Err(error),
         _ => return Ok(()),
     };
-    let response = route(request, token, status.borrow().as_ref());
+    let response = route(request, token, status.borrow().as_ref(), enroll);
     write_response(&mut stream, deadline, response).await
 }
 
-struct Request { method: String, path: String, authorization: Option<String> }
+struct Request { method: String, path: String, authorization: Option<String>, body: Vec<u8> }
 enum ReadError { Closed, Invalid, TooLarge, Io(io::Error) }
 
 async fn read_request(stream: &mut TcpStream) -> Result<Request, ReadError> {
     let mut bytes = Vec::with_capacity(1024);
     let mut chunk = [0_u8; 1024];
-    loop {
+    let header_end = loop {
         let count = stream.read(&mut chunk).await.map_err(ReadError::Io)?;
         if count == 0 { return Err(ReadError::Closed); }
-        if bytes.len().saturating_add(count) > HEADER_LIMIT_BYTES { return Err(ReadError::TooLarge); }
+        if bytes.len().saturating_add(count) > HEADER_LIMIT_BYTES + OPERATOR_BODY_LIMIT_BYTES { return Err(ReadError::TooLarge); }
         bytes.extend_from_slice(&chunk[..count]);
-        if bytes.windows(4).any(|window| window == b"\r\n\r\n") { break; }
-    }
-    let text = std::str::from_utf8(&bytes).map_err(|_| ReadError::Invalid)?;
+        if let Some(position) = bytes.windows(4).position(|window| window == b"\r\n\r\n") { break position + 4; }
+    };
+    let text = std::str::from_utf8(&bytes[..header_end]).map_err(|_| ReadError::Invalid)?;
     let mut lines = text.split("\r\n");
     let mut first = lines.next().ok_or(ReadError::Invalid)?.split_whitespace();
     let method = first.next().ok_or(ReadError::Invalid)?;
@@ -2507,20 +2656,38 @@ async fn read_request(stream: &mut TcpStream) -> Result<Request, ReadError> {
     let version = first.next().ok_or(ReadError::Invalid)?;
     if first.next().is_some() || !version.starts_with("HTTP/1.") || !path.starts_with('/') { return Err(ReadError::Invalid); }
     let mut authorization = None;
+    let mut content_length = 0_usize;
     for line in lines {
         if line.is_empty() { break; }
         let (name, value) = line.split_once(':').ok_or(ReadError::Invalid)?;
         if name.eq_ignore_ascii_case("authorization") {
             if authorization.is_some() { return Err(ReadError::Invalid); }
             authorization = Some(value.trim().to_owned());
+        } else if name.eq_ignore_ascii_case("content-length") {
+            content_length = value.trim().parse().map_err(|_| ReadError::Invalid)?;
         }
     }
-    Ok(Request { method: method.to_owned(), path: path.to_owned(), authorization })
+    if content_length > OPERATOR_BODY_LIMIT_BYTES { return Err(ReadError::TooLarge); }
+    let mut body = bytes[header_end..].to_vec();
+    while body.len() < content_length {
+        let count = stream.read(&mut chunk).await.map_err(ReadError::Io)?;
+        if count == 0 { return Err(ReadError::Closed); }
+        body.extend_from_slice(&chunk[..count]);
+    }
+    body.truncate(content_length);
+    Ok(Request { method: method.to_owned(), path: path.to_owned(), authorization, body })
 }
 
-fn route(request: Request, token: &str, status: &StatusResponse) -> Response {
-    if request.method != "GET" { return Response::plain(405, "Method Not Allowed").allow_get(); }
+fn route(request: Request, token: &str, status: &StatusResponse, enroll: Option<&crate::enroll_service::EnrollService>) -> Response {
     let path = request.path.split_once('?').map_or(request.path.as_str(), |pair| pair.0);
+    // Operator enrollment endpoints: bearer-authenticated, loopback API only.
+    if path == "/v1/enroll" || path.starts_with("/v1/enroll/") {
+        let Some(service) = enroll else { return Response::plain(404, "Not Found"); };
+        if !authorized(request.authorization.as_deref(), token) { return Response::plain(401, "Unauthorized").authenticate(); }
+        let reply = service.handle_operator(&request.method, path, &request.body);
+        return Response::raw_json(reply.status, reply.body);
+    }
+    if request.method != "GET" { return Response::plain(405, "Method Not Allowed").allow_get(); }
     match path {
         "/health" => Response::json(200, &HealthResponse { ok: true, service: "gate4agent-c2".to_owned(), api_version: C2_API_VERSION, pid: std::process::id(), version: env!("CARGO_PKG_VERSION").to_owned() }),
         "/ready" => {
@@ -2555,6 +2722,10 @@ impl Response {
         let body = serde_json::to_vec(value).expect("C2 DTO must serialize");
         if body.len() > RESPONSE_BODY_LIMIT_BYTES { return Self::plain(503, "Service Unavailable"); }
         let reason = if status == 200 { "OK" } else { "Service Unavailable" };
+        Self { status, reason, content_type: "application/json", body, headers: Vec::new() }
+    }
+    fn raw_json(status: u16, body: Vec<u8>) -> Self {
+        let reason = match status { 200 => "OK", 400 => "Bad Request", 404 => "Not Found", 409 => "Conflict", 429 => "Too Many Requests", _ => "Service Unavailable" };
         Self { status, reason, content_type: "application/json", body, headers: Vec::new() }
     }
     fn allow_get(mut self) -> Self { self.headers.push(("Allow", "GET")); self }
