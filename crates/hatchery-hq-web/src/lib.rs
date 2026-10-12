@@ -259,6 +259,8 @@ pub fn spawn_mail_watcher(state: Shared) {
 struct TermQuery {
     node: String,
     provider: String,
+    /// Event parser to use when it differs from the provider id (test fixtures).
+    parser: Option<String>,
     #[serde(default = "d_rows")]
     rows: u16,
     #[serde(default = "d_cols")]
@@ -336,6 +338,12 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     let _ = socket.send(Message::text(json!({ "type": "spawned", "node": q.node, "provider": q.provider, "session": session_key }).to_string())).await;
     let mut pending: Option<Value> = None;
     let mut tick = tokio::time::interval(Duration::from_millis(40));
+    let mut settle = tokio::time::interval(Duration::from_millis(250));
+    // The browser reads only this typed event layer; it never parses terminal text itself.
+    let mut events_layer = hatchery_session_events::EventStream::new(q.parser.as_deref().unwrap_or(&q.provider));
+    events_layer.set_size(q.rows, q.cols);
+    let started = std::time::Instant::now();
+    let now_ms = move || started.elapsed().as_millis() as u64;
     loop {
         tokio::select! {
             event = events.recv() => {
@@ -347,8 +355,16 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
                     pending = frames.pop();
                 }
             }
+            _ = settle.tick() => {
+                let evs = events_layer.tick(now_ms());
+                if !evs.is_empty() && socket.send(Message::text(json!({ "type": "events", "events": evs }).to_string())).await.is_err() { break; }
+            }
             _ = tick.tick() => {
                 if let Some(f) = pending.take() {
+                    if let Some(text) = f["contents"].as_str() {
+                        let evs = events_layer.observe_screen(text, now_ms());
+                        if !evs.is_empty() && socket.send(Message::text(json!({ "type": "events", "events": evs }).to_string())).await.is_err() { break; }
+                    }
                     let bytes: Vec<u8> = f["formatted"].as_array().map(|a| a.iter().map(|x| x.as_u64().unwrap_or(0) as u8).collect()).unwrap_or_default();
                     let msg = json!({
                         "type": "frame", "rows": f["size"]["rows"], "cols": f["size"]["columns"],

@@ -15,13 +15,23 @@ function toast(t) { document.querySelectorAll('.toast').forEach((x) => x.remove(
 // ---- avatars (soft blob with two eyes, colour from the name)
 const PALETTE = ['#1677ff', '#ff7a1a', '#ff3d8b', '#8b5cf6', '#14b8a6', '#a855f7', '#22c55e'];
 function colorOf(name) { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; }
-function avatar(name, cls = '', online) {
-  const c = colorOf(name);
-  return `<div class="av ${cls}"><svg viewBox="0 0 64 64" width="100%" height="100%"><path d="M32 4c16 0 28 10 28 26 0 18-10 30-28 30S4 48 4 30C4 14 16 4 32 4z" fill="${c}"/><ellipse cx="23" cy="28" rx="4" ry="6" fill="#0b0b0d" transform="rotate(-12 23 28)"/><ellipse cx="41" cy="28" rx="4" ry="6" fill="#0b0b0d" transform="rotate(-12 41 28)"/></svg>${online ? '<span class="on"></span>' : ''}</div>`;
+function avatarState(name) {
+  const n = S.nodes.find((x) => x.node_id === name);
+  if (n && !n.online) return 'off';
+  const st = S.agentState[name];
+  if (st === 'needs_input') return 'attention';
+  if (st === 'working') { const t = (S.events[name] && [...S.events[name].values()].filter((e) => e.kind === 'thought').pop()); return t && Date.now() - t.at < 5000 ? 'thinking' : 'working'; }
+  return 'idle';
+}
+// Avatar: round blob with two eyes; the state class (idle / working / thinking / attention / off) animates it.
+function avatar(name, cls = '', online, force) {
+  const c = colorOf(name); const st = force || (name === 'Hatchery HQ' ? 'idle' : avatarState(name));
+  const extra = st === 'thinking' ? '<g class="tdots"><circle cx="50" cy="8" r="2.4"/><circle cx="56" cy="3" r="1.8"/></g>' : st === 'attention' ? '<circle class="ring" cx="32" cy="32" r="30" fill="none" stroke="#e0a63a" stroke-width="2.5"/>' : '';
+  return `<div class="av ${cls} st-${st}" data-av="${esc(name)}"><svg viewBox="0 0 64 64" width="100%" height="100%"><path class="body" d="M32 4c16 0 28 10 28 26 0 18-10 30-28 30S4 48 4 30C4 14 16 4 32 4z" fill="${c}"/><g class="eyes"><ellipse class="eye" cx="23" cy="28" rx="4" ry="6" fill="#0b0b0d" transform="rotate(-12 23 28)"/><ellipse class="eye" cx="41" cy="28" rx="4" ry="6" fill="#0b0b0d" transform="rotate(-12 41 28)"/></g>${extra}</svg>${online ? '<span class="on"></span>' : ''}</div>`;
 }
 
 // ---- state
-const S = { mode: 'chat', widgets: {}, seenAnswers: new Set(), lastFrame: 0, promptAt: 0, lastAnsi: '', nodes: [], chat: '*', mail: {}, local: {}, session: null, sessionNode: null, sessionProv: null, target: 'mail', working: {}, panel: false, tab: 'activity', lastStatus: {}, wake: null, library: [] };
+const S = { mode: 'chat', events: {}, agentState: {}, lastFrame: 0, promptAt: 0, lastAnsi: '', nodes: [], chat: '*', mail: {}, local: {}, session: null, sessionNode: null, sessionProv: null, target: 'mail', working: {}, panel: false, tab: 'activity', lastStatus: {}, wake: null, library: [] };
 const chatName = (id) => (id === '*' ? 'Hatchery HQ' : id);
 const addLocal = (chat, item) => { (S.local[chat] ||= []).push({ ts: Date.now(), ...item }); renderChat(); };
 
@@ -62,6 +72,7 @@ function renderChat() {
   const items = [];
   for (const m of S.mail[S.chat] || []) items.push({ ts: m.created_at_ms, kind: 'mail', m });
   for (const l of S.local[S.chat] || []) items.push({ ts: l.ts, kind: 'local', l });
+  if (S.chat !== '*' && S.events[S.chat]) for (const e of S.events[S.chat].values()) if (e.kind === 'answer' || e.kind === 'prompt_needed') items.push({ ts: e.at, kind: 'ev', e });
   if (S.chat === '*') for (const [id, ls] of Object.entries(S.local)) if (id !== '*') for (const l of ls) if (l.sys) items.push({ ts: l.ts, kind: 'local', l });
   items.sort((a, b) => a.ts - b.ts);
   const box = $('#chat'); const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 600;
@@ -73,6 +84,11 @@ function renderChat() {
       const d = document.createElement('div'); d.className = 'msg ' + (mine ? 'me' : 'them');
       d.innerHTML = `${mine ? '' : `<div class="who">${esc(m.from)}${S.chat === '*' ? ' → ' + esc(m.to) : ''}</div>`}${m.subject && m.subject !== '-' ? `<b>${esc(m.subject)}</b><br>` : ''}${esc(m.body)}<div class="ts">${fmtTime(m.created_at_ms)}</div>`;
       box.appendChild(d);
+    } else if (it.kind === 'ev') {
+      const e = it.e; const d = document.createElement('div');
+      if (e.kind === 'answer') { d.className = 'msg them'; d.innerHTML = `<div class="who">${esc(S.sessionProv || e.provider)} · ${esc(S.chat)}</div>${esc(e.text)}<div class="ts">${fmtTime(e.at)} · ${e.confidence}</div>`; }
+      else { d.className = 'card attn'; d.innerHTML = `<b>${esc(e.provider)} needs input</b> · ${esc(e.prompt)}<br>${esc(e.text)}${e.options.length ? '<br><span class="sub">' + e.options.map(esc).join('<br>') + '</span>' : ''}`; }
+      box.appendChild(d);
     } else {
       const l = it.l;
       if (l.answer) { const d = document.createElement('div'); d.className = 'msg them'; d.innerHTML = `<div class="who">${esc(S.sessionProv || 'agent')} · ${esc(S.chat)}</div>${esc(l.text)}<div class="ts">${fmtTime(l.ts)}</div>`; box.appendChild(d); }
@@ -81,8 +97,8 @@ function renderChat() {
       else { const d = document.createElement('div'); d.className = 'msg me'; d.innerHTML = `${l.tag ? `<div class="who" style="color:#bcd6ff">${esc(l.tag)}</div>` : ''}${esc(l.text)}<div class="ts">${fmtTime(l.ts)}</div>`; box.appendChild(d); }
     }
   }
-  if (S.working[S.chat] && S.working[S.chat] > Date.now()) {
-    const w = document.createElement('div'); w.className = 'working'; w.innerHTML = avatar(chatName(S.chat), 'sm') + 'Working on it <span class="dots"><span>.</span><span>.</span><span>.</span></span>'; box.appendChild(w);
+  if ((S.working[S.chat] && S.working[S.chat] > Date.now()) || ['working'].includes(S.agentState[S.chat]) && S.session && S.sessionNode === S.chat) {
+    const w = document.createElement('div'); w.className = 'working'; w.innerHTML = avatar(chatName(S.chat), 'sm') + (S.agentState[S.chat] === 'working' && avatarState(S.chat) === 'thinking' ? 'Thinking' : 'Working on it') + ' <span class="dots"><span>.</span><span>.</span><span>.</span></span>'; box.appendChild(w);
   }
   $('#chat').dataset.n = items.length; if (nearBottom) box.scrollTop = box.scrollHeight;
 }
@@ -189,7 +205,7 @@ function tsend(o) { if (tws && tws.readyState === 1) tws.send(JSON.stringify(o))
 $('#tspawn').onclick = () => {
   const node = S.chat === '*' ? (S.nodes[0] && S.nodes[0].node_id) : S.chat; if (!node) { toast('select a node chat first'); return; }
   if (tws) tws.close();
-  const prov = $('#tprov').value; const q = new URLSearchParams({ node, provider: prov, rows: ROWS, cols: COLS });
+  const opt = $('#tprov').selectedOptions[0]; const prov = opt.dataset.parser ? 'fixture' : opt.value; const q = new URLSearchParams({ node, provider: opt.value, rows: ROWS, cols: COLS }); if (opt.dataset.parser) q.set('parser', opt.dataset.parser);
   term.reset(); if (mini) mini.reset(); S.lastAnsi = ''; $('#tinfo').textContent = 'spawning…';
   tws = new WebSocket(`ws://${location.host}/api/term?${q}`);
   tws.onmessage = (m) => {
@@ -197,60 +213,46 @@ $('#tspawn').onclick = () => {
     if (d.type === 'spawned') { S.session = d.session; S.sessionNode = node; S.sessionProv = prov; S.target = 'agent'; $('#tinfo').textContent = `${prov} on ${node}`; addLocal(node, { sys: true, text: `Agent ${prov} started on ${node}` }); if (S.chat === node) renderChip(); }
     if (d.type === 'error') { $('#tinfo').textContent = d.text; addLocal(node, { sys: true, text: d.text }); }
     if (d.type === 'ack') { $('#tinfo').textContent = `${d.op}: ${d.ok ? 'ok' : 'failed'}`; if (!d.ok) { S.working[node] = 0; addLocal(node, { sys: true, text: 'Refused: ' + (/does not permit/.test(d.detail) ? 'node status does not permit operator requests (policy)' : d.detail.slice(0, 120)) }); } }
+    if (d.type === 'events') onEvents(node, d.events);
     if (d.type === 'frame') {
       const bytes = Uint8Array.from(atob(d.ansi), (c) => c.charCodeAt(0));
       window.lastFrameText = d.text; term.reset(); term.write(bytes); S.lastAnsi = bytes; if (mini) { mini.reset(); mini.write(bytes); }
-      onFrame(node, d.text);
+      S.lastFrame = Date.now();
     }
   };
-  tws.onclose = () => { $('#tinfo').textContent += ' [closed]'; if (S.sessionNode) { addLocal(S.sessionNode, { sys: true, text: `Agent session on ${S.sessionNode} ended` }); } S.session = null; S.target = 'mail'; renderChip(); };
+  tws.onclose = () => { $('#tinfo').textContent += ' [closed]'; if (S.sessionNode) { addLocal(S.sessionNode, { sys: true, text: `Agent session on ${S.sessionNode} ended` }); } S.session = null; if (S.sessionNode) S.agentState[S.sessionNode] = 'idle'; S.target = 'mail'; renderChip(); };
 };
 $('#tstop').onclick = () => tsend({ t: 'stop' });
 term.onData((data) => tsend({ t: 'data', data }));
 
-// ---- PTY projection: heuristic parsing of the screen into chat answers and widgets.
-// No provider streams structured events through the PTY, so every widget is labelled heuristic.
-function parseBlocks(text) {
-  const blocks = []; let cur = null;
-  for (const raw of text.split('\n')) {
-    const l = raw.replace(/\s+$/, '');
-    if (/^(∴|✻|∵)\s*/.test(l)) { cur = { kind: 'thought', text: l.replace(/^\S+\s*/, '').replace(/^Thinking:\s*/, '') }; blocks.push(cur); }
-    else if (/^[●⏺•]\s+[\w.:-]+\(.*\)\s*$/.test(l)) { cur = { kind: 'tool', text: l.replace(/^\S+\s+/, ''), result: '' }; blocks.push(cur); }
-    else if (/^[●⏺•]\s+/.test(l)) { cur = { kind: 'answer', text: l.replace(/^\S+\s+/, '') }; blocks.push(cur); }
-    else if (/^\s*⎿\s*/.test(l)) { const t = l.replace(/^\s*⎿\s*/, ''); const last = [...blocks].reverse().find((b) => b.kind === 'tool'); if (last) last.result = last.result ? last.result + ' ' + t : t; cur = null; }
-    else if (/^(diff --git|@@ )/.test(l) || (cur && cur.kind === 'diff' && /^[ +\-@]/.test(l))) { if (!cur || cur.kind !== 'diff') { cur = { kind: 'diff', text: '' }; blocks.push(cur); } cur.text += (cur.text ? '\n' : '') + l; }
-    else if (!l.trim()) cur = null;
-    else if (cur && cur.kind === 'answer' && /^\s{2}\S/.test(l)) cur.text += ' ' + l.trim();
+// ---- event layer: the browser reads ONLY typed session events from the server (no screen parsing here)
+function refreshAvatars() { renderSidebar(); renderPanelHead(); $('#headav').innerHTML = avatar(chatName(S.chat), 'mid'); renderChat(); }
+function onEvents(node, evs) {
+  const m = (S.events[node] ||= new Map()); let chatChanged = false; let stateChanged = false;
+  for (const e of evs) {
+    const prev = m.get(e.id);
+    m.set(e.id, { ...e, at: prev ? prev.at : Date.now() });
+    if (e.kind === 'state') { if (S.agentState[node] !== e.state) { S.agentState[node] = e.state; stateChanged = true; } if (e.state !== 'working') S.working[node] = 0; }
+    if (e.kind === 'thought' && !prev) { stateChanged = true; setTimeout(refreshAvatars, 5200); }
+    if (e.kind === 'answer' || e.kind === 'prompt_needed') chatChanged = true;
+    if (e.kind === 'answer') S.working[node] = 0;
   }
-  return blocks;
-}
-let commitTimer = null;
-function onFrame(node, text) {
-  S.lastFrame = Date.now(); const ws = (S.widgets[node] ||= []);
-  const blocks = parseBlocks(text);
-  for (const b of blocks) {
-    if (b.kind === 'answer') continue;
-    const ex = ws.find((w) => w.kind === b.kind && (w.text === b.text || (b.kind === 'diff' && b.text.startsWith(w.text))));
-    if (ex && b.kind === 'diff') ex.text = b.text;
-    if (ex) { if (b.result) ex.result = b.result; } else ws.push({ ...b, ts: Date.now() });
-  }
+  window.lastEvents = Object.fromEntries(Object.entries(S.events).map(([k, v]) => [k, [...v.values()]]));
+  if (chatChanged || stateChanged) renderChat();
+  if (stateChanged) refreshAvatars();
   if (S.panel && S.tab === 'activity') renderActivity();
-  clearTimeout(commitTimer);
-  commitTimer = setTimeout(() => {
-    for (const b of blocks) if (b.kind === 'answer' && !S.seenAnswers.has(node + '|' + b.text)) { S.seenAnswers.add(node + '|' + b.text); addLocal(node, { answer: true, text: b.text }); }
-    if (S.working[node] && S.lastFrame > S.promptAt) S.working[node] = 0;
-    renderChat();
-  }, 1300);
 }
+const confTag = (e) => `<span class="tagh" title="source ${esc(e.source)}">${e.confidence === 'structured' ? 'structured' : 'heuristic'} · ${esc(e.source)}</span>`;
 function diffHtml(t) { return t.split('\n').map((l) => `<span class="${l.startsWith('+') ? 'd-add' : l.startsWith('-') ? 'd-del' : l.startsWith('@@') ? 'd-hunk' : ''}">${esc(l)}</span>`).join('\n'); }
 function renderActivity() {
-  const root = $('#p-activity'); const node = S.chat === '*' ? S.sessionNode : S.chat; const ws = (node && S.widgets[node]) || [];
-  let h = `<div class="sub" style="margin-bottom:8px">What the agent does in the PTY${node ? ' on ' + esc(node) : ''} <span class="tagh">heuristic parsing (no structured stream)</span></div>`;
-  h += ws.slice(-14).reverse().map((w) => {
-    if (w.kind === 'thought') return `<div class="wd thought"><div class="k">💭 Thought</div><div class="b">${esc(w.text)}</div></div>`;
-    if (w.kind === 'tool') return `<div class="wd tool"><div class="k">⚙ Action · tool call</div><div class="b">${esc(w.text)}</div>${w.result ? `<div class="r">⎿ ${esc(w.result)}</div>` : ''}</div>`;
-    if (w.kind === 'diff') return `<div class="wd diff"><div class="k">± Git diff</div><pre>${diffHtml(w.text)}</pre></div>`;
-    return '';
+  const root = $('#p-activity'); const node = S.chat === '*' ? S.sessionNode : S.chat; const evs = node && S.events[node] ? [...S.events[node].values()] : [];
+  const st = node ? S.agentState[node] || 'idle' : 'idle';
+  let h = `<div class="sub" style="margin-bottom:8px">Agent activity${node ? ' on ' + esc(node) : ''} · state <b>${esc(st)}</b> <span class="tagh">from the session event layer</span></div>`;
+  h += evs.filter((e) => ['thought', 'action', 'diff', 'prompt_needed'].includes(e.kind)).slice(-14).reverse().map((e) => {
+    if (e.kind === 'thought') return `<div class="wd thought"><div class="k">💭 Thought ${confTag(e)}</div><div class="b">${esc(e.text)}</div></div>`;
+    if (e.kind === 'action') return `<div class="wd tool"><div class="k">⚙ Action · ${esc(e.status)} ${confTag(e)}</div><div class="b">${esc(e.name)}(${esc(e.args)})</div>${e.result ? `<div class="r">⎿ ${esc(e.result)}</div>` : ''}</div>`;
+    if (e.kind === 'diff') return `<div class="wd diff"><div class="k">± Git diff · ${esc(e.files.join(', '))} ${confTag(e)}</div><pre>${diffHtml(e.patch)}</pre></div>`;
+    return `<div class="wd attn"><div class="k">⚠ Needs input · ${esc(e.prompt)} ${confTag(e)}</div><div class="b">${esc(e.text)}</div>${e.options.length ? `<div class="r">${e.options.map(esc).join('<br>')}</div>` : ''}</div>`;
   }).join('') || '<div class="wd"><div class="b sub">No agent activity yet. Start an agent from the Terminal tab, then talk to it in the chat.</div></div>';
   const mail = (S.mail[S.chat] || []).slice(-3);
   h += `<div class="wd"><div class="k">✉ Messenger <span class="tagh">mail with ${esc(chatName(S.chat))}</span></div>` + (mail.map((m) => `<div style="margin:4px 0"><span class="sub">${esc(m.from === OPERATOR ? 'you' : m.from)}:</span> ${esc(m.body)}</div>`).join('') || '<div class="sub">no mail yet</div>') + '</div>';
@@ -320,5 +322,5 @@ es.onmessage = (m) => {
     if (S.panel && S.tab === 'mail') renderMailTab();
   }
 };
-$('#headav').innerHTML = avatar('Hatchery HQ', 'mid'); setInterval(() => { if (S.working[S.chat]) renderChat(); }, 800); setTab('activity');
+$('#headav').innerHTML = avatar('Hatchery HQ', 'mid');  setTab('activity');
 loadNodes().then(() => { openChat('*'); }); setInterval(loadNodes, 4000);

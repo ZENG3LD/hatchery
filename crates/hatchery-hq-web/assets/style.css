@@ -85,3 +85,20 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:5px 6px;b
 body.ptymode #composer{display:none}
 #ptyview #terminal{width:max-content;max-width:100%;overflow:auto}
 #ptyview #terminal{width:800px!important}
+
+.av svg{overflow:visible}.av .eyes,.av .eye{transform-box:fill-box;transform-origin:center}
+.av.st-idle svg{animation:float 6s ease-in-out infinite}.av.st-idle .eye{animation:blink 5.5s infinite}
+.av.st-working svg{animation:pulse 1.3s ease-in-out infinite}.av.st-working .eyes{animation:dart 1.5s ease-in-out infinite}
+.av.st-thinking svg{animation:float 3.5s ease-in-out infinite}.av.st-thinking .eyes{animation:think 3s ease-in-out infinite}.av .tdots circle{fill:#9ec5ff;animation:dotfade 1.6s infinite}.av .tdots circle:nth-child(2){animation-delay:.5s}
+.av.st-attention svg{animation:bounce .9s ease-in-out infinite}.av.st-attention .eye{transform:scale(1.25)}.av .ring{animation:ring 1.4s ease-out infinite;transform-box:fill-box;transform-origin:center}
+.av.st-off .eye{transform:scaleY(.12)}.av.st-off svg{opacity:.55}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-2px)}}
+@keyframes blink{0%,92%,100%{transform:scaleY(1)}95%{transform:scaleY(.1)}}
+@keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+@keyframes dart{0%,100%{transform:translateX(-2px)}50%{transform:translateX(2px)}}
+@keyframes think{0%,100%{transform:translate(2px,-3px)}50%{transform:translate(-2px,-3px)}}
+@keyframes dotfade{0%,100%{opacity:.2}50%{opacity:1}}
+@keyframes bounce{0%,100%{transform:translateY(0)}50%{transform:translateY(-4px)}}
+@keyframes ring{0%{opacity:.9;transform:scale(1)}100%{opacity:0;transform:scale(1.25)}}
+.wd.attn{border-color:#5a4a1f;background:#1b1810}.card.attn{border-color:#5a4a1f;background:#1b1810}
+@media (prefers-reduced-motion:reduce){.av svg,.av .eyes,.av .eye,.av .ring{animation:none!important}}

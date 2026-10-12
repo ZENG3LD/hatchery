@@ -1988,6 +1988,7 @@ dependencies = [
  "hatchery-bidi-client",
  "hatchery-c2-client",
  "hatchery-c2-protocol",
+ "hatchery-session-events",
  "serde",
  "serde_json",
  "sha2",
