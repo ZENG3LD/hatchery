@@ -26,6 +26,7 @@ members = [
     "crates/hatchery-tui",
     "crates/hatchery-bidi-client",
     "crates/hatchery-c2-protocol",
+    "crates/hatchery-enroll",
     "crates/hatchery-c2-client",
     "crates/hatchery-c2",
     "crates/hatchery-node",

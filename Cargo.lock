@@ -1756,13 +1756,12 @@ dependencies = [
 name = "hatchery-c2"
 version = "0.2.1"
 dependencies = [
- "base64 0.22.1",
- "ed25519-dalek",
  "gate4agent-node-protocol",
  "gate4agent-node-wire",
  "gate4agent-types",
  "getrandom 0.2.17",
  "hatchery-c2-protocol",
+ "hatchery-enroll",
  "serde",
  "serde_json",
  "sha2",
@@ -1796,6 +1795,19 @@ dependencies = [
  "gate4agent-types",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "hatchery-enroll"
+version = "0.2.1"
+dependencies = [
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "getrandom 0.2.17",
+ "serde",
+ "sha2",
+ "thiserror 2.0.18",
+ "x25519-dalek",
 ]
 
 [[package]]
