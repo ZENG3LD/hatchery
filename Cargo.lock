@@ -183,6 +183,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d92bec98840b8f03a5ff5413de5293bfcd8bf96467cf5452609f939ec6f5de16"
 
 [[package]]
+name = "async-trait"
+version = "0.1.92"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82f6aeea286b8eb4dd3431a1be1b59d290ace00f5bfd8e2a159bc2a05e2c1667"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1753,6 +1764,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "hatchery-build"
+version = "0.2.1"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "getrandom 0.2.17",
+ "hatchery-enroll",
+ "libc",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "hatchery-c2"
 version = "0.2.1"
 dependencies = [
@@ -1760,6 +1791,7 @@ dependencies = [
  "gate4agent-node-wire",
  "gate4agent-types",
  "getrandom 0.2.17",
+ "hatchery-build",
  "hatchery-c2-protocol",
  "hatchery-enroll",
  "serde",
@@ -1945,6 +1977,7 @@ dependencies = [
 name = "hatchery-node"
 version = "0.2.1"
 dependencies = [
+ "base64 0.22.1",
  "claude-session-restore",
  "codex-session-restore",
  "dig2browser",
@@ -1958,6 +1991,7 @@ dependencies = [
  "gate4agent-testkit",
  "gate4agent-types",
  "grok-session-restore",
+ "hatchery-build",
  "hatchery-c2",
  "hatchery-c2-client",
  "hatchery-enroll",

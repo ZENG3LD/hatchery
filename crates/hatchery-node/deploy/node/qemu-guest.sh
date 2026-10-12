@@ -281,6 +281,8 @@ chmod 0755 "$SHARE/load-wireguard.sh"
 grep -q '^agent:' "$ROOT/etc/passwd" 2>/dev/null || {
   echo 'agent:x:1000:1000:agent:/home/agent:/bin/sh' >> "$ROOT/etc/passwd"
   echo 'agent:x:1000:' >> "$ROOT/etc/group"
+  echo 'node:x:1001:1001:node:/home/node:/bin/sh' >> "$ROOT/etc/passwd"
+  echo 'node:x:1001:' >> "$ROOT/etc/group"
 }
 mkdir -p "$ROOT/modules"
 cp "$MODROOT"/*.ko "$ROOT/modules/"

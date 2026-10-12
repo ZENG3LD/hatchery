@@ -20,7 +20,7 @@ const ENROLLMENT_FILE: &str = "enrollment.json";
 pub enum EnrollClientError {
     #[error("enrollment request failed: {0}")]
     Transport(String),
-    #[error("C2 refused the enrollment (check the one-time code, it is single use and expires)")]
+    #[error("C2 refused the request (for enrollment: the one-time code is single use and expires; for a build: the node status must hold the build capability)")]
     Refused,
     #[error("C2 answered with an unexpected reply: {0}")]
     Reply(String),
