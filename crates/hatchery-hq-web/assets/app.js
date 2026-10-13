@@ -80,17 +80,25 @@ function openChat(id) {
   S.chat = id; S.target = id === '*' ? 'room' : S.session && S.sessionNode === id ? 'agent' : 'mail';
   $('#headname').textContent = chatName(id); $('#headbtn').title = chatName(id); $('#headav').innerHTML = avatar(id, 'sm');
   $('#input').placeholder = `Message ${chatName(id)}`;
-  renderSidebar(); loadThread(); renderPanelHead(); if (S.panel) setTab(S.tab);
+  renderChat(); $('#chat').scrollTop = 1e9; renderSidebar(); loadThread(); renderPanelHead(); if (S.panel) setTab(S.tab);
 }
-async function loadThread() {
-  const id = S.chat; if (!id) return;
+// Timeline cache: in-memory S.mail, mirrored to sessionStorage so a reload or chat switch renders instantly.
+try { Object.assign(S.mail, JSON.parse(sessionStorage.getItem('hq.mail') || '{}')); } catch (_) {}
+let saveT = 0; const saveCache = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { sessionStorage.setItem('hq.mail', JSON.stringify(S.mail)); } catch (_) {} }, 500); };
+const inflight = {};
+async function prefetch() { for (const c of S.chats || []) if (c.target !== S.chat) { await loadThread(c.target); } }
+async function loadThread(want) {
+  const id = want || S.chat; if (!id) return; if (inflight[id]) return inflight[id];
+  return (inflight[id] = loadThread1(id).finally(() => { delete inflight[id]; }));
+}
+async function loadThread1(id) {
   try {
     let msgs;
     if (String(id).startsWith('m4a:')) {
       const d = await post('/api/s/m4a/read', { room: id.slice(4), limit: 100 }); const rows = Array.isArray(d.result) ? d.result : d.result.messages || d.result.rows || [];
       const me = S.m4a.nick; const own = (f) => f === me || String(f).startsWith('@' + me + ':');
-      S.mail[id] = rows.filter((r) => r.body || r.kind === 'undecryptable').map((r) => ({ from: own(r.from) ? OPERATOR : String(r.from || '?').replace(/^@([^:]+):.*$/, '$1'), body: r.kind === 'undecryptable' ? '[cannot decrypt yet]' : r.body, created_at_ms: r.ts, message_id: r.event_id, failed: String(r.state || '').startsWith('failed'), enc: r.kind === 'undecryptable' })).sort((a, b) => a.created_at_ms - b.created_at_ms);
-      if (S.chat === id) renderChat(); renderSidebar(); return;
+      S.mail[id] = rows.filter((r) => r.body || r.kind === 'undecryptable').map((r) => ({ from: own(r.from) ? OPERATOR : String(r.from || '?').replace(/^@([^:]+):.*$/, '$1'), body: r.kind === 'undecryptable' ? '[cannot decrypt yet]' : r.body, created_at_ms: r.ts, message_id: r.event_id, failed: String(r.state || '').startsWith('failed'), enc: r.kind === 'undecryptable' })).filter((m, i, a) => !m.message_id || a.findIndex((x) => x.message_id === m.message_id) === i).sort((a, b) => a.created_at_ms - b.created_at_ms);
+      saveCache(); if (S.chat === id) renderChat(); renderSidebar(); return;
     }
     if (isGroup(id)) { const d = await post('/api/s/mail/inbox'); msgs = d.messages.filter((m) => m.to === id); }
     else { const d = await post('/api/s/mail/thread', { node: id }); msgs = d.messages; }
@@ -454,4 +462,4 @@ setTab('info');
 api('/api/config').then(async (c) => { S.chats = c.chats && c.chats.length ? c.chats : [{ label: 'general', target: 'room:general' }];
   if (c.m4a) { S.m4a = c.m4a; try { const d = await post('/api/s/m4a/rooms', {}); const rows = Array.isArray(d.result) ? d.result : d.result.rooms || [];
     const rooms = rows.map((r) => { const rid = r.room_id || r.id || r.room; const label = r.title || r.name || r.alias || rid; return { label, target: 'm4a:' + rid, kind: (c.m4a.groups || []).includes(label) || r.kind === 'group' || r.kind === 'channel' ? 'group' : 'dm' }; }).filter((r) => r.target !== 'm4a:undefined');
-    S.chats = [...rooms, ...S.chats.filter((x) => !String(x.target).startsWith('room:'))]; } catch (e) { toast('m4a: ' + e.message); } } }).catch(() => { S.chats = [{ label: 'general', target: 'room:general' }]; }).then(loadNodes).then(() => openChat(S.chats[0].target)); setInterval(() => { if (S.chat && !S.panel) loadThread(); }, 10000); setInterval(loadNodes, 4000);
+    S.chats = [...rooms, ...S.chats.filter((x) => !String(x.target).startsWith('room:'))]; } catch (e) { toast('m4a: ' + e.message); } } }).catch(() => { S.chats = [{ label: 'general', target: 'room:general' }]; }).then(loadNodes).then(() => { openChat(S.chats[0].target); setTimeout(prefetch, 1500); setInterval(prefetch, 60000); }); setInterval(() => { if (S.chat && !S.panel) loadThread(); }, 10000); setInterval(loadNodes, 4000);
