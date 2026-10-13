@@ -1,3 +1,4 @@
+const SAVED_TAB = localStorage.getItem('hq.tab');
 'use strict';
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -76,6 +77,7 @@ $('#sidetoggle').onclick = () => document.body.classList.toggle('sideopen');
 
 // ---- chat
 function openChat(id) {
+  try { localStorage.setItem('hq.chat', id); history.replaceState(null, '', '#/chat/' + encodeURIComponent(id)); } catch (_) {}
   setMode('chat');
   S.chat = id; S.target = id === '*' ? 'room' : S.session && S.sessionNode === id ? 'agent' : 'mail';
   $('#headname').textContent = chatName(id); $('#headbtn').title = chatName(id); $('#headav').innerHTML = avatar(id, 'sm');
@@ -342,8 +344,8 @@ async function renderStatus() {
 // ---- right panel: chat info + all status / control
 const TABS = [['info', 'Overview', 'info'], ['terminal', 'Terminal', 'term'], ['browser', 'Browser', 'globe'], ['tasks', 'Tasks', 'check'], ['library', 'Files', 'folder'], ['status', 'Fleet', 'server']];
 function renderPanelHead() { if (!S.chat) return; $('#panelav').innerHTML = avatar(S.chat, 'mid'); $('#panelname').textContent = chatName(S.chat); $('#panelsub').textContent = ''; }
-function openPanel(tab) { S.panel = true; $('#panel').classList.add('open'); syncHead(); renderPanelHead(); setTab(tab || S.tab); }
-function closePanel() { S.panel = false; $('#panel').classList.remove('open'); syncHead(); }
+function openPanel(tab) { S.panel = true; localStorage.setItem('hq.panel', '1'); $('#panel').classList.add('open'); syncHead(); renderPanelHead(); setTab(tab || S.tab); }
+function closePanel() { S.panel = false; localStorage.setItem('hq.panel', ''); $('#panel').classList.remove('open'); syncHead(); }
 // The pill lives inside the main pane (overflow hidden). On panel open/close it holds its old screen
 // position briefly, then eases to the new centre; every frame is clamped to the main pane bounds.
 let pillAnim = 0;
@@ -384,7 +386,7 @@ dragger($('#rzr'), '--pw', 'hq.pw', 320, () => Math.min(640, innerWidth * 0.4), 
 function setTab(tab) {
   if (tab === 'computer') tab = 'browser';
   if (!TABS.some(([id]) => id === tab)) tab = 'info';
-  S.tab = tab; $('#ptabs').innerHTML = '';
+  S.tab = tab; localStorage.setItem('hq.tab', tab); $('#ptabs').innerHTML = '';
   for (const [id, label, ic] of TABS) { const b = document.createElement('button'); b.innerHTML = `${ico(ic, 15)}<span class="l">${esc(label)}</span>`; b.title = label; b.setAttribute('role', 'tab'); b.className = id === tab ? 'on' : ''; b.onclick = () => setTab(id); $('#ptabs').appendChild(b); }
   document.querySelectorAll('.ptab').forEach((t) => t.classList.toggle('on', t.id === 'p-' + tab));
   $('#pbody').scrollTop = 0;
@@ -548,7 +550,11 @@ setTab('info');
 api('/api/config').then(async (c) => { S.chats = c.chats && c.chats.length ? c.chats : [{ label: 'general', target: 'room:general' }];
   if (c.m4a) { S.m4a = c.m4a; try { const d = await post('/api/s/m4a/rooms', {}); const rows = Array.isArray(d.result) ? d.result : d.result.rooms || [];
     const rooms = rows.map((r) => { const rid = r.room_id || r.id || r.room; const label = r.title || r.name || r.alias || rid; return { label, target: 'm4a:' + rid, kind: (c.m4a.groups || []).includes(label) || r.kind === 'group' || r.kind === 'channel' ? 'group' : 'dm' }; }).filter((r) => r.target !== 'm4a:undefined');
-    S.chats = [...rooms, ...S.chats.filter((x) => !String(x.target).startsWith('room:'))]; } catch (e) { toast('m4a: ' + e.message); } } }).catch(() => { S.chats = [{ label: 'general', target: 'room:general' }]; }).then(loadNodes).then(() => { openChat(S.chats[0].target); setTimeout(prefetch, 1500); setInterval(prefetch, 60000); }); let pollN = 0; setInterval(() => { pollN++; if (S.chat && !document.hidden && (String(S.chat).startsWith('m4a:') || pollN % 4 === 0)) loadThread(); }, 2500); setInterval(loadNodes, 4000);
+    S.chats = [...rooms, ...S.chats.filter((x) => !String(x.target).startsWith('room:'))]; } catch (e) { toast('m4a: ' + e.message); } } }).catch(() => { S.chats = [{ label: 'general', target: 'room:general' }]; }).then(loadNodes).then(() => {
+    const h = decodeURIComponent((location.hash.match(/^#\/chat\/(.+)$/) || [])[1] || ''); const want = h || localStorage.getItem('hq.chat');
+    const ok = (t) => t && ((S.chats || []).some((c) => c.target === t) || (S.nodes || []).some((n) => n.node_id === t));
+    openChat(ok(want) ? want : S.chats[0].target);
+    if (localStorage.getItem('hq.panel')) openPanel(SAVED_TAB || 'info'); setTimeout(prefetch, 1500); setInterval(prefetch, 60000); }); let pollN = 0; setInterval(() => { pollN++; if (S.chat && !document.hidden && (String(S.chat).startsWith('m4a:') || pollN % 4 === 0)) loadThread(); }, 2500); setInterval(loadNodes, 4000);
 
 // ---- message actions: react / reply / more
 const EMO = ['👍', '👎', '❤️', '😂', '🎉', '😮', '😢', '🙏', '🔥', '👀', '✅', '🤔'];
