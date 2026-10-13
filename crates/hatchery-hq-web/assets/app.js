@@ -141,7 +141,7 @@ $('#micbtn').onclick = () => {
   r.onresult = (e) => { $('#input').value = base + [...e.results].map((x) => x[0].transcript).join(''); autosize(); };
   r.onend = () => { S.rec = null; $('#micbtn').classList.remove('rec'); }; r.start();
 };
-const autosize = () => { const i = $('#input'); i.style.height = 'auto'; i.style.height = Math.min(i.scrollHeight, 160) + 'px'; };
+const autosize = () => { const i = $('#input'); const max = Math.round(innerHeight * 0.45); i.style.height = 'auto'; const h = Math.min(i.scrollHeight, max); i.style.height = h + 'px'; i.classList.toggle('scroll', i.scrollHeight > max); };
 $('#input').oninput = autosize;
 $('#input').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
 $('#sendbtn').onclick = send;
