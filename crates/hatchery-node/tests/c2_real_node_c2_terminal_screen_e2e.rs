@@ -1,7 +1,5 @@
-//! A2: operator control no longer lives on C2. These tests dialed the legacy
-//! control UDS/TCP path and need a rewrite onto `hatchery_server::node_controller`
-//! over the core drain before they can run again.
-#![cfg(feature = "legacy-c2-control")]
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
 
 #![cfg(any(windows, unix))]
 
@@ -10,7 +8,7 @@ use hatchery_c2::protocol::{
     NodeTransportState,
 };
 use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::{connect_local, C2Client, C2ControlHandle};
+use hatchery_c2_client::{connect_core_operator, C2Client, C2ControlHandle};
 use hatchery_node::protocol::{NodeRequest, SessionMode, WorkspaceId};
 use hatchery_node::{NodeServer, NodeServerConfig, WorkspaceConfig};
 use gate4agent_types::{AgentId, AgentInstanceId, TerminalFrame, TerminalSize};
@@ -393,6 +391,7 @@ async fn wait_renderable_frame(
     .expect("renderable terminal frame did not reach C2")
 }
 
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires an explicitly selected installed vendor PTY launcher"]
 async fn real_node_c2_snapshot_renders_vendor_terminal_and_reaps_process() {
@@ -441,7 +440,7 @@ async fn real_node_c2_snapshot_renders_vendor_terminal_and_reaps_process() {
         .unwrap()
         .with_deadline(Duration::from_secs(1));
     let route = wait_online(&http, &node_id).await;
-    let (control, mut events) = connect_local(&endpoints.control, c2_token)
+    let (control, mut events) = connect_core_operator(&endpoints.control, c2_token)
         .await
         .unwrap();
     let event_drain = tokio::spawn(async move {

@@ -1,7 +1,5 @@
-//! A2: operator control no longer lives on C2. These tests dialed the legacy
-//! control UDS/TCP path and need a rewrite onto `hatchery_server::node_controller`
-//! over the core drain before they can run again.
-#![cfg(feature = "legacy-c2-control")]
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
 
 #![cfg(windows)]
 
@@ -12,7 +10,7 @@ use hatchery_c2::protocol::{
     C2_PROVIDER_CONTRACT_MANIFEST_CAPABILITY, C2_WORKSPACE_FILE_READ_CAPABILITY,
     RepositoryPath, WorkspaceFileContent,
 };
-use hatchery_c2_client::{connect_local, C2Client, C2ControlError};
+use hatchery_c2_client::{connect_core_operator, C2Client, C2ControlError};
 use hatchery_node::protocol::{
     AgentId, ClientRole, ManagedSessionState, NodeFailureCode, NodeRequest,
     NodeResponse, OpaqueHostPath, SessionMode, SessionTaskTargetV1, WorkspaceId,
@@ -127,6 +125,7 @@ fn route(status: &hatchery_c2::protocol::StatusResponse, node_id: &NodeId) -> No
     }
 }
 
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn windows_real_two_node_c2_control_relay_routes_commands_events_and_preserves_nodes_on_exit() {
     let endpoint_a = endpoint("a");
@@ -208,7 +207,7 @@ async fn windows_real_two_node_c2_control_relay_routes_commands_events_and_prese
     assert!(!initial_a_inventory.provider_contracts.is_empty());
     assert!(!initial_b_inventory.provider_contracts.is_empty());
 
-    let (control, mut events) = connect_local(&control_endpoint, c2_token).await.unwrap();
+    let (control, mut events) = connect_core_operator(&control_endpoint, c2_token).await.unwrap();
     assert_eq!(control.hello().status.nodes.len(), 2);
     let compatibility = control.hello().compatibility.as_ref()
         .expect("negotiated C2 compatibility metadata");
@@ -313,7 +312,7 @@ async fn windows_real_two_node_c2_control_relay_routes_commands_events_and_prese
     });
     let mut route_a = route(&initial, &id_a);
     let route_b = route(&initial, &id_b);
-    let second = match connect_local(&control_endpoint, c2_token).await {
+    let second = match connect_core_operator(&control_endpoint, c2_token).await {
         Err(error) => error,
         Ok(_) => panic!("second C2 operator unexpectedly connected"),
     };
@@ -619,6 +618,7 @@ async fn windows_real_two_node_c2_control_relay_routes_commands_events_and_prese
     timeout(Duration::from_secs(5), restarted_task_b).await.unwrap().unwrap().unwrap();
 }
 
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn windows_real_multi_node_task_correlation_survives_restart_and_rejects_stale_revision() {
     let endpoint_a = endpoint("task-a");
@@ -672,7 +672,7 @@ async fn windows_real_multi_node_task_correlation_survives_restart_and_rejects_s
     let initial = wait_status(&http, |status| {
         status.ready && status.nodes.values().all(|node| node.transport == NodeTransportState::Online)
     }).await;
-    let (control, mut events) = connect_local(&control_endpoint, c2_token).await.unwrap();
+    let (control, mut events) = connect_core_operator(&control_endpoint, c2_token).await.unwrap();
     let event_drain = tokio::spawn(async move {
         while events.recv().await.is_some() {}
     });

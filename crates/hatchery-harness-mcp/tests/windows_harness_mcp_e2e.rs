@@ -1,7 +1,5 @@
-//! A2: operator control no longer lives on C2. These tests dialed the legacy
-//! control UDS/TCP path and need a rewrite onto `hatchery_server::node_controller`
-//! over the core drain before they can run again.
-#![cfg(feature = "legacy-c2-control")]
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
 
 #![cfg(windows)]
 
@@ -874,6 +872,7 @@ fn assert_fixture_read_unavailable(reply: &Value) {
     assert_eq!(reply["error"]["message"], "harness read unavailable");
 }
 
+#[ignore = "A2: needs node restream g4a bridge"]
 #[test]
 #[ignore]
 fn h3b_provider_fixture_child() {
@@ -1050,6 +1049,7 @@ fn replace_grant(
     (grant, mutation)
 }
 
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn production_host_and_real_mcp_child_enforce_durable_grant_filtered_reads() {
     require_windows_headless_supervisor_for_test();
@@ -1426,6 +1426,7 @@ async fn production_host_and_real_mcp_child_enforce_durable_grant_filtered_reads
     timeout(Duration::from_secs(5), running.wait()).await.expect("C2 did not stop").unwrap();
 }
 
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn operator_schedule_next_h3b_is_exact_replay_restart_generation_and_revoke_bound() {
     let _exclusive = H3B_E2E_LOCK.lock().unwrap();

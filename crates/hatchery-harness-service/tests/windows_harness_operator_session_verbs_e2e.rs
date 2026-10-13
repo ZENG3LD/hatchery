@@ -1,7 +1,5 @@
-//! A2: operator control no longer lives on C2. These tests dialed the legacy
-//! control UDS/TCP path and need a rewrite onto `hatchery_server::node_controller`
-//! over the core drain before they can run again.
-#![cfg(feature = "legacy-c2-control")]
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
 
 #![cfg(windows)]
 
@@ -244,6 +242,7 @@ async fn wait_for_terminal_text(
     });
 }
 
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn windows_harness_operator_session_verbs_spawn_input_resize_control_stop_remove_resume_round_trip() {
     require_headless_supervisor();
@@ -496,6 +495,7 @@ fn find_managed_session<'a>(
 /// second, unrelated fixture concern) -- see the module doc comment's
 /// `PasteSession` precedent for the same "prove the rejection relays
 /// faithfully, not a success this fixture cannot honestly produce" choice.
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn windows_harness_operator_session_record_family_index_rename_forget_round_trip_and_rejections() {
     require_headless_supervisor();
@@ -783,6 +783,7 @@ fn init_git_repository(workspace: &Path) {
 /// recognizes as exportable -- see the module doc comment's `PasteSession`
 /// precedent for the same "prove the rejection relays faithfully, not a
 /// success this fixture cannot honestly produce" choice.
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn windows_harness_operator_resource_mutation_family_round_trip_and_rejections() {
     require_headless_supervisor();

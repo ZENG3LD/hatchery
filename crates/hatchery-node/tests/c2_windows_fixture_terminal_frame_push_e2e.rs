@@ -1,7 +1,5 @@
-//! A2: operator control no longer lives on C2. These tests dialed the legacy
-//! control UDS/TCP path and need a rewrite onto `hatchery_server::node_controller`
-//! over the core drain before they can run again.
-#![cfg(feature = "legacy-c2-control")]
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
 
 #![cfg(windows)]
 
@@ -10,7 +8,7 @@ use hatchery_c2::protocol::{
     C2_TERMINAL_FRAME_EVENTS_CAPABILITY,
 };
 use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::{connect_local, C2Client, C2EventReceiver};
+use hatchery_c2_client::{connect_core_operator, C2Client, C2EventReceiver};
 use hatchery_node::protocol::{
     ClientRole, NodeEvent, NodeRequest, ServerFrame, SessionAddress, SessionMode, WorkspaceId,
     NODE_TERMINAL_FRAME_EVENTS_CAPABILITY,
@@ -128,6 +126,7 @@ async fn wait_routed_terminal_frame(
     .expect("C2 did not push the expected routed terminal frame")
 }
 
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn windows_fixture_terminal_frame_push_routes_exact_event_and_preserves_commands() {
     let node_endpoint = endpoint("node");
@@ -173,7 +172,7 @@ async fn windows_fixture_terminal_frame_push_routes_exact_event_and_preserves_co
         .with_deadline(Duration::from_secs(1));
     let route = wait_online(&http, &node_id).await;
 
-    let (control, mut events) = connect_local(&control_endpoint, c2_token).await.unwrap();
+    let (control, mut events) = connect_core_operator(&control_endpoint, c2_token).await.unwrap();
     assert!(control
         .hello()
         .compatibility

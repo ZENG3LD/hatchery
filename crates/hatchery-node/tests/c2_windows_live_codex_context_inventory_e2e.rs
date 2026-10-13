@@ -1,7 +1,5 @@
-//! A2: operator control no longer lives on C2. These tests dialed the legacy
-//! control UDS/TCP path and need a rewrite onto `hatchery_server::node_controller`
-//! over the core drain before they can run again.
-#![cfg(feature = "legacy-c2-control")]
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
 
 #![cfg(windows)]
 
@@ -10,7 +8,7 @@ use hatchery_c2::protocol::{
     NodeId, NodeRoute, NodeTransportState,
 };
 use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::{connect_local, C2Client, C2ControlHandle};
+use hatchery_c2_client::{connect_core_operator, C2Client, C2ControlHandle};
 use hatchery_node::protocol::{
     AdapterId, CapabilityId, ManagedSessionState, ManagedWorktreeLeaseState,
     ManagedWorktreeRetention, ManagedWorktreeSpawnRequest, NodeRequest, SessionAddress,
@@ -1008,6 +1006,7 @@ async fn wait_session_absent(
     .expect("removed session remained in the routed C2 snapshot")
 }
 
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires authenticated Codex CLI, GATE4AGENT_VENDOR_CANARY=1, and windows-headless-supervisor"]
 async fn windows_live_codex_semantically_consumes_context_pack_and_c2_renames_inventory() {
@@ -1190,7 +1189,7 @@ async fn windows_live_codex_semantically_consumes_context_pack_and_c2_renames_in
         .unwrap()
         .with_deadline(Duration::from_secs(1));
     let route = wait_online(&http, &node_id).await;
-    let (control, mut events) = connect_local(&control_endpoint, c2_token).await.unwrap();
+    let (control, mut events) = connect_core_operator(&control_endpoint, c2_token).await.unwrap();
     wait_relay_ready(&control, &route).await;
 
     let record_events = Arc::new(Mutex::new(Vec::new()));

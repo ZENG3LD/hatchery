@@ -91,6 +91,8 @@ fixture = ["dep:gate4agent-testkit", "gate4agent-node-wire/fixture"]
 dig2-station-probe = []
 
 [dev-dependencies]
+tempfile = "3"
+hatchery-server = { path = "../hatchery-server", version = "0.2.3" }
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 # C2 <-> node integration tests (tests/c2_*.rs): C2 and the node are equal peers.
 hatchery-c2 = { path = "../hatchery-c2", version = "0.2.3" }

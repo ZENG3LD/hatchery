@@ -1,7 +1,5 @@
-//! A2: operator control no longer lives on C2. These tests dialed the legacy
-//! control UDS/TCP path and need a rewrite onto `hatchery_server::node_controller`
-//! over the core drain before they can run again.
-#![cfg(feature = "legacy-c2-control")]
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
 
 #![cfg(windows)]
 
@@ -204,6 +202,7 @@ async fn wait_online(client: &C2Client, node_id: &NodeId) {
     }).await.expect("Node did not become online through C2");
 }
 
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn schedule_next_replay_and_harness_restart_do_not_resend() {
     require_headless_supervisor();
@@ -394,6 +393,7 @@ async fn schedule_next_replay_and_harness_restart_do_not_resend() {
 /// launch options -> spec save -> task start end to end using only the
 /// plan the harness derives from the fixture node's own reported
 /// inventory (`auto-claude-<workspace>-<profile>`).
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn derived_launch_plan_starts_a_task_with_zero_launch_plan_json_args() {
     require_headless_supervisor();

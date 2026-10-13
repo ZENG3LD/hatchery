@@ -26,10 +26,8 @@
 //!   step 7  -> "== STEP 7 =="  (spec select + start_task_v2 B)
 //!   step 8  -> "== STEP 8 =="  (bare-adapter proof the durable path served it)
 //!   step 9  -> "== STEP 9 =="  (materialized context file + lineage chain)
-//! A2: operator control no longer lives on C2. These tests dialed the legacy
-//! control UDS/TCP path and need a rewrite onto `hatchery_server::node_controller`
-//! over the core drain before they can run again.
-#![cfg(feature = "legacy-c2-control")]
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
 
 
 #![cfg(windows)]
@@ -439,6 +437,7 @@ fn find_files_named(root: &Path, file_name: &str) -> Vec<PathBuf> {
     found
 }
 
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn durable_context_pack_survives_two_restarts_and_serves_finished_run_continuation() {
     require_headless_supervisor();

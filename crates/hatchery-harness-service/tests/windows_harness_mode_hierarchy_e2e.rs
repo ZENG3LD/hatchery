@@ -1,7 +1,5 @@
-//! A2: operator control no longer lives on C2. These tests dialed the legacy
-//! control UDS/TCP path and need a rewrite onto `hatchery_server::node_controller`
-//! over the core drain before they can run again.
-#![cfg(feature = "legacy-c2-control")]
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
 
 #![cfg(windows)]
 
@@ -16,7 +14,7 @@ use std::{
 
 use hatchery_c2::protocol::C2RelayFailureCode;
 use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::{connect_local, C2Client, C2ControlError};
+use hatchery_c2_client::{connect_core_operator, C2Client, C2ControlError};
 use hatchery_harness_api::{
     HarnessExpectedExecutionSpecRevisionV1, HarnessLaunchAuthorityRefV1,
     HarnessNativeSessionCatalogScopeV1, HarnessNativeSessionPreviewRoleV1,
@@ -333,6 +331,7 @@ fn assert_fixture_history_visible_through_harness(
     assert!(!preview_json.contains(FIXTURE_PRIVATE_THOUGHT));
 }
 
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tui_skin_reconnect_preserves_harness_owned_c2_workflow() {
     require_headless_supervisor();
@@ -413,7 +412,7 @@ async fn tui_skin_reconnect_preserves_harness_owned_c2_workflow() {
     let harness_endpoint = host.endpoint().socket_addr();
     let tui = tui_harness_client(harness_endpoint, operator_credential.clone());
 
-    let direct_c2 = match connect_local(&control_endpoint, c2_token).await {
+    let direct_c2 = match connect_core_operator(&control_endpoint, c2_token).await {
         Err(error) => error,
         Ok(_) => panic!("direct C2 operator connected while Harness owned the operator slot"),
     };
@@ -656,6 +655,7 @@ async fn tui_skin_reconnect_preserves_harness_owned_c2_workflow() {
     timeout(Duration::from_secs(10), node_task).await.unwrap().unwrap().unwrap();
 }
 
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tui_skin_reads_explicit_history_only_through_harness() {
     require_headless_supervisor();
@@ -719,7 +719,7 @@ async fn tui_skin_reads_explicit_history_only_through_harness() {
     let harness_endpoint = host.endpoint().socket_addr();
     let tui = tui_harness_client(harness_endpoint, operator_credential.clone());
 
-    let direct_c2 = match connect_local(&control_endpoint, c2_token).await {
+    let direct_c2 = match connect_core_operator(&control_endpoint, c2_token).await {
         Err(error) => error,
         Ok(_) => panic!("direct C2 operator connected while Harness owned the operator slot"),
     };

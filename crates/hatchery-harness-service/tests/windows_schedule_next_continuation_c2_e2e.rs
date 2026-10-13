@@ -1,7 +1,5 @@
-//! A2: operator control no longer lives on C2. These tests dialed the legacy
-//! control UDS/TCP path and need a rewrite onto `hatchery_server::node_controller`
-//! over the core drain before they can run again.
-#![cfg(feature = "legacy-c2-control")]
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
 
 #![cfg(windows)]
 
@@ -17,7 +15,7 @@ use std::{
 };
 
 use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::{connect_local, C2Client};
+use hatchery_c2_client::{connect_core_operator, C2Client};
 use hatchery_c2_protocol::{C2NodeResponse, NodeRoute};
 use hatchery_harness_api::HarnessOperatorCredential;
 use hatchery_harness_client::HarnessOperatorClient;
@@ -423,7 +421,7 @@ async fn load_source_history_through_c2(
     route: NodeRoute,
     source: SessionAddress,
 ) {
-    let (control, mut events) = connect_local(control_endpoint, c2_token).await.unwrap();
+    let (control, mut events) = connect_core_operator(control_endpoint, c2_token).await.unwrap();
     let event_drain = tokio::spawn(async move {
         while events.recv().await.is_some() {}
     });
@@ -588,6 +586,7 @@ fn install_diagnostic_tracing() {
     });
 }
 
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn schedule_next_continuation_exports_restores_and_restart_does_not_repeat() {
     install_diagnostic_tracing();

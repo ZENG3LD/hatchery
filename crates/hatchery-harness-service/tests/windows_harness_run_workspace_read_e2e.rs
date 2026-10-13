@@ -1,7 +1,5 @@
-//! A2: operator control no longer lives on C2. These tests dialed the legacy
-//! control UDS/TCP path and need a rewrite onto `hatchery_server::node_controller`
-//! over the core drain before they can run again.
-#![cfg(feature = "legacy-c2-control")]
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
 
 #![cfg(windows)]
 
@@ -16,7 +14,7 @@ use std::{
 
 use hatchery_c2::protocol::C2RelayFailureCode;
 use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::{connect_local, C2Client, C2ControlError};
+use hatchery_c2_client::{connect_core_operator, C2Client, C2ControlError};
 use hatchery_harness_api::{
     HarnessExpectedExecutionSpecRevisionV1, HarnessGitDiffModeV1,
     HarnessGitObjectIdV1, HarnessLaunchAuthorityRefV1, HarnessOperatorActionV1,
@@ -373,6 +371,7 @@ fn assert_private_reply(value: &impl serde::Serialize, canonical_workspace: &str
     assert!(!json.contains(DIAGNOSTIC_CANARY));
 }
 
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tui_like_harness_client_reads_exact_run_workspace_and_rejects_stale_incarnation() {
     require_headless_supervisor();
@@ -436,7 +435,7 @@ async fn tui_like_harness_client_reads_exact_run_workspace_and_rejects_stale_inc
     let harness_endpoint = host.endpoint().socket_addr();
     let tui = HarnessOperatorClient::new(harness_endpoint, operator_credential.clone()).unwrap();
 
-    let direct_c2 = match connect_local(&control_endpoint, c2_token).await {
+    let direct_c2 = match connect_core_operator(&control_endpoint, c2_token).await {
         Err(error) => error,
         Ok(_) => panic!("direct C2 operator connected while Harness owned the operator slot"),
     };
@@ -687,6 +686,7 @@ async fn tui_like_harness_client_reads_exact_run_workspace_and_rejects_stale_inc
 /// `CreateNodeWorkspaceFile`/`CreateNodeWorkspaceDirectory` verbs relayed
 /// straight from a node/workspace pair, on the same real node+C2+harness
 /// stack and fixture repository.
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tui_like_harness_client_writes_and_creates_node_workspace_entries_and_rejects_stale_revision() {
     require_headless_supervisor();

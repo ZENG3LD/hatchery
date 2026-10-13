@@ -1,7 +1,5 @@
-//! A2: operator control no longer lives on C2. These tests dialed the legacy
-//! control UDS/TCP path and need a rewrite onto `hatchery_server::node_controller`
-//! over the core drain before they can run again.
-#![cfg(feature = "legacy-c2-control")]
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
 
 #![cfg(windows)]
 
@@ -11,7 +9,7 @@ use hatchery_c2::protocol::{
     C2_MANAGED_WORKTREE_LIFECYCLE_CAPABILITY, C2_TERMINAL_FRAME_EVENTS_CAPABILITY,
 };
 use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::{connect_local, C2Client, C2ControlHandle};
+use hatchery_c2_client::{connect_core_operator, C2Client, C2ControlHandle};
 use hatchery_node::protocol::{
     CapabilityId, ManagedSessionState, ManagedWorktreeCleanupFailure,
     ManagedWorktreeLeaseSnapshot, ManagedWorktreeLeaseState, ManagedWorktreeRetention,
@@ -560,6 +558,7 @@ async fn wait_released(
     .expect("managed worktree did not reach released Retained state")
 }
 
+#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn spawn_managed_worktree_is_durable_path_free_and_safely_cleaned_end_to_end() {
     require_headless_windows_fixture();
@@ -651,7 +650,7 @@ async fn spawn_managed_worktree_is_durable_path_free_and_safely_cleaned_end_to_e
         .unwrap()
         .with_deadline(Duration::from_secs(1));
     let mut route = wait_online_after(&http, &node_id, None).await;
-    let (control, mut events) = connect_local(&control_endpoint, c2_token).await.unwrap();
+    let (control, mut events) = connect_core_operator(&control_endpoint, c2_token).await.unwrap();
     let capabilities = &control.hello().compatibility.as_ref().unwrap().capabilities;
     assert!(capabilities
         .iter()
