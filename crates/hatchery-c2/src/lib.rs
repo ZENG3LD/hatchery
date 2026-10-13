@@ -9,7 +9,7 @@ pub use runtime::{
     C2ShutdownHandle, C2Timings, DEFAULT_C2_CONTROL_ENDPOINT,
 };
 
-pub use hatchery_c2_protocol as protocol;
+pub use hatchery_core as protocol;
 
 /// Node enrollment registry (phase P1 of the enrollment and fleet plan): signed
 /// enrollment requests, a neutral first status, operator-driven status changes

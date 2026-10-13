@@ -1534,7 +1534,7 @@ mod opaque_restreamer_tests {
         assert!(!sock.exists(), "C2 must not bind the legacy operator control socket");
         let client = crate::restreamer::DrainClient::new(drain, "drain-token-0123456789ab");
         let mut session = client.connect().await.expect("drain connect");
-        session.open("n1", 1, hatchery_c2_protocol::ChannelKind::G4aControl).await.unwrap();
+        session.open("n1", 1, hatchery_core::ChannelKind::G4aControl).await.unwrap();
         session.resume(0).await.unwrap();
         running.shutdown_handle().shutdown();
         let _ = running.wait().await;

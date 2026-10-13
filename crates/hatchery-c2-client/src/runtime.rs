@@ -1,4 +1,4 @@
-use hatchery_c2_protocol::{
+use hatchery_core::{
     c2_auth_transcript, c2_bound_auth_transcript, provider_id_is_legacy, C2AuthDirection, C2ClientAuthentication, C2ClientFrame,
     C2ClientHello, C2Hello, C2NodeEvent, C2NodeResponse, C2RelayFailure,
     C2RelayFailureCode,
@@ -1514,7 +1514,7 @@ fn validate_managed_worktree_spawn_v2_response(
 }
 
 fn c2_session_task_record_matches(
-    record: &hatchery_c2_protocol::C2ManagedSessionRecord,
+    record: &hatchery_core::C2ManagedSessionRecord,
     record_id: &gate4agent_node_protocol::SessionRecordId,
     expected_revision: u64,
     target: &gate4agent_node_protocol::SessionTaskTargetV1,
@@ -1990,14 +1990,14 @@ fn c2_node_event_is_managed_worktree(event: &C2NodeEvent) -> bool {
 }
 
 fn c2_workspace_has_managed_worktree_metadata(
-    workspace: &hatchery_c2_protocol::C2WorkspaceSnapshot,
+    workspace: &hatchery_core::C2WorkspaceSnapshot,
 ) -> bool {
     workspace.worktree_service_mode.is_some()
         || workspace.managed_worktree_profiles.is_some()
 }
 
 fn c2_snapshot_has_managed_worktree(
-    snapshot: &hatchery_c2_protocol::C2NodeSnapshot,
+    snapshot: &hatchery_core::C2NodeSnapshot,
 ) -> bool {
     !snapshot.managed_worktrees.is_empty()
         || snapshot
@@ -2006,7 +2006,7 @@ fn c2_snapshot_has_managed_worktree(
             .any(c2_workspace_has_managed_worktree_metadata)
 }
 
-fn node_snapshot_has_unix_bytes(snapshot: &hatchery_c2_protocol::C2NodeSnapshot) -> bool {
+fn node_snapshot_has_unix_bytes(snapshot: &hatchery_core::C2NodeSnapshot) -> bool {
     snapshot
         .workspaces
         .iter()
@@ -2038,11 +2038,11 @@ fn c2_node_event_has_unix_bytes(event: &C2NodeEvent) -> bool {
 }
 
 fn provider_text_is_legacy(value: &str) -> bool {
-    hatchery_c2_protocol::AgentId::new(value)
+    hatchery_core::AgentId::new(value)
         .is_ok_and(|provider| provider_id_is_legacy(&provider))
 }
 
-fn status_has_open_provider_id(status: &hatchery_c2_protocol::StatusResponse) -> bool {
+fn status_has_open_provider_id(status: &hatchery_core::StatusResponse) -> bool {
     status.nodes.values().filter_map(|node| node.inventory.as_ref()).any(|inventory| {
         inventory.enabled_providers.iter().any(|provider| !provider_id_is_legacy(provider))
             || inventory.provider_runtime_statuses.iter()
@@ -2060,7 +2060,7 @@ fn status_has_open_provider_id(status: &hatchery_c2_protocol::StatusResponse) ->
     })
 }
 
-fn status_has_managed_worktree(status: &hatchery_c2_protocol::StatusResponse) -> bool {
+fn status_has_managed_worktree(status: &hatchery_core::StatusResponse) -> bool {
     status.nodes.values().any(|node| {
         node.inventory
             .as_ref()
@@ -2075,7 +2075,7 @@ fn status_has_managed_worktree(status: &hatchery_c2_protocol::StatusResponse) ->
 }
 
 fn status_has_child_environment_profile(
-    status: &hatchery_c2_protocol::StatusResponse,
+    status: &hatchery_core::StatusResponse,
 ) -> bool {
     status.nodes.values().any(|node| {
         node.inventory.as_ref().is_some_and(|inventory| {
@@ -2087,7 +2087,7 @@ fn status_has_child_environment_profile(
 }
 
 fn status_has_session_bundle_materialization(
-    status: &hatchery_c2_protocol::StatusResponse,
+    status: &hatchery_core::StatusResponse,
 ) -> bool {
     status.nodes.values().any(|node| {
         node.inventory.as_ref().is_some_and(|inventory| {
@@ -2108,14 +2108,14 @@ fn topology_has_open_provider_id(topology: &C2Topology) -> bool {
 }
 
 fn workspace_has_open_provider_id(
-    workspace: &hatchery_c2_protocol::C2WorkspaceSnapshot,
+    workspace: &hatchery_core::C2WorkspaceSnapshot,
 ) -> bool {
     workspace.sessions.iter()
         .any(|session| !provider_id_is_legacy(&session.agent_id))
 }
 
 fn snapshot_has_open_provider_id(
-    snapshot: &hatchery_c2_protocol::C2NodeSnapshot,
+    snapshot: &hatchery_core::C2NodeSnapshot,
 ) -> bool {
     snapshot.enabled_providers.iter().any(|provider| !provider_id_is_legacy(provider))
         || snapshot.provider_runtime_statuses.iter()
@@ -2132,7 +2132,7 @@ fn context_receipt_has_open_provider_id(
 }
 
 fn c2_managed_record_has_open_provider_id(
-    record: &hatchery_c2_protocol::C2ManagedSessionRecord,
+    record: &hatchery_core::C2ManagedSessionRecord,
 ) -> bool {
     !provider_id_is_legacy(&record.provider)
         || record
@@ -3226,7 +3226,7 @@ mod tests {
         assert_ne!(workspace_file_read_message, message);
     }
 
-    use hatchery_c2_protocol::{
+    use hatchery_core::{
         ArchitectureId, C2GitSnapshot, C2WorkspaceInspection, C2WorkspaceSnapshot,
         C2ServerChallenge, HostDescriptor, HostDirectoryEntry, HostDirectoryListing,
         NodeCursor, NodeId, OpaqueHostPath,
@@ -3269,7 +3269,7 @@ mod tests {
                 incarnation_id: NodeIncarnationId::from_bytes([7; 16]),
                 sequence,
             },
-            event: hatchery_c2_protocol::C2NodeEvent::ResyncRequired {
+            event: hatchery_core::C2NodeEvent::ResyncRequired {
                 oldest_available_sequence: sequence,
             },
         }
@@ -3443,7 +3443,7 @@ mod tests {
             target: spawn_spec("node-a").target,
             profile_id: SpawnProfileId::new("default").unwrap(),
             profile_revision: SpawnProfileRevision::new("r1").unwrap(),
-            provider: hatchery_c2_protocol::AgentId::new("claude").unwrap(),
+            provider: hatchery_core::AgentId::new("claude").unwrap(),
             mode: SessionMode::Pty,
             terminal_size: TerminalSize { rows: 24, columns: 80 },
             prompt: SpawnPromptMetadata { present: false, byte_len: 0 },
@@ -3691,7 +3691,7 @@ mod tests {
             selection: selection.clone(),
             display_name: "Indexed".to_owned(),
         };
-        let record = hatchery_c2_protocol::C2ManagedSessionRecord {
+        let record = hatchery_core::C2ManagedSessionRecord {
             record_id: gate4agent_node_protocol::SessionRecordId::new("record-7").unwrap(),
             display_name: "Indexed".to_owned(),
             provider: gate4agent_types::AgentId::new("codex").unwrap(),
@@ -3788,18 +3788,18 @@ mod tests {
     }
 
     fn reply(request_id: u64) -> OwnerInput {
-        OwnerInput::Frame(C2ServerFrame::Reply(hatchery_c2_protocol::C2ReplyEnvelope {
+        OwnerInput::Frame(C2ServerFrame::Reply(hatchery_core::C2ReplyEnvelope {
             request_id: C2RequestId(request_id),
             result: Ok(RoutedNodeResponse {
                 node_id: NodeId::new("node-a").unwrap(),
                 incarnation_id: NodeIncarnationId::from_bytes([7; 16]),
-                response: Ok(hatchery_c2_protocol::C2NodeResponse::Accepted),
+                response: Ok(hatchery_core::C2NodeResponse::Accepted),
             }),
         }))
     }
 
     fn terminal_resync_reply(request_id: u64, sequence: u64) -> OwnerInput {
-        OwnerInput::Frame(C2ServerFrame::Reply(hatchery_c2_protocol::C2ReplyEnvelope {
+        OwnerInput::Frame(C2ServerFrame::Reply(hatchery_core::C2ReplyEnvelope {
             request_id: C2RequestId(request_id),
             result: Ok(RoutedNodeResponse {
                 node_id: NodeId::new("node-a").unwrap(),
@@ -3807,7 +3807,7 @@ mod tests {
                 response: Ok(C2NodeResponse::Resync {
                     event_sequence: sequence,
                     oldest_available_sequence: 1,
-                    snapshot: hatchery_c2_protocol::C2NodeSnapshot {
+                    snapshot: hatchery_core::C2NodeSnapshot {
                         node_id: NodeId::new("node-a").unwrap(),
                         enabled_providers: Vec::new(),
                         provider_runtime_statuses: Default::default(),
@@ -3817,7 +3817,7 @@ mod tests {
                         managed_worktrees: Vec::new(),
                         launch_inventory: None,
                     },
-                    events: vec![hatchery_c2_protocol::C2NodeEventEnvelope {
+                    events: vec![hatchery_core::C2NodeEventEnvelope {
                         sequence,
                         event: terminal_node_event(sequence),
                     }],
@@ -3831,7 +3831,7 @@ mod tests {
     }
 
     fn unix_path_reply(request_id: u64) -> OwnerInput {
-        OwnerInput::Frame(C2ServerFrame::Reply(hatchery_c2_protocol::C2ReplyEnvelope {
+        OwnerInput::Frame(C2ServerFrame::Reply(hatchery_core::C2ReplyEnvelope {
             request_id: C2RequestId(request_id),
             result: Ok(RoutedNodeResponse {
                 node_id: NodeId::new("node-a").unwrap(),
@@ -3886,7 +3886,7 @@ mod tests {
     }
 
     fn unix_repository_path_reply(request_id: u64) -> OwnerInput {
-        OwnerInput::Frame(C2ServerFrame::Reply(hatchery_c2_protocol::C2ReplyEnvelope {
+        OwnerInput::Frame(C2ServerFrame::Reply(hatchery_core::C2ReplyEnvelope {
             request_id: C2RequestId(request_id),
             result: Ok(RoutedNodeResponse {
                 node_id: NodeId::new("node-a").unwrap(),
@@ -4002,7 +4002,7 @@ mod tests {
         assert_eq!(envelope.request.route, route());
         assert_eq!(envelope.request.request, request);
         incoming_tx.send(OwnerInput::Frame(C2ServerFrame::Reply(
-            hatchery_c2_protocol::C2ReplyEnvelope {
+            hatchery_core::C2ReplyEnvelope {
                 request_id: envelope.request_id,
                 result: Ok(RoutedNodeResponse {
                     node_id: route().node_id,
@@ -4058,7 +4058,7 @@ mod tests {
             panic!("snapshot request was not written");
         };
         incoming_tx.send(OwnerInput::Frame(C2ServerFrame::Reply(
-            hatchery_c2_protocol::C2ReplyEnvelope {
+            hatchery_core::C2ReplyEnvelope {
                 request_id: envelope.request_id,
                 result: Ok(RoutedNodeResponse {
                     node_id: route().node_id,
@@ -4150,7 +4150,7 @@ mod tests {
             managed_worktree_profiles: None,
         };
         incoming_tx.send(OwnerInput::Frame(C2ServerFrame::Reply(
-            hatchery_c2_protocol::C2ReplyEnvelope {
+            hatchery_core::C2ReplyEnvelope {
                 request_id: envelope.request_id,
                 result: Ok(RoutedNodeResponse {
                     node_id: route().node_id,
@@ -4829,7 +4829,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Spawn {
                 workspace_id: WorkspaceId::new("primary").unwrap(),
-                provider: hatchery_c2_protocol::AgentId::new("third-party-agent").unwrap(),
+                provider: hatchery_core::AgentId::new("third-party-agent").unwrap(),
                 mode: SessionMode::Pty,
                 terminal_size: TerminalSize { rows: 40, columns: 120 },
                 initial_prompt: None,
@@ -4966,7 +4966,7 @@ mod tests {
         }).await.unwrap();
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
         incoming_tx.send(OwnerInput::Frame(C2ServerFrame::Reply(
-            hatchery_c2_protocol::C2ReplyEnvelope {
+            hatchery_core::C2ReplyEnvelope {
                 request_id: C2RequestId(1),
                 result: Ok(RoutedNodeResponse {
                     node_id: NodeId::new("node-a").unwrap(),
@@ -5057,7 +5057,7 @@ mod tests {
         let mut receipt = spawn_receipt();
         receipt.target.worktree_id = Some(WorkspaceId::new("review-tree").unwrap());
         incoming_tx.send(OwnerInput::Frame(C2ServerFrame::Reply(
-            hatchery_c2_protocol::C2ReplyEnvelope {
+            hatchery_core::C2ReplyEnvelope {
                 request_id: C2RequestId(1),
                 result: Ok(RoutedNodeResponse {
                     node_id: NodeId::new("node-a").unwrap(),
@@ -5096,13 +5096,13 @@ mod tests {
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
         let mut receipt = spawn_receipt();
         receipt.environment_profile = Some(
-            hatchery_c2_protocol::ResolvedEnvironmentProfileReceipt {
-                profile_id: hatchery_c2_protocol::SpawnEnvironmentProfileId::new(
+            hatchery_core::ResolvedEnvironmentProfileReceipt {
+                profile_id: hatchery_core::SpawnEnvironmentProfileId::new(
                     "local-default",
                 )
                 .unwrap(),
                 profile_revision:
-                    hatchery_c2_protocol::SpawnEnvironmentProfileRevision::new(
+                    hatchery_core::SpawnEnvironmentProfileRevision::new(
                         "local-default.r1",
                     )
                     .unwrap(),
@@ -5111,7 +5111,7 @@ mod tests {
             },
         );
         incoming_tx.send(OwnerInput::Frame(C2ServerFrame::Reply(
-            hatchery_c2_protocol::C2ReplyEnvelope {
+            hatchery_core::C2ReplyEnvelope {
                 request_id: C2RequestId(1),
                 result: Ok(RoutedNodeResponse {
                     node_id: NodeId::new("node-a").unwrap(),
@@ -5147,7 +5147,7 @@ mod tests {
         }).await.unwrap();
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
         incoming_tx.send(OwnerInput::Frame(C2ServerFrame::Reply(
-            hatchery_c2_protocol::C2ReplyEnvelope {
+            hatchery_core::C2ReplyEnvelope {
                 request_id: C2RequestId(1),
                 result: Ok(RoutedNodeResponse {
                     node_id: NodeId::new("node-a").unwrap(),
@@ -5155,10 +5155,10 @@ mod tests {
                     response: Ok(C2NodeResponse::Snapshot {
                         event_sequence: 1,
                         controller: None,
-                        snapshot: hatchery_c2_protocol::C2NodeSnapshot {
+                        snapshot: hatchery_core::C2NodeSnapshot {
                             node_id: NodeId::new("node-a").unwrap(),
                             enabled_providers: vec![
-                                hatchery_c2_protocol::AgentId::new("third-party-agent").unwrap(),
+                                hatchery_core::AgentId::new("third-party-agent").unwrap(),
                             ],
                             provider_runtime_statuses: Default::default(),
                             workspaces: Vec::new(),
@@ -5319,7 +5319,7 @@ mod tests {
     fn provider_session_reference_index_request_is_c2_capability_gated() {
         let request = NodeRequest::IndexProviderSession {
             workspace_id: WorkspaceId::new("primary").unwrap(),
-            provider: hatchery_c2_protocol::AgentId::new("claude").unwrap(),
+            provider: hatchery_core::AgentId::new("claude").unwrap(),
             identity: ProviderSessionIdentity {
                 key: ProviderSessionKey::SessionId,
                 id: "provider-session-42".to_owned(),
@@ -5606,7 +5606,7 @@ mod tests {
         incoming_tx.send(reply(2)).await.unwrap();
         assert!(matches!(
             timeout(Duration::from_secs(1), live_rx).await.unwrap().unwrap(),
-            Ok(RoutedNodeResponse { response: Ok(hatchery_c2_protocol::C2NodeResponse::Accepted), .. })
+            Ok(RoutedNodeResponse { response: Ok(hatchery_core::C2NodeResponse::Accepted), .. })
         ));
 
         drop(incoming_tx);
@@ -5660,7 +5660,7 @@ mod tests {
         assert!(matches!(
             timeout(Duration::from_secs(1), reply_rx).await.unwrap().unwrap(),
             Ok(RoutedNodeResponse {
-                response: Ok(hatchery_c2_protocol::C2NodeResponse::Accepted),
+                response: Ok(hatchery_core::C2NodeResponse::Accepted),
                 ..
             })
         ));
@@ -5724,23 +5724,23 @@ mod tests {
 
     #[tokio::test]
     async fn c2_client_topology_replaces_old_incarnation_status() {
-        use hatchery_c2_protocol::{C2TopologyNode, NodeTransportState};
+        use hatchery_core::{C2TopologyNode, NodeTransportState};
 
         let (commands_tx, commands_rx) = mpsc::channel(1);
         let (events_tx, mut events_rx) = mpsc::channel(1);
         let (writer_tx, _writer_rx) = mpsc::channel(1);
         let (incoming_tx, incoming_rx) = mpsc::channel(1);
-        let old_runtime_status = hatchery_c2_protocol::ProviderRuntimeStatuses::new([
-            hatchery_c2_protocol::ProviderRuntimeStatus::raw_passthrough(
-                hatchery_c2_protocol::AgentId::new("claude").unwrap(),
-                Some(hatchery_c2_protocol::ProviderRuntimeVersion::new("1.0.0").unwrap()),
+        let old_runtime_status = hatchery_core::ProviderRuntimeStatuses::new([
+            hatchery_core::ProviderRuntimeStatus::raw_passthrough(
+                hatchery_core::AgentId::new("claude").unwrap(),
+                Some(hatchery_core::ProviderRuntimeVersion::new("1.0.0").unwrap()),
             ),
         ])
         .unwrap();
         let offline = Arc::new(C2Topology { nodes: vec![C2TopologyNode {
             node_id: NodeId::new("node-a").unwrap(),
             endpoint: r"\\.\pipe\node-a".to_owned(),
-            relay_route: hatchery_c2_protocol::C2RelayRoute::LocalIpc,
+            relay_route: hatchery_core::C2RelayRoute::LocalIpc,
             transport: NodeTransportState::Offline,
             current_incarnation_id: Some(NodeIncarnationId::from_bytes([8; 16])),
             provider_contracts: Vec::new(),
@@ -5756,15 +5756,15 @@ mod tests {
             nodes: vec![C2TopologyNode {
                 node_id: NodeId::new("node-a").unwrap(),
                 endpoint: r"\\.\pipe\node-a".to_owned(),
-                relay_route: hatchery_c2_protocol::C2RelayRoute::LocalIpc,
+                relay_route: hatchery_core::C2RelayRoute::LocalIpc,
                 transport: NodeTransportState::Online,
                 current_incarnation_id: Some(incarnation_id),
                 provider_contracts: Vec::new(),
                 provider_adapter_contracts: Vec::new(),
-                provider_runtime_statuses: hatchery_c2_protocol::ProviderRuntimeStatuses::new([
-                    hatchery_c2_protocol::ProviderRuntimeStatus::raw_passthrough(
-                        hatchery_c2_protocol::AgentId::new("codex").unwrap(),
-                        Some(hatchery_c2_protocol::ProviderRuntimeVersion::new("2.0.0").unwrap()),
+                provider_runtime_statuses: hatchery_core::ProviderRuntimeStatuses::new([
+                    hatchery_core::ProviderRuntimeStatus::raw_passthrough(
+                        hatchery_core::AgentId::new("codex").unwrap(),
+                        Some(hatchery_core::ProviderRuntimeVersion::new("2.0.0").unwrap()),
                     ),
                 ])
                 .unwrap(),
@@ -5778,7 +5778,7 @@ mod tests {
         assert_eq!(statuses.as_slice().len(), 1);
         assert_eq!(
             statuses.as_slice()[0].provider(),
-            &hatchery_c2_protocol::AgentId::new("codex").unwrap(),
+            &hatchery_core::AgentId::new("codex").unwrap(),
         );
         assert_eq!(statuses.as_slice()[0].version().unwrap().as_str(), "2.0.0");
         assert!(events_rx.try_recv().is_err());
@@ -5792,7 +5792,7 @@ mod tests {
         let mut explicit = spawn_spec("node-a");
         explicit.overrides.environment_profile_id =
             gate4agent_node_protocol::SpawnOverride::Set {
-                value: hatchery_c2_protocol::SpawnEnvironmentProfileId::new(
+                value: hatchery_core::SpawnEnvironmentProfileId::new(
                     "local-default",
                 )
                 .unwrap(),
@@ -5820,10 +5820,10 @@ mod tests {
                 if message == CHILD_ENVIRONMENT_PROFILE_NOT_NEGOTIATED
         ));
         let managed = NodeRequest::SpawnManagedWorktree {
-            request: hatchery_c2_protocol::ManagedWorktreeSpawnRequest {
+            request: hatchery_core::ManagedWorktreeSpawnRequest {
                 spawn_spec: inherited,
                 worktree_profile_id:
-                    hatchery_c2_protocol::WorktreeProfileId::new("review").unwrap(),
+                    hatchery_core::WorktreeProfileId::new("review").unwrap(),
             },
         };
         assert!(matches!(
@@ -5861,7 +5861,7 @@ mod tests {
 
         let mut explicit = inherited.clone();
         explicit.overrides.bundle_id = gate4agent_node_protocol::SpawnOverride::Set {
-            value: hatchery_c2_protocol::SpawnBundleId::new("review-bundle").unwrap(),
+            value: hatchery_core::SpawnBundleId::new("review-bundle").unwrap(),
         };
         assert!(matches!(
             reject_unnegotiated_outbound_path(
@@ -5884,10 +5884,10 @@ mod tests {
     #[test]
     fn managed_worktree_partial_capabilities_fail_closed() {
         let request = NodeRequest::SpawnManagedWorktree {
-            request: hatchery_c2_protocol::ManagedWorktreeSpawnRequest {
+            request: hatchery_core::ManagedWorktreeSpawnRequest {
                 spawn_spec: spawn_spec("node-a"),
                 worktree_profile_id:
-                    hatchery_c2_protocol::WorktreeProfileId::new("review").unwrap(),
+                    hatchery_core::WorktreeProfileId::new("review").unwrap(),
             },
         };
 
@@ -5916,7 +5916,7 @@ mod tests {
         ));
 
         let cleanup = NodeRequest::CleanupManagedWorktree {
-            lease_id: hatchery_c2_protocol::ManagedWorktreeLeaseId::new("lease-a").unwrap(),
+            lease_id: hatchery_core::ManagedWorktreeLeaseId::new("lease-a").unwrap(),
         };
         capabilities.spawn_spec_defaults_overrides = false;
         capabilities.worktree_selection = true;
@@ -5925,7 +5925,7 @@ mod tests {
         assert!(reject_unnegotiated_outbound_path(&cleanup, capabilities).is_err());
 
         let event = C2NodeEvent::ManagedWorktreeRemoved {
-            lease_id: hatchery_c2_protocol::ManagedWorktreeLeaseId::new("lease-a").unwrap(),
+            lease_id: hatchery_core::ManagedWorktreeLeaseId::new("lease-a").unwrap(),
         };
         assert!(c2_node_event_is_managed_worktree(&event));
 
@@ -5958,7 +5958,7 @@ mod tests {
         assert!(!c2_workspace_has_managed_worktree_metadata(&legacy));
         let profile_only = C2WorkspaceSnapshot {
             managed_worktree_profiles: Some(
-                hatchery_c2_protocol::WorktreeProfileInventory {
+                hatchery_core::WorktreeProfileInventory {
                     profiles: Vec::new(),
                 },
             ),
@@ -5974,12 +5974,12 @@ mod tests {
             capability.as_str() == C2_MANAGED_WORKTREE_SPAWN_V2_CAPABILITY
         }));
         let request = NodeRequest::SpawnManagedWorktreeV2 {
-            request: hatchery_c2_protocol::ManagedWorktreeSpawnRequestV2 {
+            request: hatchery_core::ManagedWorktreeSpawnRequestV2 {
                 spawn_spec: spawn_spec("node-a"),
                 worktree_profile_id:
-                    hatchery_c2_protocol::WorktreeProfileId::new("review").unwrap(),
+                    hatchery_core::WorktreeProfileId::new("review").unwrap(),
                 expected_profile_revision:
-                    hatchery_c2_protocol::WorktreeProfileRevision::new("wr1").unwrap(),
+                    hatchery_core::WorktreeProfileRevision::new("wr1").unwrap(),
             },
         };
         let mut capabilities = all_path_capabilities();
@@ -5995,19 +5995,19 @@ mod tests {
         spawn.profile_revision = SpawnProfileRevision::new("default.r1").unwrap();
         spawn.target.worktree_id = Some(managed_workspace_id.clone());
         spawn.session.workspace_id = managed_workspace_id.clone();
-        let receipt = hatchery_c2_protocol::ManagedWorktreeSpawnReceipt {
+        let receipt = hatchery_core::ManagedWorktreeSpawnReceipt {
             spawn,
-            lease: hatchery_c2_protocol::ManagedWorktreeLeaseSnapshot {
+            lease: hatchery_core::ManagedWorktreeLeaseSnapshot {
                 lease_id:
-                    hatchery_c2_protocol::ManagedWorktreeLeaseId::new("lease-v2").unwrap(),
+                    hatchery_core::ManagedWorktreeLeaseId::new("lease-v2").unwrap(),
                 source_workspace_id: WorkspaceId::new("primary").unwrap(),
                 workspace_id: managed_workspace_id,
                 profile_id:
-                    hatchery_c2_protocol::WorktreeProfileId::new("review").unwrap(),
+                    hatchery_core::WorktreeProfileId::new("review").unwrap(),
                 profile_revision:
-                    hatchery_c2_protocol::WorktreeProfileRevision::new("wr1").unwrap(),
-                retention: hatchery_c2_protocol::ManagedWorktreeRetention::RemoveWhenReleased,
-                state: hatchery_c2_protocol::ManagedWorktreeLeaseState::InUse,
+                    hatchery_core::WorktreeProfileRevision::new("wr1").unwrap(),
+                retention: hatchery_core::ManagedWorktreeRetention::RemoveWhenReleased,
+                state: hatchery_core::ManagedWorktreeLeaseState::InUse,
                 active_session_count: 1,
                 managed_record_count: 1,
                 cleanup_failure: None,
@@ -6030,7 +6030,7 @@ mod tests {
 
         let mut mismatched = receipt;
         mismatched.lease.profile_revision =
-            hatchery_c2_protocol::WorktreeProfileRevision::new("wr2").unwrap();
+            hatchery_core::WorktreeProfileRevision::new("wr2").unwrap();
         let routed = RoutedNodeResponse {
             node_id: NodeId::new("node-a").unwrap(),
             incarnation_id: mismatched.spawn.incarnation_id,
@@ -6086,7 +6086,7 @@ mod tests {
         let failure = RoutedNodeResponse {
             node_id: NodeId::new("node-a").unwrap(),
             incarnation_id: NodeIncarnationId::from_bytes([7; 16]),
-            response: Err(hatchery_c2_protocol::C2NodeFailure {
+            response: Err(hatchery_core::C2NodeFailure {
                 code: gate4agent_node_protocol::NodeFailureCode::UnknownContextPack,
                 message: "context pack unavailable".to_owned(),
             }),
@@ -6109,7 +6109,7 @@ mod tests {
     fn native_session_catalog_request_is_capability_bound_and_read_only() {
         let route = gate4agent_node_protocol::NativeSessionCatalogRoute::workspace(
             gate4agent_node_protocol::WorkspaceId::new("primary").unwrap(),
-            hatchery_c2_protocol::AgentId::new("codex").unwrap(),
+            hatchery_core::AgentId::new("codex").unwrap(),
         );
         let request = NodeRequest::CatalogNativeSessions {
             route: route.clone(),
@@ -6124,7 +6124,7 @@ mod tests {
 
         let page = NodeRequest::PageNativeSessions {
             route,
-            window: hatchery_c2_protocol::NativeSessionCatalogWindow::Older,
+            window: hatchery_core::NativeSessionCatalogWindow::Older,
             catalog_revision: 7,
             recent_cutoff_unix_ms: 8,
             after_selection_id: Some("hist_selection_1".to_owned()),
@@ -6167,7 +6167,7 @@ mod tests {
         };
         incoming_tx
             .send(OwnerInput::Frame(C2ServerFrame::Reply(
-                hatchery_c2_protocol::C2ReplyEnvelope {
+                hatchery_core::C2ReplyEnvelope {
                     request_id: request.request_id,
                     result: Ok(RoutedNodeResponse {
                         node_id: request.request.route.node_id,

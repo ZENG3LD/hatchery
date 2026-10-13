@@ -8,9 +8,9 @@
 //! and the node never learns what sits behind C2.
 
 use crate::uplink_journal::UplinkJournal;
-use hatchery_c2_protocol::inner::{decode_inner, encode_inner, InnerKind};
-use hatchery_c2_protocol::nested::{node_seal_outer, NoiseInitiator, NoiseTransport, PublicKeyBytes};
-use hatchery_c2_protocol::{ChannelKind, Frame, FrameError, FrameType, OpenPayload};
+use hatchery_core::inner::{decode_inner, encode_inner, InnerKind};
+use hatchery_core::nested::{node_seal_outer, NoiseInitiator, NoiseTransport, PublicKeyBytes};
+use hatchery_core::{ChannelKind, Frame, FrameError, FrameType, OpenPayload};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::sync::Arc;

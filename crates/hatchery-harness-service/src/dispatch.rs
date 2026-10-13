@@ -7,7 +7,7 @@ use hatchery_harness_protocol::{
     HarnessSessionIdentityV1, HarnessTaskId, HarnessTaskStateV1, HarnessTaskV1,
     HarnessWorktreeIntentV1, SessionGrantId,
 };
-use hatchery_c2_protocol::{C2ControlEventKind, C2NodeEvent, RoutedNodeEvent};
+use hatchery_core::{C2ControlEventKind, C2NodeEvent, RoutedNodeEvent};
 use gate4agent_catalog::{approval_level_resolution, ApprovalLevelResolution};
 use gate4agent_node_protocol::{
     DeliveryComponentKindV2, DeliveryRelativePathV2, DeliveryScopeV2,

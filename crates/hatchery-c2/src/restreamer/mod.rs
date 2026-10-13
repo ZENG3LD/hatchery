@@ -4,11 +4,15 @@
 //! replay buffer, and lets core drain a long-lived stream. C2 never pushes to
 //! core and never parses g4a / m4a payloads.
 
-mod buffer;
-mod crypto {
-    pub use hatchery_c2_protocol::nested::*;
+mod buffer {
+    pub use hatchery_core::buffer::*;
 }
-mod journal;
+mod crypto {
+    pub use hatchery_core::nested::*;
+}
+mod journal {
+    pub use hatchery_core::journal::*;
+}
 mod runtime;
 mod wg;
 

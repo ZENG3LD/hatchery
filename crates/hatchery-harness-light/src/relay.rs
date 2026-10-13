@@ -20,7 +20,7 @@
 
 use std::time::Duration;
 
-use hatchery_c2_protocol::{C2NodeResponse, NodeRequest, NodeRoute};
+use hatchery_core::{C2NodeResponse, NodeRequest, NodeRoute};
 use hatchery_harness_api::{
     HarnessApprovalLevelV1, HarnessExecutionModeV1, HarnessGitDiffModeV1, HarnessGitObjectIdV1, HarnessHostPathV1,
     HarnessNativeSessionCatalogWindowV1, HarnessNativeSessionRouteV1,

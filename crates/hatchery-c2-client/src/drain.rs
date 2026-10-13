@@ -2,7 +2,7 @@
 //!
 //! Core opens the stream to C2; C2 never dials core.
 
-use hatchery_c2_protocol::{
+use hatchery_core::{
     ChannelKind, DrainEnvelope, Frame, FrameError, OpenPayload,
 };
 use std::net::SocketAddr;
@@ -125,7 +125,7 @@ impl DrainSession {
                         // A bare frame (GOAWAY on auth failure, PONG): surface auth refusal.
                         if let Ok((frame, used)) = Frame::decode(&self.buf) {
                             self.buf.drain(..used);
-                            if frame.frame_type == hatchery_c2_protocol::FrameType::GoAway {
+                            if frame.frame_type == hatchery_core::FrameType::GoAway {
                                 return Err(DrainError::Auth);
                             }
                             continue;

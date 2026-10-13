@@ -25,7 +25,7 @@ members = [
     # TUI (was nested single-crate workspace)
     "crates/hatchery-tui",
     "crates/hatchery-bidi-client",
-    "crates/hatchery-c2-protocol",
+    "crates/hatchery-core",
     "crates/hatchery-enroll",
     "crates/hatchery-build",
     "crates/hatchery-session-events",
@@ -34,10 +34,11 @@ members = [
     "crates/hatchery-c2",
     "crates/hatchery-node",
     "crates/hatchery-server",
+    "crates/hatchery-e2e",
 ]
 
 [workspace.package]
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"

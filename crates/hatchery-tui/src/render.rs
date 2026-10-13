@@ -32,7 +32,7 @@ use hatchery_arcade_pet_bastion::zone::{ZoneKind, ZonePolarity};
 use hatchery_arcade_pet_bastion::RunOutcome as PetBastionRunOutcome;
 use hatchery_arcade_pet_bastion_render::interp::{interpolated_dynamic_sprites, render_sim_time};
 use hatchery_arcade_pet_bastion_render::{snapshot_to_surface, terrain_surface};
-use hatchery_c2_protocol::C2RelayRoute;
+use hatchery_core::C2RelayRoute;
 use hatchery_harness_protocol::HarnessRunGitFactsOutcomeV1;
 use gate4agent_node_protocol::{
     GitSnapshot, ManagedWorktreeCleanupFailure, ManagedWorktreeLeaseSnapshot,
@@ -18010,7 +18010,7 @@ mod tests {
             node_id: "node-a".to_owned(),
             incarnation_id: None,
             endpoint: "pipe".to_owned(),
-            relay_route: hatchery_c2_protocol::C2RelayRoute::Unknown,
+            relay_route: hatchery_core::C2RelayRoute::Unknown,
             connection: ConnectionState::Connected,
             controller_owned: true,
             event_sequence: 1,

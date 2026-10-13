@@ -8,7 +8,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use hatchery_c2_protocol::{
+use hatchery_core::{
     ChannelKind, DrainEnvelope, Frame, FrameError, FrameType, JournalReplyBody, OpenPayload,
     MAX_DATA_PAYLOAD,
 };
@@ -774,7 +774,7 @@ mod tests {
     use super::*;
     use crate::restreamer::crypto::{core_open_inner, noise_session_seal, HqRecipientSecret};
     use crate::restreamer::journal::MemoryJournal;
-    use hatchery_c2_protocol::ChannelKind;
+    use hatchery_core::ChannelKind;
     use std::time::Duration;
 
     fn token() -> String {
@@ -966,7 +966,7 @@ mod tests {
     #[tokio::test]
     async fn uplink_journal_req_served_from_file_journal() {
         use crate::restreamer::FileJournal;
-        use hatchery_c2_protocol::FrameType;
+        use hatchery_core::FrameType;
 
         let dir = std::env::temp_dir().join(format!("upj-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

@@ -370,7 +370,7 @@ fn collect_frames(v: &Value, out: &mut Vec<Value>) {
 async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<(), String> {
     use gate4agent_node_protocol::{AgentId, NodeRequest, SessionMode, WorkspaceId};
     use gate4agent_types::TerminalSize;
-    use hatchery_c2_protocol::{C2NodeResponse, NodeId, NodeRoute, NodeTransportState};
+    use hatchery_core::{C2NodeResponse, NodeId, NodeRoute, NodeTransportState};
     let cfg = &s.config;
     let say = |kind: &str, text: String| json!({ "type": kind, "text": text }).to_string();
     let node = NodeId::new(q.node.clone()).map_err(|e| e.to_string())?;

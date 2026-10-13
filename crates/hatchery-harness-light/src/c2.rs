@@ -14,7 +14,7 @@
 //! small, pure read-path helpers against it.
 
 use hatchery_c2_client::{C2LinkState, C2ReconnectingHandle};
-use hatchery_c2_protocol::{C2NodeResponse, C2NodeSnapshot, C2Topology, NodeRoute, NodeTransportState};
+use hatchery_core::{C2NodeResponse, C2NodeSnapshot, C2Topology, NodeRoute, NodeTransportState};
 use gate4agent_node_protocol::{NodeId, NodeRequest};
 use tokio::sync::Mutex;
 

@@ -30,7 +30,7 @@ use crate::runtime::{
     C2PendingRequest, EVENT_CAPACITY, HARNESS_MCP_EVENT_CAPACITY,
 };
 use std::net::SocketAddr;
-use hatchery_c2_protocol::{C2Topology, NodeRequest, NodeRoute, RoutedNodeEvent, RoutedNodeResponse};
+use hatchery_core::{C2Topology, NodeRequest, NodeRoute, RoutedNodeEvent, RoutedNodeResponse};
 use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -572,7 +572,7 @@ async fn connect_reconnecting(
 mod tests {
     use super::*;
     use crate::runtime::{c2_proof, client_compatibility_offer};
-    use hatchery_c2_protocol::{
+    use hatchery_core::{
         AgentId, ArchitectureId, C2AuthDirection, C2ClientFrame, C2Hello, C2NodeEvent,
         C2NodeResponse, C2NodeSnapshot, C2ReplyEnvelope, C2RelayRoute, C2RequestEnvelope,
         C2ServerChallenge, C2ServerFrame, C2TopologyNode, HostDescriptor,
