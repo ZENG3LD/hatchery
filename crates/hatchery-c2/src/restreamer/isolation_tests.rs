@@ -1,8 +1,8 @@
 //! A2 isolation invariants (unit-level).
 
 use crate::restreamer::{
-    c2_cannot_open_inner, c2_strip_outer, core_open_inner, node_seal, BufferLimits,
-    HqRecipientSecret, MemoryJournal, Restreamer, RestreamerKeys,
+    c2_cannot_complete_as_hq, c2_cannot_open_inner, c2_strip_outer, core_open_inner,
+    noise_session_seal, BufferLimits, HqRecipientSecret, MemoryJournal, Restreamer, RestreamerKeys,
 };
 use std::sync::Arc;
 
@@ -17,10 +17,12 @@ fn node_sees_only_upstream_keys() {
     let (c2_pub, hq_pub) = keys.upstream_public_keys();
     assert_eq!(c2_pub.as_bytes().len(), 32);
     assert_eq!(hq_pub.as_bytes().len(), 32);
-    let sealed = node_seal(&keys, b"body").unwrap();
-    let inner = c2_strip_outer(&keys, &sealed).unwrap();
+    let sealed = noise_session_seal(&keys, &hq, b"body").unwrap();
+    let inner = c2_strip_outer(&keys, &sealed.outer).unwrap();
     assert!(c2_cannot_open_inner(&keys, &inner));
-    assert_eq!(core_open_inner(&hq, &inner).unwrap(), b"body");
+    assert!(c2_cannot_complete_as_hq(&keys, &sealed.handshake_msg1));
+    let mut hq_tx = sealed.hq_transport;
+    assert_eq!(core_open_inner(&mut hq_tx, &inner).unwrap(), b"body");
 }
 
 #[test]

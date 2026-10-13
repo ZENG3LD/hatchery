@@ -11,8 +11,9 @@ mod runtime;
 
 pub use buffer::{BufferLimits, BufferedEvent, EnqueueOutcome, ReplayBuffer, StreamKey};
 pub use crypto::{
-    c2_cannot_open_inner, c2_strip_outer, core_open_inner, node_seal, CryptoError, HqRecipientSecret,
-    PublicKeyBytes, RestreamerKeys,
+    c2_cannot_complete_as_hq, c2_cannot_open_inner, c2_strip_outer, core_open_inner,
+    noise_session_seal, CryptoError, HqRecipientSecret, NestedSeal, NoiseInitiator, NoiseResponder,
+    NoiseTransport, PublicKeyBytes, RestreamerKeys, NOISE_PATTERN,
 };
 pub use journal::{recover_gap, JournalEntry, JournalError, MemoryJournal, NodeJournal};
 pub use runtime::{

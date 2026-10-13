@@ -560,7 +560,7 @@ impl DrainSession {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::restreamer::crypto::{core_open_inner, node_seal, HqRecipientSecret};
+    use crate::restreamer::crypto::{core_open_inner, noise_session_seal, HqRecipientSecret};
     use crate::restreamer::journal::MemoryJournal;
     use hatchery_c2_protocol::ChannelKind;
     use std::time::Duration;
@@ -738,16 +738,16 @@ mod tests {
             token(),
             Some(keys.clone()),
         );
-        let sealed = node_seal(&keys, b"visible-only-to-core").unwrap();
-        rs.admit_from_node("node-a", 1, sealed).unwrap();
+        let sealed = noise_session_seal(&keys, &hq, b"visible-only-to-core").unwrap();
+        rs.admit_from_node("node-a", 1, sealed.outer).unwrap();
         let env = &rs.buffered_after("node-a", 1, 0)[0];
-        // Buffer holds inner ciphertext, not plaintext.
         assert!(!env
             .frame
             .payload
             .windows(b"visible-only-to-core".len())
             .any(|w| w == b"visible-only-to-core"));
-        let plain = core_open_inner(&hq, &env.frame.payload).unwrap();
+        let mut hq_tx = sealed.hq_transport;
+        let plain = core_open_inner(&mut hq_tx, &env.frame.payload).unwrap();
         assert_eq!(plain, b"visible-only-to-core");
     }
 
