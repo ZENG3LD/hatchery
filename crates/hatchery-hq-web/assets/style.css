@@ -418,3 +418,14 @@ body.rail #chats{order:2}body.rail .sidetop{order:3;padding:8px 0 0}body.rail .s
 .msg.them .rx{right:auto;left:calc(100% + 6px);top:-6px}.msg.me .rx{left:auto;right:calc(100% + 6px);top:-6px}.msg.hasrx{margin-top:8px!important}
 .msg.them .rx,.msg.me .rx{top:-22px}.msg.hasrx{margin-top:24px!important}
 .msg:has(>.ts.in){padding-right:52px}.msg .ts.in{background:none;padding-left:0;right:12px;top:10px}
+
+/* round 21: badge on the corner, composer colours, expands sideways on hover to show who */
+.msg.hasrx{margin-top:16px!important}
+.msg.them .rx,.msg.me .rx{top:-16px;height:24px;padding:0 7px;background:#1f1f1f;border:1px solid #353535;box-shadow:0 2px 8px #0006;transition:border-color .15s}
+.msg.me .rx{right:auto;left:-10px}.msg.them .rx{left:auto;right:-10px}
+.rx.mine,.rx:has(.rpill.mine){background:#1f1f1f;border-color:#4a6d96}
+.rpill,.msg.me .rpill{font-size:13px;line-height:22px}
+.rw{display:inline-block;max-width:0;overflow:hidden;opacity:0;white-space:nowrap;font-size:12px;color:#d6d6d6;vertical-align:middle;transition:max-width .25s ease,opacity .2s ease,margin .25s ease}
+.rx:hover .rw{max-width:220px;opacity:1;margin:0 6px 0 3px}
+.rn{transition:opacity .15s}.rx:hover .rn{opacity:0;max-width:0;padding:0;overflow:hidden}
+.msg.them.hasrx>.ts.in{top:auto;bottom:8px}

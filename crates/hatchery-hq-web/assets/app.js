@@ -157,7 +157,7 @@ function renderChat() {
     if (meta && meta.reply_to) { const o = mail.find((x) => x.message_id === meta.reply_to); rq = `<button class="rq" data-goto="${esc(meta.reply_to)}"><b style="color:${colorOf(o ? (o.from === OPERATOR ? 'me' : o.from) : '?')}">${esc(o ? (o.from === OPERATOR ? 'You' : o.from) : 'message')}</b><span>${esc(o ? String(o.body).slice(0, 90) : '…')}</span></button>`; }
     const rxs = meta && meta.message_id ? rxOf(meta) : [];
     if (rxs.length) { const tot = rxs.reduce((a, r) => a + r.count, 0); d.classList.add('hasrx');
-      rx = `<div class="rx" data-tip="${esc(JSON.stringify(rxs.map((r) => [r.key, r.by])))}">${rxs.map((r) => `<button class="rpill${r.me ? ' mine' : ''}" data-key="${esc(r.key)}"${r.mine ? ` data-mine="${esc(r.mine)}"` : ''}>${esc(r.key)}</button>`).join('')}${tot > 1 ? `<span class="rn">${tot}</span>` : ''}</div>`; }
+      rx = `<div class="rx${rxs.some((r) => r.me) ? ' mine' : ''}" data-tip="${esc(JSON.stringify(rxs.map((r) => [r.key, r.by])))}">${rxs.map((r) => `<button class="rpill${r.me ? ' mine' : ''}" data-key="${esc(r.key)}"${r.mine ? ` data-mine="${esc(r.mine)}"` : ''}>${esc(r.key)}</button><span class="rw">${esc(r.by.map((n) => n === myNick() ? 'You' : n).join(', '))}</span>`).join('')}${tot > 1 ? `<span class="rn">${tot}</span>` : ''}</div>`; }
     const acts = meta && meta.message_id && String(S.chat).startsWith('m4a:') ? `<div class="macts"><button data-act="react" title="React">${ico('smile')}</button><button data-act="reply" title="Reply">${ico('reply')}</button><button data-act="more" title="More">${ico('dots')}</button></div>` : '';
     const t = `<span class="ts" title="${esc(new Date(ts).toLocaleString())}">${fmtTime(ts).slice(0, 5)}</span>`;
     const label = group && !mine && from && from !== prevFrom ? `<div class="hdr"><button class="who nick" data-nick="${esc(from)}" style="color:${colorOf(from)}">${esc(from)}</button>${t}</div>` : '';
@@ -587,16 +587,7 @@ async function unreact(ev, id, key) {
   if (id) pend(id, key, 'del');
   try { await post('/api/s/m4a/redact', { room: S.chat.slice(4), event: ev }); loadThread(); } catch (e) { if (id) unpend(id, key, e.message); else toast('Reaction: ' + e.message); }
 }
-// hover popover: who reacted, per emoji
-document.addEventListener('mouseover', (e) => {
-  const rx = e.target.closest && e.target.closest('.rx'); let tip = document.querySelector('#rxtip');
-  if (!rx) { tip?.remove(); return; } if (tip && tip.dataset.for === rx.dataset.tip) return; tip?.remove();
-  let list = []; try { list = JSON.parse(rx.dataset.tip); } catch (_) {}
-  tip = document.createElement('div'); tip.id = 'rxtip'; tip.dataset.for = rx.dataset.tip;
-  tip.innerHTML = list.map(([k, by]) => `<div><span class="e">${esc(k)}</span><span>${esc(by.map((n) => n === myNick() ? 'You' : n).join(', '))}</span></div>`).join('');
-  document.body.appendChild(tip); const r = rx.getBoundingClientRect(); const w = tip.offsetWidth;
-  tip.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px'; tip.style.top = Math.max(8, r.top - tip.offsetHeight - 6) + 'px';
-});
+
 function setReply(m) {
   S.replyTo = m ? { chat: S.chat, id: m.message_id, from: m.from === OPERATOR ? 'You' : m.from, body: m.body } : null;
   let bar = $('#replybar'); if (!S.replyTo) { bar?.remove(); return; }
