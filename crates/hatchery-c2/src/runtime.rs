@@ -491,6 +491,53 @@ pub struct C2Running {
     task: Option<JoinHandle<Result<(), C2Error>>>,
 }
 
+
+fn load_restreamer_keys_from_env() -> Result<Option<crate::restreamer::RestreamerKeys>, C2Error> {
+    use crate::restreamer::{PublicKeyBytes, RestreamerKeys};
+    use std::path::PathBuf;
+    let seed_path = match std::env::var_os("HATCHERY_RESTREAMER_C2_SEED_FILE") {
+        Some(p) => PathBuf::from(p),
+        None => return Ok(None),
+    };
+    let recip_b64 = match std::env::var("HATCHERY_RESTREAMER_RECIPIENT_PUBLIC_B64") {
+        Ok(v) if !v.trim().is_empty() => v,
+        _ => return Ok(None),
+    };
+    let seed_bytes = std::fs::read(&seed_path).map_err(|e| {
+        C2Error::Api(std::io::Error::other(format!(
+            "HATCHERY_RESTREAMER_C2_SEED_FILE {}: {e}",
+            seed_path.display()
+        )))
+    })?;
+    if seed_bytes.len() != 32 {
+        return Err(C2Error::Api(std::io::Error::other(
+            "HATCHERY_RESTREAMER_C2_SEED_FILE must be exactly 32 bytes",
+        )));
+    }
+    let mut seed = [0u8; 32];
+    seed.copy_from_slice(&seed_bytes);
+    let recip = decode_b64_32(&recip_b64).map_err(|e| {
+        C2Error::Api(std::io::Error::other(format!(
+            "HATCHERY_RESTREAMER_RECIPIENT_PUBLIC_B64: {e}"
+        )))
+    })?;
+    Ok(Some(RestreamerKeys::from_seeds(seed, recip)))
+}
+
+fn decode_b64_32(text: &str) -> Result<[u8; 32], String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(text.trim())
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(text.trim()))
+        .map_err(|e| e.to_string())?;
+    if bytes.len() != 32 {
+        return Err(format!("expected 32 bytes, got {}", bytes.len()));
+    }
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&bytes);
+    Ok(out)
+}
+
 impl C2Running {
     pub async fn start(config: C2Config) -> Result<Self, C2Error> {
         prepare_default_control_parent(&config.control_endpoint)?;
@@ -616,11 +663,17 @@ async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch:
         config.restreamer_core_token.clone(),
     ) {
         let journal = Arc::new(crate::restreamer::MemoryJournal::new());
+        let keys = load_restreamer_keys_from_env()?;
+        if keys.is_some() {
+            tracing::info!("A2 restreamer nested keys loaded");
+        } else {
+            tracing::warn!("A2 restreamer nested keys missing; uplink DATA cannot be unwrapped (set HATCHERY_RESTREAMER_C2_SEED_FILE + HATCHERY_RESTREAMER_RECIPIENT_PUBLIC_B64)");
+        }
         let restreamer = crate::restreamer::Restreamer::new(
             crate::restreamer::BufferLimits::default(),
             journal,
             core_token.clone(),
-            None,
+            keys,
         );
         let cfg = crate::restreamer::RestreamerConfig {
             node_listen,

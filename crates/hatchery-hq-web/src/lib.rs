@@ -249,15 +249,45 @@ async fn api_server(State(s): State<Shared>, Path(rest): Path<String>, method: M
     }
 }
 
-/// Enrollment records merged with live transport state from C2 `/status`.
+/// Enrollment records merged with live transport: prefer core operator topology (A2 drain),
+/// fall back to C2 HTTP `/status` (call-home presence).
 async fn api_nodes(State(s): State<Shared>) -> Response {
     let cfg = &s.config;
     let enrolled = upstream(cfg.c2_api, "GET", "/v1/enroll/nodes", Some(&cfg.c2_token), b"", Duration::from_secs(10)).await.ok().filter(|r| r.0 == 200).and_then(|r| serde_json::from_slice::<Value>(&r.1).ok());
+    let core_topo = match tokio::time::timeout(
+        Duration::from_secs(3),
+        hatchery_c2_client::connect_local(&cfg.c2_control, &cfg.c2_token),
+    )
+    .await
+    {
+        Ok(Ok((control, _ev))) => {
+            let topo = control.current_topology();
+            serde_json::to_value(topo).ok()
+        }
+        _ => None,
+    };
     let status = match hatchery_c2_client::C2Client::new(cfg.c2_api, cfg.c2_token.clone()) {
         Ok(c) => c.status().await.ok().and_then(|st| serde_json::to_value(st).ok()),
         Err(_) => None,
     };
     let live = |id: &str| -> String {
+        if let Some(tr) = core_topo
+            .as_ref()
+            .and_then(|st| st["nodes"].as_array())
+            .and_then(|nodes| {
+                nodes.iter().find_map(|n| {
+                    let nid = n["node_id"].as_str().or_else(|| n.get("id").and_then(|x| x.as_str()))?;
+                    if nid == id {
+                        n["transport"].as_str().map(str::to_lowercase)
+                            .or_else(|| n["transport_state"].as_str().map(str::to_lowercase))
+                    } else {
+                        None
+                    }
+                })
+            })
+        {
+            return tr;
+        }
         status
             .as_ref()
             .and_then(|st| st["nodes"][id]["transport"].as_str())
@@ -378,15 +408,14 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     let cfg = &s.config;
     let say = |kind: &str, text: String| json!({ "type": kind, "text": text }).to_string();
     let node = NodeId::new(q.node.clone()).map_err(|e| e.to_string())?;
-    let http = hatchery_c2_client::C2Client::new(cfg.c2_api, cfg.c2_token.clone()).map_err(|e| e.to_string())?;
-    let status = http.status().await.map_err(|e| e.to_string())?;
-    let observed = status.nodes.get(&node).filter(|n| n.transport == NodeTransportState::Online);
+    let (control, mut events) = hatchery_c2_client::connect_local(&cfg.c2_control, &cfg.c2_token).await.map_err(|e| e.to_string())?;
+    let topo = control.current_topology();
+    let observed = topo.nodes.iter().find(|n| n.node_id == node && n.transport == NodeTransportState::Online);
     let Some(observed) = observed else {
-        let _ = socket.send(Message::text(say("error", format!("node {} is not online", q.node)))).await;
+        let _ = socket.send(Message::text(say("error", format!("node {} is not online on core operator", q.node)))).await;
         return Err("node not online".into());
     };
-    let route = NodeRoute { node_id: node.clone(), expected_incarnation_id: observed.cursor.clone().ok_or("no cursor")?.incarnation_id };
-    let (control, mut events) = hatchery_c2_client::connect_local(&cfg.c2_control, &cfg.c2_token).await.map_err(|e| e.to_string())?;
+    let route = NodeRoute { node_id: node.clone(), expected_incarnation_id: observed.current_incarnation_id.ok_or("no cursor")? };
     let spawned = control
         .request(
             route.clone(),

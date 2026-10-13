@@ -169,6 +169,7 @@ async fn main() {
     let mut no_wg = false;
     let mut door_listen: Option<std::net::SocketAddr> = None;
     let mut door_c2: Option<std::net::SocketAddr> = None;
+    let mut restream_uplink: Option<std::net::SocketAddr> = None;
     let mut wake_policy_path: Option<PathBuf> = None;
     let mut kill_switch = std::env::var("HATCHERY_KILL_SWITCH").is_ok_and(|v| v == "1");
     let mut run_as: Option<String> = std::env::var("HATCHERY_RUN_AS").ok().filter(|v| !v.is_empty());
@@ -184,6 +185,8 @@ async fn main() {
             // Loopback door for agents: mail/task operations signed by this node and sent to C2.
             "--door-listen" => door_listen = Some(required_value("--door-listen", args.next()).parse().unwrap_or_else(|e| fail(&format!("--door-listen is invalid: {e}")))),
             "--door-c2" => door_c2 = Some(required_value("--door-c2", args.next()).pipe_resolve("--door-c2")),
+            "--restream-uplink" => restream_uplink = Some(required_value("--restream-uplink", args.next()).parse()
+                .unwrap_or_else(|e| fail(&format!("--restream-uplink is invalid: {e}")))),
             // Letter pipeline policy (deliver / terminal grant / routines / node mail), JSON.
             "--wake-policy" => wake_policy_path = Some(required_value("--wake-policy", args.next()).into()),
             // Egress is dropped unless it goes through the tunnel (fails closed).
@@ -445,6 +448,9 @@ async fn main() {
     }
     let node_id_for_door = Some(node_id.to_string());
     let state_path = default_state_path(&node_id).unwrap_or_else(|error| fail(&error.to_string()));
+    let endpoint_for_bridge = endpoint.clone();
+    let token_for_bridge = token.clone();
+    let node_id_for_bridge = node_id.to_string();
     let config = NodeServerConfig::new(endpoint, token, node_id, workspaces)
         .and_then(|config| config.with_state_path(&state_path))
         .and_then(|config| config.with_api_listen(api_listen))
@@ -583,9 +589,95 @@ async fn main() {
     } else if door_listen.is_some() || door_c2.is_some() {
         fail("--door-listen and --door-c2 need each other and --enrolled");
     }
+    // A2: opaque restreamer uplink (g4a bridged to core over Noise). Optional.
+    let restream_uplink = restream_uplink.or_else(|| {
+        std::env::var("HATCHERY_RESTREAM_UPLINK").ok().and_then(|v| v.parse().ok())
+    });
+    if let Some(uplink) = restream_uplink {
+        let keys = resolve_upstream_keys(enroll_state.as_deref())
+            .unwrap_or_else(|e| fail(&e));
+        let endpoint = endpoint_for_bridge;
+        let node_id = node_id_for_bridge;
+        let bridge_token = token_for_bridge;
+        let journal = enroll_state.as_ref().map(|dir| {
+            let path = dir.join("uplink.journal");
+            std::sync::Arc::new(
+                hatchery_node::uplink_journal::UplinkJournal::open(node_id.clone(), &path)
+                    .unwrap_or_else(|e| fail(&format!("uplink journal: {e}"))),
+            )
+        });
+        let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+        tokio::spawn(async move {
+            loop {
+                match hatchery_node::restream_g4a_bridge::run(
+                    endpoint.clone(),
+                    node_id.clone(),
+                    bridge_token.clone(),
+                    uplink,
+                    keys,
+                    journal.clone(),
+                    stop_rx.clone(),
+                )
+                .await
+                {
+                    Ok(()) => break,
+                    Err(err) => {
+                        tracing::warn!(error = %err, %uplink, "restream g4a bridge ended; retry in 3s");
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                        if *stop_rx.borrow() { break; }
+                    }
+                }
+            }
+        });
+        // Keep stop_tx alive for process lifetime.
+        std::mem::forget(stop_tx);
+        tracing::info!(%uplink, "restream g4a bridge starting");
+    }
     if let Err(error) = server.run_until_ctrl_signal().await {
         fail(&error.to_string());
     }
+}
+
+fn resolve_upstream_keys(enroll_dir: Option<&std::path::Path>) -> Result<hatchery_node::restream_session::UpstreamKeys, String> {
+    use hatchery_node::restream_session::UpstreamKeys;
+    use hatchery_core::nested::PublicKeyBytes;
+    let from_b64 = |name: &str, v: &str| -> Result<PublicKeyBytes, String> {
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(v.trim())
+            .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(v.trim()))
+            .map_err(|e| format!("{name}: {e}"))?;
+        if bytes.len() != 32 {
+            return Err(format!("{name}: expected 32 bytes, got {}", bytes.len()));
+        }
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&bytes);
+        Ok(PublicKeyBytes(out))
+    };
+    let mut c2 = std::env::var("HATCHERY_UPSTREAM_C2_PUBLIC_B64").ok().filter(|s| !s.is_empty());
+    let mut recip = std::env::var("HATCHERY_UPSTREAM_RECIPIENT_PUBLIC_B64").ok().filter(|s| !s.is_empty());
+    if c2.is_none() || recip.is_none() {
+        if let Some(dir) = enroll_dir {
+            let path = dir.join("enrollment.json");
+            if path.is_file() {
+                let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?;
+                let resp = v.get("response").unwrap_or(&v);
+                if c2.is_none() {
+                    c2 = resp.get("upstream_c2_public_key").and_then(|x| x.as_str()).map(str::to_owned);
+                }
+                if recip.is_none() {
+                    recip = resp.get("upstream_recipient_public_key").and_then(|x| x.as_str()).map(str::to_owned);
+                }
+            }
+        }
+    }
+    let c2 = c2.ok_or("upstream C2 public key missing (HATCHERY_UPSTREAM_C2_PUBLIC_B64 or enrollment.json)")?;
+    let recip = recip.ok_or("upstream recipient public key missing (HATCHERY_UPSTREAM_RECIPIENT_PUBLIC_B64 or enrollment.json)")?;
+    Ok(UpstreamKeys {
+        c2_public: from_b64("c2", &c2)?,
+        recipient_public: from_b64("recipient", &recip)?,
+    })
 }
 
 /// Stock CLI secret resolver. There is no secret product here: any
