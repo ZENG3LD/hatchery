@@ -17,7 +17,7 @@ path = "src/main.rs"
 [dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.3" }
-hatchery-c2-protocol = { path = "../hatchery-c2-protocol", version = "0.2.3" }
+hatchery-c2-protocol = { path = "../hatchery-c2-protocol", version = "0.2.3", features = ["nested-crypto"] }
 hatchery-c2 = { path = "../hatchery-c2", version = "0.2.3" }
 hatchery-build = { path = "../hatchery-build", version = "0.2.3" }
 base64 = "0.22"

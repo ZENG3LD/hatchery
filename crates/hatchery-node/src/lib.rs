@@ -39,6 +39,7 @@ mod network_allowlist_catalog;
 pub(crate) use gate4agent_node_core::platform;
 pub mod enroll_client;
 pub mod uplink_journal;
+pub mod restream_session;
 pub mod m4a_accounts;
 pub mod door;
 pub mod wake_pipeline;

@@ -247,6 +247,11 @@ pub fn core_open_inner(
     transport.decrypt(ciphertext)
 }
 
+/// Node seals already-inner bytes (handshake or transport, tagged) for C2's outer layer.
+pub fn node_seal_outer(c2_public: PublicKeyBytes, inner: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    outer_seal(&PublicKey::from(c2_public.0), inner)
+}
+
 /// C2 strips the outer layer; returns opaque inner bytes (Noise ciphertext or handshake).
 pub fn c2_strip_outer(keys: &RestreamerKeys, sealed: &[u8]) -> Result<Vec<u8>, CryptoError> {
     outer_open(&keys.c2_secret, sealed)

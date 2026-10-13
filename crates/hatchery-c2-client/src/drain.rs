@@ -52,12 +52,14 @@ impl DrainClient {
         let mut stream = TcpStream::connect(self.addr).await?;
         stream.write_all(self.token.as_bytes()).await?;
         stream.write_all(b"\n").await?;
-        Ok(DrainSession { stream })
+        Ok(DrainSession { stream, buf: Vec::new() })
     }
 }
 
 pub struct DrainSession {
     stream: TcpStream,
+    /// Bytes read but not yet decoded (several envelopes may share one read).
+    buf: Vec<u8>,
 }
 
 impl DrainSession {
@@ -95,18 +97,51 @@ impl DrainSession {
         Ok(())
     }
 
+    /// Downlink: send opaque bytes to the node selected by `open` (C2 relays as-is).
+    pub async fn send_data(&mut self, channel_id: u32, payload: Vec<u8>) -> Result<(), DrainError> {
+        let frame = Frame::data(channel_id, 0, payload).map_err(DrainError::Frame)?;
+        self.stream
+            .write_all(&frame.encode().map_err(DrainError::Frame)?)
+            .await?;
+        Ok(())
+    }
+
+    /// Next drained envelope, or `None` on timeout / close. Non-DATA control frames
+    /// from C2 (e.g. PONG) are skipped.
     pub async fn recv_envelope(
         &mut self,
         deadline: Duration,
     ) -> Result<Option<DrainEnvelope>, DrainError> {
-        let mut buf = vec![0u8; 64 * 1024];
-        let n = match tokio::time::timeout(deadline, self.stream.read(&mut buf)).await {
-            Ok(Ok(0)) => return Ok(None),
-            Ok(Ok(n)) => n,
-            Ok(Err(e)) => return Err(e.into()),
-            Err(_) => return Ok(None),
-        };
-        let (env, _) = DrainEnvelope::decode(&buf[..n]).map_err(DrainError::Frame)?;
-        Ok(Some(env))
+        let until = tokio::time::Instant::now() + deadline;
+        loop {
+            if !self.buf.is_empty() {
+                match DrainEnvelope::decode(&self.buf) {
+                    Ok((env, used)) => {
+                        self.buf.drain(..used);
+                        return Ok(Some(env));
+                    }
+                    Err(FrameError::Truncated) => {}
+                    Err(_) => {
+                        // A bare frame (GOAWAY on auth failure, PONG): surface auth refusal.
+                        if let Ok((frame, used)) = Frame::decode(&self.buf) {
+                            self.buf.drain(..used);
+                            if frame.frame_type == hatchery_c2_protocol::FrameType::GoAway {
+                                return Err(DrainError::Auth);
+                            }
+                            continue;
+                        }
+                        return Err(DrainError::Frame(FrameError::Io("bad drain envelope".into())));
+                    }
+                }
+            }
+            let mut chunk = vec![0u8; 64 * 1024];
+            let left = until.saturating_duration_since(tokio::time::Instant::now());
+            match tokio::time::timeout(left, self.stream.read(&mut chunk)).await {
+                Ok(Ok(0)) => return Ok(None),
+                Ok(Ok(n)) => self.buf.extend_from_slice(&chunk[..n]),
+                Ok(Err(e)) => return Err(e.into()),
+                Err(_) => return Ok(None),
+            }
+        }
     }
 }

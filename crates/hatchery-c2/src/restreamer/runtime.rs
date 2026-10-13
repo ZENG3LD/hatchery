@@ -96,6 +96,20 @@ impl UplinkPeers {
         }
     }
 
+    /// Relay one opaque downlink frame (core -> node). C2 does not read the payload.
+    pub async fn send_to(&self, node_id: &str, frame: Frame) -> Result<(), RestreamerError> {
+        let out = {
+            let guard = self.inner.lock().expect("peers");
+            guard.get(node_id).map(|slot| slot.out.clone())
+        };
+        let Some(out) = out else {
+            return Err(RestreamerError::Frame(FrameError::Io("node uplink absent".into())));
+        };
+        out.send(frame)
+            .await
+            .map_err(|_| RestreamerError::Frame(FrameError::Io("node uplink closed".into())))
+    }
+
     pub fn is_registered(&self, node_id: &str) -> bool {
         self.inner.lock().expect("peers").contains_key(node_id)
     }
@@ -632,6 +646,16 @@ async fn handle_core_drain(
                                         // Even with an empty replay, do not resend <= after.
                                         sent_through = sent_through.max(after);
                                         resumed = true;
+                                    }
+                                }
+                                FrameType::Data => {
+                                    // Downlink: opaque bytes for the selected node, relayed as-is.
+                                    if let Some((ref nid, ch)) = selected {
+                                        let down = Frame::data(ch, frame.seq, frame.payload)
+                                            .map_err(RestreamerError::Frame)?;
+                                        if let Err(err) = rs.peers().send_to(nid, down).await {
+                                            tracing::debug!(error = %err, "downlink dropped");
+                                        }
                                     }
                                 }
                                 FrameType::Ping => {

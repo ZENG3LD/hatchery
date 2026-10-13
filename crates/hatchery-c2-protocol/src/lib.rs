@@ -70,6 +70,9 @@ pub use control_detail::control_telemetry_detail;
 
 mod multiplex;
 pub use multiplex::*;
+pub mod inner;
+#[cfg(feature = "nested-crypto")]
+pub mod nested;
 use gate4agent_node_protocol::{
     AgentStreamChunkV1, ManagedSessionRecord, ManagedSessionState, SessionHistorySummaryV1,
     NodeSnapshot, SessionAddress, SessionMode, SessionRecordId, WorkspaceId,
