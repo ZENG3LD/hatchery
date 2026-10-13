@@ -151,7 +151,8 @@ async fn handle_control(
     }
 
     let request = routed.request;
-    if !is_read_only(&request) && !*controller_owned {
+    let controller_gated = !is_read_only(&request);
+    if controller_gated && !*controller_owned {
         match acquire_controller(client, connection_id).await {
             Ok(true) => *controller_owned = true,
             Ok(false) => {
@@ -172,22 +173,48 @@ async fn handle_control(
     }
 
     let deadline = request_deadline(&request);
-    let response = match tokio::time::timeout(deadline, client.request(request)).await {
-        Ok(Ok(response)) => Ok(response),
-        Ok(Err(NodeClientError::Node(failure))) => Err(failure),
-        Ok(Err(err)) => return Err(err.to_string()),
-        Err(_) => {
-            return send_reply(
-                session,
-                op_id,
-                &failure_response(
-                    node_id,
-                    *incarnation_id,
-                    NodeFailureCode::HostDirectoryReadTimedOut,
-                    "node request deadline exceeded",
-                ),
-            )
-            .await;
+    // The node controller lease is short-lived and the node clears it on
+    // expiry, but `controller_owned` stays set on this long-lived bridge. So a
+    // controller-gated request can come back `ControllerRequired` even though
+    // we believe we hold it (lease lapsed, or the local client reconnected
+    // under a new connection id). Re-acquire once and retry so live PTY input
+    // and fresh spawns keep working on a held stream.
+    let mut remaining_retries = 1u8;
+    let response = loop {
+        match tokio::time::timeout(deadline, client.request(request.clone())).await {
+            Ok(Ok(response)) => break Ok(response),
+            Ok(Err(NodeClientError::Node(failure))) => {
+                if controller_gated
+                    && failure.code == NodeFailureCode::ControllerRequired
+                    && remaining_retries > 0
+                {
+                    remaining_retries -= 1;
+                    *controller_owned = false;
+                    match acquire_controller(client, connection_id).await {
+                        Ok(true) => {
+                            *controller_owned = true;
+                            continue;
+                        }
+                        Ok(false) => break Err(failure),
+                        Err(err) => return Err(err.to_string()),
+                    }
+                }
+                break Err(failure);
+            }
+            Ok(Err(err)) => return Err(err.to_string()),
+            Err(_) => {
+                return send_reply(
+                    session,
+                    op_id,
+                    &failure_response(
+                        node_id,
+                        *incarnation_id,
+                        NodeFailureCode::HostDirectoryReadTimedOut,
+                        "node request deadline exceeded",
+                    ),
+                )
+                .await;
+            }
         }
     };
 
