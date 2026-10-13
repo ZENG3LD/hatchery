@@ -73,7 +73,10 @@ function renderSidebar() {
   const root = $('#chats'); root.innerHTML = '';
   const last = (id) => { const m = S.mail[id] || []; const l = m[m.length - 1]; return l ? l.body : ''; };
   const item = (id, name, preview, active, onclick) => { if (!match(name)) return; const b = document.createElement('button'); b.className = 'chatitem' + (active ? ' on' : ''); b.title = name; b.innerHTML = avatar(id) + `<div class="t"><div class="n">${esc(name)}</div><div class="p">${esc(preview)}</div></div>`; b.onclick = () => { onclick(); document.body.classList.remove('sideopen'); }; root.appendChild(b); };
-  for (const { node, s: x } of allSessions().reverse()) item('pty:' + x.id, `${x.provider} · ${node}`, x.live ? 'live session' : (x.detached ? 'detached' : 'ended'), S.view === 'pty' && S.ptySession && S.ptySession.id === x.id, () => openPty(node, x));
+  for (const { node, s: x } of allSessions().reverse()) {
+    if (x.kind === 'browser') { item('br:' + x.id, `browser · ${node}`, x.live ? (x.url || 'live') : 'ended', false, () => openBrowser(node, x)); continue; }
+    item('pty:' + x.id, x.label || sessLabel(node, x), x.state === 'starting' ? 'starting…' : x.ended ? 'ended' : x._ws ? 'live' : 'reconnecting…', S.view === 'pty' && S.ptySession === x, () => openPty(node, x));
+  }
   for (const c of S.chats || []) item(c.target, c.label, last(c.target) || '', S.view === 'chat' && S.chat === c.target, () => openChat(c.target));
 }
 
@@ -120,9 +123,10 @@ function openNode(focus) {
     ${ns.length ? ns.map((n) => `<div class="ncard2"><div class="nrow">${avatar(n.node_id, 'mid')}<div class="grow"><b>${esc(n.node_id)}</b><div class="sub">${nodeStatus(n)} · ${esc(n.kind || '')}${n.tunnel_ip ? ' · ' + esc(n.tunnel_ip) : ''} · ${(S.sessions[n.node_id] || []).filter((x) => x.live).length} live</div></div>
       <select data-prov="${esc(n.node_id)}">${provOptions(0)}</select><button class="btn blue" data-spawn="${esc(n.node_id)}"${n.online ? '' : ' disabled'}>Start</button></div>
       <details${focus === n.node_id ? ' open' : ''}><summary>Environment</summary><div class="pcard">${envHtml(n)}</div></details></div>`).join('') : '<div class="pcard sub">No nodes connected.</div>'}
-    <div class="row" style="margin-top:12px"><button class="btn" id="nenroll">Add a node (enrollment code)</button></div></div>`;
+    <div class="row" style="margin-top:12px"><button class="btn" id="nreattach">Reattach…</button><button class="btn" id="nenroll">Add a node (enrollment code)</button></div></div>`;
   $('#nclose').onclick = () => d.remove();
   $('#nenroll').onclick = () => { d.remove(); openPanel('status'); issueCode(); };
+  $('#nreattach').onclick = () => reattachDialog(focus);
   d.querySelectorAll('[data-spawn]').forEach((b) => (b.onclick = () => { const sel = d.querySelector(`select[data-prov="${CSS.escape(b.dataset.spawn)}"]`); const opt = sel.selectedOptions[0]; d.remove(); startSession(b.dataset.spawn, opt.value, opt.dataset.parser); }));
 }
 function renderNode() {}
@@ -285,9 +289,9 @@ $('#addbtn').onclick = () => menu([
   ['Nodes…', () => openNode()],
   ['Create a task…', () => { openPanel('tasks'); }],
   ['Issue enrollment code', issueCode],
-  ['Open browser stream…', () => openPanel('computer')],
+  ['New browser on node…', () => { const n = visibleNodes().find((x) => x.online); if (n) startBrowser(n.node_id); else toast('No online node'); }],
 ]);
-$('#plusbtn').onclick = (e) => { e.stopPropagation(); menu([...visibleNodes().filter((n) => n.online).flatMap((n) => ['shell', 'claude'].map((p) => [`New ${p} on ${n.node_id}`, () => startSession(n.node_id, p)])), ['Nodes…', () => openNode()], ['Add a node (enrollment code)', () => { openPanel('status'); issueCode(); }]]); const m = $('#menu'); m.style.position = 'fixed'; m.style.left = '120px'; m.style.top = '54px'; m.style.bottom = 'auto'; };
+$('#plusbtn').onclick = (e) => { e.stopPropagation(); menu([...visibleNodes().filter((n) => n.online).flatMap((n) => ['shell', 'claude'].map((p) => [`New ${p} on ${n.node_id}`, () => startSession(n.node_id, p)])), ['Reattach…', () => reattachDialog()], ['Nodes…', () => openNode()], ['Add a node (enrollment code)', () => { openPanel('status'); issueCode(); }]]); const m = $('#menu'); m.style.position = 'fixed'; m.style.left = '120px'; m.style.top = '54px'; m.style.bottom = 'auto'; };
 // ---- account pill
 async function loadMe() {
   try { const r = await fetch('/api/me', { credentials: 'same-origin' }); const d = await r.json(); const u = d.user || {}; S.me = u; const nm = u.display_name || u.username || 'Account';
@@ -386,7 +390,7 @@ async function renderStatus() {
 }
 
 // ---- right panel: chat info + all status / control
-const TABS = [['info', 'Overview', 'info'], ['browser', 'Browser', 'globe'], ['tasks', 'Tasks', 'check'], ['library', 'Files', 'folder'], ['status', 'Fleet', 'server']];
+const TABS = [['info', 'Overview', 'info'], ['tasks', 'Tasks', 'check'], ['library', 'Files', 'folder'], ['status', 'Fleet', 'server']];
 function renderPanelHead() { if (S.view === 'pty' && S.ptySession) { const x = S.ptySession; $('#panelav').innerHTML = avatar('pty:' + x.id, 'mid'); $('#panelname').textContent = x.provider; $('#panelsub').textContent = 'on ' + S.sessionNode; return; } if (!S.chat) return; $('#panelav').innerHTML = avatar(S.chat, 'mid'); $('#panelname').textContent = chatName(S.chat); $('#panelsub').textContent = ''; }
 function openPanel(tab) { S.panel = true; localStorage.setItem('hq.panel', '1'); $('#panel').classList.add('open'); syncHead(); renderPanelHead(); setTab(tab || S.tab); }
 function closePanel() { S.panel = false; localStorage.setItem('hq.panel', ''); $('#panel').classList.remove('open'); syncHead(); }
@@ -428,7 +432,7 @@ $('#rzl').onpointerdown = (e) => {
 };
 dragger($('#rzr'), '--pw', 'hq.pw', 320, () => Math.min(640, innerWidth * 0.4), true);
 function setTab(tab) {
-  if (tab === 'computer') tab = 'browser';
+  if (tab === 'computer' || tab === 'browser') tab = 'info';
   if (!TABS.some(([id]) => id === tab)) tab = 'info';
   S.tab = tab; localStorage.setItem('hq.tab', tab); $('#ptabs').innerHTML = '';
   for (const [id, label, ic] of TABS) { const b = document.createElement('button'); b.innerHTML = `${ico(ic, 15)}<span class="l">${esc(label)}</span>`; b.title = label; b.setAttribute('role', 'tab'); b.className = id === tab ? 'on' : ''; b.onclick = () => setTab(id); $('#ptabs').appendChild(b); }
@@ -514,68 +518,127 @@ function openUrlOnNode(uri) {
   startBrowser(node, url);
 }
 
-// One live socket per on-screen PTY. S.sessions[node] records what we spawned.
-let tws = null;
-function tsend(o) { if (tws && tws.readyState === 1) tws.send(JSON.stringify(o)); }
-function recordSession(node, sess) { const arr = (S.sessions[node] ||= []); if (!arr.some((x) => x.id === sess.id)) arr.push(sess); }
-function endSession(node, id) { const arr = S.sessions[node]; if (!arr) return; const x = arr.find((s) => s.id === id); if (x) x.live = false; }
-
-// Start a provider session on a real node and open it full-center.
-function startSession(node, provider, parser) {
-  if (!node) { toast('Pick a node first'); return; }
-  if (provider === 'browser') { startBrowser(node); return; }
-  if (tws) { try { tws.close(); } catch (_) {} tws = null; }
-  const prov = parser ? 'fixture' : provider;
-  if (S.ptySession && S.ptySession.live) { S.ptySession.live = false; S.ptySession.detached = true; }
-  term.reset(); S.lastAnsi = '';
-  openPty(node, { provider: prov, key: '', id: 'pending', live: true });
-  try { fit.fit(); } catch (_) {}
-  S.sentCols = term.cols; S.sentRows = term.rows;
-  const q = new URLSearchParams({ node, provider, rows: term.rows, cols: term.cols }); if (parser) q.set('parser', parser);
-  $('#tinfo').textContent = `spawning ${prov} on ${node}…`;
-  let mine = null;
-  const sock = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/term?${q}`);
-  tws = sock;
+// ---- PTY sessions: one websocket per session, all kept open; only the active one paints the xterm.
+// A sidebar entry is 'starting' until the node returns a session id; failures remove it.
+const wsUrl = (path, q) => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}?${q}`;
+const sessLabel = (node, x) => x.instance_id != null ? `${node}/${x.provider}#${x.instance_id}` : `${x.provider} · ${node}`;
+function tsend(o, sess) { const x = sess || S.ptySession; if (x && x._ws && x._ws.readyState === 1) x._ws.send(JSON.stringify(o)); }
+function recordSession(node, sess) { const arr = (S.sessions[node] ||= []); if (!arr.includes(sess)) arr.push(sess); }
+function dropSession(node, sess) { const arr = S.sessions[node]; if (!arr) return; const i = arr.indexOf(sess); if (i >= 0) arr.splice(i, 1); if (S.ptySession === sess) { S.ptySession = null; if (S.view === 'pty') openChat(S.chat || (S.chats[0] || {}).target); } renderSidebar(); }
+function endSession(node, sess, why) {
+  if (!sess || sess.ended) return; sess.live = false; sess.ended = true; sess.state = 'ended';
+  if (why) toast(`${sessLabel(node, sess)}: ${why}`);
+  renderSidebar(); if (S.ptySession === sess) $('#tinfo').textContent = `${sessLabel(node, sess)} — ended`;
+  setTimeout(() => dropSession(node, sess), 8000); // grace: last output stays visible
+}
+function paint(sess) {
+  if (!sess || S.ptySession !== sess) return;
+  term.reset(); if (sess.lastAnsi) term.write(sess.lastAnsi);
+  window.lastFrameText = sess.lastText || '';
+  if (S.ptyLayout === 'chat') renderPtyChat(sess.lastText || '');
+  const u = findUrl(sess.lastText, sess.cols || term.cols); const tl = $('#tlink'); if (u) { tl.dataset.url = u; tl.title = u; tl.hidden = false; } else { tl.hidden = true; delete tl.dataset.url; }
+}
+// Open a socket for a session: spawn (provider) or attach (session id). Returns the sess object.
+function connectSession(node, sess, { provider, parser, attach } = {}) {
+  const rows = term.rows || 30, cols = term.cols || 110;
+  const q = new URLSearchParams({ node, rows, cols, keep: 'true' });
+  if (attach) q.set('session', attach); else q.set('provider', provider);
+  if (parser) q.set('parser', parser);
+  const sock = new WebSocket(wsUrl('/api/term', q)); sess._ws = sock; sess.state = sess.state || 'starting';
+  let bound = false;
   sock.onmessage = (m) => {
     const d = JSON.parse(m.data);
     if (d.type === 'spawned') {
-      const id = (d.session && JSON.stringify(d.session)) || String(Date.now());
-      S.events[node] = S.events[node] || new Map(); S.agentState[node] = 'idle';
-      S.session = d.session; S.sessionNode = node; S.sessionProv = prov;
-      const sess = { provider: prov, key: d.session, id, live: true, parser };
-      recordSession(node, sess); mine = sess; if (tws === sock) S.ptySession = sess;
-      $('#tinfo').textContent = `${prov} on ${node}`; logEv(`session ${prov} started on ${node}`);
-      renderSidebar(); renderPanelHead(); if (S.panel && S.tab === 'info') renderInfo(); refit();
+      bound = true; sess.key = d.session; sess.instance_id = d.instance_id; sess.workspace_id = d.workspace_id;
+      if (d.provider) sess.provider = d.provider; sess.id = `${node}:${d.workspace_id}:${d.instance_id}`;
+      sess.live = true; sess.state = 'live'; sess.label = d.label || sessLabel(node, sess);
+      S.events[node] = S.events[node] || new Map();
+      if (S.ptySession === sess) { $('#tinfo').textContent = sess.label; $('#headname').textContent = sess.label; S.sentCols = 0; refit(); }
+      logEv(`session ${sess.label} ${attach ? 'attached' : 'started'}`); renderSidebar(); renderPanelHead();
     }
-    if (d.type === 'error') { $('#tinfo').textContent = d.text; toast(d.text); }
-    if (d.type === 'ack') { if (!d.ok) toast('Refused: ' + (/does not permit/.test(d.detail) ? 'node status does not permit operator requests (policy)' : String(d.detail).slice(0, 120))); }
-    if (d.type === 'events') onEvents(node, d.events);
+    if (d.type === 'error') { if (!bound) { toast(`${sess.provider} on ${node}: ${d.text}`); dropSession(node, sess); } else toast(d.text); }
+    if (d.type === 'ack' && !d.ok) toast('Refused: ' + String(d.detail).slice(0, 120));
+    if (d.type === 'events' && S.ptySession === sess) onEvents(node, d.events);
     if (d.type === 'frame') {
-      const bytes = Uint8Array.from(atob(d.ansi), (c) => c.charCodeAt(0));
-      window.lastFrameText = d.text; term.reset(); term.write(bytes); S.lastAnsi = bytes; S.lastFrame = Date.now();
-      if (S.ptyLayout === 'chat') renderPtyChat(d.text);
-      const u = findUrl(d.text, d.cols || term.cols); const tl = $('#tlink'); if (u) { tl.dataset.url = u; tl.title = u; tl.hidden = false; } else { tl.hidden = true; delete tl.dataset.url; }
+      sess.lastAnsi = Uint8Array.from(atob(d.ansi), (c) => c.charCodeAt(0)); sess.lastText = d.text; sess.cols = d.cols; sess.lastFrame = Date.now();
+      if (S.ptySession === sess) { S.lastFrame = Date.now(); paint(sess); }
     }
   };
   sock.onclose = () => {
-    if (mine && !mine.detached) mine.live = false;
-    if (tws === sock) { $('#tinfo').textContent += ' [closed]'; S.session = null; S.agentState[node] = 'idle'; }
-    renderSidebar(); if (S.panel && S.tab === 'info' && S.view === 'pty') renderInfo();
+    if (sess._ws !== sock) return;
+    sess._ws = null;
+    if (!bound) { if (!sess.ended) { toast(`${sess.provider} on ${node}: could not start`); dropSession(node, sess); } return; }
+    // Socket gone: check whether the session is still live on the node; reattach if so.
+    setTimeout(() => reconcileNode(node), 500);
   };
+  return sess;
 }
-function stopSession(sess) {
-  if (S.ptySession && S.ptySession.id === sess.id && tws) tsend({ t: 'stop' });
-  endSession(S.sessionNode, sess.id); renderSidebar();
+function startSession(node, provider, parser) {
+  if (!node) { toast('Pick a node first'); return; }
+  if (provider === 'browser') { startBrowser(node); return; }
+  const prov = parser ? 'fixture' : provider;
+  const sess = { provider: prov, id: 'pending-' + Date.now() + Math.random().toString(36).slice(2, 6), live: false, state: 'starting', parser };
+  recordSession(node, sess); openPty(node, sess);
+  $('#tinfo').textContent = `starting ${prov} on ${node}…`;
+  connectSession(node, sess, { provider, parser });
 }
-// Open the full-center PTY for a session. Reconnecting to an existing session id is a later step;
-// for now this shows the live terminal of the session we hold a socket for.
+// Attach to a live node session by id: "6", "primary/6", "claude#6", "node/claude#6".
+function attachSession(node, idText, provider) {
+  const want = String(idText).trim(); const m = want.match(/(\d+)\s*$/); if (!m) { toast('Session id must end with the instance number'); return; }
+  const inst = Number(m[1]);
+  const existing = (S.sessions[node] || []).find((x) => x.instance_id === inst && !x.ended);
+  if (existing) { if (!existing._ws) connectSession(node, existing, { attach: `${existing.workspace_id || 'primary'}/${inst}` }); openPty(node, existing); return existing; }
+  const sess = { provider: provider || 'session', id: `attach-${node}-${inst}`, instance_id: inst, live: false, state: 'starting' };
+  recordSession(node, sess); openPty(node, sess);
+  connectSession(node, sess, { attach: want.includes('/') && !want.includes('#') ? want.split('/').slice(-2).join('/') : `primary/${inst}` });
+  return sess;
+}
+// Reconcile the sidebar with the node's live sessions: add missing (attach), drop gone ones.
+async function reconcileNode(node) {
+  let list; try { list = (await api('/api/sessions?node=' + encodeURIComponent(node))).sessions || []; } catch (_) { return; }
+  const live = list.filter((s) => s.live);
+  const arr = (S.sessions[node] ||= []);
+  for (const x of [...arr]) {
+    if (x.kind === 'browser' || x.state === 'starting' || x.ended) continue;
+    const on = live.find((s) => s.instance_id === x.instance_id);
+    if (!on) endSession(node, x, 'exited');
+    else if (!x._ws) connectSession(node, x, { attach: `${on.workspace_id}/${on.instance_id}` });
+  }
+  for (const s of live) {
+    if (arr.some((x) => x.instance_id === s.instance_id && !x.ended)) continue;
+    const sess = { provider: s.provider, id: `${node}:${s.workspace_id}:${s.instance_id}`, instance_id: s.instance_id, workspace_id: s.workspace_id, live: false, state: 'starting', label: s.label };
+    recordSession(node, sess); connectSession(node, sess, { attach: `${s.workspace_id}/${s.instance_id}` });
+  }
+  S.nodeSessions = S.nodeSessions || {}; S.nodeSessions[node] = list;
+  renderSidebar();
+}
+async function reconcileAll() { for (const n of visibleNodes().filter((n) => n.online)) await reconcileNode(n.node_id); }
+function reattachDialog(node) {
+  const nodes = visibleNodes().filter((n) => n.online); node = node || (nodes[0] || {}).node_id;
+  if (!node) { toast('No online node'); return; }
+  let d = $('#nodesdlg'); if (!d) { d = document.createElement('div'); d.id = 'nodesdlg'; document.body.appendChild(d); d.onclick = (e) => { if (e.target === d) d.remove(); }; }
+  d.innerHTML = `<div class="ndlg"><div class="ndh"><h2>Reattach session</h2><span class="grow"></span><button class="round" id="nclose">✕</button></div>
+    <div class="row"><select id="ranode">${nodes.map((n) => `<option${n.node_id === node ? ' selected' : ''}>${esc(n.node_id)}</option>`).join('')}</select>
+    <input id="raid" placeholder="claude#6 or primary/6" style="flex:1"><button class="btn blue" id="rago">Attach</button></div>
+    <div id="ralist" class="sub" style="margin-top:10px">Loading live sessions…</div></div>`;
+  $('#nclose').onclick = () => d.remove();
+  const load = async () => { const nd = $('#ranode').value; try { const r = await api('/api/sessions?node=' + encodeURIComponent(nd)); const ls = (r.sessions || []);
+    $('#ralist').innerHTML = ls.length ? ls.map((s) => `<div class="nrow" style="margin:4px 0"><span class="grow">${esc(s.label)} <span class="sub">${esc(s.status)}</span></span>${s.live ? `<button class="btn" data-ra="${s.instance_id}" data-prov="${esc(s.provider)}">Attach</button>` : ''}</div>`).join('') : 'No sessions on this node.';
+    d.querySelectorAll('[data-ra]').forEach((b) => (b.onclick = () => { d.remove(); attachSession(nd, b.dataset.ra, b.dataset.prov); })); } catch (e) { $('#ralist').textContent = e.message; } };
+  $('#ranode').onchange = load; load();
+  $('#rago').onclick = () => { const v = $('#raid').value.trim(); if (!v) return; d.remove(); attachSession($('#ranode').value, v); };
+}
+function stopSession(sess) { tsend({ t: 'stop' }, sess); }
 function openPty(node, sess) {
-  const bv = $('#bview'); if (bv) bv.style.display = 'none'; $('#terminal').style.display = '';
+  hideBrowserOverlay(false);
+  $('#terminal').style.display = '';
   showView('pty'); S.sessionNode = node; S.ptySession = sess;
-  $('#headname').textContent = `${sess.provider} · ${node}`; $('#headbtn').title = 'Session info · runs on ' + node; $('#headav').innerHTML = avatar('pty:' + sess.id, 'sm');
+  const lbl = sess.label || sessLabel(node, sess);
+  $('#headname').textContent = lbl; $('#headbtn').title = 'Session info · runs on ' + node; $('#headav').innerHTML = avatar('pty:' + sess.id, 'sm');
   renderSidebar(); renderPanelHead(); if (S.panel) setTab(S.tab);
-  $('#tinfo').textContent = `${sess.provider} on ${node}`;
+  $('#tinfo').textContent = sess.state === 'starting' ? `starting ${sess.provider} on ${node}…` : (sess.ended ? `${lbl} — ended` : lbl);
   setPtyLayout(S.ptyLayout || 'native');
+  S.sentCols = 0; paint(sess);
   setTimeout(() => { refit(); term.focus(); }, 30);
 }
 // Layout toggle: native xterm vs. a re-rendered chat-like PTY view (stub for later). Not m4a.
@@ -593,7 +656,7 @@ function renderPtyChat(text) {
 }
 $('#tpaste').onclick = async () => { try { const t = await navigator.clipboard.readText(); if (t) term.paste(t); term.focus(); } catch (_) { toast('Clipboard blocked: press Ctrl+V (Cmd+V) in the terminal'); term.focus(); } };
 $('#ptylayout').onclick = (e) => { const b = e.target.closest('button[data-l]'); if (b) setPtyLayout(b.dataset.l); };
-$('#tstop').onclick = () => { tsend({ t: 'stop' }); };
+$('#tstop').onclick = () => { if (S.ptySession) stopSession(S.ptySession); };
 $('#tlink').onclick = () => { const u = $('#tlink').dataset.url || findUrl(window.lastFrameText, term.cols); if (u) openUrlOnNode(u); else toast('No link in the current frame'); };
 term.onData((data) => tsend({ t: 'data', data }));
 // Mouse CSI reports arrive here only when the app enabled DEC mouse tracking (1000/1002/1003/1006).
@@ -655,87 +718,75 @@ async function renderLibraryTab() {
 }
 
 
-// ---- Browser sessions (dig2browser over restream)
+// ---- Browser sessions (dig2browser over restream): floating overlay window, frame-exact canvas.
 function startBrowser(node, url) {
   const id = 'b' + Date.now().toString(36);
-  const sess = { provider: 'browser', key: 'br-' + id, id, live: true, kind: 'browser', url: url || 'https://example.org/' };
-  if (!S.sessions[node]) S.sessions[node] = [];
-  S.sessions[node].push(sess);
-  openBrowser(node, sess);
+  const sess = { provider: 'browser', key: 'br-' + id, id, live: false, kind: 'browser', url: url || 'https://example.org/' };
+  recordSession(node, sess); openBrowser(node, sess); renderSidebar();
 }
+function browserWin() {
+  let w = $('#bwin'); if (w) return w;
+  w = document.createElement('div'); w.id = 'bwin'; w.className = 'bwin';
+  w.innerHTML = `<div class="bwbar"><span class="bwgrip" title="Drag">⠿</span><input id="bwurl" placeholder="https://…"><span id="bwmeta" class="sub"></span><button class="ibtn" id="bwmin" title="Minimize">–</button><button class="ibtn" id="bwclose" title="Close (stop)">✕</button></div><canvas id="bwcanvas" tabindex="0"></canvas><div class="bwrz" title="Resize"></div>`;
+  document.body.appendChild(w);
+  const saved = JSON.parse(localStorage.getItem('hq.bwin') || 'null');
+  if (saved) Object.assign(w.style, saved); else { w.style.top = '64px'; w.style.right = '24px'; w.style.width = '720px'; }
+  const save = () => localStorage.setItem('hq.bwin', JSON.stringify({ top: w.style.top, left: w.style.left, right: w.style.right, width: w.style.width }));
+  // Drag by title bar.
+  w.querySelector('.bwbar').addEventListener('pointerdown', (e) => {
+    if (e.target.closest('input,button')) return; const r = w.getBoundingClientRect(); const ox = e.clientX - r.left, oy = e.clientY - r.top;
+    const mv = (ev) => { w.style.left = Math.max(0, Math.min(innerWidth - 80, ev.clientX - ox)) + 'px'; w.style.top = Math.max(0, Math.min(innerHeight - 40, ev.clientY - oy)) + 'px'; w.style.right = 'auto'; };
+    const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); save(); };
+    addEventListener('pointermove', mv); addEventListener('pointerup', up);
+  });
+  // Resize by width; height follows the frame aspect.
+  w.querySelector('.bwrz').addEventListener('pointerdown', (e) => {
+    e.preventDefault(); const r = w.getBoundingClientRect(); const sx = e.clientX, sw = r.width;
+    if (w.style.right !== 'auto') { w.style.left = r.left + 'px'; w.style.right = 'auto'; }
+    const mv = (ev) => { w.style.width = Math.max(320, Math.min(innerWidth - 20, sw + ev.clientX - sx)) + 'px'; };
+    const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); save(); };
+    addEventListener('pointermove', mv); addEventListener('pointerup', up);
+  });
+  $('#bwmin').onclick = () => { w.classList.toggle('min'); };
+  return w;
+}
+function hideBrowserOverlay(stop) { const w = $('#bwin'); if (w) w.hidden = true; if (stop && S.browserSession && S.browserSession._ws) { try { S.browserSession._ws.send(JSON.stringify({ t: 'stop' })); S.browserSession._ws.close(); } catch (_) {} } }
 function openBrowser(node, sess) {
-  S.view = 'browser'; S.sessionNode = node; S.ptySession = sess; S.browserSession = sess;
-  document.body.classList.add('ptymode'); document.body.classList.remove('nodemode');
-  showView('pty');
-  $('#headname').textContent = `browser · ${node}`; $('#headbtn').title = 'Browser on ' + node;
-  $('#headav').innerHTML = avatar('pty:' + sess.id, 'sm');
-  $('#tinfo').textContent = `browser on ${node}`;
-  $('#terminal').style.display = 'none';
-  let wrap = $('#bview');
-  if (!wrap) {
-    wrap = document.createElement('div'); wrap.id = 'bview'; wrap.className = 'bview';
-    wrap.innerHTML = `<div class="bbar"><input id="burl2" placeholder="https://…"><button class="btn" id="bnav2">Go</button><span class="grow"></span><span id="bmeta" class="sub"></span><button class="btn" id="bstop2">Stop</button></div><canvas id="bcanvas2"></canvas>`;
-    ($('#ptyview') || document.body).appendChild(wrap);
-  }
-  wrap.style.display = '';
-  const canvas = $('#bcanvas2'); const ctx = canvas.getContext('2d');
-  if (S.bws) try { S.bws.close(); } catch (_) {}
-  const q = new URLSearchParams({ node, session: sess.key, url: sess.url || 'https://example.org/' });
-  const real = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/browser?${q}`);
-  real.binaryType = 'blob'; S.bws = real; sess._ws = real;
-  real.onmessage = async (m) => {
-    if (typeof m.data === 'string') {
-      const d = JSON.parse(m.data);
-      if (d.type === 'spawned') { sess.key = d.session; $('#bmeta').textContent = 'session ' + d.session; }
-      if (d.type === 'started' || d.type === 'frame_info') {
-        if (d.url) $('#burl2').value = d.url;
-        $('#bmeta').textContent = ((d.title || d.url || '') + (d.bytes ? ` · ${d.bytes}B` : '')).trim();
+  S.browserSession = sess; S.browserNode = node;
+  const w = browserWin(); w.hidden = false; w.classList.remove('min');
+  const canvas = $('#bwcanvas'); const ctx = canvas.getContext('2d');
+  $('#bwurl').value = sess.url || '';
+  if (sess.lastBmp) { canvas.width = sess.lastBmp.width; canvas.height = sess.lastBmp.height; ctx.drawImage(sess.lastBmp, 0, 0); }
+  const bsend = (o) => { const ws = S.browserSession && S.browserSession._ws; if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+  if (!sess._ws || sess._ws.readyState > 1) {
+    const q = new URLSearchParams({ node, session: sess.key, url: sess.url || 'https://example.org/', keep: 'true' });
+    const ws = new WebSocket(wsUrl('/api/browser', q)); ws.binaryType = 'blob'; sess._ws = ws;
+    ws.onmessage = async (m) => {
+      if (typeof m.data === 'string') {
+        const d = JSON.parse(m.data);
+        if (d.type === 'spawned') { sess.key = d.session; sess.live = true; renderSidebar(); }
+        if (d.type === 'started' || d.type === 'frame_info') { if (d.url) { sess.url = d.url; if (S.browserSession === sess && document.activeElement !== $('#bwurl')) $('#bwurl').value = d.url; } if (S.browserSession === sess) $('#bwmeta').textContent = d.title || ''; }
+        if (d.type === 'error') toast('browser: ' + d.text);
+        if (d.type === 'stopped') { sess.live = false; endSession(node, sess); }
+        return;
       }
-      if (d.type === 'error') toast('browser: ' + d.text);
-      if (d.type === 'stopped') { sess.live = false; $('#bmeta').textContent = 'stopped'; }
-      return;
-    }
-    const bmp = await createImageBitmap(m.data);
-    canvas.width = bmp.width; canvas.height = bmp.height; ctx.drawImage(bmp, 0, 0);
-    window.browserFrames = (window.browserFrames || 0) + 1;
-  };
-  real.onclose = () => { sess.live = false; };
+      const bmp = await createImageBitmap(m.data); sess.lastBmp = bmp;
+      if (S.browserSession !== sess) return;
+      if (canvas.width !== bmp.width || canvas.height !== bmp.height) { canvas.width = bmp.width; canvas.height = bmp.height; }
+      ctx.drawImage(bmp, 0, 0); window.browserFrames = (window.browserFrames || 0) + 1;
+    };
+    ws.onclose = () => { if (sess._ws === ws) { sess._ws = null; if (!sess.live) dropSession(node, sess); else endSession(node, sess); } };
+  }
+  // Input maps through the canvas's own scale: CSS size → frame pixels, any window size.
   const pos = (e) => { const r = canvas.getBoundingClientRect(); return { x: Math.round((e.clientX - r.left) * canvas.width / Math.max(1, r.width)), y: Math.round((e.clientY - r.top) * canvas.height / Math.max(1, r.height)) }; };
-  const bsend = (o) => { if (real.readyState === 1) real.send(JSON.stringify(o)); };
-  canvas.onclick = (e) => bsend({ t: 'click', ...pos(e), button: 'left' });
+  canvas.onclick = (e) => { canvas.focus(); bsend({ t: 'click', ...pos(e), button: 'left' }); };
   canvas.oncontextmenu = (e) => { e.preventDefault(); bsend({ t: 'click', ...pos(e), button: 'right' }); };
   canvas.onwheel = (e) => { e.preventDefault(); bsend({ t: 'scroll', ...pos(e), dx: e.deltaX, dy: e.deltaY }); };
-  canvas.tabIndex = 0;
-  canvas.onkeydown = (e) => {
-    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { bsend({ t: 'text', text: e.key }); e.preventDefault(); }
-    else { bsend({ t: 'key', key: e.key }); e.preventDefault(); }
-  };
-  $('#bnav2').onclick = () => { sess.url = $('#burl2').value; bsend({ t: 'nav', url: sess.url }); };
-  $('#burl2').onkeydown = (e) => { if (e.key === 'Enter') $('#bnav2').click(); };
-  $('#bstop2').onclick = () => { bsend({ t: 'stop' }); real.close(); sess.live = false; wrap.style.display = 'none'; $('#terminal').style.display = ''; showView('chat'); };
+  canvas.onkeydown = (e) => { e.preventDefault(); if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) bsend({ t: 'text', text: e.key }); else bsend({ t: 'key', key: e.key }); };
+  $('#bwurl').onkeydown = (e) => { if (e.key === 'Enter') { let u = $('#bwurl').value.trim(); if (u && !/^https?:\/\//i.test(u)) u = 'https://' + u; sess.url = u; bsend({ t: 'nav', url: u }); canvas.focus(); } };
+  $('#bwclose').onclick = () => { hideBrowserOverlay(true); };
   renderSidebar();
 }
-
-// ---- browser tab (dig2 station frames)
-let bws = null; const canvas = $('#bcanvas'); const ctx = canvas.getContext('2d');
-function bsend(o) { if (bws && bws.readyState === 1) bws.send(JSON.stringify(o)); }
-$('#bopen').onclick = () => {
-  if (bws) bws.close();
-  bws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/browser?session=${encodeURIComponent($('#bsess').value.trim())}`); bws.binaryType = 'blob';
-  bws.onmessage = async (m) => {
-    if (typeof m.data === 'string') { const d = JSON.parse(m.data); if (d.type === 'sent') $('#binfo').textContent = `sent ${d.op} (${d.bytes} bytes) at ${d.x ?? ''},${d.y ?? ''}`; return; }
-    const bmp = await createImageBitmap(m.data); canvas.width = bmp.width; canvas.height = bmp.height; ctx.drawImage(bmp, 0, 0); window.browserFrames = (window.browserFrames || 0) + 1;
-  };
-};
-const pos = (e) => { const r = canvas.getBoundingClientRect(); return { x: Math.round((e.clientX - r.left) * canvas.width / r.width), y: Math.round((e.clientY - r.top) * canvas.height / r.height) }; };
-canvas.onclick = (e) => bsend({ t: 'click', ...pos(e), button: 'left' });
-canvas.oncontextmenu = (e) => { e.preventDefault(); bsend({ t: 'click', ...pos(e), button: 'right' }); };
-canvas.onwheel = (e) => { e.preventDefault(); bsend({ t: 'scroll', ...pos(e), dx: e.deltaX, dy: e.deltaY }); };
-$('#bnav').onclick = () => bsend({ t: 'nav', url: $('#burl').value });
-$('#btype').onclick = () => bsend({ t: 'text', text: $('#btext').value });
-$('#benter').onclick = () => bsend({ t: 'key', key: 'Enter' });
-$('#bup').onclick = () => bsend({ t: 'scroll', x: 400, y: 250, dx: 0, dy: -300 });
-$('#bdown').onclick = () => bsend({ t: 'scroll', x: 400, y: 250, dx: 0, dy: 300 });
 
 // ---- live events: mail wakes HQ
 const es = new EventSource('/api/events');
@@ -759,7 +810,7 @@ api('/api/config').then(async (c) => { S.chats = c.chats && c.chats.length ? c.c
     const want = nodeHash || chatHash || localStorage.getItem('hq.chat');
     if (want && (S.chats || []).some((c) => c.target === want)) openChat(want); else openChat(S.chats[0].target);
     if (nodeHash && (S.nodes || []).some((n) => n.node_id === nodeHash)) openNode(nodeHash);
-    if (localStorage.getItem('hq.panel')) openPanel(SAVED_TAB || 'info'); setTimeout(prefetch, 1500); setInterval(prefetch, 60000); }); let pollN = 0; setInterval(() => { pollN++; if (S.chat && !document.hidden && (String(S.chat).startsWith('m4a:') || pollN % 4 === 0)) loadThread(); }, 2500); setInterval(loadNodes, 4000);
+    if (localStorage.getItem('hq.panel')) openPanel(SAVED_TAB || 'info'); setTimeout(prefetch, 1500); setInterval(prefetch, 60000); }); let pollN = 0; setInterval(() => { pollN++; if (S.chat && !document.hidden && (String(S.chat).startsWith('m4a:') || pollN % 4 === 0)) loadThread(); }, 2500); setInterval(loadNodes, 4000); setTimeout(reconcileAll, 1200); setInterval(reconcileAll, 15000);
 
 // ---- message actions: react / reply / more
 const EMO = ['👍', '👎', '❤️', '😂', '🎉', '😮', '😢', '🙏', '🔥', '👀', '✅', '🤔'];

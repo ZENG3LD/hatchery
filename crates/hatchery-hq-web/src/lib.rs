@@ -159,6 +159,7 @@ pub fn router(config: Config) -> (Router, Shared) {
         .route("/api/library/{name}", get(api_library_file))
         .route("/api/events", get(api_events))
         .route("/api/term", get(term_ws))
+        .route("/api/sessions", get(api_sessions))
         .route("/api/browser", get(browser_ws))
         .layer(middleware::from_fn_with_state(Arc::clone(&state), guard))
         .with_state(Arc::clone(&state));
@@ -448,6 +449,8 @@ pub fn spawn_topology_watcher(state: Shared) {
 #[derive(Deserialize)]
 struct TermQuery {
     node: String,
+    /// Provider id for a fresh Spawn. Ignored when `session` is set (attach).
+    #[serde(default)]
     provider: String,
     /// Event parser to use when it differs from the provider id (test fixtures).
     parser: Option<String>,
@@ -457,13 +460,24 @@ struct TermQuery {
     cols: u16,
     #[serde(default = "d_ws")]
     workspace: String,
-    /// Leave the session running when the page closes.
-    #[serde(default)]
+    /// Leave the session running when the websocket closes (default true so
+    /// many concurrent HQ views can come and go without killing CLIs).
+    #[serde(default = "d_keep")]
     keep: bool,
+    /// Attach to an existing session: JSON `SessionAddress`, or shorthand
+    /// `workspace/instance` / `instance` (workspace defaults to `primary`).
+    #[serde(default)]
+    session: Option<String>,
 }
 fn d_rows() -> u16 { 30 }
 fn d_cols() -> u16 { 110 }
 fn d_ws() -> String { "primary".into() }
+fn d_keep() -> bool { true }
+
+#[derive(Deserialize)]
+struct SessionsQuery {
+    node: String,
+}
 
 async fn term_ws(State(s): State<Shared>, Query(q): Query<TermQuery>, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |socket| async move {
@@ -492,9 +506,6 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     use hatchery_core::{C2NodeResponse, NodeId, NodeRoute, NodeTransportState};
     let say = |kind: &str, text: String| json!({ "type": kind, "text": text }).to_string();
     let node = NodeId::new(q.node.clone()).map_err(|e| e.to_string())?;
-    // Core admits a single operator connection; use the one held by the
-    // topology watcher for all requests, and subscribe to its fanned-out
-    // event stream for this session's terminal frames.
     let Some(control) = s.topology.get().cloned() else {
         let _ = socket.send(Message::text(say("error", "operator control not ready yet".to_owned()))).await;
         return Err("operator control not ready".into());
@@ -506,50 +517,104 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
         let _ = socket.send(Message::text(say("error", format!("node {} is not online on core operator", q.node)))).await;
         return Err("node not online".into());
     };
-    // Wildcard expected incarnation: the restream bridge accepts all-zero and
-    // the reply carries the live incarnation. This stays correct across node
-    // restarts even when the topology cursor is momentarily stale.
     use gate4agent_node_protocol::NodeIncarnationId;
     let mut route = NodeRoute {
         node_id: node.clone(),
         expected_incarnation_id: NodeIncarnationId::from_bytes([0; 16]),
     };
-    let spawned = control
-        .request(
-            route.clone(),
-            NodeRequest::Spawn {
-                workspace_id: WorkspaceId::new(q.workspace.clone()).map_err(|e| e.to_string())?,
-                provider: AgentId::new(q.provider.clone()).map_err(|e| e.to_string())?,
-                mode: SessionMode::Pty,
-                terminal_size: TerminalSize { rows: q.rows, columns: q.cols },
-                initial_prompt: None,
-            },
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    let session = match spawned.response {
-        Ok(C2NodeResponse::SpawnAccepted { session }) => {
-            // Pin subsequent input/resize/stop to the incarnation that accepted Spawn.
-            route.expected_incarnation_id = spawned.incarnation_id;
-            session
+    let workspace = if q.workspace.trim().is_empty() { "primary".to_owned() } else { q.workspace.clone() };
+    let size = TerminalSize { rows: q.rows, columns: q.cols };
+
+    let (session, provider_label, initial_frame) = if let Some(raw) = q.session.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        // Attach / reattach: the session keeps running on the node; just bind to its
+        // frames (no Resume, which would relaunch the CLI). Snapshot confirms it exists.
+        let session = parse_session_address(raw, &workspace)?;
+        let (provider, frame, gen) = snapshot_session_screen(&control, route.clone(), &session).await;
+        let Some(provider) = provider else {
+            let _ = socket.send(Message::text(say("error", format!("no live session {raw} on {}", q.node)))).await;
+            return Err("no such session".into());
+        };
+        let mut session = session;
+        if let Some(g) = gen { session.session.generation = g; }
+        let _ = control.request(route.clone(), NodeRequest::Resize { session: session.clone(), size }).await;
+        (session, provider, frame)
+    } else {
+        let provider = q.provider.trim();
+        if provider.is_empty() {
+            let _ = socket.send(Message::text(say("error", "provider is required to spawn".into()))).await;
+            return Err("provider required".into());
         }
-        other => {
-            let _ = socket.send(Message::text(say("error", format!("spawn refused: {other:?}")))).await;
-            return Err("spawn refused".into());
-        }
+        let spawned = control
+            .request(
+                route.clone(),
+                NodeRequest::Spawn {
+                    workspace_id: WorkspaceId::new(workspace.clone()).map_err(|e| e.to_string())?,
+                    provider: AgentId::new(provider.to_owned()).map_err(|e| e.to_string())?,
+                    mode: SessionMode::Pty,
+                    terminal_size: size,
+                    initial_prompt: None,
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let session = match spawned.response {
+            Ok(C2NodeResponse::SpawnAccepted { session }) => {
+                route.expected_incarnation_id = spawned.incarnation_id;
+                session
+            }
+            other => {
+                let _ = socket.send(Message::text(say("error", format!("spawn refused: {other:?}")))).await;
+                return Err("spawn refused".into());
+            }
+        };
+        (session, provider.to_owned(), None)
     };
-    let session_key = serde_json::to_value(&session).map(|v| v.to_string()).unwrap_or_default();
-    let session_key = session_key.trim_matches('"').to_owned();
-    tracing::info!(node = %q.node, provider = %q.provider, "terminal session spawned from web HQ");
-    let _ = socket.send(Message::text(json!({ "type": "spawned", "node": q.node, "provider": q.provider, "session": session_key }).to_string())).await;
+
+    let instance_id = session.session.instance_id.0;
+    let session_key = serde_json::to_string(&session).unwrap_or_default();
+    let label = format!("{}/{}#{}", q.node, if provider_label.is_empty() { "session" } else { &provider_label }, instance_id);
+    tracing::info!(node = %q.node, provider = %provider_label, %instance_id, attach = q.session.is_some(), "terminal session ready from web HQ");
+    let _ = socket
+        .send(Message::text(
+            json!({
+                "type": "spawned",
+                "node": q.node,
+                "provider": provider_label,
+                "session": session_key,
+                "instance_id": instance_id,
+                "generation": session.session.generation.0,
+                "workspace_id": session.workspace_id.as_str(),
+                "label": label,
+            })
+            .to_string(),
+        ))
+        .await;
+    if let Some(f) = initial_frame {
+        let bytes: Vec<u8> = f
+            .get("formatted")
+            .and_then(|a| a.as_array())
+            .map(|a| a.iter().map(|x| x.as_u64().unwrap_or(0) as u8).collect())
+            .unwrap_or_default();
+        let msg = json!({
+            "type": "frame",
+            "rows": f["size"]["rows"],
+            "cols": f["size"]["columns"],
+            "cursor": [f["cursor_row"], f.get("cursor_column").or_else(|| f.get("cursor_col"))],
+            "ansi": B64.encode(&bytes),
+            "text": f["contents"],
+        });
+        let _ = socket.send(Message::text(msg.to_string())).await;
+    }
+
     let mut pending: Option<Value> = None;
     let mut tick = tokio::time::interval(Duration::from_millis(40));
     let mut settle = tokio::time::interval(Duration::from_millis(250));
-    // The browser reads only this typed event layer; it never parses terminal text itself.
-    let mut events_layer = hatchery_session_events::EventStream::new(q.parser.as_deref().unwrap_or(&q.provider));
+    let parser = q.parser.as_deref().unwrap_or(if provider_label.is_empty() { "shell" } else { &provider_label });
+    let mut events_layer = hatchery_session_events::EventStream::new(parser);
     events_layer.set_size(q.rows, q.cols);
     let started = std::time::Instant::now();
     let now_ms = move || started.elapsed().as_millis() as u64;
+    let id_token = format!("\"instance_id\":{instance_id}");
     loop {
         tokio::select! {
             event = events.recv() => {
@@ -560,7 +625,8 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
                 };
                 let mut frames = Vec::new();
                 collect_frames(&value, &mut frames);
-                if !frames.is_empty() && (session_key.is_empty() || value.to_string().contains(&session_key)) {
+                let blob = value.to_string();
+                if !frames.is_empty() && blob.contains(&id_token) {
                     pending = frames.pop();
                 }
             }
@@ -586,7 +652,6 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
             incoming = socket.recv() => {
                 let Some(Ok(Message::Text(text))) = incoming else { if matches!(incoming, Some(Ok(Message::Close(_))) | None | Some(Err(_))) { break } else { continue } };
                 let Ok(cmd) = serde_json::from_str::<Value>(&text) else { continue };
-                // The node accepts at most 64 terminal bytes per request: split longer input.
                 let chunks = |bytes: Vec<u8>| -> Vec<NodeRequest> { bytes.chunks(64).map(|c| NodeRequest::TerminalBytes { session: session.clone(), bytes: c.to_vec() }).collect() };
                 let mut requests: Vec<NodeRequest> = match cmd["t"].as_str() {
                     Some("data") => cmd["data"].as_str().map(|d| chunks(d.as_bytes().to_vec())).unwrap_or_default(),
@@ -605,7 +670,6 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
                         if failed { break; }
                     }
                     let result = last.expect("at least one request");
-
                     let ok = result.as_ref().map(|r| r.response.is_ok()).unwrap_or(false);
                     tracing::info!(op = %cmd["t"], ok, detail = %match &result { Ok(r) => format!("{:?}", r.response).chars().take(160).collect::<String>(), Err(e) => e.to_string() }, "terminal command from web HQ");
                     let _ = socket.send(Message::text(json!({ "type": "ack", "op": cmd["t"], "ok": ok, "detail": if ok { String::new() } else { match &result { Ok(r) => format!("{:?}", r.response), Err(e) => e.to_string() } } }).to_string())).await;
@@ -618,6 +682,140 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
         let _ = control.request(route, NodeRequest::Stop { session, force: true }).await;
     }
     Ok(())
+}
+
+fn parse_session_address(raw: &str, default_workspace: &str) -> Result<gate4agent_node_protocol::SessionAddress, String> {
+    use gate4agent_node_protocol::{SessionAddress, SessionKey, WorkspaceId};
+    use gate4agent_types::{AgentInstanceId, SessionGeneration};
+    if let Ok(addr) = serde_json::from_str::<SessionAddress>(raw) {
+        return Ok(addr);
+    }
+    // Shorthand: "primary/6", "6", "claude#6" (provider ignored), "hatchery-box/claude#6"
+    let s = raw.trim().trim_start_matches('#');
+    let (workspace, instance_s) = if let Some((a, b)) = s.rsplit_once('#') {
+        let inst = b.trim();
+        let ws = if a.contains('/') {
+            a.rsplit_once('/').map(|(_, w)| w).unwrap_or("primary")
+        } else if a.chars().all(|c| c.is_ascii_digit()) {
+            "primary"
+        } else {
+            // "claude#6" or "node/claude" — workspace stays default
+            default_workspace
+        };
+        // If form is "primary/6" without hash:
+        let _ = a;
+        (ws, inst)
+    } else if let Some((ws, inst)) = s.rsplit_once('/') {
+        // "primary/6" or "hatchery-box/6"
+        if inst.chars().all(|c| c.is_ascii_digit()) {
+            (if ws.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') && !ws.chars().all(|c| c.is_ascii_digit()) {
+                // could be node id — use default workspace when left side looks like a node
+                if ws.contains('-') || ws.len() > 12 { default_workspace } else { ws }
+            } else { ws }, inst)
+        } else {
+            return Err(format!("cannot parse session id {raw:?}"));
+        }
+    } else {
+        (default_workspace, s)
+    };
+    let instance_id: u64 = instance_s.parse().map_err(|_| format!("bad instance id in {raw:?}"))?;
+    Ok(SessionAddress {
+        workspace_id: WorkspaceId::new(workspace).map_err(|e| e.to_string())?,
+        session: SessionKey {
+            instance_id: AgentInstanceId(instance_id),
+            generation: SessionGeneration(1),
+        },
+    })
+}
+
+async fn snapshot_session_screen(
+    control: &hatchery_c2_client::C2ReconnectingHandle,
+    route: hatchery_core::NodeRoute,
+    want: &gate4agent_node_protocol::SessionAddress,
+) -> (Option<String>, Option<Value>, Option<gate4agent_types::SessionGeneration>) {
+    use gate4agent_node_protocol::NodeRequest;
+    use hatchery_core::C2NodeResponse;
+    let Ok(routed) = control.request(route, NodeRequest::Snapshot).await else {
+        return (None, None, None);
+    };
+    let Ok(C2NodeResponse::Snapshot { snapshot, .. }) = routed.response else {
+        return (None, None, None);
+    };
+    for ws in &snapshot.workspaces {
+        if ws.workspace_id.as_str() != want.workspace_id.as_str() {
+            continue;
+        }
+        for sess in &ws.sessions {
+            if sess.instance_id == want.session.instance_id {
+                let st = format!("{:?}", sess.status).to_lowercase();
+                if !(st.contains("running") || st.contains("starting") || st.contains("registered")) {
+                    return (None, None, None);
+                }
+                let provider = Some(sess.agent_id.as_str().to_owned());
+                let frame = sess
+                    .terminal_frame
+                    .as_ref()
+                    .and_then(|f| serde_json::to_value(f).ok());
+                return (provider, frame, Some(sess.generation));
+            }
+        }
+    }
+    (None, None, None)
+}
+
+async fn api_sessions(State(s): State<Shared>, Query(q): Query<SessionsQuery>) -> Response {
+    use gate4agent_node_protocol::{NodeIncarnationId, NodeRequest};
+    use hatchery_core::{C2NodeResponse, NodeId, NodeRoute, NodeTransportState};
+    let Ok(node) = NodeId::new(q.node.clone()) else {
+        return err(StatusCode::BAD_REQUEST, "bad node id");
+    };
+    let Some(control) = s.topology.get().cloned() else {
+        return err(StatusCode::SERVICE_UNAVAILABLE, "operator control not ready");
+    };
+    let topo = control.current_topology();
+    if !topo.nodes.iter().any(|n| n.node_id == node && n.transport == NodeTransportState::Online) {
+        return err(StatusCode::BAD_REQUEST, "node not online");
+    }
+    let route = NodeRoute {
+        node_id: node.clone(),
+        expected_incarnation_id: NodeIncarnationId::from_bytes([0; 16]),
+    };
+    let routed = match control.request(route, NodeRequest::Snapshot).await {
+        Ok(r) => r,
+        Err(e) => return err(StatusCode::BAD_GATEWAY, &e.to_string()),
+    };
+    let Ok(C2NodeResponse::Snapshot { snapshot, .. }) = routed.response else {
+        return err(StatusCode::BAD_GATEWAY, "snapshot refused");
+    };
+    let mut sessions = Vec::new();
+    for ws in &snapshot.workspaces {
+        for sess in &ws.sessions {
+            let status = format!("{:?}", sess.status).to_lowercase();
+            let live = matches!(
+                status.as_str(),
+                s if s.contains("running") || s.contains("starting") || s.contains("registered")
+            );
+            let instance_id = sess.instance_id.0;
+            let provider = sess.agent_id.as_str().to_owned();
+            let key = json!({
+                "workspace_id": ws.workspace_id.as_str(),
+                "session": { "instance_id": instance_id, "generation": sess.generation.0 },
+            });
+            sessions.push(json!({
+                "node": q.node,
+                "workspace_id": ws.workspace_id.as_str(),
+                "instance_id": instance_id,
+                "generation": sess.generation.0,
+                "provider": provider,
+                "status": status,
+                "live": live,
+                "label": format!("{}/{}#{}", q.node, sess.agent_id.as_str(), instance_id),
+                "session": key,
+                "has_frame": sess.terminal_frame.is_some(),
+            }));
+        }
+    }
+    json_reply(200, serde_json::to_vec(&json!({ "node": q.node, "sessions": sessions })).unwrap_or_default())
 }
 
 // ---------------------------------------------------------------------------------- browser frames (A2 restream dig2browser)
