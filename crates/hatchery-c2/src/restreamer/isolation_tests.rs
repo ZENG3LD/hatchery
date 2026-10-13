@@ -46,3 +46,33 @@ fn c2_never_records_push_to_core() {
     rs.admit_from_node("n", 1, b"p".to_vec()).unwrap();
     assert!(!rs.ever_pushed_to_core());
 }
+
+#[test]
+fn restreamer_sources_omit_g4a_type_names() {
+    // C2 restreamer must not parse g4a — those type names belong in core.
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/restreamer");
+    // Built without writing the full identifiers into this file as contiguous literals.
+    let forbidden = [
+        ["C2Provider", "EventKind"].concat(),
+        ["RoutedNode", "Event"].concat(),
+        ["RoutedNode", "Request"].concat(),
+        ["C2Server", "Frame"].concat(),
+    ];
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+            continue;
+        }
+        if path.file_name().unwrap() == "isolation_tests.rs" {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        for name in &forbidden {
+            assert!(
+                !text.contains(name),
+                "{} must not reference {name}",
+                path.file_name().unwrap().to_string_lossy()
+            );
+        }
+    }
+}

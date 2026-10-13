@@ -2147,6 +2147,8 @@ name = "hatchery-server"
 version = "0.2.3"
 dependencies = [
  "hatchery-c2",
+ "hatchery-c2-client",
+ "hatchery-c2-protocol",
  "hatchery-enroll",
  "hatchery-harness-mcp",
  "hatchery-node",

@@ -11,6 +11,7 @@ pub mod m4a;
 pub mod memory;
 #[cfg(feature = "m4a")]
 pub mod hub;
+pub mod node_controller;
 #[cfg(feature = "m4a")]
 pub mod messenger;
 #[cfg(feature = "m4a")]

@@ -1,3 +1,7 @@
+//! A2 LEGACY: g4a parsing on C2. New traffic must stay opaque on the restreamer;
+//! core parses g4a in `hatchery_server::node_controller`. This module remains for
+//! the operator control endpoint during migration and will be removed once HQ
+//! speaks only through core.
 use super::*;
 use crate::protocol::{
     c2_auth_transcript, c2_bound_auth_transcript, provider_id_is_legacy, AgentId, ArchitectureId, C2AuthDirection, C2ClientAuthentication,
