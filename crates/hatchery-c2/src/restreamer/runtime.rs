@@ -9,7 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use hatchery_c2_protocol::{
-    ChannelKind, DrainEnvelope, Frame, FrameError, FrameType, OpenPayload, MAX_DATA_PAYLOAD,
+    ChannelKind, DrainEnvelope, Frame, FrameError, FrameType, JournalReplyBody, OpenPayload,
+    MAX_DATA_PAYLOAD,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -56,6 +57,83 @@ impl From<std::io::Error> for RestreamerError {
     }
 }
 
+/// Live node uplinks so C2 can send JournalReq when recovering gaps.
+#[derive(Clone, Default)]
+pub struct UplinkPeers {
+    inner: Arc<Mutex<BTreeMap<String, PeerSlot>>>,
+}
+
+struct PeerSlot {
+    out: tokio::sync::mpsc::Sender<Frame>,
+    pending: Option<tokio::sync::oneshot::Sender<JournalReplyBody>>,
+}
+
+impl UplinkPeers {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn register(&self, node_id: String, tx: tokio::sync::mpsc::Sender<Frame>) {
+        self.inner.lock().expect("peers").insert(
+            node_id,
+            PeerSlot {
+                out: tx,
+                pending: None,
+            },
+        );
+    }
+
+    pub fn unregister(&self, node_id: &str) {
+        self.inner.lock().expect("peers").remove(node_id);
+    }
+
+    pub fn deliver_reply(&self, node_id: &str, body: JournalReplyBody) {
+        let mut guard = self.inner.lock().expect("peers");
+        if let Some(slot) = guard.get_mut(node_id) {
+            if let Some(tx) = slot.pending.take() {
+                let _ = tx.send(body);
+            }
+        }
+    }
+
+    pub fn is_registered(&self, node_id: &str) -> bool {
+        self.inner.lock().expect("peers").contains_key(node_id)
+    }
+
+    pub async fn request_journal(
+        &self,
+        node_id: &str,
+        channel_id: u32,
+        after: u64,
+        limit: u32,
+        timeout: std::time::Duration,
+    ) -> Result<JournalReplyBody, RestreamerError> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let out = {
+            let mut guard = self.inner.lock().expect("peers");
+            let Some(slot) = guard.get_mut(node_id) else {
+                return Err(RestreamerError::Frame(FrameError::Io(
+                    "node uplink absent".into(),
+                )));
+            };
+            slot.pending = Some(tx);
+            slot.out.clone()
+        };
+        out.send(Frame::journal_req(channel_id, after, limit))
+            .await
+            .map_err(|_| RestreamerError::Frame(FrameError::Io("node uplink closed".into())))?;
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(body)) => Ok(body),
+            Ok(Err(_)) => Err(RestreamerError::Frame(FrameError::Io(
+                "journal reply dropped".into(),
+            ))),
+            Err(_) => Err(RestreamerError::Frame(FrameError::Io(
+                "journal reply timeout".into(),
+            ))),
+        }
+    }
+}
+
 struct Inner {
     buffer: ReplayBuffer,
     /// channel_id -> kind, for OPEN bookkeeping (metadata only).
@@ -70,6 +148,7 @@ struct Inner {
 pub struct Restreamer {
     inner: Arc<Mutex<Inner>>,
     journal: Arc<dyn NodeJournal>,
+    peers: UplinkPeers,
 }
 
 impl Restreamer {
@@ -88,11 +167,16 @@ impl Restreamer {
                 pushed_to_core: false,
             })),
             journal,
+            peers: UplinkPeers::new(),
         }
     }
 
     pub fn set_keys(&self, keys: RestreamerKeys) {
         self.inner.lock().expect("lock").keys = Some(keys);
+    }
+
+    pub fn peers(&self) -> &UplinkPeers {
+        &self.peers
     }
 
     pub fn upstream_public_keys(&self) -> Option<(super::crypto::PublicKeyBytes, super::crypto::PublicKeyBytes)> {
@@ -214,6 +298,77 @@ impl Restreamer {
         Ok(out)
     }
 
+    /// Prefer live uplink journal; fall back to the configured NodeJournal.
+    pub async fn resume_with_uplink(
+        &self,
+        node_id: &str,
+        channel_id: u32,
+        after: u64,
+    ) -> Result<Vec<DrainEnvelope>, RestreamerError> {
+        let (gap, oldest, buffered) = {
+            let guard = self.inner.lock().expect("lock");
+            let gap = guard.buffer.gap_before_buffer(node_id, channel_id, after);
+            let oldest = guard.buffer.oldest_seq(node_id, channel_id);
+            let buffered = guard.buffer.events_after(node_id, channel_id, after);
+            (gap, oldest, buffered)
+        };
+        let mut out = Vec::new();
+        if gap {
+            let until = oldest;
+            let recovered = if self.peers.is_registered(node_id) {
+                let body = self
+                    .peers
+                    .request_journal(
+                        node_id,
+                        channel_id,
+                        after,
+                        1024,
+                        std::time::Duration::from_secs(5),
+                    )
+                    .await?;
+                body.entries
+                    .into_iter()
+                    .filter(|e| until.map(|u| e.seq < u).unwrap_or(true))
+                    .map(|e| super::buffer::BufferedEvent {
+                        seq: e.seq,
+                        node_id: node_id.to_owned(),
+                        channel_id,
+                        payload: e.payload,
+                        enqueued_at: Instant::now(),
+                    })
+                    .collect()
+            } else {
+                recover_gap(
+                    self.journal.as_ref(),
+                    node_id,
+                    channel_id,
+                    after,
+                    until,
+                    1024,
+                )
+                .map_err(|e| RestreamerError::Frame(FrameError::Io(e.to_string())))?
+            };
+            for ev in recovered {
+                out.push(DrainEnvelope {
+                    node_id: ev.node_id.clone(),
+                    frame: Frame::data(ev.channel_id, ev.seq, ev.payload)
+                        .map_err(RestreamerError::Frame)?,
+                });
+            }
+        }
+        for ev in buffered {
+            if out.iter().any(|e| e.frame.seq == ev.seq) {
+                continue;
+            }
+            out.push(DrainEnvelope {
+                node_id: ev.node_id.clone(),
+                frame: Frame::data(ev.channel_id, ev.seq, ev.payload)
+                    .map_err(RestreamerError::Frame)?,
+            });
+        }
+        Ok(out)
+    }
+
     /// Snapshot of buffered events for a stream (no journal).
     pub fn buffered_after(&self, node_id: &str, channel_id: u32, after: u64) -> Vec<DrainEnvelope> {
         let guard = self.inner.lock().expect("lock");
@@ -279,76 +434,109 @@ pub async fn serve(
 }
 
 async fn handle_node_uplink(mut stream: TcpStream, rs: Restreamer) -> Result<(), RestreamerError> {
-    // First frame must be OPEN naming the opaque node id.
     let mut buf = vec![0u8; 64 * 1024];
     let mut filled = 0usize;
     let mut node_id: Option<String> = None;
+    let (out_tx, mut out_rx) = tokio::sync::mpsc::channel::<Frame>(16);
     loop {
-        let n = stream.read(&mut buf[filled..]).await?;
-        if n == 0 {
-            break;
-        }
-        filled += n;
-        while filled > 0 {
-            match Frame::decode(&buf[..filled]) {
-                Ok((frame, consumed)) => {
-                    buf.copy_within(consumed..filled, 0);
-                    filled -= consumed;
-                    match frame.frame_type {
-                        FrameType::Open => {
-                            let open = frame.parse_open().map_err(RestreamerError::Frame)?;
-                            node_id = Some(open.node_id.clone());
-                            rs.open_channel(&open.node_id, frame.channel_id, open.channel_kind);
-                            let credit = rs.window_credit(&open.node_id, frame.channel_id);
-                            let win = Frame::window(frame.channel_id, credit);
-                            stream
-                                .write_all(&win.encode().map_err(RestreamerError::Frame)?)
-                                .await?;
-                        }
-                        FrameType::Data => {
-                            let Some(ref nid) = node_id else {
-                                let go = Frame::goaway(1);
-                                stream
-                                    .write_all(&go.encode().map_err(RestreamerError::Frame)?)
-                                    .await?;
-                                return Ok(());
-                            };
-                            match rs.admit_from_node(nid, frame.channel_id, frame.payload)? {
-                                EnqueueOutcome::Accepted { window_credit } => {
-                                    let win = Frame::window(frame.channel_id, window_credit);
+        tokio::select! {
+            biased;
+            maybe_out = out_rx.recv() => {
+                match maybe_out {
+                    Some(frame) => {
+                        stream
+                            .write_all(&frame.encode().map_err(RestreamerError::Frame)?)
+                            .await?;
+                    }
+                    None => break,
+                }
+            }
+            read = stream.read(&mut buf[filled..]) => {
+                let n = read?;
+                if n == 0 {
+                    break;
+                }
+                filled += n;
+                while filled > 0 {
+                    match Frame::decode(&buf[..filled]) {
+                        Ok((frame, consumed)) => {
+                            buf.copy_within(consumed..filled, 0);
+                            filled -= consumed;
+                            match frame.frame_type {
+                                FrameType::Open => {
+                                    let open = frame.parse_open().map_err(RestreamerError::Frame)?;
+                                    if let Some(prev) = node_id.replace(open.node_id.clone()) {
+                                        rs.peers().unregister(&prev);
+                                    }
+                                    rs.peers().register(open.node_id.clone(), out_tx.clone());
+                                    rs.open_channel(&open.node_id, frame.channel_id, open.channel_kind);
+                                    let credit = rs.window_credit(&open.node_id, frame.channel_id);
+                                    let win = Frame::window(frame.channel_id, credit);
                                     stream
-                                        .write_all(
-                                            &win.encode().map_err(RestreamerError::Frame)?,
-                                        )
+                                        .write_all(&win.encode().map_err(RestreamerError::Frame)?)
                                         .await?;
                                 }
-                                EnqueueOutcome::Backpressure => {
-                                    let win = Frame::window(frame.channel_id, 0);
+                                FrameType::Data => {
+                                    let Some(ref nid) = node_id else {
+                                        let go = Frame::goaway(1);
+                                        stream
+                                            .write_all(&go.encode().map_err(RestreamerError::Frame)?)
+                                            .await?;
+                                        return Ok(());
+                                    };
+                                    match rs.admit_from_node(nid, frame.channel_id, frame.payload)? {
+                                        EnqueueOutcome::Accepted { window_credit } => {
+                                            let win = Frame::window(frame.channel_id, window_credit);
+                                            stream
+                                                .write_all(
+                                                    &win.encode().map_err(RestreamerError::Frame)?,
+                                                )
+                                                .await?;
+                                        }
+                                        EnqueueOutcome::Backpressure => {
+                                            let win = Frame::window(frame.channel_id, 0);
+                                            stream
+                                                .write_all(
+                                                    &win.encode().map_err(RestreamerError::Frame)?,
+                                                )
+                                                .await?;
+                                        }
+                                    }
+                                }
+                                FrameType::JournalReply => {
+                                    if let Some(ref nid) = node_id {
+                                        let body = JournalReplyBody::decode(&frame.payload)
+                                            .map_err(RestreamerError::Frame)?;
+                                        rs.peers().deliver_reply(nid, body);
+                                    }
+                                }
+                                FrameType::Ping => {
+                                    let pong = Frame::pong(frame.seq);
                                     stream
-                                        .write_all(
-                                            &win.encode().map_err(RestreamerError::Frame)?,
-                                        )
+                                        .write_all(&pong.encode().map_err(RestreamerError::Frame)?)
                                         .await?;
                                 }
+                                FrameType::Close | FrameType::GoAway => {
+                                    if let Some(ref nid) = node_id {
+                                        rs.peers().unregister(nid);
+                                    }
+                                    return Ok(());
+                                }
+                                _ => {}
                             }
                         }
-                        FrameType::Ping => {
-                            let pong = Frame::pong(frame.seq);
-                            stream
-                                .write_all(&pong.encode().map_err(RestreamerError::Frame)?)
-                                .await?;
-                        }
-                        FrameType::Close | FrameType::GoAway => return Ok(()),
-                        _ => {}
+                        Err(FrameError::Truncated) => break,
+                        Err(err) => return Err(RestreamerError::Frame(err)),
                     }
                 }
-                Err(FrameError::Truncated) => break,
-                Err(err) => return Err(RestreamerError::Frame(err)),
+                if filled == buf.len() {
+                    return Err(RestreamerError::Frame(FrameError::PayloadTooLarge(filled)));
+                }
             }
         }
-        if filled == buf.len() {
-            return Err(RestreamerError::Frame(FrameError::PayloadTooLarge(filled)));
-        }
+    }
+    if let Some(ref nid) = node_id {
+        rs.peers().unregister(nid);
     }
     Ok(())
 }
@@ -432,7 +620,7 @@ async fn handle_core_drain(
                                 FrameType::Resume => {
                                     if let Some((ref nid, ch)) = selected {
                                         let after = frame.seq;
-                                        let envelopes = rs.resume(nid, ch, after)?;
+                                        let envelopes = rs.resume_with_uplink(nid, ch, after).await?;
                                         for env in envelopes {
                                             stream
                                                 .write_all(
@@ -751,4 +939,103 @@ mod tests {
         assert_eq!(plain, b"visible-only-to-core");
     }
 
+    #[tokio::test]
+    async fn uplink_journal_req_served_from_file_journal() {
+        use crate::restreamer::FileJournal;
+        use hatchery_c2_protocol::FrameType;
+
+        let dir = std::env::temp_dir().join(format!("upj-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let fj = FileJournal::open(dir.join("n.journal")).unwrap();
+        for i in 0..5u8 {
+            fj.append(1, &[i]).unwrap();
+        }
+        let journal = Arc::new(MemoryJournal::new());
+        let rs = Restreamer::new(
+            super::super::buffer::BufferLimits::default(),
+            journal,
+            token(),
+            None,
+        );
+        let node_l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let drain_l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let node_addr = node_l.local_addr().unwrap();
+        let drain_addr = drain_l.local_addr().unwrap();
+        drop(node_l);
+        drop(drain_l);
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let cfg = RestreamerConfig {
+            node_listen: node_addr,
+            drain_listen: drain_addr,
+            buffer: super::super::buffer::BufferLimits::default(),
+            core_token: token(),
+        };
+        let serve_rs = rs.clone();
+        let handle = tokio::spawn(async move { serve(cfg, serve_rs, shutdown_rx).await });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let fj_node = fj.clone();
+        let node_task = tokio::spawn(async move {
+            let mut node = TcpStream::connect(node_addr).await.unwrap();
+            let open = Frame::open(
+                1,
+                &OpenPayload {
+                    channel_kind: ChannelKind::G4aEvents,
+                    node_id: "node-a".into(),
+                },
+            )
+            .unwrap();
+            node.write_all(&open.encode().unwrap()).await.unwrap();
+            let mut rb = vec![0u8; 64 * 1024];
+            let mut filled = 0usize;
+            loop {
+                let n = node.read(&mut rb[filled..]).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                filled += n;
+                while filled > 0 {
+                    match Frame::decode(&rb[..filled]) {
+                        Ok((frame, consumed)) => {
+                            rb.copy_within(consumed..filled, 0);
+                            filled -= consumed;
+                            if frame.frame_type == FrameType::JournalReq {
+                                let limit = frame.journal_req_limit().unwrap_or(64) as usize;
+                                let body = fj_node
+                                    .reply_body(frame.channel_id, frame.seq, limit)
+                                    .unwrap();
+                                let reply = Frame::journal_reply(frame.channel_id, &body).unwrap();
+                                node.write_all(&reply.encode().unwrap()).await.unwrap();
+                            }
+                        }
+                        Err(FrameError::Truncated) => break,
+                        Err(e) => panic!("{e}"),
+                    }
+                }
+            }
+        });
+
+        for _ in 0..50 {
+            if rs.peers().is_registered("node-a") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(rs.peers().is_registered("node-a"));
+        let body = rs
+            .peers()
+            .request_journal("node-a", 1, 2, 10, Duration::from_secs(2))
+            .await
+            .unwrap();
+        assert_eq!(
+            body.entries.iter().map(|e| e.seq).collect::<Vec<_>>(),
+            vec![3, 4, 5]
+        );
+        assert_eq!(body.entries[0].payload, &[2]);
+
+        let _ = shutdown_tx.send(true);
+        node_task.abort();
+        let _ = handle.await;
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

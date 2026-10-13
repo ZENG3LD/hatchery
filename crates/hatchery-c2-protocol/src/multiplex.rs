@@ -27,6 +27,10 @@ pub enum FrameType {
     GoAway = 7,
     Ack = 8,
     Resume = 9,
+    /// C2 → node: request journal entries with seq > N.
+    JournalReq = 10,
+    /// node → C2: journal entries (payload = JournalReplyBody).
+    JournalReply = 11,
 }
 
 impl FrameType {
@@ -41,6 +45,8 @@ impl FrameType {
             7 => Self::GoAway,
             8 => Self::Ack,
             9 => Self::Resume,
+            10 => Self::JournalReq,
+            11 => Self::JournalReply,
             _ => return None,
         })
     }
@@ -281,6 +287,67 @@ impl Frame {
         }
         serde_json::from_slice(&self.payload).map_err(|e| FrameError::Io(e.to_string()))
     }
+
+    /// Journal request: `seq` = after, payload = u32 limit (big-endian).
+    pub fn journal_req(channel_id: u32, after: u64, limit: u32) -> Self {
+        Self {
+            version: MULTIPLEX_VERSION,
+            frame_type: FrameType::JournalReq,
+            channel_id,
+            seq: after,
+            payload: limit.to_be_bytes().to_vec(),
+        }
+    }
+
+    pub fn journal_req_limit(&self) -> Option<u32> {
+        if self.frame_type != FrameType::JournalReq || self.payload.len() != 4 {
+            return None;
+        }
+        Some(u32::from_be_bytes([
+            self.payload[0],
+            self.payload[1],
+            self.payload[2],
+            self.payload[3],
+        ]))
+    }
+
+    pub fn journal_reply(channel_id: u32, body: &JournalReplyBody) -> Result<Self, FrameError> {
+        let payload = body.encode()?;
+        if payload.len() > MAX_DATA_PAYLOAD {
+            return Err(FrameError::PayloadTooLarge(payload.len()));
+        }
+        Ok(Self {
+            version: MULTIPLEX_VERSION,
+            frame_type: FrameType::JournalReply,
+            channel_id,
+            seq: body.after,
+            payload,
+        })
+    }
+}
+
+/// One journal entry on the wire (opaque payload).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JournalWireEntry {
+    pub seq: u64,
+    pub payload: Vec<u8>,
+}
+
+/// Body of JournalReply: entries with seq > after for one channel.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JournalReplyBody {
+    pub after: u64,
+    pub entries: Vec<JournalWireEntry>,
+}
+
+impl JournalReplyBody {
+    pub fn encode(&self) -> Result<Vec<u8>, FrameError> {
+        serde_json::to_vec(self).map_err(|e| FrameError::Io(e.to_string()))
+    }
+
+    pub fn decode(bytes: &[u8]) -> Result<Self, FrameError> {
+        serde_json::from_slice(bytes).map_err(|e| FrameError::Io(e.to_string()))
+    }
 }
 
 /// Drain-stream envelope: C2 prefixes each uplink DATA with an opaque node id for core.
@@ -380,6 +447,26 @@ mod tests {
         assert_eq!(decoded.node_id, "node-b");
         assert_eq!(decoded.frame.seq, 9);
         assert_eq!(decoded.frame.payload, b"inner");
+    }
+
+    #[test]
+    fn journal_req_roundtrip() {
+        let f = Frame::journal_req(3, 10, 64);
+        let (d, _) = Frame::decode(&f.encode().unwrap()).unwrap();
+        assert_eq!(d.frame_type, FrameType::JournalReq);
+        assert_eq!(d.seq, 10);
+        assert_eq!(d.journal_req_limit(), Some(64));
+        let body = JournalReplyBody {
+            after: 10,
+            entries: vec![JournalWireEntry {
+                seq: 11,
+                payload: b"x".to_vec(),
+            }],
+        };
+        let reply = Frame::journal_reply(3, &body).unwrap();
+        let (d, _) = Frame::decode(&reply.encode().unwrap()).unwrap();
+        let decoded = JournalReplyBody::decode(&d.payload).unwrap();
+        assert_eq!(decoded.entries[0].seq, 11);
     }
 
     #[test]

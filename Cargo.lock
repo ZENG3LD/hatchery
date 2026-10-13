@@ -2065,6 +2065,7 @@ dependencies = [
  "hatchery-build",
  "hatchery-c2",
  "hatchery-c2-client",
+ "hatchery-c2-protocol",
  "hatchery-enroll",
  "kimi-session-restore",
  "libc",

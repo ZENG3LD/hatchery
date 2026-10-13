@@ -15,9 +15,13 @@ pub use crypto::{
     noise_session_seal, CryptoError, HqRecipientSecret, NestedSeal, NoiseInitiator, NoiseResponder,
     NoiseTransport, PublicKeyBytes, RestreamerKeys, NOISE_PATTERN,
 };
-pub use journal::{recover_gap, JournalEntry, JournalError, MemoryJournal, NodeJournal};
+pub use journal::{
+    recover_gap, FileJournal, JournalEntry, JournalError, LocalFileJournal, MemoryJournal,
+    NodeJournal,
+};
 pub use runtime::{
     serve, DrainClient, DrainSession, Restreamer, RestreamerConfig, RestreamerError,
+    UplinkPeers,
 };
 
 #[cfg(test)]
