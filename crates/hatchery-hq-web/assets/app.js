@@ -164,9 +164,33 @@ async function loadMe() {
   try { const r = await fetch('/api/me', { credentials: 'same-origin' }); const d = await r.json(); const u = d.user || {}; S.me = u; const nm = u.display_name || u.username || 'Account';
     $('#acctav').innerHTML = avatar(u.username || nm, '', false, 'idle'); } catch (_) {}
 }
-$('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); m.hidden = !m.hidden; if (m.hidden) return; const u = S.me || {};
-  m.innerHTML = ''; const b = document.createElement('button'); b.textContent = 'Sign out';
-  b.onclick = async () => { try { await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{}' }); } catch (_) {} location.href = '/'; }; m.appendChild(b); };
+const signOut = async () => { try { await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{}' }); } catch (_) {} location.href = '/'; };
+$('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); m.hidden = !m.hidden; if (m.hidden) return; const u = S.me || {}; m.className = 'pop amenu';
+  m.innerHTML = `<div class="hd"><b>${esc(u.display_name || u.username || 'Account')}</b><span>@${esc(u.username || '')}</span></div>`;
+  const it = (ic, label, fn, r) => { const b = document.createElement('button'); b.innerHTML = `<span class="ic">${ic}</span>${esc(label)}${r ? `<span class="r">${r}</span>` : ''}`; b.onclick = () => { m.hidden = true; fn(); }; m.appendChild(b); };
+  it('◔', 'Usage & plan', () => openSettings('usage'), '›'); it('?', 'Support', () => toast('Support: coming soon'), '›'); it('⚙', 'Settings', () => openSettings('general'));
+  m.insertAdjacentHTML('beforeend', '<hr>'); it('+', 'Add account', () => toast('Multiple accounts: coming soon')); it('⇥', 'Sign out', signOut); };
+// ---- settings modal (stubs)
+const SNAV = [['general', '⚙', 'General'], ['computer', '▭', 'Computer & nodes'], ['usage', '◔', 'Usage'], ['updates', '↻', 'Updates']];
+function openSettings(sec) {
+  let d = $('#settings'); if (!d) { d = document.createElement('div'); d.id = 'settings'; document.body.appendChild(d); d.onclick = (e) => { if (e.target === d) d.remove(); }; }
+  const u = S.me || {}; const sel = (opts) => `<select>${opts.map((o) => `<option>${esc(o)}</option>`).join('')}</select>`; const sw = (on) => `<button class="sw${on ? ' on' : ''}"></button>`;
+  const body = {
+    general: `<h2>General</h2><h5>Account</h5><div class="scard"><div class="acc">${avatar(u.username || 'me', '', false, 'idle', 'dm')}<div class="who"><b>${esc(u.display_name || u.username || '')}</b><span>@${esc(u.username || '')}</span></div><button class="pbtn" id="sadd">Add account</button><button class="pbtn" id="sout">Sign out</button></div></div>
+      <h5>Appearance</h5><div class="scard"><div class="srow">Theme${sel(['System', 'Dark'])}</div><div class="srow">Accent${sel(['Blue', 'Violet', 'Green'])}</div><div class="srow">Language${sel(['System', 'English', 'Русский'])}</div><div class="srow">Spellcheck while typing${sw(true)}</div></div>
+      <h5>System</h5><div class="scard"><div class="srow">Microphone${sel(['System default'])}</div><div class="srow">Sounds${sw(false)}</div></div>
+      <h5>HQ</h5><div class="scard"><div class="srow">Timezone${sel(['Auto (' + Intl.DateTimeFormat().resolvedOptions().timeZone + ')'])}</div></div>`,
+    computer: `<h2>Computer & nodes</h2><div class="scard"><div class="srow">Nodes online<span>${S.nodes.filter((n) => n.online).length} / ${S.nodes.length}</span></div><div class="srow">Add a node<button class="pbtn" id="senr">Enrollment code</button></div></div>`,
+    usage: '<h2>Usage</h2><div class="scard"><div class="srow">Plan<span>Operator</span></div><div class="srow">Traffic this month<span>—</span></div></div>',
+    updates: '<h2>Updates</h2><div class="scard"><div class="srow">HQ web<span>feat/hq-web-ui-polish</span></div></div>',
+  }[sec];
+  d.innerHTML = `<div class="sdlg"><nav class="snav">${SNAV.map(([id, ic, l]) => `<button data-s="${id}" class="${id === sec ? 'on' : ''}"><span>${ic}</span>${l}</button>`).join('')}</nav><div class="sbody">${body}</div><button class="round sx" id="sclose">✕</button></div>`;
+  d.querySelectorAll('[data-s]').forEach((b) => (b.onclick = () => openSettings(b.dataset.s)));
+  d.querySelectorAll('.sw').forEach((b) => (b.onclick = () => b.classList.toggle('on')));
+  $('#sclose').onclick = () => d.remove(); const so = $('#sout'); if (so) so.onclick = signOut; const sa = $('#sadd'); if (sa) sa.onclick = () => toast('Multiple accounts: coming soon');
+  const se = $('#senr'); if (se) se.onclick = () => { d.remove(); openPanel('status'); issueCode(); };
+}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#settings')) $('#settings').remove(); });
 loadMe();
 async function issueCode() {
   try {
@@ -208,8 +232,11 @@ async function renderStatus() {
 // ---- right panel: chat info + all status / control
 const TABS = [['info', 'Info'], ['status', 'Status'], ['library', 'Library'], ['computer', 'Computer']];
 function renderPanelHead() { if (!S.chat) return; $('#panelav').innerHTML = avatar(S.chat, 'big'); $('#panelname').textContent = chatName(S.chat); $('#panelsub').textContent = ''; }
-function openPanel(tab) { S.panel = true; $('#panel').classList.add('open'); renderPanelHead(); setTab(tab || S.tab); }
-function closePanel() { S.panel = false; $('#panel').classList.remove('open'); }
+function openPanel(tab) { S.panel = true; $('#panel').classList.add('open'); syncHead(); renderPanelHead(); setTab(tab || S.tab); }
+function closePanel() { S.panel = false; $('#panel').classList.remove('open'); syncHead(); }
+// the top pill is fixed over the chat; its right edge eases (with a short delay) to the docked panel's edge
+function syncHead() { const r = document.documentElement.style; r.setProperty('--sw', innerWidth <= 760 ? '0px' : $('#side').offsetWidth + 'px'); r.setProperty('--pr', S.panel && innerWidth > 760 ? '380px' : '0px'); }
+addEventListener('resize', syncHead); syncHead();
 function setTab(tab) {
   if (!TABS.some(([id]) => id === tab)) tab = 'info';
   S.tab = tab; $('#ptabs').innerHTML = '';

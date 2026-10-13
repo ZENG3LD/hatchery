@@ -130,7 +130,6 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 8px;b
 @keyframes ring{0%{opacity:.9;transform:scale(1)}100%{opacity:0;transform:scale(1.25)}}
 @media (prefers-reduced-motion:reduce){.av svg,.av .eyes,.av .eye,.av .ring{animation:none!important}}
 /* narrow */
-@media (max-width:1100px){#panel.open,#panel.open.wide{position:absolute;right:0;top:0;bottom:0;width:min(400px,92vw);z-index:20;box-shadow:-12px 0 40px #000a}}
 @media (max-width:760px){#sidetoggle{display:grid}#side{position:absolute;left:0;top:0;bottom:0;z-index:25;transform:translateX(-100%);transition:transform .2s;box-shadow:12px 0 40px #000a}body.sideopen #side{transform:none}.tools .icon:not(.on){display:none}.tools .icon[data-tab=activity]{display:grid}}
 
 .pair{display:flex;gap:8px;flex:none}
@@ -191,3 +190,31 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 8px;b
 .kv{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}.kv:last-child{border:0}.kv span:first-child{color:var(--sub)}
 @media (max-width:760px){#sidetoggle{display:grid}#chat{padding-top:60px}}
 @media (max-width:760px){#side{box-shadow:none}body.sideopen #side{box-shadow:12px 0 40px #000a}}
+/* round 4: tones, docked panel, delayed pill, account menu, settings */
+:root{--side:#0f0f0f;--bg:#181818;--el:#212121;--el2:#2a2a2a;--hover:#1c1c1c;--line:#262626}
+#side{background:var(--side)}#main,#composer,#panel{background:var(--bg)}
+.msg.them,.card,.pcard,.wd,.stat{background:var(--el);border-color:#262626}
+#box{background:#1f1f1f;border-color:#2e2e2e}
+#panel{width:0;transition:width .16s cubic-bezier(.2,.8,.3,1);border-left:1px solid transparent}
+#panel.open{width:380px;border-left-color:var(--line)}
+#panel>*{min-width:380px}
+#head{position:fixed;left:var(--sw,256px);right:var(--pr,0px);transition:right .38s cubic-bezier(.3,.7,.2,1) .14s}
+.brow{flex:none}.brow>*{flex:none}
+@media (max-width:760px){#head{left:0}#panel.open{position:absolute;inset:0 0 0 auto;width:100vw;z-index:30}#panel>*{min-width:0}}
+@media (prefers-reduced-motion:reduce){#panel,#head{transition:none}}
+.amenu{left:12px!important;bottom:58px;min-width:280px;padding:6px}
+.amenu .hd{padding:8px 10px 10px;border-bottom:1px solid #2b2b2b;margin-bottom:4px}.amenu .hd b{display:block;font-size:14px}.amenu .hd span{color:var(--sub);font-size:12.5px}
+.amenu button{gap:12px}.amenu .ic{width:18px;text-align:center;color:var(--sub)}.amenu .r{margin-left:auto;color:var(--sub);font-size:12px}.amenu hr{border:0;border-top:1px solid #2b2b2b;margin:4px 0}
+#settings{position:fixed;inset:0;background:#000a;z-index:70;display:grid;place-items:center}
+.sdlg{width:min(900px,94vw);height:min(700px,88vh);background:#1b1b1b;border:1px solid #2c2c2c;border-radius:14px;display:flex;overflow:hidden;box-shadow:0 30px 80px #000c;position:relative}
+.snav{width:200px;flex:none;border-right:1px solid #262626;padding:12px 10px;display:flex;flex-direction:column;gap:2px;background:#161616}
+.snav button{display:flex;gap:10px;align-items:center;text-align:left;padding:8px 10px;border-radius:8px;font-size:13.5px;color:#d0d0d0}.snav button:hover{background:#222}.snav button.on{background:#2a2a2a;color:#fff}
+.sbody{flex:1;overflow-y:auto;padding:22px 30px 30px}.sbody h2{font-size:17px;margin:4px 0 18px}.sbody h5{font-size:12.5px;color:var(--sub);font-weight:500;margin:20px 0 8px}
+.scard{background:#222;border:1px solid #2c2c2c;border-radius:12px;padding:4px 14px}
+.srow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid #2a2a2a;font-size:13.5px}.srow:last-child{border:0}
+.srow select{background:#2a2a2a;border:0;border-radius:8px;padding:5px 8px}
+.sw{width:38px;height:22px;border-radius:11px;background:#3a3a3a;position:relative;transition:background .15s;flex:none}.sw::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s}.sw.on{background:#1d77f2}.sw.on::after{transform:translateX(16px)}
+.sx{position:absolute;top:12px;right:12px}
+.acc{display:flex;align-items:center;gap:12px;padding:12px 0}.acc .av{width:44px;height:44px}.acc .who{flex:1;min-width:0}.acc .who b{display:block}.acc .who span{color:var(--sub);font-size:12.5px}
+.pbtn{background:#2c2c2c;border-radius:16px;padding:6px 14px;font-size:13px;font-weight:500}.pbtn:hover{background:#363636}
+.brow .grow{flex:1 1 auto}
