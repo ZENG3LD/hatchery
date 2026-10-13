@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-server"
-version = "0.2.0"
+version = "0.2.3"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
@@ -24,12 +24,12 @@ toml = "0.8"
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-m4a-agent = { git = "https://github.com/ZENG3LD/mail4agent.git", branch = "feat/pure-messenger", optional = true }
-mail4agent-core = { git = "https://github.com/ZENG3LD/mail4agent.git", branch = "feat/pure-messenger", optional = true }
-mail4agent-api = { git = "https://github.com/ZENG3LD/mail4agent.git", branch = "feat/pure-messenger", optional = true }
-mail4agent-store-sqlite = { git = "https://github.com/ZENG3LD/mail4agent.git", branch = "feat/pure-messenger", optional = true }
+m4a-agent = { version = "0.4.10", optional = true }
+mail4agent-core = { version = "0.4.10", optional = true }
+mail4agent-api = { version = "0.4.10", optional = true }
+mail4agent-store-sqlite = { version = "0.4.10", optional = true }
 rusqlite = { version = "0.36", features = ["bundled"], optional = true }
-hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.1" }
+hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.3" }
 
 [features]
 # Full kit by default: there is no light mode.
@@ -44,6 +44,6 @@ memory = []
 
 [dev-dependencies]
 tempfile = "3"
-hatchery-c2 = { path = "../hatchery-c2", version = "0.2.0" }
-hatchery-node = { path = "../hatchery-node", version = "0.2.0", default-features = false }
-hatchery-harness-mcp = { path = "../hatchery-harness-mcp", version = "0.2.0" }
+hatchery-c2 = { path = "../hatchery-c2", version = "0.2.3" }
+hatchery-node = { path = "../hatchery-node", version = "0.2.3", default-features = false }
+hatchery-harness-mcp = { path = "../hatchery-harness-mcp", version = "0.2.3" }

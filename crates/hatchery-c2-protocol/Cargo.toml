@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-c2-protocol"
-version = "0.2.0"
+version = "0.2.3"
 edition = "2021"
 repository = "https://github.com/ZENG3LD/hatchery"
 description = "Stable, serde-only inventory and control wire contract for C2 relays and clients"
@@ -10,9 +10,9 @@ license = "MIT"
 name = "hatchery_c2_protocol"
 
 [dependencies]
-gate4agent-build-stamp = { version = "0.5.0" }
-gate4agent-node-protocol = { version = "0.5.0" }
-gate4agent-types = { version = "0.5.0" }
+gate4agent-build-stamp = { version = "0.5.2" }
+gate4agent-node-protocol = { version = "0.5.2" }
+gate4agent-types = { version = "0.5.2" }
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]

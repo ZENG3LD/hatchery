@@ -37,31 +37,8 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.3"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
 
-# Session identity env on native overlays (gate4agent feat/session-account-env); branch only, not published.
-[patch.crates-io]
-gate4agent-adapters = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-bidi-relay = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-build-stamp = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-catalog = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-engine = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-handle = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-kernel = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-node-core = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-node-protocol = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-node-wire = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-provider-ports = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-pty = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-runtime-native = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-shell-capabilities = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-shell-history = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-shell-native = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-shell-one-shot = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-testkit = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-tool-engine = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-tool-protocol = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }
-gate4agent-types = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters" }

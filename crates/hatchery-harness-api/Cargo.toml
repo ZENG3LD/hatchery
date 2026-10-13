@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-harness-api"
-version = "0.2.0"
+version = "0.2.3"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
@@ -11,8 +11,8 @@ description = "Read and operator wire contract for the hatchery harness localhos
 name = "hatchery_harness_api"
 
 [dependencies]
-gate4agent-build-stamp = { version = "0.5.0" }
-hatchery-harness-protocol = { version = "0.2.0", path = "../hatchery-harness-protocol" }
+gate4agent-build-stamp = { version = "0.5.2" }
+hatchery-harness-protocol = { version = "0.2.3", path = "../hatchery-harness-protocol" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 

@@ -1,7 +1,7 @@
 
 [package]
 name = "hatchery-node"
-version = "0.2.1"
+version = "0.2.3"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
@@ -16,27 +16,27 @@ path = "src/main.rs"
 
 [dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
-hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.1" }
-hatchery-build = { path = "../hatchery-build", version = "0.2.1" }
+hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.3" }
+hatchery-build = { path = "../hatchery-build", version = "0.2.3" }
 base64 = "0.22"
 # Standard kit cores, all from crates.io: dig2browser 0.5 (browser machine and
 # stream), mail4agent 0.4 (lib face), session-restore libraries 0.1.x.
 dig2browser = { version = "0.5.3", optional = true, default-features = false }
-mail4agent = { git = "https://github.com/ZENG3LD/mail4agent.git", branch = "feat/pure-messenger", optional = true, default-features = false }
+mail4agent = { version = "0.4.10", optional = true, default-features = false }
 claude-session-restore = { version = "0.1.3", optional = true }
 codex-session-restore = { version = "0.1.3", optional = true }
 grok-session-restore = { version = "0.1.4", optional = true }
 kimi-session-restore = { version = "0.1.4", optional = true }
-gate4agent-adapters = { version = "0.5.0" }
-gate4agent-catalog = { version = "0.5.0" }
-gate4agent-handle = { version = "0.5.0" }
-gate4agent-node-core = { version = "0.5.0" }
-gate4agent-node-protocol = { version = "0.5.0" }
-gate4agent-node-wire = { version = "0.5.0" }
-gate4agent-runtime-native = { version = "0.5.0" }
-gate4agent-wake = { git = "https://github.com/ZENG3LD/gate4agent.git", branch = "feat/deliver-adapters", default-features = false, features = ["wake-routine", "wake-kimi"] }
-gate4agent-testkit = { optional = true, version = "0.5.0" }
-gate4agent-types = { version = "0.5.0" }
+gate4agent-adapters = { version = "0.5.2" }
+gate4agent-catalog = { version = "0.5.2" }
+gate4agent-handle = { version = "0.5.2" }
+gate4agent-node-core = { version = "0.5.2" }
+gate4agent-node-protocol = { version = "0.5.2" }
+gate4agent-node-wire = { version = "0.5.2" }
+gate4agent-runtime-native = { version = "0.5.2" }
+gate4agent-wake = { version = "0.5.2", default-features = false, features = ["wake-routine", "wake-kimi"] }
+gate4agent-testkit = { optional = true, version = "0.5.2" }
+gate4agent-types = { version = "0.5.2" }
 ring = "=0.17.14"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -91,6 +91,6 @@ dig2-station-probe = []
 [dev-dependencies]
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 # C2 <-> node integration tests (tests/c2_*.rs): C2 and the node are equal peers.
-hatchery-c2 = { path = "../hatchery-c2", version = "0.2.0" }
-hatchery-c2-client = { path = "../hatchery-c2-client", version = "0.2.0" }
+hatchery-c2 = { path = "../hatchery-c2", version = "0.2.3" }
+hatchery-c2-client = { path = "../hatchery-c2-client", version = "0.2.3" }
 vt100 = "0.16"

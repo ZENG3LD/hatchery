@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-c2"
-version = "0.2.1"
+version = "0.2.3"
 edition = "2021"
 repository = "https://github.com/ZENG3LD/hatchery"
 description = "Relay daemon that aggregates node state/events and routes commands down to attached nodes"
@@ -14,20 +14,20 @@ name = "hatchery-c2"
 path = "src/main.rs"
 
 [dependencies]
-hatchery-c2-protocol = { path = "../hatchery-c2-protocol", version = "0.2.0" }
-gate4agent-node-protocol = { version = "0.5.0" }
-gate4agent-node-wire = { version = "0.5.0" }
+hatchery-c2-protocol = { path = "../hatchery-c2-protocol", version = "0.2.3" }
+gate4agent-node-protocol = { version = "0.5.2" }
+gate4agent-node-wire = { version = "0.5.2" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "signal", "sync", "time"] }
 tracing = "0.1"
-hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.1" }
-hatchery-build = { path = "../hatchery-build", version = "0.2.1" }
+hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.3" }
+hatchery-build = { path = "../hatchery-build", version = "0.2.3" }
 sha2 = "0.10"
 getrandom = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
-gate4agent-types = { version = "0.5.0" }
+gate4agent-types = { version = "0.5.2" }
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
