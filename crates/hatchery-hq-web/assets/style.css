@@ -231,3 +231,24 @@ body{color:#f5f5f5}
 .cbtn{background:#282828;color:#f5f5f5}.cbtn:hover{background:#323232}
 .sendb{background:#116dd2}.sendb:hover{background:#1884fc}
 #ptabs button.on{background:#1b1b1b}.btn.blue,.sw.on{background:#116dd2;border-color:#116dd2}
+
+/* round 6: separators + resize, compact right panel, pill clamped to the main pane */
+:root{--sw:258px;--pw:258px}
+#side{width:var(--sw);border-right:0}
+#panel,#panel.open{border-left:0}
+#panel.open{width:var(--pw)}#panel>*{min-width:var(--pw)}
+.rz{flex:none;width:1px;background:#1b1b1b;position:relative;z-index:15;cursor:col-resize;transition:background .12s}
+#rzr{background:#1f1f1f}
+.rz::before{content:'';position:absolute;top:0;bottom:0;left:-4px;right:-4px}
+.rz:hover,.rz.drag{background:#3a3a3a}
+#rzr{display:none}body.panelopen #rzr{display:block}
+body.dragging{cursor:col-resize;user-select:none}body.dragging #panel,body.dragging #side{transition:none}
+#main{overflow:hidden}
+#head{position:absolute;left:0;right:0;transition:none}
+#headbtn{max-width:calc(100% - 24px);will-change:transform}
+#headname{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.hchev{width:0;opacity:0;overflow:hidden;color:#acacac;font-size:16px;line-height:1;transition:width .15s,opacity .15s,margin .15s}
+#headbtn:hover .hchev{width:10px;opacity:1;margin-left:2px}
+@media (max-width:760px){.rz{display:none!important}#side{width:272px}}
+@media (max-width:760px){#panel.open{width:100vw}#panel>*{min-width:0}}
+#ptabs{gap:0;padding:0 8px 6px}#ptabs button{padding:5px 8px;font-size:12.5px}

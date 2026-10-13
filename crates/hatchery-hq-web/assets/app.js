@@ -76,7 +76,7 @@ $('#sidetoggle').onclick = () => document.body.classList.toggle('sideopen');
 function openChat(id) {
   setMode('chat');
   S.chat = id; S.target = id === '*' ? 'room' : S.session && S.sessionNode === id ? 'agent' : 'mail';
-  $('#headname').textContent = chatName(id); $('#headav').innerHTML = avatar(id, 'sm');
+  $('#headname').textContent = chatName(id); $('#headbtn').title = chatName(id); $('#headav').innerHTML = avatar(id, 'sm');
   $('#input').placeholder = id === '*' ? 'Message general' : `Message ${id}`;
   renderSidebar(); loadThread(); renderPanelHead(); if (S.panel) setTab(S.tab);
 }
@@ -234,9 +234,36 @@ const TABS = [['info', 'Info'], ['status', 'Status'], ['library', 'Library'], ['
 function renderPanelHead() { if (!S.chat) return; $('#panelav').innerHTML = avatar(S.chat, 'big'); $('#panelname').textContent = chatName(S.chat); $('#panelsub').textContent = ''; }
 function openPanel(tab) { S.panel = true; $('#panel').classList.add('open'); syncHead(); renderPanelHead(); setTab(tab || S.tab); }
 function closePanel() { S.panel = false; $('#panel').classList.remove('open'); syncHead(); }
-// the top pill is fixed over the chat; its right edge eases (with a short delay) to the docked panel's edge
-function syncHead() { const r = document.documentElement.style; r.setProperty('--sw', innerWidth <= 760 ? '0px' : $('#side').offsetWidth + 'px'); r.setProperty('--pr', S.panel && innerWidth > 760 ? '380px' : '0px'); }
-addEventListener('resize', syncHead); syncHead();
+// The pill lives inside the main pane (overflow hidden). On panel open/close it holds its old screen
+// position briefly, then eases to the new centre; every frame is clamped to the main pane bounds.
+let pillAnim = 0;
+function syncHead() {
+  document.body.classList.toggle('panelopen', !!S.panel);
+  const b = $('#headbtn'); const from = b.getBoundingClientRect(); const fromC = (from.left + from.right) / 2 - (parseFloat(b.dataset.tx) || 0);
+  const oldX = fromC + (parseFloat(b.dataset.tx) || 0); const t0 = performance.now(); const id = ++pillAnim;
+  const step = (now) => {
+    if (id !== pillAnim) return;
+    b.style.transform = ''; const r = b.getBoundingClientRect(); const m = $('#main').getBoundingClientRect(); const nat = (r.left + r.right) / 2;
+    const t = Math.max(0, Math.min(1, (now - t0 - 140) / 380)); const e = 1 - Math.pow(1 - t, 3);
+    let want = oldX + (nat - oldX) * e; const half = r.width / 2; want = Math.max(m.left + 12 + half, Math.min(m.right - 12 - half, want));
+    const tx = want - nat; b.dataset.tx = tx; b.style.transform = tx ? `translateX(${tx}px)` : '';
+    if (t < 1) requestAnimationFrame(step); else { b.style.transform = ''; b.dataset.tx = 0; }
+  };
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { b.style.transform = ''; return; }
+  requestAnimationFrame(step);
+}
+// draggable separators; widths persist in localStorage
+function setW(v, px) { document.documentElement.style.setProperty(v, px + 'px'); }
+setW('--sw', +localStorage.getItem('hq.sw') || 258); setW('--pw', +localStorage.getItem('hq.pw') || 258);
+function dragger(el, v, key, min, max, fromRight) {
+  el.onpointerdown = (e) => {
+    e.preventDefault(); el.setPointerCapture(e.pointerId); el.classList.add('drag'); document.body.classList.add('dragging');
+    el.onpointermove = (ev) => { const w = Math.round(Math.max(min, Math.min(max(), fromRight ? innerWidth - ev.clientX : ev.clientX))); setW(v, w); localStorage.setItem(key, w); };
+    el.onpointerup = () => { el.onpointermove = null; el.classList.remove('drag'); document.body.classList.remove('dragging'); };
+  };
+}
+dragger($('#rzl'), '--sw', 'hq.sw', 200, () => Math.min(440, innerWidth * 0.35));
+dragger($('#rzr'), '--pw', 'hq.pw', 240, () => Math.min(640, innerWidth * 0.4), true);
 function setTab(tab) {
   if (!TABS.some(([id]) => id === tab)) tab = 'info';
   S.tab = tab; $('#ptabs').innerHTML = '';
