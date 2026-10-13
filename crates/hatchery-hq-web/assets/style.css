@@ -252,3 +252,11 @@ body.dragging{cursor:col-resize;user-select:none}body.dragging #panel,body.dragg
 @media (max-width:760px){.rz{display:none!important}#side{width:272px}}
 @media (max-width:760px){#panel.open{width:100vw}#panel>*{min-width:0}}
 #ptabs{gap:0;padding:0 8px 6px}#ptabs button{padding:5px 8px;font-size:12.5px}
+/* round 7: compact rail */
+body.snap #side{transition:width .2s cubic-bezier(.2,.8,.3,1)!important}
+body.rail #side{width:72px}
+body.rail .sidetop{justify-content:center;padding:12px 0 8px}body.rail .pair{flex-direction:column;gap:8px}
+body.rail #search{display:none}
+body.rail #chats{padding:6px 10px}body.rail .chatitem{justify-content:center;padding:7px 0}body.rail .chatitem .t{display:none}
+body.rail .sidebottom{justify-content:center;padding:12px 0}
+body.rail #acctmenu{left:12px}

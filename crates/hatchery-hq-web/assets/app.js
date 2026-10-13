@@ -64,7 +64,7 @@ function renderSidebar() {
   const q = $('#search').value.toLowerCase(); const match = (n) => !q || n.toLowerCase().includes(q);
   const root = $('#chats'); root.innerHTML = '';
   const last = (id) => { const m = S.mail[id] || []; const l = m[m.length - 1]; return l ? l.body : ''; };
-  const item = (id, name, preview) => { if (!match(name)) return; const b = document.createElement('button'); b.className = 'chatitem' + (S.chat === id ? ' on' : ''); b.innerHTML = avatar(id) + `<div class="t"><div class="n">${esc(name)}</div><div class="p">${esc(preview)}</div></div>`; b.onclick = () => { openChat(id); document.body.classList.remove('sideopen'); }; root.appendChild(b); };
+  const item = (id, name, preview) => { if (!match(name)) return; const b = document.createElement('button'); b.className = 'chatitem' + (S.chat === id ? ' on' : ''); b.title = name; b.innerHTML = avatar(id) + `<div class="t"><div class="n">${esc(name)}</div><div class="p">${esc(preview)}</div></div>`; b.onclick = () => { openChat(id); document.body.classList.remove('sideopen'); }; root.appendChild(b); };
   if (S.session) item(S.sessionNode, S.sessionNode, last(S.sessionNode) || S.sessionProv);
   item('*', 'general', last('*') || '');
 }
@@ -262,7 +262,14 @@ function dragger(el, v, key, min, max, fromRight) {
     el.onpointerup = () => { el.onpointermove = null; el.classList.remove('drag'); document.body.classList.remove('dragging'); };
   };
 }
-dragger($('#rzl'), '--sw', 'hq.sw', 200, () => Math.min(440, innerWidth * 0.35));
+// left separator: shrink to 200, past the threshold snap to a 72px avatar rail; drag back out to expand
+function setRail(on) { if (document.body.classList.contains('rail') === on) return; document.body.classList.add('snap'); document.body.classList.toggle('rail', on); localStorage.setItem('hq.rail', on ? '1' : ''); setTimeout(() => document.body.classList.remove('snap'), 220); renderSidebar(); }
+if (localStorage.getItem('hq.rail')) document.body.classList.add('rail');
+$('#rzl').onpointerdown = (e) => {
+  const el = $('#rzl'); e.preventDefault(); el.setPointerCapture(e.pointerId); el.classList.add('drag'); document.body.classList.add('dragging');
+  el.onpointermove = (ev) => { const x = ev.clientX; if (x < 140) { setRail(true); return; } setRail(false); const w = Math.round(Math.max(200, Math.min(Math.min(440, innerWidth * 0.35), x))); setW('--sw', w); localStorage.setItem('hq.sw', w); };
+  el.onpointerup = () => { el.onpointermove = null; el.classList.remove('drag'); document.body.classList.remove('dragging'); };
+};
 dragger($('#rzr'), '--pw', 'hq.pw', 240, () => Math.min(640, innerWidth * 0.4), true);
 function setTab(tab) {
   if (!TABS.some(([id]) => id === tab)) tab = 'info';
