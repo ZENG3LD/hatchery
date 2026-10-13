@@ -21,7 +21,8 @@ async fn main() {
     });
     let listen = config.listen;
     let (app, state) = hatchery_hq_web::router(config);
-    hatchery_hq_web::spawn_mail_watcher(state);
+    hatchery_hq_web::spawn_mail_watcher(std::sync::Arc::clone(&state));
+    hatchery_hq_web::spawn_topology_watcher(state);
     let listener = tokio::net::TcpListener::bind(listen).await.unwrap_or_else(|e| {
         eprintln!("hatchery-hq-web: bind {listen}: {e}");
         std::process::exit(2)

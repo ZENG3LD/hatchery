@@ -113,13 +113,20 @@ pub fn index_html(base: &str) -> String {
 pub struct AppState {
     pub config: Config,
     pub events: broadcast::Sender<String>,
+    /// One held, self-reconnecting operator control connection whose
+    /// background supervisor keeps `current_topology()` fresh. `/api/nodes`
+    /// reads this instead of dialing core operator control on every poll,
+    /// which is what caused a new operator connection every few seconds.
+    /// `None` until `spawn_topology_watcher` establishes it; callers fall
+    /// back to a one-shot dial while it is unset.
+    pub topology: std::sync::OnceLock<hatchery_c2_client::C2ReconnectingHandle>,
 }
 
 type Shared = Arc<AppState>;
 
 pub fn router(config: Config) -> (Router, Shared) {
     let (events, _) = broadcast::channel(256);
-    let state = Arc::new(AppState { config, events });
+    let state = Arc::new(AppState { config, events, topology: std::sync::OnceLock::new() });
     let base = state.config.base_path.clone();
     let index: &'static str = Box::leak(index_html(&base).into_boxed_str());
     let mut app = Router::new()
@@ -254,17 +261,24 @@ async fn api_server(State(s): State<Shared>, Path(rest): Path<String>, method: M
 async fn api_nodes(State(s): State<Shared>) -> Response {
     let cfg = &s.config;
     let enrolled = upstream(cfg.c2_api, "GET", "/v1/enroll/nodes", Some(&cfg.c2_token), b"", Duration::from_secs(10)).await.ok().filter(|r| r.0 == 200).and_then(|r| serde_json::from_slice::<Value>(&r.1).ok());
-    let core_topo = match tokio::time::timeout(
-        Duration::from_secs(3),
-        hatchery_c2_client::connect_local(&cfg.c2_control, &cfg.c2_token),
-    )
-    .await
-    {
-        Ok(Ok((control, _ev))) => {
-            let topo = control.current_topology();
-            serde_json::to_value(topo.as_ref()).ok()
+    // Prefer the held, self-reconnecting operator control (no per-poll dial,
+    // so no ~4s operator-connection churn on core). Fall back to a one-shot
+    // dial only while the watcher has not established the held handle yet.
+    let core_topo = if let Some(handle) = s.topology.get() {
+        serde_json::to_value(handle.current_topology().as_ref()).ok()
+    } else {
+        match tokio::time::timeout(
+            Duration::from_secs(3),
+            hatchery_c2_client::connect_local(&cfg.c2_control, &cfg.c2_token),
+        )
+        .await
+        {
+            Ok(Ok((control, _ev))) => {
+                let topo = control.current_topology();
+                serde_json::to_value(topo.as_ref()).ok()
+            }
+            _ => None,
         }
-        _ => None,
     };
     let status = match hatchery_c2_client::C2Client::new(cfg.c2_api, cfg.c2_token.clone()) {
         Ok(c) => c.status().await.ok().and_then(|st| serde_json::to_value(st).ok()),
@@ -360,6 +374,41 @@ pub fn spawn_mail_watcher(state: Shared) {
                     }
                 }
                 _ => tokio::time::sleep(Duration::from_secs(3)).await,
+            }
+        }
+    });
+}
+
+/// Establish one held, self-reconnecting operator control connection and
+/// keep it. Its background supervisor keeps the cached topology fresh and
+/// reconnects on its own, so `/api/nodes` can read `current_topology()`
+/// without dialing core operator control on every poll (that per-poll dial
+/// was the ~4s operator-connection churn). The event stream must be drained
+/// or the supervisor's topology updates would stall, so a task consumes and
+/// discards events here; HQ's live views use their own per-view streams.
+pub fn spawn_topology_watcher(state: Shared) {
+    tokio::spawn(async move {
+        loop {
+            match hatchery_c2_client::connect_local_reconnecting(
+                state.config.c2_control.clone(),
+                state.config.c2_token.clone(),
+            )
+            .await
+            {
+                Ok((handle, mut events)) => {
+                    // Publish once; if already set (shouldn't happen), keep the first.
+                    let _ = state.topology.set(handle);
+                    tracing::info!("HQ topology watcher: held operator control established");
+                    // Drain forever so the supervisor keeps updating topology.
+                    while events.recv().await.is_some() {}
+                    tracing::warn!("HQ topology watcher: event stream ended; supervisor retains the handle");
+                    // The handle self-reconnects; nothing more to do. Park.
+                    std::future::pending::<()>().await;
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "HQ topology watcher: initial connect failed; retrying");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
             }
         }
     });
