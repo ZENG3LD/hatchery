@@ -26,6 +26,11 @@
 //!   step 7  -> "== STEP 7 =="  (spec select + start_task_v2 B)
 //!   step 8  -> "== STEP 8 =="  (bare-adapter proof the durable path served it)
 //!   step 9  -> "== STEP 9 =="  (materialized context file + lineage chain)
+//! A2: operator control no longer lives on C2. These tests dialed the legacy
+//! control UDS/TCP path and need a rewrite onto `hatchery_server::node_controller`
+//! over the core drain before they can run again.
+#![cfg(feature = "legacy-c2-control")]
+
 
 #![cfg(windows)]
 

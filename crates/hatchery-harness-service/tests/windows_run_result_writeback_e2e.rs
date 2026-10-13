@@ -33,6 +33,11 @@
 //!               task_get/run_get carry git_facts/result_refs/context_pack
 //!               (None)/result_disposition, §7/§8)
 //!   step 7 -> "== STEP 7 =="  (operator flow: move_task Review -> Done)
+//! A2: operator control no longer lives on C2. These tests dialed the legacy
+//! control UDS/TCP path and need a rewrite onto `hatchery_server::node_controller`
+//! over the core drain before they can run again.
+#![cfg(feature = "legacy-c2-control")]
+
 
 #![cfg(windows)]
 

@@ -44,7 +44,6 @@ const OPERATOR_BODY_LIMIT_BYTES: usize = 16 * 1024;
 const MAX_HTTP_CONNECTIONS: usize = 16;
 const RESPONSE_BODY_LIMIT_BYTES: usize = 8 * 1024 * 1024;
 
-mod control;
 
 #[cfg(windows)]
 pub const DEFAULT_C2_CONTROL_ENDPOINT: &str = r"\\.\pipe\gate4agent-c2";
@@ -154,9 +153,10 @@ impl Default for C2Timings {
 #[derive(Clone)]
 pub struct C2Config {
     pub api_listen: SocketAddr,
+    /// Deprecated (A2): kept for config compatibility. C2 no longer opens an
+    /// operator control socket; core drains and parses g4a.
     pub control_endpoint: String,
-    /// Optional TCP control accept bound to the C2 tunnel address.
-    /// The unix `control_endpoint` listener is always started as well.
+    /// Deprecated (A2): ignored. Operator control is not accepted on C2.
     pub control_tunnel_listen: Option<SocketAddr>,
     api_token: String,
     pub nodes: Vec<C2NodeConfig>,
@@ -306,6 +306,7 @@ impl C2Config {
         self
     }
 
+    /// Deprecated (A2): records the path but C2 does not listen on it.
     pub fn with_control_endpoint(mut self, endpoint: impl Into<String>) -> Result<Self, C2ConfigError> {
         let endpoint = endpoint.into();
         validate_control_endpoint(&endpoint)?;
@@ -319,6 +320,7 @@ impl C2Config {
     /// TCP door for an HQ WireGuard client. Bound to one concrete address
     /// (the address on the C2 tunnel), never `0.0.0.0` or port 0. Does not
     /// replace the unix control listener.
+    /// Deprecated (A2): records the address but C2 does not listen on it.
     pub fn with_control_tunnel_listen(mut self, listen: SocketAddr) -> Result<Self, C2ConfigError> {
         if listen.port() == 0 || listen.ip().is_unspecified() {
             return Err(C2ConfigError::InvalidControlTunnel(listen));
@@ -497,57 +499,28 @@ struct RelayEndpoint {
     force_disconnect: watch::Sender<u64>,
 }
 
+/// A2: operator control lives on core (`hatchery_server::node_controller`).
+/// C2 no longer accepts an operator control socket; events are not faned out here.
 #[derive(Clone)]
 struct OperatorHub {
-    sink: Arc<Mutex<Option<OperatorEventSink>>>,
     gate: Arc<Mutex<Option<Arc<dyn crate::enroll_service::CapabilityGate>>>>,
 }
 
-#[derive(Clone)]
-struct OperatorEventSink {
-    connection_id: u64,
-    outbound: mpsc::Sender<control::QueuedFrame>,
-    budget: Arc<AtomicUsize>,
-    disconnect: watch::Sender<bool>,
-}
-
 impl OperatorHub {
-    fn new() -> Self { Self { sink: Arc::new(Mutex::new(None)), gate: Arc::new(Mutex::new(None)) } }
+    fn new() -> Self { Self { gate: Arc::new(Mutex::new(None)) } }
 
     fn set_gate(&self, gate: Arc<dyn crate::enroll_service::CapabilityGate>) {
         *self.gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(gate);
     }
 
-    fn attach(&self, sink: OperatorEventSink) {
-        *self.sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(sink);
-    }
+    fn has_active_operator(&self) -> bool { false }
 
-    fn detach(&self, connection_id: u64) {
-        let mut sink = self.sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if sink.as_ref().is_some_and(|current| current.connection_id == connection_id) { *sink = None; }
-    }
-
-    fn is_active(&self, connection_id: u64) -> bool {
-        self.sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
-            .as_ref().is_some_and(|current| current.connection_id == connection_id)
-    }
-
-    fn has_active_operator(&self) -> bool {
-        self.sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_some()
-    }
+    /// Legacy operator sockets are gone; always false so RelayCommand::Request is refused.
+    fn is_active(&self, _connection_id: u64) -> bool { false }
 
     fn publish(&self, event: RoutedNodeEvent) {
-        // Events of a node whose status does not hold `attach` never reach the operator.
-        let gate = self.gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone();
-        if gate.is_some_and(|gate| gate.allows(event.node_id.as_str(), "attach") == Some(false)) {
-            return;
-        }
-        let sink = self.sink.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some(sink) = sink.as_ref() {
-            if control::queue_operator_event(&sink.outbound, &sink.budget, event).is_err() {
-                let _ = sink.disconnect.send(true);
-            }
-        }
+        let _ = event;
+        // Dropped: core drains and parses g4a. C2 does not fan out to an operator socket.
     }
 }
 
@@ -765,29 +738,8 @@ async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch:
     };
     drop(ingress_tx);
     tasks.spawn(http_server(listener, config.api_token.clone(), config.timings.http_io_deadline, status_rx.clone(), enroll_service.clone(), shutdown.clone()));
-    let slots = control::ControlSlots::new();
-    let tunnel_listen = config.control_tunnel_listen;
-    let tunnel_token = config.api_token.clone();
-    tasks.spawn(control::run(
-        config.control_endpoint,
-        config.api_token,
-        relay_senders.clone(),
-        status_rx.clone(),
-        hub.clone(),
-        shutdown.clone(),
-        slots.clone(),
-    ));
-    if let Some(listen) = tunnel_listen {
-        tasks.spawn(control::run_tcp(
-            listen,
-            tunnel_token,
-            relay_senders.clone(),
-            status_rx,
-            hub,
-            shutdown.clone(),
-            slots,
-        ));
-    }
+    // A2: no operator control listener on C2. Core opens the drain and parses g4a.
+    let _ = (config.control_endpoint, config.control_tunnel_listen, hub, status_rx);
     loop {
         tokio::select! {
             changed = shutdown.changed() => {

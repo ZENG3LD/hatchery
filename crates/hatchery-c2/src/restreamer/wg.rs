@@ -192,3 +192,43 @@ mod tests {
         assert_eq!(t.socket_addr().to_string(), "10.88.1.1:19002");
     }
 }
+
+/// Bring up a kernel WireGuard interface for a restreamer bind. Needs CAP_NET_ADMIN
+/// and the `wg` tool; ignored by default so ordinary CI stays green.
+#[cfg(test)]
+mod bringup_tests {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::process::Command;
+
+    fn have_wg() -> bool {
+        Command::new("wg").arg("help").output().map(|o| o.status.success() || o.status.code().is_some()).unwrap_or(false)
+    }
+
+    #[test]
+    #[ignore = "needs CAP_NET_ADMIN and wg; opt-in with --ignored"]
+    fn wireguard_bring_up_for_restreamer_bind() {
+        if !have_wg() {
+            eprintln!("wg not installed; skipping bring-up body");
+            return;
+        }
+        let ifname = format!("hyrst{}", std::process::id() % 10000);
+        let tunnel = IpAddr::V4(Ipv4Addr::new(10, 66, 0, 1));
+        let bind = RestreamerWgBind::production(tunnel, 9100, 9101).expect("production bind");
+        assert_eq!(bind.node_listen.ip(), tunnel);
+        assert_eq!(bind.drain_listen.ip(), tunnel);
+
+        // Create a temporary WireGuard device, assign the tunnel address, then tear it down.
+        // No peers, no keys logged. Failures here mean the host lacks privileges.
+        let add = Command::new("ip").args(["link", "add", &ifname, "type", "wireguard"]).output().expect("ip");
+        if !add.status.success() {
+            let err = String::from_utf8_lossy(&add.stderr);
+            panic!("ip link add failed (need CAP_NET_ADMIN): {err}");
+        }
+        let _ = Command::new("ip").args(["addr", "add", &format!("{tunnel}/32"), "dev", &ifname]).status();
+        let _ = Command::new("ip").args(["link", "set", "dev", &ifname, "up"]).status();
+        let show = Command::new("wg").args(["show", &ifname]).output().expect("wg show");
+        assert!(show.status.success(), "wg show {}", String::from_utf8_lossy(&show.stderr));
+        let _ = Command::new("ip").args(["link", "del", &ifname]).status();
+    }
+}

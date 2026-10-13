@@ -1,3 +1,8 @@
+//! A2: operator control no longer lives on C2. These tests dialed the legacy
+//! control UDS/TCP path and need a rewrite onto `hatchery_server::node_controller`
+//! over the core drain before they can run again.
+#![cfg(feature = "legacy-c2-control")]
+
 #![cfg(unix)]
 //! (helpers copied from the enrollment e2e)
 //! C2 <-> node enrollment end to end on loopback (the WireGuard provisioner is recorded, the

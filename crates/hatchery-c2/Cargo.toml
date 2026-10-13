@@ -3,7 +3,7 @@ name = "hatchery-c2"
 version = "0.2.3"
 edition = "2021"
 repository = "https://github.com/ZENG3LD/hatchery"
-description = "Edge restreamer and relay: opaque multiplex drain for core, plus legacy node control during A2 migration"
+description = "Edge restreamer: opaque multiplex uplink and core drain (A2). No operator control socket."
 license = "MIT"
 
 [lib]

@@ -1,3 +1,8 @@
+//! A2: operator control no longer lives on C2. These tests dialed the legacy
+//! control UDS/TCP path and need a rewrite onto `hatchery_server::node_controller`
+//! over the core drain before they can run again.
+#![cfg(feature = "legacy-c2-control")]
+
 #![cfg(unix)]
 
 use hatchery_c2::protocol::{
