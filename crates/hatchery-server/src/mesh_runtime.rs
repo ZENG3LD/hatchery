@@ -173,21 +173,22 @@ async fn bootstrap_cursor(
         };
         match link.request(&req, std::time::Duration::from_secs(5)).await {
             Ok(G4aMessage::Response(routed)) => {
-                if routed.response.is_ok() {
-                    mesh.set_cursor(
-                        &node_id,
-                        NodeCursor {
-                            incarnation_id: routed.incarnation_id,
-                            sequence: 0,
-                        },
-                    );
-                    tracing::info!(
-                        %node_id,
-                        incarnation = %routed.incarnation_id,
-                        "core mesh cursor from Snapshot"
-                    );
-                    return;
-                }
+                // Any routed reply carries the live incarnation (ok Snapshot or
+                // a typed failure). That is enough for HQ Spawn cursors.
+                mesh.set_cursor(
+                    &node_id,
+                    NodeCursor {
+                        incarnation_id: routed.incarnation_id,
+                        sequence: 0,
+                    },
+                );
+                tracing::info!(
+                    %node_id,
+                    incarnation = %routed.incarnation_id,
+                    ok = routed.response.is_ok(),
+                    "core mesh cursor from Snapshot"
+                );
+                return;
             }
             Ok(_) => {}
             Err(err) => {

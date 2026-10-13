@@ -134,7 +134,9 @@ async fn handle_control(
         )
         .await;
     }
-    if routed.route.expected_incarnation_id != *incarnation_id {
+    // All-zero expected incarnation is the core cursor-bootstrap wildcard.
+    let expected = routed.route.expected_incarnation_id;
+    if expected != NodeIncarnationId::from_bytes([0; 16]) && expected != *incarnation_id {
         return send_reply(
             session,
             op_id,

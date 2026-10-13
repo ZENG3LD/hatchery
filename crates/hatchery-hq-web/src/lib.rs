@@ -262,7 +262,7 @@ async fn api_nodes(State(s): State<Shared>) -> Response {
     {
         Ok(Ok((control, _ev))) => {
             let topo = control.current_topology();
-            serde_json::to_value(topo).ok()
+            serde_json::to_value(topo.as_ref()).ok()
         }
         _ => None,
     };
