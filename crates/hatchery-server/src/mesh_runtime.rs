@@ -13,7 +13,7 @@ use crate::node_controller::{G4aMessage, OperatorLink};
 use crate::operator_control::{serve_local, NodeOperatorMesh};
 use hatchery_c2_client::DrainClient;
 use hatchery_core::nested::HqRecipientSecret;
-use hatchery_core::{ChannelKind, NodeRequest, NodeRoute, NodeId, NodeCursor, RoutedNodeRequest};
+use hatchery_core::{BrowserStreamEvent, ChannelKind, NodeRequest, NodeRoute, NodeId, NodeCursor, RoutedNodeRequest};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use tokio::sync::{mpsc, watch};
@@ -233,7 +233,8 @@ impl MeshRuntime {
 
         for node_id in &config.node_ids {
             let (events_tx, mut events_rx) = mpsc::unbounded_channel();
-            let (link, outbound) = OperatorLink::new(Some(events_tx));
+            let (browser_tx, mut browser_rx) = mpsc::unbounded_channel::<BrowserStreamEvent>();
+            let (link, outbound) = OperatorLink::new_with_browser(Some(events_tx), Some(browser_tx));
             mesh.register(node_id, link.clone());
             // Forward node-initiated g4a events (PTY frames, etc.) onto the
             // operator broadcast bus so every HQ client sees live bytes.
@@ -243,6 +244,12 @@ impl MeshRuntime {
                     if let G4aMessage::Event(ev) = msg {
                         mesh_ev.publish_event(ev);
                     }
+                }
+            }));
+            let mesh_br = mesh.clone();
+            tasks.push(tokio::spawn(async move {
+                while let Some(ev) = browser_rx.recv().await {
+                    mesh_br.publish_browser(ev);
                 }
             }));
             let consumer = DrainConsumer::new(

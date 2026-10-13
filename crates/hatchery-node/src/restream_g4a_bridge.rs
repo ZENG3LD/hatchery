@@ -12,14 +12,16 @@ use gate4agent_node_protocol::{
 };
 use gate4agent_node_wire::{LocalNodeClient, NodeClientError};
 use hatchery_core::{
-    C2NodeEvent, C2NodeFailure, C2NodeResponse, ChannelKind, NodeCursor, RoutedNodeEvent,
-    RoutedNodeRequest, RoutedNodeResponse,
+    BrowserClientOp, BrowserOpReply, BrowserStreamEvent, C2NodeEvent, C2NodeFailure,
+    C2NodeResponse, ChannelKind, NodeCursor, RoutedNodeEvent, RoutedNodeRequest,
+    RoutedNodeResponse,
 };
 use serde_json::{json, Value};
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 
 const HANDSHAKE: Duration = Duration::from_secs(10);
 const CONTROL_CHANNEL: u32 = 1;
@@ -32,12 +34,16 @@ pub async fn run(
     uplink: SocketAddr,
     keys: UpstreamKeys,
     journal: Option<Arc<UplinkJournal>>,
+    browser_profile_root: Option<PathBuf>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), String> {
     let local_endpoint = local_endpoint.into();
     let node_id_str = node_id.into();
     let local_token = local_token.into();
     let node_id = NodeId::new(node_id_str.clone()).map_err(|e| e.to_string())?;
+    let browser_profile_root = browser_profile_root.unwrap_or_else(|| {
+        std::env::temp_dir().join("hatchery-browser-profiles")
+    });
 
     let mut client =
         LocalNodeClient::connect(&local_endpoint, &node_id, ClientRole::Operator, &local_token)
@@ -64,6 +70,10 @@ pub async fn run(
         .is_some_and(|c| c.connection_id == connection_id);
 
     tracing::info!(%node_id_str, connection_id, "restream g4a bridge up");
+
+    let (browser_ev_tx, mut browser_ev_rx) = mpsc::unbounded_channel::<BrowserStreamEvent>();
+    #[cfg(feature = "d2b")]
+    let browsers = crate::browser_capture::shared_map();
 
     loop {
         if *shutdown.borrow() {
@@ -97,6 +107,10 @@ pub async fn run(
                             connection_id,
                             &mut controller_owned,
                             &bytes,
+                            &browser_profile_root,
+                            browser_ev_tx.clone(),
+                            #[cfg(feature = "d2b")]
+                            &browsers,
                         )
                         .await?;
                         while let Some(envelope) = client.take_event() {
@@ -106,6 +120,11 @@ pub async fn run(
                     Err(err) if err.contains("timeout") => continue,
                     Err(err) => return Err(err),
                 }
+            }
+            ev = browser_ev_rx.recv() => {
+                let Some(ev) = ev else { continue };
+                let plain = serde_json::to_vec(&json!({ "browser": ev })).map_err(|e| e.to_string())?;
+                session.send(&plain).await?;
             }
         }
     }
@@ -119,11 +138,28 @@ async fn handle_control(
     connection_id: u64,
     controller_owned: &mut bool,
     plain: &[u8],
+    browser_profile_root: &std::path::Path,
+    browser_ev_tx: mpsc::UnboundedSender<BrowserStreamEvent>,
+    #[cfg(feature = "d2b")] browsers: &std::sync::Arc<crate::browser_capture::BrowserSessionMap>,
 ) -> Result<(), String> {
     let v: Value = serde_json::from_slice(plain).map_err(|e| e.to_string())?;
     let Some(op_id) = v.get("op_id").and_then(Value::as_u64) else {
         return Ok(());
     };
+    if let Some(browser) = v.get("browser") {
+        let op: BrowserClientOp = serde_json::from_value(browser.clone()).map_err(|e| e.to_string())?;
+        let reply = handle_browser_op(
+            &node_id_str_from(node_id),
+            op,
+            browser_profile_root,
+            browser_ev_tx,
+            #[cfg(feature = "d2b")]
+            browsers,
+        )
+        .await;
+        let plain = serde_json::to_vec(&json!({ "op_id": op_id, "browser": reply })).map_err(|e| e.to_string())?;
+        return session.send(&plain).await;
+    }
     let g4a = v.get("g4a").cloned().unwrap_or(Value::Null);
     let routed: RoutedNodeRequest = serde_json::from_value(g4a).map_err(|e| e.to_string())?;
     if routed.route.node_id.as_str() != node_id.as_str() {
@@ -344,5 +380,83 @@ fn request_deadline(request: &NodeRequest) -> Duration {
         | NodeRequest::SpawnManagedWorktree { .. } => Duration::from_secs(60),
         NodeRequest::InspectWorkspace { .. } => Duration::from_secs(15),
         _ => Duration::from_secs(30),
+    }
+}
+
+
+fn node_id_str_from(node_id: &NodeId) -> String {
+    node_id.as_str().to_owned()
+}
+
+async fn handle_browser_op(
+    node_id: &str,
+    op: BrowserClientOp,
+    browser_profile_root: &std::path::Path,
+    _browser_ev_tx: mpsc::UnboundedSender<BrowserStreamEvent>,
+    #[cfg(feature = "d2b")] browsers: &std::sync::Arc<crate::browser_capture::BrowserSessionMap>,
+) -> BrowserOpReply {
+    #[cfg(not(feature = "d2b"))]
+    {
+        let _ = (node_id, op, browser_profile_root, _browser_ev_tx);
+        return BrowserOpReply {
+            ok: false,
+            session: String::new(),
+            message: "dig2browser feature (d2b) is not enabled in this node build".into(),
+        };
+    }
+    #[cfg(feature = "d2b")]
+    {
+        match op {
+            BrowserClientOp::Start {
+                session,
+                url,
+                profile_dir,
+            } => {
+                let dir = match profile_dir {
+                    Some(p) if !p.is_empty() => PathBuf::from(p),
+                    _ => browser_profile_root.join(&session),
+                };
+                match browsers
+                    .start(node_id.to_owned(), session.clone(), url, dir, _browser_ev_tx)
+                    .await
+                {
+                    Ok(()) => BrowserOpReply {
+                        ok: true,
+                        session,
+                        message: String::new(),
+                    },
+                    Err(message) => BrowserOpReply {
+                        ok: false,
+                        session,
+                        message,
+                    },
+                }
+            }
+            BrowserClientOp::Input { session, bytes } => match browsers.input(&session, &bytes).await
+            {
+                Ok(()) => BrowserOpReply {
+                    ok: true,
+                    session,
+                    message: String::new(),
+                },
+                Err(message) => BrowserOpReply {
+                    ok: false,
+                    session,
+                    message,
+                },
+            },
+            BrowserClientOp::Stop { session } => match browsers.stop(&session).await {
+                Ok(()) => BrowserOpReply {
+                    ok: true,
+                    session,
+                    message: String::new(),
+                },
+                Err(message) => BrowserOpReply {
+                    ok: false,
+                    session,
+                    message,
+                },
+            },
+        }
     }
 }

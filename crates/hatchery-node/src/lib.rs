@@ -43,6 +43,8 @@ pub mod restream_session;
 pub mod machine_env;
 pub use machine_env::collect as collect_machine_environment;
 pub mod restream_g4a_bridge;
+#[cfg(feature = "d2b")]
+pub mod browser_capture;
 pub mod m4a_accounts;
 pub mod door;
 pub mod wake_pipeline;

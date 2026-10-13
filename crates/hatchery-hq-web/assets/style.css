@@ -467,3 +467,9 @@ body.nodemode #composer{display:none}
 .ncard2 details{margin-top:8px}.ncard2 summary{cursor:pointer;color:var(--sub);font-size:13px}
 .ncard2 details .pcard{margin-top:8px}
 .ptybar .tog button{white-space:nowrap}
+
+/* dig2browser full-center view (node-side; never opens in the operator browser) */
+.bview{position:absolute;inset:0;display:flex;flex-direction:column;background:#0b0d10;z-index:2}
+.bview .bbar{display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--panel)}
+.bview .bbar input{flex:1;min-width:0}
+.bview #bcanvas2{flex:1;width:100%;height:100%;object-fit:contain;background:#000;cursor:crosshair}

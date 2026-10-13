@@ -58,7 +58,7 @@ document.addEventListener('mousemove', (e) => {
 // ---- state
 const S = { mode: 'chat', view: 'chat', space: '*', log: [], events: {}, agentState: {}, lastFrame: 0, promptAt: 0, lastAnsi: '', nodes: [], ready: null, chat: '*', nodeId: null, sessions: {}, ptyLayout: 'native', mail: {}, local: {}, session: null, sessionNode: null, sessionProv: null, target: 'mail', working: {}, panel: false, tab: 'activity', lastStatus: {}, wake: null, library: [] };
 // Providers offered by the node Start control. `parser` overrides the event parser (test fixtures).
-const PROVIDERS = [{ v: 'shell', label: 'shell' }, { v: 'claude' }, { v: 'codex' }, { v: 'kimi' }, { v: 'grok' }, { v: 'grok', label: 'fixture agent (test)', parser: 'claude' }];
+const PROVIDERS = [{ v: 'shell', label: 'shell' }, { v: 'browser', label: 'browser' }, { v: 'claude' }, { v: 'codex' }, { v: 'kimi' }, { v: 'grok' }, { v: 'grok', label: 'fixture agent (test)', parser: 'claude' }];
 const provOptions = (sel) => PROVIDERS.map((p, i) => `<option value="${esc(p.v)}"${p.parser ? ` data-parser="${esc(p.parser)}"` : ''}${i === sel ? ' selected' : ''}>${esc(p.label || p.v)}</option>`).join('');
 const chatName = (id) => { const c = (S.chats || []).find((x) => x.target === id); return c ? c.label : id === '*' ? 'general' : String(id).replace(/^room:/, ''); };
 const addLocal = (chat, item) => { (S.local[chat] ||= []).push({ ts: Date.now(), ...item }); renderChat(); };
@@ -463,8 +463,8 @@ $('#closepanel').onclick = closePanel;
 const COLS = 100, ROWS = 30;
 const term = new Terminal({ rows: ROWS, cols: COLS, cursorBlink: true, fontSize: 13, fontFamily: 'ui-monospace,Menlo,Consolas,monospace', theme: { background: '#000000' } });
 const fit = new FitAddon.FitAddon(); term.loadAddon(fit);
-// Links open in the user's own browser (e.g. the claude OAuth login URL).
-term.loadAddon(new WebLinksAddon.WebLinksAddon((ev, uri) => { ev.preventDefault(); window.open(uri, '_blank', 'noopener,noreferrer'); }));
+// Links never navigate the operator client. Open on the node via dig2browser.
+term.loadAddon(new WebLinksAddon.WebLinksAddon((ev, uri) => { ev.preventDefault(); if (ev.stopPropagation) ev.stopPropagation(); openUrlOnNode(uri); }));
 term.open($('#terminal'));
 // Ctrl/Cmd+V: let the browser fire a real paste (xterm forwards it via onData); Ctrl+Shift+C copies a selection.
 term.attachCustomKeyEventHandler((e) => {
@@ -490,6 +490,30 @@ function findUrl(text, cols) {
   }
   return null;
 }
+// Rebuild wrapped URLs; a click on a line fragment must open the full URL on the node.
+function resolveLink(uri) {
+  const frag = String(uri || '').replace(/[.,;:!?\)\]]+$/, '');
+  const full = findUrl(window.lastFrameText, term.cols);
+  if (full && (full === frag || full.startsWith(frag) || frag.startsWith(full))) return full.length >= frag.length ? full : frag;
+  return frag;
+}
+// Spawn or reuse a dig2browser session on the PTY node. Never navigate the operator client.
+function openUrlOnNode(uri) {
+  const node = S.sessionNode;
+  if (!node) { toast('No node for this session'); return; }
+  const url = resolveLink(uri);
+  if (!/^https?:\/\//i.test(url)) { toast('Not a navigable URL'); return; }
+  const arr = S.sessions[node] || [];
+  const live = arr.find((s) => s.kind === 'browser' && s.live && s._ws && s._ws.readyState === 1);
+  if (live) {
+    live.url = url;
+    try { live._ws.send(JSON.stringify({ t: 'nav', url })); } catch (_) {}
+    openBrowser(node, live);
+    return;
+  }
+  startBrowser(node, url);
+}
+
 // One live socket per on-screen PTY. S.sessions[node] records what we spawned.
 let tws = null;
 function tsend(o) { if (tws && tws.readyState === 1) tws.send(JSON.stringify(o)); }
@@ -499,6 +523,7 @@ function endSession(node, id) { const arr = S.sessions[node]; if (!arr) return; 
 // Start a provider session on a real node and open it full-center.
 function startSession(node, provider, parser) {
   if (!node) { toast('Pick a node first'); return; }
+  if (provider === 'browser') { startBrowser(node); return; }
   if (tws) { try { tws.close(); } catch (_) {} tws = null; }
   const prov = parser ? 'fixture' : provider;
   if (S.ptySession && S.ptySession.live) { S.ptySession.live = false; S.ptySession.detached = true; }
@@ -529,7 +554,7 @@ function startSession(node, provider, parser) {
       const bytes = Uint8Array.from(atob(d.ansi), (c) => c.charCodeAt(0));
       window.lastFrameText = d.text; term.reset(); term.write(bytes); S.lastAnsi = bytes; S.lastFrame = Date.now();
       if (S.ptyLayout === 'chat') renderPtyChat(d.text);
-      const u = findUrl(d.text, d.cols || term.cols); const tl = $('#tlink'); if (u) { tl.href = u; tl.title = u; tl.hidden = false; } else tl.hidden = true;
+      const u = findUrl(d.text, d.cols || term.cols); const tl = $('#tlink'); if (u) { tl.dataset.url = u; tl.title = u; tl.hidden = false; } else { tl.hidden = true; delete tl.dataset.url; }
     }
   };
   sock.onclose = () => {
@@ -545,6 +570,7 @@ function stopSession(sess) {
 // Open the full-center PTY for a session. Reconnecting to an existing session id is a later step;
 // for now this shows the live terminal of the session we hold a socket for.
 function openPty(node, sess) {
+  const bv = $('#bview'); if (bv) bv.style.display = 'none'; $('#terminal').style.display = '';
   showView('pty'); S.sessionNode = node; S.ptySession = sess;
   $('#headname').textContent = `${sess.provider} · ${node}`; $('#headbtn').title = 'Session info · runs on ' + node; $('#headav').innerHTML = avatar('pty:' + sess.id, 'sm');
   renderSidebar(); renderPanelHead(); if (S.panel) setTab(S.tab);
@@ -568,7 +594,10 @@ function renderPtyChat(text) {
 $('#tpaste').onclick = async () => { try { const t = await navigator.clipboard.readText(); if (t) term.paste(t); term.focus(); } catch (_) { toast('Clipboard blocked: press Ctrl+V (Cmd+V) in the terminal'); term.focus(); } };
 $('#ptylayout').onclick = (e) => { const b = e.target.closest('button[data-l]'); if (b) setPtyLayout(b.dataset.l); };
 $('#tstop').onclick = () => { tsend({ t: 'stop' }); };
+$('#tlink').onclick = () => { const u = $('#tlink').dataset.url || findUrl(window.lastFrameText, term.cols); if (u) openUrlOnNode(u); else toast('No link in the current frame'); };
 term.onData((data) => tsend({ t: 'data', data }));
+// Mouse CSI reports arrive here only when the app enabled DEC mouse tracking (1000/1002/1003/1006).
+term.onBinary((data) => tsend({ t: 'data', data }));
 
 // ---- event layer: the browser reads ONLY typed session events from the server (no screen parsing here)
 function refreshAvatars() { renderSidebar(); if (S.chat) $('#headav').innerHTML = avatar(S.chat, 'mid'); renderChat(); }
@@ -623,6 +652,68 @@ async function renderLibraryTab() {
   try { S.library = (await api('/api/library')).files; } catch (_) { S.library = []; }
   root.innerHTML = S.library.length ? `<div class="lib">${S.library.map((f) => `<div><img loading="lazy" src="/api/library/${encodeURIComponent(f)}" data-f="${esc(f)}"><div class="sub">${esc(f)}</div></div>`).join('')}</div>` : '<div class="sub">No library folder configured (HATCHERY_HQ_LIBRARY).</div>';
   root.querySelectorAll('img').forEach((i) => (i.onclick = () => { const lb = $('#lightbox'); lb.innerHTML = `<img src="${i.src}">`; lb.hidden = false; lb.onclick = () => (lb.hidden = true); }));
+}
+
+
+// ---- Browser sessions (dig2browser over restream)
+function startBrowser(node, url) {
+  const id = 'b' + Date.now().toString(36);
+  const sess = { provider: 'browser', key: 'br-' + id, id, live: true, kind: 'browser', url: url || 'https://example.org/' };
+  if (!S.sessions[node]) S.sessions[node] = [];
+  S.sessions[node].push(sess);
+  openBrowser(node, sess);
+}
+function openBrowser(node, sess) {
+  S.view = 'browser'; S.sessionNode = node; S.ptySession = sess; S.browserSession = sess;
+  document.body.classList.add('ptymode'); document.body.classList.remove('nodemode');
+  showView('pty');
+  $('#headname').textContent = `browser · ${node}`; $('#headbtn').title = 'Browser on ' + node;
+  $('#headav').innerHTML = avatar('pty:' + sess.id, 'sm');
+  $('#tinfo').textContent = `browser on ${node}`;
+  $('#terminal').style.display = 'none';
+  let wrap = $('#bview');
+  if (!wrap) {
+    wrap = document.createElement('div'); wrap.id = 'bview'; wrap.className = 'bview';
+    wrap.innerHTML = `<div class="bbar"><input id="burl2" placeholder="https://…"><button class="btn" id="bnav2">Go</button><span class="grow"></span><span id="bmeta" class="sub"></span><button class="btn" id="bstop2">Stop</button></div><canvas id="bcanvas2"></canvas>`;
+    ($('#ptyview') || document.body).appendChild(wrap);
+  }
+  wrap.style.display = '';
+  const canvas = $('#bcanvas2'); const ctx = canvas.getContext('2d');
+  if (S.bws) try { S.bws.close(); } catch (_) {}
+  const q = new URLSearchParams({ node, session: sess.key, url: sess.url || 'https://example.org/' });
+  const real = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/browser?${q}`);
+  real.binaryType = 'blob'; S.bws = real; sess._ws = real;
+  real.onmessage = async (m) => {
+    if (typeof m.data === 'string') {
+      const d = JSON.parse(m.data);
+      if (d.type === 'spawned') { sess.key = d.session; $('#bmeta').textContent = 'session ' + d.session; }
+      if (d.type === 'started' || d.type === 'frame_info') {
+        if (d.url) $('#burl2').value = d.url;
+        $('#bmeta').textContent = ((d.title || d.url || '') + (d.bytes ? ` · ${d.bytes}B` : '')).trim();
+      }
+      if (d.type === 'error') toast('browser: ' + d.text);
+      if (d.type === 'stopped') { sess.live = false; $('#bmeta').textContent = 'stopped'; }
+      return;
+    }
+    const bmp = await createImageBitmap(m.data);
+    canvas.width = bmp.width; canvas.height = bmp.height; ctx.drawImage(bmp, 0, 0);
+    window.browserFrames = (window.browserFrames || 0) + 1;
+  };
+  real.onclose = () => { sess.live = false; };
+  const pos = (e) => { const r = canvas.getBoundingClientRect(); return { x: Math.round((e.clientX - r.left) * canvas.width / Math.max(1, r.width)), y: Math.round((e.clientY - r.top) * canvas.height / Math.max(1, r.height)) }; };
+  const bsend = (o) => { if (real.readyState === 1) real.send(JSON.stringify(o)); };
+  canvas.onclick = (e) => bsend({ t: 'click', ...pos(e), button: 'left' });
+  canvas.oncontextmenu = (e) => { e.preventDefault(); bsend({ t: 'click', ...pos(e), button: 'right' }); };
+  canvas.onwheel = (e) => { e.preventDefault(); bsend({ t: 'scroll', ...pos(e), dx: e.deltaX, dy: e.deltaY }); };
+  canvas.tabIndex = 0;
+  canvas.onkeydown = (e) => {
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { bsend({ t: 'text', text: e.key }); e.preventDefault(); }
+    else { bsend({ t: 'key', key: e.key }); e.preventDefault(); }
+  };
+  $('#bnav2').onclick = () => { sess.url = $('#burl2').value; bsend({ t: 'nav', url: sess.url }); };
+  $('#burl2').onkeydown = (e) => { if (e.key === 'Enter') $('#bnav2').click(); };
+  $('#bstop2').onclick = () => { bsend({ t: 'stop' }); real.close(); sess.live = false; wrap.style.display = 'none'; $('#terminal').style.display = ''; showView('chat'); };
+  renderSidebar();
 }
 
 // ---- browser tab (dig2 station frames)

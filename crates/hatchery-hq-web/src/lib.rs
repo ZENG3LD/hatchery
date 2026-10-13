@@ -125,6 +125,8 @@ pub struct AppState {
     /// admits only one operator connection at a time, so all views must share
     /// this one stream rather than each dialing its own.
     pub node_events: broadcast::Sender<std::sync::Arc<Value>>,
+    /// Dig2browser frames / lifecycle from the held operator control.
+    pub browser_events: broadcast::Sender<std::sync::Arc<hatchery_core::BrowserStreamEvent>>,
 }
 
 type Shared = Arc<AppState>;
@@ -132,7 +134,8 @@ type Shared = Arc<AppState>;
 pub fn router(config: Config) -> (Router, Shared) {
     let (events, _) = broadcast::channel(256);
     let (node_events, _) = broadcast::channel(1024);
-    let state = Arc::new(AppState { config, events, topology: std::sync::OnceLock::new(), node_events });
+    let (browser_events, _) = broadcast::channel(256);
+    let state = Arc::new(AppState { config, events, topology: std::sync::OnceLock::new(), node_events, browser_events });
     let base = state.config.base_path.clone();
     let index: &'static str = Box::leak(index_html(&base).into_boxed_str());
     let mut app = Router::new()
@@ -404,19 +407,31 @@ pub fn spawn_topology_watcher(state: Shared) {
             .await
             {
                 Ok((handle, mut events)) => {
-                    // Publish once; if already set (shouldn't happen), keep the first.
                     let _ = state.topology.set(handle);
                     tracing::info!("HQ topology watcher: held operator control established");
-                    // Drain forever so the supervisor keeps updating topology, and
-                    // fan each event out to any live terminal views. `send` on a
-                    // broadcast with no receivers is a no-op, so this never stalls.
-                    while let Some(ev) = events.recv().await {
-                        if let Ok(v) = serde_json::to_value(&ev) {
-                            let _ = state.node_events.send(std::sync::Arc::new(v));
+                    let (regular, harness, browser) = events.split_all();
+                    loop {
+                        tokio::select! {
+                            biased;
+                            ev = harness.recv() => {
+                                let Some(ev) = ev else { break; };
+                                if let Ok(v) = serde_json::to_value(&ev) {
+                                    let _ = state.node_events.send(std::sync::Arc::new(v));
+                                }
+                            }
+                            ev = regular.recv() => {
+                                let Some(ev) = ev else { break; };
+                                if let Ok(v) = serde_json::to_value(&ev) {
+                                    let _ = state.node_events.send(std::sync::Arc::new(v));
+                                }
+                            }
+                            ev = browser.recv() => {
+                                let Some(ev) = ev else { break; };
+                                let _ = state.browser_events.send(std::sync::Arc::new(ev));
+                            }
                         }
                     }
                     tracing::warn!("HQ topology watcher: event stream ended; supervisor retains the handle");
-                    // The handle self-reconnects; nothing more to do. Park.
                     std::future::pending::<()>().await;
                 }
                 Err(e) => {
@@ -605,68 +620,165 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     Ok(())
 }
 
-// ---------------------------------------------------------------------------------- browser frames
+// ---------------------------------------------------------------------------------- browser frames (A2 restream dig2browser)
 
 #[derive(Deserialize)]
 struct BrowserQuery {
-    session: String,
+    node: String,
+    #[serde(default)]
+    session: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    keep: bool,
 }
 
 async fn browser_ws(State(s): State<Shared>, Query(q): Query<BrowserQuery>, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |socket| async move {
-        if let Err(e) = browser_session(socket, s, q.session).await {
+        if let Err(e) = browser_session(socket, s, q).await {
             tracing::warn!(error = %e, "browser stream ended with error");
         }
     })
 }
 
-async fn browser_session(mut socket: WebSocket, s: Shared, session: String) -> Result<(), String> {
-    use hatchery_bidi_client as bidi;
-    use tokio_tungstenite::tungstenite::Message as Tm;
-    if !session.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')) {
-        return Err("bad session id".into());
+async fn browser_session(mut socket: WebSocket, s: Shared, q: BrowserQuery) -> Result<(), String> {
+    use hatchery_core::{
+        encode_browser_click, encode_browser_key, encode_browser_navigate, encode_browser_scroll,
+        encode_browser_text, validate_browser_session_id, BrowserClientCommand, BrowserClientOp,
+        BrowserMouseButton, BrowserStreamEvent,
+    };
+    let node = q.node.trim().to_owned();
+    if node.is_empty() {
+        return Err("node is required".into());
     }
-    let endpoints = bidi::c2_endpoints(&format!("http://{}", s.config.bidi.unwrap_or(s.config.c2_api)), &session).map_err(|e| e.to_string())?;
-    bidi::open_session(&endpoints.post_url).await.map_err(|e| e.to_string())?;
-    let upstream_ws = bidi::connect_ws(&endpoints.ws_url).await.map_err(|e| e.to_string())?;
-    let (mut up_tx, mut up_rx) = upstream_ws.split();
+    let session = q
+        .session
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("br-{}", now_ms()));
+    validate_browser_session_id(&session)?;
+    let url = q.url.filter(|u| !u.trim().is_empty()).unwrap_or_else(|| "about:blank".into());
+
+    let control = s.topology.get().cloned().ok_or_else(|| "operator control not ready".to_string())?;
+    let mut browser_rx = s.browser_events.subscribe();
+
+    control
+        .browser_command(BrowserClientCommand {
+            node_id: node.clone(),
+            op: BrowserClientOp::Start {
+                session: session.clone(),
+                url: url.clone(),
+                profile_dir: None,
+            },
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    tracing::info!(%node, %session, %url, "browser session start requested from web HQ");
+    let _ = socket
+        .send(Message::text(
+            json!({ "type": "spawned", "node": node, "session": session, "url": url }).to_string(),
+        ))
+        .await;
+
+    let send_input = |control: &hatchery_c2_client::C2ReconnectingHandle, session: &str, node: &str, bytes: Vec<u8>| {
+        let cmd = BrowserClientCommand {
+            node_id: node.to_owned(),
+            op: BrowserClientOp::Input {
+                session: session.to_owned(),
+                bytes,
+            },
+        };
+        let control = control.clone();
+        async move { control.browser_command(cmd).await.map_err(|e| e.to_string()) }
+    };
+
     loop {
         tokio::select! {
-            frame = up_rx.next() => match frame {
-                Some(Ok(Tm::Binary(b))) => {
-                    use sha2::{Digest, Sha256};
-                    let sha: String = Sha256::digest(&b).iter().take(8).map(|x| format!("{x:02x}")).collect();
-                    let _ = socket.send(Message::text(json!({ "type": "frame_info", "bytes": b.len(), "sha256_8": sha }).to_string())).await;
-                    if socket.send(Message::binary(b.to_vec())).await.is_err() { break; }
+            ev = browser_rx.recv() => {
+                let ev = match ev {
+                    Ok(v) => v,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                };
+                match ev.as_ref() {
+                    BrowserStreamEvent::Frame { node_id, session: sess, bytes, width, height, url, title }
+                        if node_id == &node && sess == &session => {
+                        let _ = socket.send(Message::text(json!({
+                            "type": "frame_info", "bytes": bytes.len(), "w": width, "h": height, "url": url, "title": title
+                        }).to_string())).await;
+                        if socket.send(Message::binary(bytes.clone())).await.is_err() { break; }
+                    }
+                    BrowserStreamEvent::Started { node_id, session: sess, url }
+                        if node_id == &node && sess == &session => {
+                        let _ = socket.send(Message::text(json!({ "type": "started", "url": url }).to_string())).await;
+                    }
+                    BrowserStreamEvent::Error { node_id, session: sess, message }
+                        if node_id == &node && sess == &session => {
+                        let _ = socket.send(Message::text(json!({ "type": "error", "text": message }).to_string())).await;
+                    }
+                    BrowserStreamEvent::Stopped { node_id, session: sess, reason }
+                        if node_id == &node && sess == &session => {
+                        let _ = socket.send(Message::text(json!({ "type": "stopped", "reason": reason }).to_string())).await;
+                        break;
+                    }
+                    _ => {}
                 }
-                Some(Ok(Tm::Ping(p))) => { let _ = up_tx.send(Tm::Pong(p)).await; }
-                Some(Ok(Tm::Close(_))) | None | Some(Err(_)) => break,
-                _ => {}
-            },
+            }
             incoming = socket.recv() => {
-                let Some(Ok(Message::Text(text))) = incoming else { if matches!(incoming, Some(Ok(Message::Close(_))) | None | Some(Err(_))) { break } else { continue } };
+                let Some(Ok(Message::Text(text))) = incoming else {
+                    if matches!(incoming, Some(Ok(Message::Close(_))) | None | Some(Err(_))) { break } else { continue }
+                };
                 let Ok(cmd) = serde_json::from_str::<Value>(&text) else { continue };
                 let f = |k: &str| cmd[k].as_f64().unwrap_or(0.0);
                 let wire = match cmd["t"].as_str() {
-                    Some("click") => Ok(bidi::encode_click(f("x"), f("y"), match cmd["button"].as_str() { Some("right") => bidi::MouseButton::Right, Some("middle") => bidi::MouseButton::Middle, _ => bidi::MouseButton::Left })),
-                    Some("scroll") => Ok(bidi::encode_scroll(f("x"), f("y"), f("dx"), f("dy"))),
-                    Some("key") => bidi::encode_key(cmd["key"].as_str().unwrap_or_default()),
-                    Some("text") => bidi::encode_text(cmd["text"].as_str().unwrap_or_default()),
-                    Some("nav") => bidi::encode_navigate(cmd["url"].as_str().unwrap_or_default()),
+                    Some("click") => Ok(encode_browser_click(f("x"), f("y"), match cmd["button"].as_str() {
+                        Some("right") => BrowserMouseButton::Right,
+                        Some("middle") => BrowserMouseButton::Middle,
+                        _ => BrowserMouseButton::Left,
+                    })),
+                    Some("scroll") => Ok(encode_browser_scroll(f("x"), f("y"), f("dx"), f("dy"))),
+                    Some("key") => encode_browser_key(cmd["key"].as_str().unwrap_or_default()),
+                    Some("text") => encode_browser_text(cmd["text"].as_str().unwrap_or_default()),
+                    Some("nav") => encode_browser_navigate(cmd["url"].as_str().unwrap_or_default()),
+                    Some("stop") => {
+                        let _ = control.browser_command(BrowserClientCommand {
+                            node_id: node.clone(),
+                            op: BrowserClientOp::Stop { session: session.clone() },
+                        }).await;
+                        break;
+                    }
                     _ => continue,
                 };
                 match wire {
                     Ok(bytes) => {
-                        tracing::info!(op = %cmd["t"], bytes = bytes.len(), x = f("x"), y = f("y"), "browser input from web HQ");
-                        let _ = socket.send(Message::text(json!({ "type": "sent", "op": cmd["t"], "x": cmd["x"], "y": cmd["y"], "bytes": bytes.len() }).to_string())).await;
-                        if up_tx.send(Tm::binary(bytes)).await.is_err() { break; }
+                        tracing::info!(op = %cmd["t"], bytes = bytes.len(), "browser input from web HQ");
+                        let _ = socket.send(Message::text(json!({ "type": "sent", "op": cmd["t"], "bytes": bytes.len() }).to_string())).await;
+                        if let Err(e) = send_input(&control, &session, &node, bytes).await {
+                            let _ = socket.send(Message::text(json!({ "type": "error", "text": e }).to_string())).await;
+                        }
                     }
-                    Err(e) => { let _ = socket.send(Message::text(json!({ "type": "error", "text": e.to_string() }).to_string())).await; }
+                    Err(e) => {
+                        let _ = socket.send(Message::text(json!({ "type": "error", "text": e }).to_string())).await;
+                    }
                 }
             }
         }
     }
+    if !q.keep {
+        let _ = control
+            .browser_command(BrowserClientCommand {
+                node_id: node,
+                op: BrowserClientOp::Stop { session },
+            })
+            .await;
+    }
     Ok(())
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 

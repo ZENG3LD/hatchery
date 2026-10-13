@@ -616,6 +616,7 @@ async fn main() {
             )
         });
         let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+        let browser_root = enroll_state.as_ref().map(|d| d.join("browser-profiles"));
         tokio::spawn(async move {
             loop {
                 match hatchery_node::restream_g4a_bridge::run(
@@ -625,6 +626,7 @@ async fn main() {
                     uplink,
                     keys,
                     journal.clone(),
+                    browser_root.clone(),
                     stop_rx.clone(),
                 )
                 .await

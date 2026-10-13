@@ -1,4 +1,4 @@
-use hatchery_core::{
+use hatchery_core::{BrowserClientCommand, BrowserStreamEvent, 
     c2_auth_transcript, c2_bound_auth_transcript, provider_id_is_legacy, C2AuthDirection, C2ClientAuthentication, C2ClientFrame,
     C2ClientHello, C2Hello, C2NodeEvent, C2NodeResponse, C2RelayFailure,
     C2RelayFailureCode,
@@ -153,9 +153,15 @@ struct NegotiatedPathCapabilities {
 #[derive(Clone)]
 pub struct C2ControlHandle {
     commands: mpsc::Sender<ControlCommand>,
+    browser_commands: mpsc::Sender<BrowserControlCommand>,
     hello: Arc<C2Hello>,
     topology: watch::Receiver<Arc<C2Topology>>,
     terminal_frame_events: bool,
+}
+
+struct BrowserControlCommand {
+    cmd: BrowserClientCommand,
+    reply: oneshot::Sender<Result<(), C2ControlError>>,
 }
 
 impl C2ControlHandle {
@@ -189,6 +195,23 @@ impl C2ControlHandle {
 
     /// Validates and synchronously enqueues one typed request. The returned
     /// non-cloneable waiter cannot enqueue or replay the request again.
+    /// Start / drive / stop a dig2browser session on a node (A2 restream sidecar).
+    pub async fn browser_command(
+        &self,
+        cmd: BrowserClientCommand,
+    ) -> Result<(), C2ControlError> {
+        let (reply_tx, reply_rx) = oneshot::channel();
+        timeout(Duration::from_secs(60), async {
+            self.browser_commands
+                .send(BrowserControlCommand { cmd, reply: reply_tx })
+                .await
+                .map_err(|_| C2ControlError::Closed)?;
+            reply_rx.await.map_err(|_| C2ControlError::Closed)?
+        })
+        .await
+        .map_err(|_| C2ControlError::Closed)?
+    }
+
     pub fn start_request(
         &self,
         route: NodeRoute,
@@ -300,6 +323,7 @@ fn control_request_deadline(request: &NodeRequest) -> Duration {
 pub struct C2EventReceiver {
     events: mpsc::Receiver<RoutedNodeEvent>,
     harness_mcp_events: mpsc::Receiver<RoutedNodeEvent>,
+    browser_events: mpsc::Receiver<BrowserStreamEvent>,
 }
 
 impl C2EventReceiver {
@@ -334,19 +358,29 @@ impl C2EventReceiver {
     /// borrows instead.
     pub(crate) fn split_mut(
         &mut self,
-    ) -> (&mut mpsc::Receiver<RoutedNodeEvent>, &mut mpsc::Receiver<RoutedNodeEvent>) {
-        (&mut self.events, &mut self.harness_mcp_events)
+    ) -> (
+        &mut mpsc::Receiver<RoutedNodeEvent>,
+        &mut mpsc::Receiver<RoutedNodeEvent>,
+        &mut mpsc::Receiver<BrowserStreamEvent>,
+    ) {
+        (
+            &mut self.events,
+            &mut self.harness_mcp_events,
+            &mut self.browser_events,
+        )
     }
 }
 
 struct EventDelivery {
     regular: mpsc::Sender<RoutedNodeEvent>,
     harness_mcp: mpsc::Sender<RoutedNodeEvent>,
+    browser: mpsc::Sender<BrowserStreamEvent>,
 }
 
 impl From<mpsc::Sender<RoutedNodeEvent>> for EventDelivery {
     fn from(regular: mpsc::Sender<RoutedNodeEvent>) -> Self {
-        Self { harness_mcp: regular.clone(), regular }
+        let (browser, _) = mpsc::channel(1);
+        Self { harness_mcp: regular.clone(), regular, browser }
     }
 }
 
@@ -535,7 +569,9 @@ where
 
     let (reader, writer) = tokio::io::split(pipe);
     let (commands_tx, commands_rx) = mpsc::channel(COMMAND_CAPACITY);
+    let (browser_commands_tx, browser_commands_rx) = mpsc::channel(16);
     let (events_tx, events_rx) = mpsc::channel(EVENT_CAPACITY);
+    let (browser_events_tx, browser_events_rx) = mpsc::channel::<BrowserStreamEvent>(64);
     let (harness_mcp_events_tx, harness_mcp_events_rx) =
         mpsc::channel(HARNESS_MCP_EVENT_CAPACITY);
     let initial_topology = Arc::new(C2Topology::from_status(&hello.status));
@@ -547,7 +583,8 @@ where
     tokio::spawn(async move {
         control_owner(
             commands_rx,
-        EventDelivery { regular: events_tx, harness_mcp: harness_mcp_events_tx },
+            browser_commands_rx,
+            EventDelivery { regular: events_tx, harness_mcp: harness_mcp_events_tx, browser: browser_events_tx },
             topology_tx,
             writer_tx,
             owner_rx,
@@ -558,12 +595,14 @@ where
     });
     Ok((C2ControlHandle {
         commands: commands_tx,
+        browser_commands: browser_commands_tx,
         hello: Arc::new(hello),
         topology: topology_rx,
         terminal_frame_events: path_capabilities.terminal_frame_events,
     }, C2EventReceiver {
         events: events_rx,
         harness_mcp_events: harness_mcp_events_rx,
+        browser_events: browser_events_rx,
     }))
 }
 
@@ -2295,6 +2334,7 @@ async fn control_writer<W>(
 
 async fn control_owner<E>(
     mut commands: mpsc::Receiver<ControlCommand>,
+    mut browser_commands: mpsc::Receiver<BrowserControlCommand>,
     events: E,
     topology: watch::Sender<Arc<C2Topology>>,
     writer: mpsc::Sender<C2ClientFrame>,
@@ -2320,6 +2360,16 @@ async fn control_owner<E>(
     let mut loss_reason = C2ConnectionLossReason::Shutdown;
     loop {
         tokio::select! {
+            browser_cmd = browser_commands.recv() => {
+                let Some(browser_cmd) = browser_cmd else { break; };
+                let frame = C2ClientFrame::Browser(browser_cmd.cmd);
+                if writer.send(frame).await.is_err() {
+                    let _ = browser_cmd.reply.send(Err(C2ControlError::Closed));
+                    loss_reason = C2ConnectionLossReason::PipeClosed;
+                    break;
+                }
+                let _ = browser_cmd.reply.send(Ok(()));
+            }
             command = commands.recv() => {
                 let Some(command) = command else { break; };
                 if let Err(error) = reject_unnegotiated_outbound_path(
@@ -2941,6 +2991,19 @@ async fn control_owner<E>(
                                     loss_reason = C2ConnectionLossReason::RegularEventBackpressure;
                                     break;
                                 }
+                            }
+                        }
+                    }
+                    Some(OwnerInput::Frame(C2ServerFrame::Browser(ev))) => {
+                        loss_reason = C2ConnectionLossReason::Protocol;
+                        match events.browser.try_send(ev) {
+                            Ok(()) => {}
+                            Err(mpsc::error::TrySendError::Full(_)) => {
+                                tracing::warn!("dropped browser frame; browser event channel full");
+                            }
+                            Err(mpsc::error::TrySendError::Closed(_)) => {
+                                loss_reason = C2ConnectionLossReason::RegularEventBackpressure;
+                                break;
                             }
                         }
                     }
@@ -4328,7 +4391,8 @@ mod tests {
         drop(incoming_tx);
         let owner = tokio::spawn(control_owner(
             commands_rx,
-            EventDelivery { regular: events_tx, harness_mcp: harness_tx },
+            mpsc::channel(1).1,
+            EventDelivery { regular: events_tx, harness_mcp: harness_tx, browser: mpsc::channel(1).0 },
             topology_tx,
             writer_tx,
             incoming_rx,
@@ -4393,7 +4457,8 @@ mod tests {
         let deadline_unix_ms = current_unix_ms().unwrap() + 3_000;
         let owner = tokio::spawn(control_owner(
             commands_rx,
-            EventDelivery { regular: events_tx, harness_mcp: harness_tx },
+            mpsc::channel(1).1,
+            EventDelivery { regular: events_tx, harness_mcp: harness_tx, browser: mpsc::channel(1).0 },
             topology_tx,
             writer_tx,
             incoming_rx,
@@ -4440,7 +4505,8 @@ mod tests {
         let deadline_unix_ms = current_unix_ms().unwrap() + 3_000;
         let owner = tokio::spawn(control_owner(
             commands_rx,
-            EventDelivery { regular: events_tx, harness_mcp: harness_tx },
+            mpsc::channel(1).1,
+            EventDelivery { regular: events_tx, harness_mcp: harness_tx, browser: mpsc::channel(1).0 },
             topology_tx,
             writer_tx,
             incoming_rx,
@@ -4514,7 +4580,8 @@ mod tests {
         incoming_tx.send(ordinary_state_event(42)).await.unwrap();
         let owner = tokio::spawn(control_owner(
             commands_rx,
-            EventDelivery { regular: events_tx, harness_mcp: harness_tx },
+            mpsc::channel(1).1,
+            EventDelivery { regular: events_tx, harness_mcp: harness_tx, browser: mpsc::channel(1).0 },
             topology_tx,
             writer_tx,
             incoming_rx,
@@ -4581,7 +4648,8 @@ mod tests {
         incoming_tx.send(harness_mcp_event(1, deadline_unix_ms)).await.unwrap();
         let owner = tokio::spawn(control_owner(
             commands_rx,
-            EventDelivery { regular: events_tx, harness_mcp: harness_tx },
+            mpsc::channel(1).1,
+            EventDelivery { regular: events_tx, harness_mcp: harness_tx, browser: mpsc::channel(1).0 },
             topology_tx,
             writer_tx,
             incoming_rx,
@@ -4597,7 +4665,7 @@ mod tests {
             }
         }).await.unwrap();
 
-        let (regular_events, harness_mcp_events) = receiver.split_mut();
+        let (regular_events, harness_mcp_events, _browser_events) = receiver.split_mut();
 
         let mcp_event = timeout(Duration::from_secs(1), harness_mcp_events.recv())
             .await

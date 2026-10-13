@@ -8,7 +8,8 @@ use gate4agent_node_protocol::{
 };
 use gate4agent_node_wire::{local_hmac_sha256, proofs_match, random_nonce, OwnerOnlyLocalListener};
 use hatchery_core::{
-    c2_auth_transcript, c2_bound_auth_transcript, ArchitectureId, BUILD_STAMP, C2AuthDirection,
+    c2_auth_transcript, c2_bound_auth_transcript, ArchitectureId, BUILD_STAMP, BrowserClientCommand,
+    BrowserStreamEvent, C2AuthDirection,
     C2ClientAuthentication, C2ClientFrame, C2ClientHello, C2ControlCompatibilitySupport, C2Hello,
     C2RelayFailure, C2RelayFailureCode, C2ReplyEnvelope, C2RequestEnvelope, C2ServerChallenge,
     C2ServerFrame, C2Topology, CapabilityId, ClientCompatibilityOffer, HostDescriptor,
@@ -57,6 +58,8 @@ pub struct NodeOperatorMesh {
     topology: watch::Sender<Arc<StatusResponse>>,
     /// Fan-out of node-initiated g4a events (PTY frames, etc.) to every operator client.
     events: broadcast::Sender<hatchery_core::RoutedNodeEvent>,
+    /// Fan-out of dig2browser frames / lifecycle events.
+    browser: broadcast::Sender<BrowserStreamEvent>,
 }
 
 impl NodeOperatorMesh {
@@ -69,12 +72,14 @@ impl NodeOperatorMesh {
         });
         let (topology, _) = watch::channel(initial);
         let (events, _) = broadcast::channel(256);
+        let (browser, _) = broadcast::channel(64);
         Self {
             inner: Arc::new(Mutex::new(BTreeMap::new())),
             cursors: Arc::new(Mutex::new(BTreeMap::new())),
             machines: Arc::new(Mutex::new(BTreeMap::new())),
             topology,
             events,
+            browser,
         }
     }
 
@@ -127,6 +132,14 @@ impl NodeOperatorMesh {
 
     pub fn subscribe_events(&self) -> broadcast::Receiver<hatchery_core::RoutedNodeEvent> {
         self.events.subscribe()
+    }
+
+    pub fn publish_browser(&self, event: BrowserStreamEvent) {
+        let _ = self.browser.send(event);
+    }
+
+    pub fn subscribe_browser(&self) -> broadcast::Receiver<BrowserStreamEvent> {
+        self.browser.subscribe()
     }
 
     fn publish_topology(&self) {
@@ -278,6 +291,7 @@ where
     let connection_id = connection_ids.fetch_add(1, Ordering::AcqRel);
     let mut status_rx = mesh.subscribe();
     let mut events_rx = mesh.subscribe_events();
+    let mut browser_rx = mesh.subscribe_browser();
     let hello_status = status_rx.borrow().as_ref().clone();
     timeout(AUTH_DEADLINE, write_json_frame_limited(
         &mut pipe,
@@ -325,6 +339,21 @@ where
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
+            browser = browser_rx.recv() => {
+                match browser {
+                    Ok(ev) => {
+                        if write_json_frame_limited(
+                            &mut writer,
+                            &C2ServerFrame::Browser(ev),
+                            MAX_C2_SERVER_FRAME_BYTES,
+                        ).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
             frame = read_client_frame(&mut reader, MAX_C2_CLIENT_FRAME_BYTES) => {
                 match frame {
                     Ok(C2ClientFrame::Request(envelope)) => {
@@ -333,12 +362,68 @@ where
                             break;
                         }
                     }
+                    Ok(C2ClientFrame::Browser(cmd)) => {
+                        let reply = dispatch_browser(&mesh, cmd).await;
+                        // Replies for browser ops are also pushed as Browser stream events when needed;
+                        // still ack with a Topology-neutral Rejected-free path: reuse Reply with empty request id 0.
+                        // HQ correlates via the BrowserStreamEvent::Started / Error / Stopped events.
+                        let _ = reply;
+                        // Also emit a tiny Browser event so HQ can wait on start failure.
+                        if let Some(ev) = reply {
+                            if write_json_frame_limited(
+                                &mut writer,
+                                &C2ServerFrame::Browser(ev),
+                                MAX_C2_SERVER_FRAME_BYTES,
+                            ).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
                     Ok(_) | Err(_) => break,
                 }
             }
         }
     }
     Ok(())
+}
+
+
+async fn dispatch_browser(
+    mesh: &NodeOperatorMesh,
+    cmd: BrowserClientCommand,
+) -> Option<BrowserStreamEvent> {
+    let link = {
+        let guard = mesh.inner.lock().expect("mesh");
+        guard.get(&cmd.node_id).cloned()
+    };
+    let Some(link) = link else {
+        return Some(BrowserStreamEvent::Error {
+            node_id: cmd.node_id,
+            session: match &cmd.op {
+                hatchery_core::BrowserClientOp::Start { session, .. }
+                | hatchery_core::BrowserClientOp::Input { session, .. }
+                | hatchery_core::BrowserClientOp::Stop { session } => session.clone(),
+            },
+            message: "node is not registered on core mesh".into(),
+        });
+    };
+    match link.browser_op(&cmd.op, Duration::from_secs(60)).await {
+        Ok(reply) if reply.ok => None,
+        Ok(reply) => Some(BrowserStreamEvent::Error {
+            node_id: cmd.node_id,
+            session: reply.session,
+            message: reply.message,
+        }),
+        Err(err) => Some(BrowserStreamEvent::Error {
+            node_id: cmd.node_id,
+            session: match &cmd.op {
+                hatchery_core::BrowserClientOp::Start { session, .. }
+                | hatchery_core::BrowserClientOp::Input { session, .. }
+                | hatchery_core::BrowserClientOp::Stop { session } => session.clone(),
+            },
+            message: err.to_string(),
+        }),
+    }
 }
 
 async fn dispatch_request(mesh: &NodeOperatorMesh, envelope: C2RequestEnvelope) -> C2ReplyEnvelope {

@@ -76,6 +76,15 @@ pub use control_detail::control_telemetry_detail;
 mod multiplex;
 pub use multiplex::*;
 pub mod inner;
+pub mod browser_wire;
+
+pub use browser_wire::{
+    decode_input as decode_browser_input, encode_click as encode_browser_click,
+    encode_key as encode_browser_key, encode_navigate as encode_browser_navigate,
+    encode_scroll as encode_browser_scroll, encode_text as encode_browser_text,
+    validate_session_id as validate_browser_session_id, BrowserClientOp, BrowserInput,
+    BrowserMouseButton, BrowserOpReply, BrowserStreamEvent,
+};
 #[cfg(feature = "nested-crypto")]
 pub mod nested;
 pub mod buffer;
@@ -2538,12 +2547,22 @@ pub struct C2ReplyEnvelope {
     pub result: Result<RoutedNodeResponse, C2RelayFailure>,
 }
 
+
+/// Operator → core browser command (routed to one node over the restream control channel).
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct BrowserClientCommand {
+    pub node_id: String,
+    pub op: BrowserClientOp,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "payload", rename_all = "kebab-case")]
 pub enum C2ClientFrame {
     Hello(C2ClientHello),
     Authenticate(C2ClientAuthentication),
     Request(C2RequestEnvelope),
+    /// Start / drive / stop a dig2browser session on a node (A2 restream sidecar).
+    Browser(BrowserClientCommand),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -2553,6 +2572,8 @@ pub enum C2ServerFrame {
     Hello(C2Hello),
     Reply(C2ReplyEnvelope),
     Event(RoutedNodeEvent),
+    /// Live dig2browser frame / lifecycle event from a node (A2 restream sidecar).
+    Browser(BrowserStreamEvent),
     Topology(C2Topology),
     Rejected(C2RelayFailure),
 }
