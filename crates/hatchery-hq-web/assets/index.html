@@ -5,61 +5,47 @@
 <body>
 <div id="app">
  <aside id="side">
-  <div class="sidetop">
-   <button id="spacebtn" class="spacebtn" title="Switch space"><span id="spaceav"></span><span class="sn"><span id="spacename">All spaces</span><span class="sk">Space</span></span><span class="chev">▾</span></button>
-   <div class="pair"><button class="round" id="searchbtn" title="Search"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg></button><button class="round" id="plusbtn" title="New"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button></div>
-  </div>
-  <div id="spacemenu" class="pop" hidden></div>
+  <div class="sidetop"><div class="pair"><button class="round" id="searchbtn" title="Search"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg></button><button class="round" id="plusbtn" title="New"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button></div></div>
   <input id="search" placeholder="Search" hidden>
   <nav id="chats"></nav>
-  <div class="sidebottom">
-   <button class="navitem" id="statusbtn"><span class="ic">◉</span><span>Status</span><span id="statusdot" class="dot"></span></button>
-   <button class="acct" id="acctbtn"><span id="acctav" class="acctav"></span><span id="acctname" class="acctname">Account</span></button>
-   <div id="acctmenu" class="pop" hidden></div>
-  </div>
+  <div class="sidebottom"><button class="acct" id="acctbtn" title="Account"><span id="acctav" class="acctav"></span></button><div id="acctmenu" class="pop" hidden></div></div>
  </aside>
  <main id="main">
-  <header id="head">
-   <button id="sidetoggle" class="icon" title="Menu">☰</button>
-   <div id="headid"><span id="headav"></span><div class="hn"><div id="headname">Hatchery HQ</div><div id="headsub" class="hs"></div></div></div>
-   <div id="seg" hidden><button data-m="chat" class="on">Chat</button><button data-m="pty">Terminal</button></div>
-   <div class="tools" id="tools">
-    <button class="icon" data-tab="activity" title="Activity">≋</button>
-    <button class="icon" data-tab="browser" title="Browser">◫</button>
-    <button class="icon" data-tab="tasks" title="Tasks">☑</button>
-    <button class="icon" data-tab="library" title="Library">▤</button>
-   </div>
-  </header>
+  <header id="head"><button id="sidetoggle" class="round" title="Chats">☰</button><button id="headbtn"><span id="headav"></span><span id="headname">general</span></button></header>
   <div id="body">
    <div id="ptyview">
     <div class="ptybar"><select id="tprov"><option>claude</option><option>codex</option><option>kimi</option><option>grok</option><option value="grok" data-parser="claude">fixture agent (test)</option></select>
      <button class="btn blue" id="tspawn">Start</button><button class="btn" id="tstop">Stop</button><span class="sub" id="tinfo"></span></div>
     <div class="termwrap"><div id="terminal"></div></div>
    </div>
-   <div id="statusview" class="view"></div>
    <div id="chat" class="view"></div>
   </div>
   <div id="composer">
-   <div id="pill">
-    <button class="icon" id="addbtn" title="Actions">+</button>
+   <div id="box">
     <textarea id="input" rows="1" placeholder="Message"></textarea>
-    <button class="sendb" id="sendbtn" title="Send">↑</button>
+    <div class="brow"><button class="cbtn" id="addbtn" title="Attach / actions"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button><span class="grow"></span>
+     <button class="cbtn" id="micbtn" title="Voice input"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+     <button class="sendb" id="sendbtn" title="Send"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button></div>
    </div>
    <div id="menu" class="pop" hidden></div>
   </div>
  </main>
  <aside id="panel">
-  <div class="paneltop"><div id="ptabs"></div><button class="icon" id="closepanel" title="Close">✕</button></div>
+  <div class="paneltop"><button class="round" id="closepanel" title="Close">✕</button></div>
+  <div class="panelhead"><div id="panelav"></div><div id="panelname"></div><div id="panelsub" class="sub"></div></div>
+  <div id="ptabs"></div>
   <div id="pbody">
-   <div class="ptab" id="p-activity"></div>
-   <div class="ptab" id="p-browser">
+   <div class="ptab" id="p-info"></div>
+   <div class="ptab" id="p-status"></div>
+   <div class="ptab" id="p-library"></div>
+   <div class="ptab" id="p-computer">
+    <div class="pcard"><h4>Browser</h4>
     <div class="row"><input id="bsess" placeholder="Browser session id"><button class="btn" id="bopen">Open</button></div>
     <div class="row"><input id="burl" value="https://example.org/"><button class="btn" id="bnav">Go</button></div>
     <div class="row"><input id="btext" placeholder="Type…"><button class="btn" id="btype">Type</button><button class="btn" id="benter">Enter</button><button class="btn" id="bup">▲</button><button class="btn" id="bdown">▼</button></div>
-    <canvas id="bcanvas" width="800" height="500"></canvas><div class="sub" id="binfo"></div>
+    <canvas id="bcanvas" width="800" height="500"></canvas><div class="sub" id="binfo"></div></div>
+    <div id="p-tasks"></div>
    </div>
-   <div class="ptab" id="p-tasks"></div>
-   <div class="ptab" id="p-library"></div>
   </div>
  </aside>
 </div>

@@ -35,8 +35,10 @@ const SHAPES = [
 ];
 function hashOf(name) { let h = 2166136261; for (const c of String(name)) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return h; }
 // Avatar "critter": shape + colour derived from the id; state class animates it, .look follows the cursor.
-function avatar(name, cls = '', online, force) {
-  const h = hashOf(name); const c = colorOf(name); const shape = SHAPES[(h >>> 8) % SHAPES.length]; const st = force || avatarState(name);
+const FAMILY = { dm: [0, 5], group: [3, 4], agent: [1, 2, 6] };
+const kindOf = (id) => (id === '*' || String(id).startsWith('room:') ? 'group' : S.session && S.sessionNode === id ? 'agent' : 'dm');
+function avatar(name, cls = '', online, force, fam) {
+  const h = hashOf(name); const c = colorOf(name); const f = FAMILY[fam || kindOf(name)] || FAMILY.dm; const shape = SHAPES[f[(h >>> 8) % f.length]]; const st = force || avatarState(name);
   const extra = st === 'thinking' ? '<g class="tdots"><circle cx="50" cy="8" r="2.4"/><circle cx="56" cy="3" r="1.8"/></g>' : st === 'attention' ? '<circle class="ring" cx="32" cy="32" r="30" fill="none" stroke="#e0a63a" stroke-width="2.5"/>' : '';
   const ey = 28 + ((h >>> 4) % 5) - 2;
   return `<div class="av ${cls} st-${st}" data-av="${esc(name)}"><svg viewBox="0 0 64 64" width="100%" height="100%"><g class="bodyg"><path class="body" d="${shape}" fill="${c}"/><g class="look"><g class="eyes"><ellipse class="eye" cx="23" cy="${ey}" rx="4" ry="6" fill="#0b0b0d" transform="rotate(-12 23 ${ey})"/><ellipse class="eye" cx="41" cy="${ey}" rx="4" ry="6" fill="#0b0b0d" transform="rotate(-12 41 ${ey})"/></g></g></g>${extra}</svg>${online ? '<span class="on"></span>' : ''}</div>`;
@@ -54,52 +56,29 @@ document.addEventListener('mousemove', (e) => {
 const S = { mode: 'chat', view: 'chat', space: '*', log: [], events: {}, agentState: {}, lastFrame: 0, promptAt: 0, lastAnsi: '', nodes: [], ready: null, chat: '*', mail: {}, local: {}, session: null, sessionNode: null, sessionProv: null, target: 'mail', working: {}, panel: false, tab: 'activity', lastStatus: {}, wake: null, library: [] };
 const chatName = (id) => (id === '*' ? 'general' : id);
 const addLocal = (chat, item) => { (S.local[chat] ||= []).push({ ts: Date.now(), ...item }); renderChat(); };
-const logEv = (text) => { S.log.push({ ts: Date.now(), text }); if (S.log.length > 300) S.log.shift(); if (S.view === 'status') renderStatus(); };
+const logEv = (text) => { S.log.push({ ts: Date.now(), text }); if (S.log.length > 300) S.log.shift(); if (S.panel && S.tab === 'status') renderStatus(); };
 const visibleNodes = () => S.nodes.filter((n) => n.status !== 'revoked');
 
-// ---- sidebar: spaces (nodes) -> agents (1:1 chats) + groups (messenger rooms)
+// ---- sidebar: only chats (groups, DMs, agent sessions); kind is shown by creature shape only
 function renderSidebar() {
-  const sp = S.space === '*' ? null : S.nodes.find((n) => n.node_id === S.space);
-  $('#spacename').textContent = sp ? sp.node_id : 'All spaces';
-  $('#spaceav').innerHTML = `<span class="gi" style="width:30px;height:30px;border-radius:9px;background:${sp ? colorOf(sp.node_id) : '#2a2a30'};display:grid;place-items:center;color:#fff;font-weight:600;font-size:13px">${esc((sp ? sp.node_id : 'H')[0].toUpperCase())}</span>`;
   const q = $('#search').value.toLowerCase(); const match = (n) => !q || n.toLowerCase().includes(q);
   const root = $('#chats'); root.innerHTML = '';
-  const sec = (t) => { const d = document.createElement('div'); d.className = 'sec'; d.textContent = t; root.appendChild(d); };
-  const item = (id, html, preview) => { const b = document.createElement('button'); b.className = 'chatitem' + (S.view === 'chat' && S.chat === id ? ' on' : ''); b.innerHTML = html + `<div class="t"><div class="n">${esc(chatName(id))}</div><div class="p">${esc(preview)}</div></div>`; b.onclick = () => { openChat(id); document.body.classList.remove('sideopen'); }; root.appendChild(b); };
   const last = (id) => { const m = S.mail[id] || []; const l = m[m.length - 1]; return l ? l.body : ''; };
-  sec('Agents');
-  const sess = S.session && match(S.sessionNode) && (S.space === '*' || S.sessionNode === S.space) ? [S.sessionNode] : [];
-  if (!sess.length) root.insertAdjacentHTML('beforeend', '<div class="empty">No live agent sessions</div>');
-  for (const id of sess) item(id, avatar(id, '', true), last(id) || S.sessionProv + ' session');
-  sec('Groups');
-  if (match('general')) item('*', '<span class="gi">#</span>', last('*') || 'Team room');
-  $('#statusbtn').classList.toggle('on', S.view === 'status');
+  const item = (id, name, preview) => { if (!match(name)) return; const b = document.createElement('button'); b.className = 'chatitem' + (S.chat === id ? ' on' : ''); b.innerHTML = avatar(id) + `<div class="t"><div class="n">${esc(name)}</div><div class="p">${esc(preview)}</div></div>`; b.onclick = () => { openChat(id); document.body.classList.remove('sideopen'); }; root.appendChild(b); };
+  if (S.session) item(S.sessionNode, S.sessionNode, last(S.sessionNode) || S.sessionProv);
+  item('*', 'general', last('*') || '');
 }
-function renderSpaceMenu() {
-  const m = $('#spacemenu'); m.innerHTML = '';
-  for (const [id, label] of [['*', 'All spaces'], ...visibleNodes().map((n) => [n.node_id, n.node_id])]) {
-    const b = document.createElement('button'); b.className = S.space === id ? 'on' : ''; b.textContent = label;
-    b.onclick = () => { S.space = id; m.hidden = true; renderSidebar(); }; m.appendChild(b);
-  }
-}
-$('#spacebtn').onclick = (e) => { e.stopPropagation(); const m = $('#spacemenu'); m.hidden = !m.hidden; if (!m.hidden) renderSpaceMenu(); };
 $('#searchbtn').onclick = () => { const s = $('#search'); s.hidden = !s.hidden; if (!s.hidden) s.focus(); };
 $('#search').oninput = renderSidebar;
 $('#sidetoggle').onclick = () => document.body.classList.toggle('sideopen');
-$('#statusbtn').onclick = () => openStatus();
 
 // ---- chat
-function setView(v) { S.view = v; document.body.classList.toggle('statusmode', v === 'status'); if (v === 'status') setMode('chat'); }
 function openChat(id) {
-  setView('chat'); setMode('chat');
+  setMode('chat');
   S.chat = id; S.target = id === '*' ? 'room' : S.session && S.sessionNode === id ? 'agent' : 'mail';
-  const isAgent = id !== '*';
-  $('#headname').textContent = isAgent ? id : '# general';
-  $('#headsub').textContent = isAgent ? (S.session && S.sessionNode === id ? `${S.sessionProv} · live session` : 'Agent') : 'Group';
-  $('#headav').innerHTML = isAgent ? avatar(id, 'mid') : '<span class="gi" style="width:30px;height:30px;border-radius:9px;background:#1f1f23;display:grid;place-items:center;color:#8e8e96;font-weight:600">#</span>';
-  $('#seg').hidden = !isAgent;
-  $('#input').placeholder = isAgent ? `Message ${id}` : 'Message #general';
-  renderSidebar(); loadThread();
+  $('#headname').textContent = chatName(id); $('#headav').innerHTML = avatar(id, 'sm');
+  $('#input').placeholder = id === '*' ? 'Message general' : `Message ${id}`;
+  renderSidebar(); loadThread(); renderPanelHead(); if (S.panel) setTab(S.tab);
 }
 async function loadThread() {
   try {
@@ -116,7 +95,7 @@ function renderChat() {
     items.sort((a, b) => a.ts - b.ts);
   const box = $('#chat'); const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 600;
   box.innerHTML = '';
-  if (!items.length) box.innerHTML = `<div class="hello">${S.chat === '*' ? '<span class="gi" style="width:56px;height:56px;border-radius:16px;background:#1f1f23;display:grid;place-items:center;font-size:24px">#</span><b>#general</b><span>Messages from your team and agents appear here.</span>' : avatar(S.chat, 'big') + '<b>' + esc(S.chat) + '</b><span>Send a message to wake this agent.</span>'}</div>`;
+  if (!items.length) box.innerHTML = `<div class="hello">${avatar(S.chat, 'big')}<b>${esc(chatName(S.chat))}</b></div>`;
   for (const it of items) {
     if (it.kind === 'mail') {
       const m = it.m; const mine = m.from === OPERATOR;
@@ -155,6 +134,13 @@ async function send() {
     }
   } catch (e) { addLocal(S.chat, { sys: true, text: 'Not sent: ' + e.message }); }
 }
+$('#micbtn').onclick = () => {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) { toast('Voice input is not supported in this browser'); return; }
+  if (S.rec) { S.rec.stop(); return; }
+  const r = new SR(); r.interimResults = true; r.lang = navigator.language || 'ru-RU'; const base = $('#input').value; S.rec = r; $('#micbtn').classList.add('rec');
+  r.onresult = (e) => { $('#input').value = base + [...e.results].map((x) => x[0].transcript).join(''); autosize(); };
+  r.onend = () => { S.rec = null; $('#micbtn').classList.remove('rec'); }; r.start();
+};
 const autosize = () => { const i = $('#input'); i.style.height = 'auto'; i.style.height = Math.min(i.scrollHeight, 160) + 'px'; };
 $('#input').oninput = autosize;
 $('#input').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
@@ -165,27 +151,27 @@ function menu(items, anchorLeft) {
   const m = $('#menu'); m.removeAttribute('style'); m.innerHTML = ''; m.hidden = false;
   for (const [label, fn] of items) { const b = document.createElement('button'); b.textContent = label; b.onclick = () => { m.hidden = true; fn(); }; m.appendChild(b); }
 }
-document.addEventListener('click', (e) => { if (!e.target.closest('#menu') && !e.target.closest('#addbtn') && !e.target.closest('#plusbtn')) $('#menu').hidden = true; if (!e.target.closest('#spacemenu')) $('#spacemenu').hidden = true; if (!e.target.closest('#acctmenu')) $('#acctmenu').hidden = true; });
+document.addEventListener('click', (e) => { if (!e.target.closest('#menu') && !e.target.closest('#addbtn') && !e.target.closest('#plusbtn')) $('#menu').hidden = true; if (!e.target.closest('#acctmenu')) $('#acctmenu').hidden = true; });
 $('#addbtn').onclick = () => menu([
   ['Open terminal for this agent', () => { if (S.chat !== '*') setMode('pty'); else toast('Open an agent chat first'); }],
-  ['Create a task…', () => { openPanel('tasks'); }],
+  ['Create a task…', () => { openPanel('computer'); }],
   ['Issue enrollment code', issueCode],
-  ['Open browser stream…', () => openPanel('browser')],
+  ['Open browser stream…', () => openPanel('computer')],
 ]);
-$('#plusbtn').onclick = (e) => { e.stopPropagation(); const m = $('#menu'); menu([['Start an agent session…', () => { const n = S.space !== '*' ? S.space : (visibleNodes().find((x) => x.online) || {}).node_id; if (!n) { toast('No online space'); return; } S.chat = n; openChat(n); setMode('pty'); }], ['Add a node (enrollment code)', () => { openStatus(); issueCode(); }]]); m.style.left = '180px'; m.style.top = '56px'; m.style.bottom = 'auto'; m.style.position = 'fixed'; };
+$('#plusbtn').onclick = (e) => { e.stopPropagation(); menu([['New agent session…', () => { const n = (visibleNodes().find((x) => x.online) || {}).node_id; if (!n) { toast('No online node'); return; } openChat(n); setMode('pty'); }], ['Add a node (enrollment code)', () => { openPanel('status'); issueCode(); }]]); const m = $('#menu'); m.style.position = 'fixed'; m.style.left = '120px'; m.style.top = '54px'; m.style.bottom = 'auto'; };
 // ---- account pill
 async function loadMe() {
   try { const r = await fetch('/api/me', { credentials: 'same-origin' }); const d = await r.json(); const u = d.user || {}; S.me = u; const nm = u.display_name || u.username || 'Account';
-    $('#acctname').textContent = nm; $('#acctav').innerHTML = avatar(u.username || nm, '', false, 'idle'); } catch (_) {}
+    $('#acctav').innerHTML = avatar(u.username || nm, '', false, 'idle'); } catch (_) {}
 }
 $('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); m.hidden = !m.hidden; if (m.hidden) return; const u = S.me || {};
-  m.innerHTML = `<div class="who">${esc(u.display_name || '')} ${u.username ? '@' + esc(u.username) : ''}</div>`; const b = document.createElement('button'); b.textContent = 'Sign out';
+  m.innerHTML = ''; const b = document.createElement('button'); b.textContent = 'Sign out';
   b.onclick = async () => { try { await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{}' }); } catch (_) {} location.href = '/'; }; m.appendChild(b); };
 loadMe();
 async function issueCode() {
   try {
     const d = await post('/api/c2/codes');
-    S.code = d.code; logEv('enrollment code issued'); if (S.view === 'status') renderStatus(); else addLocal(S.chat, { card: `<b>Enrollment code</b><br><code class="big" id="codetext">${esc(d.code)}</code><br><span class="sub">Single use. Give it to the node operator; the node generates its own keys.</span>` });
+    S.code = d.code; logEv('enrollment code issued'); if (S.panel && S.tab === 'status') renderStatus(); else addLocal(S.chat, { card: `<b>Enrollment code</b><br><code class="big" id="codetext">${esc(d.code)}</code><br><span class="sub">Single use. Give it to the node operator; the node generates its own keys.</span>` });
   } catch (e) { toast('error: ' + e.message); }
 }
 
@@ -200,19 +186,16 @@ async function loadNodes() {
       S.lastStatus[n.node_id] = key;
     }
   } catch (_) { if (S.ready !== false) logEv('C2 unreachable'); S.ready = false; }
-  $('#statusdot').className = 'dot ' + (S.ready ? 'ok' : 'bad');
-  renderSidebar(); if (S.view === 'status') renderStatus();
+  renderSidebar(); if (S.panel && S.tab === 'status') renderStatus();
 }
 
 // ---- status: the one place for C2 state, node trust, policy and the event log
-function openStatus() { setView('status'); S.chat = null; $('#seg').hidden = true; $('#headname').textContent = 'Status'; $('#headsub').textContent = 'C2, nodes and events'; $('#headav').innerHTML = '<span class="gi" style="width:30px;height:30px;border-radius:9px;background:#1f1f23;display:grid;place-items:center;color:#8e8e96">◉</span>'; renderSidebar(); renderStatus(); }
 async function renderStatus() {
-  const root = $('#statusview'); const on = S.nodes.filter((n) => n.online).length; let policy = '';
+  const root = $('#p-status'); const on = S.nodes.filter((n) => n.online).length; let policy = '';
   try { policy = JSON.stringify(await api('/api/c2/policy'), null, 2); } catch (e) { policy = e.message; }
-  if (S.view !== 'status') return;
-  root.innerHTML = `<div class="stgrid"><div class="stat"><div class="l">C2</div><div class="v"><span class="dot ${S.ready ? 'ok' : 'bad'}"></span>${S.ready ? 'Ready' : 'Not ready'}</div></div><div class="stat"><div class="l">Nodes online</div><div class="v">${on} / ${S.nodes.length}</div></div><div class="stat"><div class="l">Agent session</div><div class="v">${S.session ? esc(S.sessionProv + ' · ' + S.sessionNode) : 'None'}</div></div></div>`
+  root.innerHTML = `<div class="stgrid" style="grid-template-columns:1fr 1fr"><div class="stat"><div class="l">C2</div><div class="v"><span class="dot ${S.ready ? 'ok' : 'bad'}"></span>${S.ready ? 'Ready' : 'Not ready'}</div></div><div class="stat"><div class="l">Nodes online</div><div class="v">${on} / ${S.nodes.length}</div></div><div class="stat"><div class="l">Agent session</div><div class="v">${S.session ? esc(S.sessionProv + ' · ' + S.sessionNode) : 'None'}</div></div></div>`
     + `<div class="row"><button class="btn blue" id="nc">Issue enrollment code</button><button class="btn" id="pr">Reload policy</button></div>${S.code ? `<div class="pcard"><h4>Enrollment code</h4><code class="big">${esc(S.code)}</code><div class="sub" style="margin-top:6px">Single use. The node generates its own keys.</div></div>` : ''}`
-    + `<h3>Nodes</h3><div class="pcard" style="padding:4px 6px"><table><tr><th>Node</th><th>Trust</th><th>Link</th><th></th></tr>${S.nodes.map((n) => `<tr><td><b>${esc(n.node_id)}</b><div class="sub">${esc(n.kind)}${n.tunnel_ip ? ' · ' + esc(n.tunnel_ip) : ''}</div></td><td><span class="badge ${esc(n.status)}">${esc(n.status)}</span></td><td><span class="dot ${n.online ? 'ok' : ''}"></span> ${n.online ? 'online' : esc(n.transport || 'offline')}</td><td>${n.enrolled && n.status !== 'revoked' ? `<select data-id="${esc(n.node_id)}"><option value="">Set trust…</option>${['neutral', 'member', 'trusted', 'suspended'].filter((s) => s !== n.status).map((s) => `<option>${s}</option>`).join('')}<option value="revoke">revoke</option></select>` : ''}</td></tr>`).join('')}</table></div>`
+    + `<h3>Nodes</h3><div class="pcard" style="padding:4px 6px"><table><tr><th>Node</th><th>Trust</th><th></th></tr>${S.nodes.map((n) => `<tr><td><b>${esc(n.node_id)}</b><div class="sub"><span class="dot ${n.online ? 'ok' : ''}"></span> ${n.online ? 'online' : esc(n.transport || 'offline')} · ${esc(n.kind)}</div></td><td><span class="badge ${esc(n.status)}">${esc(n.status)}</span></td><td>${n.enrolled && n.status !== 'revoked' ? `<select data-id="${esc(n.node_id)}"><option value="">Set trust…</option>${['neutral', 'member', 'trusted', 'suspended'].filter((s) => s !== n.status).map((s) => `<option>${s}</option>`).join('')}<option value="revoke">revoke</option></select>` : ''}</td></tr>`).join('')}</table></div>`
     + `<h3>Events</h3><div class="pcard log">${S.log.slice().reverse().map((l) => `<div>${fmtTime(l.ts)}  ${esc(l.text)}</div>`).join('') || '<div>No events yet</div>'}</div>`
     + `<h3>Policy</h3><pre>${esc(policy)}</pre>`;
   $('#nc').onclick = issueCode; $('#pr').onclick = async () => { try { await post('/api/c2/policy/reload'); toast('Policy reloaded'); renderStatus(); } catch (e) { toast('Error: ' + e.message); } };
@@ -222,19 +205,27 @@ async function renderStatus() {
   }));
 }
 
-// ---- right panel: space / agent tools
-const TABS = [['activity', 'Activity'], ['browser', 'Browser'], ['tasks', 'Tasks'], ['library', 'Library']];
-function renderPanelHead() {}
-function openPanel(tab) { S.panel = true; $('#panel').classList.add('open'); setTab(tab || S.tab); }
-function closePanel() { S.panel = false; $('#panel').classList.remove('open'); document.querySelectorAll('#tools .icon').forEach((b) => b.classList.remove('on')); }
+// ---- right panel: chat info + all status / control
+const TABS = [['info', 'Info'], ['status', 'Status'], ['library', 'Library'], ['computer', 'Computer']];
+function renderPanelHead() { if (!S.chat) return; $('#panelav').innerHTML = avatar(S.chat, 'big'); $('#panelname').textContent = chatName(S.chat); $('#panelsub').textContent = ''; }
+function openPanel(tab) { S.panel = true; $('#panel').classList.add('open'); renderPanelHead(); setTab(tab || S.tab); }
+function closePanel() { S.panel = false; $('#panel').classList.remove('open'); }
 function setTab(tab) {
-  S.tab = tab; $('#panel').classList.toggle('wide', tab === 'browser'); $('#ptabs').innerHTML = '';
+  if (!TABS.some(([id]) => id === tab)) tab = 'info';
+  S.tab = tab; $('#ptabs').innerHTML = '';
   for (const [id, label] of TABS) { const b = document.createElement('button'); b.textContent = label; b.className = id === tab ? 'on' : ''; b.onclick = () => setTab(id); $('#ptabs').appendChild(b); }
   document.querySelectorAll('.ptab').forEach((t) => t.classList.toggle('on', t.id === 'p-' + tab));
-  document.querySelectorAll('#tools .icon').forEach((b) => b.classList.toggle('on', S.panel && b.dataset.tab === tab));
-  if (tab === 'activity') renderActivity(); if (tab === 'tasks') renderTasksTab(); if (tab === 'library') renderLibraryTab();
+  if (tab === 'info') renderInfo(); if (tab === 'status') renderStatus(); if (tab === 'computer') renderTasksTab(); if (tab === 'library') renderLibraryTab();
 }
-document.querySelectorAll('#tools .icon').forEach((b) => (b.onclick = () => { if (S.panel && S.tab === b.dataset.tab) closePanel(); else openPanel(b.dataset.tab); }));
+function renderInfo() {
+  const root = $('#p-info'); const agent = S.chat && S.chat !== '*'; const n = S.nodes.find((x) => x.node_id === S.chat);
+  let h = `<div class="pcard">${agent ? `<div class="kv"><span>Session</span><span>${S.session && S.sessionNode === S.chat ? esc(S.sessionProv) + ' · live' : 'not running'}</span></div>` : '<div class="kv"><span>Room</span><span>room:general</span></div>'}${n ? `<div class="kv"><span>Node</span><span>${esc(n.node_id)} · ${n.online ? 'online' : 'offline'}</span></div>` : ''}</div>`;
+  if (agent) h += `<div class="pcard"><h4>View</h4><div class="tog" id="vtog"><button data-m="chat" class="${S.mode === 'chat' ? 'on' : ''}">Chat</button><button data-m="pty" class="${S.mode === 'pty' ? 'on' : ''}">Terminal</button></div></div>`;
+  root.innerHTML = h + '<div id="p-activity"></div>';
+  root.querySelectorAll('#vtog button').forEach((b) => (b.onclick = () => { setMode(b.dataset.m); renderInfo(); }));
+  if (agent) renderActivity();
+}
+$('#headbtn').onclick = () => { if (S.panel) closePanel(); else openPanel('info'); };
 $('#closepanel').onclick = closePanel;
 
 // ---- terminal tab
@@ -244,10 +235,9 @@ term.open($('#terminal'));
 let mini = null;
 function setMode(m) {
   S.mode = m; document.body.classList.toggle('ptymode', m === 'pty'); $('#ptyview').classList.toggle('on', m === 'pty');
-  document.querySelectorAll('#seg button').forEach((b) => b.classList.toggle('on', b.dataset.m === m));
+  
   if (m === 'pty') term.focus();
 }
-document.querySelectorAll('#seg button').forEach((b) => (b.onclick = () => setMode(b.dataset.m)));
 let tws = null;
 function tsend(o) { if (tws && tws.readyState === 1) tws.send(JSON.stringify(o)); }
 $('#tspawn').onclick = () => {
@@ -288,7 +278,7 @@ function onEvents(node, evs) {
   window.lastEvents = Object.fromEntries(Object.entries(S.events).map(([k, v]) => [k, [...v.values()]]));
   if (chatChanged || stateChanged) renderChat();
   if (stateChanged) refreshAvatars();
-  if (S.panel && S.tab === 'activity') renderActivity();
+  if (S.panel && S.tab === 'info') renderInfo();
 }
 const confTag = (e) => `<span class="tagh" title="source ${esc(e.source)}">${e.confidence === 'structured' ? 'structured' : 'heuristic'} · ${esc(e.source)}</span>`;
 function diffHtml(t) { return t.split('\n').map((l) => `<span class="${l.startsWith('+') ? 'd-add' : l.startsWith('-') ? 'd-del' : l.startsWith('@@') ? 'd-hunk' : ''}">${esc(l)}</span>`).join('\n'); }
@@ -359,5 +349,5 @@ es.onmessage = (m) => {
     if (S.chat === msg.from || S.chat === '*') loadThread(); else { S.mail[msg.from] = (S.mail[msg.from] || []).concat([msg]); renderSidebar(); }
   }
 };
-setTab('activity');
+setTab('info');
 loadNodes().then(() => { openChat('*'); }); setInterval(loadNodes, 4000);
