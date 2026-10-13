@@ -140,6 +140,8 @@ pub fn router(config: Config) -> (Router, Shared) {
         .route(&format!("{base}/app.js"), get(|| async { asset("text/javascript; charset=utf-8", include_str!("../assets/app.js").as_bytes()) }))
         .route(&format!("{base}/style.css"), get(|| async { asset("text/css; charset=utf-8", include_str!("../assets/style.css").as_bytes()) }))
         .route(&format!("{base}/vendor/xterm.js"), get(|| async { asset("text/javascript; charset=utf-8", include_bytes!("../assets/vendor/xterm.js")) }))
+        .route(&format!("{base}/vendor/addon-fit.js"), get(|| async { asset("text/javascript; charset=utf-8", include_bytes!("../assets/vendor/addon-fit.js")) }))
+        .route(&format!("{base}/vendor/addon-web-links.js"), get(|| async { asset("text/javascript; charset=utf-8", include_bytes!("../assets/vendor/addon-web-links.js")) }))
         .route(&format!("{base}/vendor/xterm.css"), get(|| async { asset("text/css; charset=utf-8", include_bytes!("../assets/vendor/xterm.css")) }));
     if !base.is_empty() {
         let to: &'static str = Box::leak(format!("{base}/").into_boxed_str());

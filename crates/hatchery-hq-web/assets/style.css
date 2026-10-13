@@ -452,3 +452,18 @@ body.nodemode #composer{display:none}
 .ptychat{flex:1;min-height:0;overflow:auto;padding:16px}
 .ptychat-stub{max-width:720px;margin:0 auto}
 .ptychat-screen{white-space:pre-wrap;background:var(--el);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:12px;font:13px/1.45 ui-monospace,Menlo,Consolas,monospace}
+
+/* round 23: full-center fitted PTY, Nodes modal */
+.termwrap{display:flex;flex-direction:column;overflow:hidden;padding:10px 12px 12px}
+#terminal{flex:1;min-height:0;width:auto;max-width:none;box-sizing:border-box}
+#terminal .xterm{height:100%}
+#terminal .xterm-viewport{overflow-y:hidden}
+.ptybar a.btn{text-decoration:none}
+#nodesdlg{position:fixed;inset:0;background:#000a;z-index:70;display:grid;place-items:center}
+.ndlg{width:min(720px,94vw);max-height:86vh;overflow:auto;background:var(--side);border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:0 20px 60px #000c}
+.ndh{display:flex;align-items:center;margin-bottom:10px}.ndh h2{margin:0;font-size:18px}.ndh .grow{flex:1}
+.ncard2{border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:10px;background:var(--el)}
+.nrow{display:flex;align-items:center;gap:10px}.nrow .grow{flex:1;min-width:0}
+.ncard2 details{margin-top:8px}.ncard2 summary{cursor:pointer;color:var(--sub);font-size:13px}
+.ncard2 details .pcard{margin-top:8px}
+.ptybar .tog button{white-space:nowrap}

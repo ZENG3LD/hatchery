@@ -39,7 +39,7 @@ function hashOf(name) { let h = 2166136261; for (const c of String(name)) h = Ma
 const FAMILY = { dm: [0, 5], group: [3], agent: [1, 2, 6], node: [4] };
 const isNode = (id) => (S.nodes || []).some((n) => n.node_id === id);
 const chatKind = (id) => ((S.chats || []).find((x) => x.target === id) || {}).kind;
-const kindOf = (id) => (isNode(id) ? 'node' : chatKind(id) ? chatKind(id) : id === '*' || String(id).startsWith('room:') ? 'group' : S.session && S.sessionNode === id ? 'agent' : 'dm');
+const kindOf = (id) => (String(id).startsWith('pty:') ? 'agent' : isNode(id) ? 'node' : chatKind(id) ? chatKind(id) : id === '*' || String(id).startsWith('room:') ? 'group' : S.session && S.sessionNode === id ? 'agent' : 'dm');
 function avatar(name, cls = '', online, force, fam) {
   const h = hashOf(name); const c = colorOf(name); const f = FAMILY[fam || kindOf(name)] || FAMILY.dm; const shape = SHAPES[f[(h >>> 8) % f.length]]; const st = force || avatarState(name);
   const extra = st === 'thinking' ? '<g class="tdots"><circle cx="50" cy="8" r="2.4"/><circle cx="56" cy="3" r="1.8"/></g>' : st === 'attention' ? '<circle class="ring" cx="32" cy="32" r="30" fill="none" stroke="#e0a63a" stroke-width="2.5"/>' : '';
@@ -66,20 +66,14 @@ const logEv = (text) => { S.log.push({ ts: Date.now(), text }); if (S.log.length
 const visibleNodes = () => S.nodes.filter((n) => n.status !== 'revoked');
 
 const isGroup = (id) => chatKind(id) ? chatKind(id) === 'group' : id === '*' || String(id).startsWith('room:');
-// ---- sidebar: nodes (environments) and chats together, no section labels; kind shown by creature shape
+// ---- sidebar: sessions only (m4a chats and PTY/agent sessions), each its own entry; no nodes here
+const allSessions = () => Object.entries(S.sessions).flatMap(([node, arr]) => arr.map((s) => ({ node, s })));
 function renderSidebar() {
   const q = $('#search').value.toLowerCase(); const match = (n) => !q || n.toLowerCase().includes(q);
   const root = $('#chats'); root.innerHTML = '';
   const last = (id) => { const m = S.mail[id] || []; const l = m[m.length - 1]; return l ? l.body : ''; };
   const item = (id, name, preview, active, onclick) => { if (!match(name)) return; const b = document.createElement('button'); b.className = 'chatitem' + (active ? ' on' : ''); b.title = name; b.innerHTML = avatar(id) + `<div class="t"><div class="n">${esc(name)}</div><div class="p">${esc(preview)}</div></div>`; b.onclick = () => { onclick(); document.body.classList.remove('sideopen'); }; root.appendChild(b); };
-  // Nodes are environments: their own entries, opened into the node view.
-  for (const n of visibleNodes()) {
-    const nsess = (S.sessions[n.node_id] || []).length;
-    const preview = n.online ? (nsess ? nsess + ' session' + (nsess > 1 ? 's' : '') : 'node · online') : 'node · ' + (n.transport || 'offline');
-    const active = (S.view === 'node' && S.nodeId === n.node_id) || (S.view === 'pty' && S.sessionNode === n.node_id);
-    item(n.node_id, n.node_id, preview, active, () => openNode(n.node_id));
-  }
-  // Chats (m4a rooms / DMs) are not owned by a node.
+  for (const { node, s: x } of allSessions().reverse()) item('pty:' + x.id, `${x.provider} · ${node}`, x.live ? 'live session' : (x.detached ? 'detached' : 'ended'), S.view === 'pty' && S.ptySession && S.ptySession.id === x.id, () => openPty(node, x));
   for (const c of S.chats || []) item(c.target, c.label, last(c.target) || '', S.view === 'chat' && S.chat === c.target, () => openChat(c.target));
 }
 
@@ -89,7 +83,6 @@ function showView(v) {
   document.body.classList.toggle('ptymode', v === 'pty');
   document.body.classList.toggle('nodemode', v === 'node');
   $('#ptyview').classList.toggle('on', v === 'pty');
-  $('#nodeview').classList.toggle('on', v === 'node');
   $('#chat').style.display = v === 'chat' ? '' : 'none';
 }
 $('#searchbtn').onclick = () => { const s = $('#search'); s.hidden = !s.hidden; if (!s.hidden) s.focus(); };
@@ -106,38 +99,34 @@ function openChat(id) {
   renderChat(); $('#chat').scrollTop = 1e9; renderSidebar(); loadThread(); renderPanelHead(); if (S.panel) setTab(S.tab);
 }
 
-// ---- node view: an environment (resources card), its sessions, and a Start control
-function openNode(id) {
-  try { localStorage.setItem('hq.chat', id); history.replaceState(null, '', '#/node/' + encodeURIComponent(id)); } catch (_) {}
-  showView('node'); S.nodeId = id;
-  $('#headname').textContent = id; $('#headbtn').title = id; $('#headav').innerHTML = avatar(id, 'sm');
-  renderNode(); renderSidebar(); renderPanelHead(); if (S.panel) setTab(S.tab);
-}
+// ---- Nodes modal: connected nodes, status, environment, quick spawn (opened from the account menu / +)
 const fmtBytes = (b) => (!b && b !== 0) ? '?' : (b >= 1e9 ? (b / 1e9).toFixed(1) + 'G' : (b >= 1e6 ? (b / 1e6).toFixed(0) + 'M' : b + 'B'));
-function renderNode() {
-  const root = $('#nodeview'); const n = (S.nodes || []).find((x) => x.node_id === S.nodeId);
-  if (!n) { root.innerHTML = `<div class="nodewrap"><div class="pcard sub">Node ${esc(S.nodeId || '')} is not known.</div></div>`; return; }
-  const m = n.machine; const clis = (m && m.provider_clis || []).map((c) => `${esc(c.id)}${c.version ? ' ' + esc(c.version) : ''}`);
-  const envRows = m ? `
-    <div class="kv"><span>Host</span><span>${esc(m.hostname || '')} · ${esc(m.os)}/${esc(m.arch)}</span></div>
+function envHtml(n) {
+  const m = n && n.machine; if (!m) return '<div class="sub">No environment inventory yet.</div>';
+  const clis = (m.provider_clis || []).map((c) => `${c.id}${c.version ? ' ' + c.version : ''}`);
+  return `<div class="kv"><span>Host</span><span>${esc(m.hostname || '')} · ${esc(m.os)}/${esc(m.arch)}</span></div>
     <div class="kv"><span>Kernel</span><span>${esc(m.kernel)}</span></div>
     <div class="kv"><span>CPU</span><span>${m.cpu_cores} cores${m.cpu_model ? ' · ' + esc(m.cpu_model) : ''}</span></div>
     <div class="kv"><span>Memory</span><span>${fmtBytes(m.ram_available_bytes)} free / ${fmtBytes(m.ram_total_bytes)}</span></div>
     <div class="kv"><span>Disk</span><span>${fmtBytes(m.disk_available_bytes)} free / ${fmtBytes(m.disk_total_bytes)}</span></div>
     <div class="kv"><span>Uptime</span><span>${Math.floor((m.uptime_secs || 0) / 3600)}h</span></div>
-    <div class="kv"><span>Provider CLIs</span><span>${clis.length ? clis.map(esc).join(', ') : '—'}</span></div>` : '<div class="sub">No environment inventory yet.</div>';
-  const sess = S.sessions[n.node_id] || [];
-  const sessList = sess.length ? sess.map((x) => `<div class="pcard srow2"><div><b>${esc(x.provider)}</b><div class="sub">${esc(x.key)}${x.live ? '' : ' · ended'}</div></div><div class="row"><button class="btn blue" data-open="${esc(x.id)}">Open</button><button class="btn" data-stop="${esc(x.id)}">Stop</button></div></div>`).join('') : '<div class="pcard sub">No sessions yet. Start one below.</div>';
-  root.innerHTML = `<div class="nodewrap">
-    <div class="nhero">${avatar(n.node_id, 'big')}<div><h2>${esc(n.node_id)}</h2><div class="sub"><span class="dot ${n.online ? 'ok' : ''}"></span> ${n.online ? 'online' : esc(n.transport || 'offline')} · ${esc(n.kind)}${n.tunnel_ip ? ' · ' + esc(n.tunnel_ip) : ''}</div></div></div>
-    <section class="nsec"><h3>Environment</h3><div class="pcard">${envRows}</div></section>
-    <section class="nsec"><h3>Start a session</h3><div class="pcard"><div class="row"><select id="nprov">${provOptions(0)}</select><button class="btn blue" id="nstart"${n.online ? '' : ' disabled'}>Start</button>${n.online ? '' : '<span class="sub">node offline</span>'}</div></div></section>
-    <section class="nsec"><h3>Sessions</h3>${sessList}</section>
-  </div>`;
-  const st = $('#nstart'); if (st) st.onclick = () => { const sel = $('#nprov'); const opt = sel.selectedOptions[0]; startSession(n.node_id, opt.value, opt.dataset.parser); };
-  root.querySelectorAll('[data-open]').forEach((b) => (b.onclick = () => { const x = (S.sessions[n.node_id] || []).find((s) => s.id === b.dataset.open); if (x) openPty(n.node_id, x); }));
-  root.querySelectorAll('[data-stop]').forEach((b) => (b.onclick = () => { const x = (S.sessions[n.node_id] || []).find((s) => s.id === b.dataset.stop); if (x) stopSession(x); }));
+    <div class="kv"><span>Provider CLIs</span><span>${clis.length ? clis.map(esc).join(', ') : '—'}</span></div>`;
 }
+const nodeStatus = (n) => `<span class="dot ${n && n.online ? 'ok' : ''}"></span> ${n && n.online ? 'online' : esc((n && n.transport) || 'offline')}`;
+function openNode(focus) {
+  let d = $('#nodesdlg'); if (!d) { d = document.createElement('div'); d.id = 'nodesdlg'; document.body.appendChild(d); d.onclick = (e) => { if (e.target === d) d.remove(); }; }
+  const ns = visibleNodes();
+  d.innerHTML = `<div class="ndlg"><div class="ndh"><h2>Nodes</h2><span class="grow"></span><button class="round" id="nclose">✕</button></div>
+    ${ns.length ? ns.map((n) => `<div class="ncard2"><div class="nrow">${avatar(n.node_id, 'mid')}<div class="grow"><b>${esc(n.node_id)}</b><div class="sub">${nodeStatus(n)} · ${esc(n.kind || '')}${n.tunnel_ip ? ' · ' + esc(n.tunnel_ip) : ''} · ${(S.sessions[n.node_id] || []).filter((x) => x.live).length} live</div></div>
+      <select data-prov="${esc(n.node_id)}">${provOptions(0)}</select><button class="btn blue" data-spawn="${esc(n.node_id)}"${n.online ? '' : ' disabled'}>Start</button></div>
+      <details${focus === n.node_id ? ' open' : ''}><summary>Environment</summary><div class="pcard">${envHtml(n)}</div></details></div>`).join('') : '<div class="pcard sub">No nodes connected.</div>'}
+    <div class="row" style="margin-top:12px"><button class="btn" id="nenroll">Add a node (enrollment code)</button></div></div>`;
+  $('#nclose').onclick = () => d.remove();
+  $('#nenroll').onclick = () => { d.remove(); openPanel('status'); issueCode(); };
+  d.querySelectorAll('[data-spawn]').forEach((b) => (b.onclick = () => { const sel = d.querySelector(`select[data-prov="${CSS.escape(b.dataset.spawn)}"]`); const opt = sel.selectedOptions[0]; d.remove(); startSession(b.dataset.spawn, opt.value, opt.dataset.parser); }));
+}
+function renderNode() {}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#nodesdlg')) $('#nodesdlg').remove(); });
 // Timeline cache: in-memory S.mail, mirrored to sessionStorage so a reload or chat switch renders instantly.
 try { Object.assign(S.mail, JSON.parse(sessionStorage.getItem('hq.mail') || '{}')); } catch (_) {}
 let saveT = 0; const saveCache = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { sessionStorage.setItem('hq.mail', JSON.stringify(S.mail)); } catch (_) {} }, 500); };
@@ -293,12 +282,12 @@ function menu(items, anchorLeft) {
 }
 document.addEventListener('click', (e) => { if (!e.target.closest('#menu') && !e.target.closest('#addbtn') && !e.target.closest('#plusbtn')) $('#menu').hidden = true; if (!e.target.closest('#acctmenu')) $('#acctmenu').hidden = true; });
 $('#addbtn').onclick = () => menu([
-  ['Open a node…', () => { const n = (visibleNodes().find((x) => x.online) || visibleNodes()[0]); if (n) openNode(n.node_id); else toast('No node yet. Add one with an enrollment code.'); }],
+  ['Nodes…', () => openNode()],
   ['Create a task…', () => { openPanel('tasks'); }],
   ['Issue enrollment code', issueCode],
   ['Open browser stream…', () => openPanel('computer')],
 ]);
-$('#plusbtn').onclick = (e) => { e.stopPropagation(); menu([['Open a node…', () => { const n = (visibleNodes().find((x) => x.online) || visibleNodes()[0]); if (!n) { toast('No node yet'); return; } openNode(n.node_id); }], ['Add a node (enrollment code)', () => { openPanel('status'); issueCode(); }]]); const m = $('#menu'); m.style.position = 'fixed'; m.style.left = '120px'; m.style.top = '54px'; m.style.bottom = 'auto'; };
+$('#plusbtn').onclick = (e) => { e.stopPropagation(); menu([...visibleNodes().filter((n) => n.online).flatMap((n) => ['shell', 'claude'].map((p) => [`New ${p} on ${n.node_id}`, () => startSession(n.node_id, p)])), ['Nodes…', () => openNode()], ['Add a node (enrollment code)', () => { openPanel('status'); issueCode(); }]]); const m = $('#menu'); m.style.position = 'fixed'; m.style.left = '120px'; m.style.top = '54px'; m.style.bottom = 'auto'; };
 // ---- account pill
 async function loadMe() {
   try { const r = await fetch('/api/me', { credentials: 'same-origin' }); const d = await r.json(); const u = d.user || {}; S.me = u; const nm = u.display_name || u.username || 'Account';
@@ -329,6 +318,7 @@ const LUC = {
 const ico = (k, sz = 16) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${LUC[k]}</svg>`;
 $('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); m.hidden = !m.hidden; if (m.hidden) return; m.className = 'pop amenu2'; m.innerHTML = '';
   const it = (ic, label, fn, right, chev) => { const b = document.createElement('button'); b.innerHTML = `<span class="ic">${ico(ic)}</span><span class="l">${esc(label)}</span>${right ? `<span class="r">${esc(right)}</span>` : ''}${chev ? `<span class="cv">${ico('chev', 16)}</span>` : ''}`; b.onclick = () => { m.hidden = true; fn(); }; m.appendChild(b); };
+  it('server', 'Nodes', () => openNode(), String(visibleNodes().filter((n) => n.online).length) + ' online', true);
   it('gauge', 'Usage & plan', () => openSettings('usage'), '— % used', true);
   it('phone', 'Get the apps', () => toast('Apps: coming soon'));
   it('book', 'Support', () => toast('Support: coming soon'), '', true);
@@ -397,7 +387,7 @@ async function renderStatus() {
 
 // ---- right panel: chat info + all status / control
 const TABS = [['info', 'Overview', 'info'], ['browser', 'Browser', 'globe'], ['tasks', 'Tasks', 'check'], ['library', 'Files', 'folder'], ['status', 'Fleet', 'server']];
-function renderPanelHead() { if (!S.chat) return; $('#panelav').innerHTML = avatar(S.chat, 'mid'); $('#panelname').textContent = chatName(S.chat); $('#panelsub').textContent = ''; }
+function renderPanelHead() { if (S.view === 'pty' && S.ptySession) { const x = S.ptySession; $('#panelav').innerHTML = avatar('pty:' + x.id, 'mid'); $('#panelname').textContent = x.provider; $('#panelsub').textContent = 'on ' + S.sessionNode; return; } if (!S.chat) return; $('#panelav').innerHTML = avatar(S.chat, 'mid'); $('#panelname').textContent = chatName(S.chat); $('#panelsub').textContent = ''; }
 function openPanel(tab) { S.panel = true; localStorage.setItem('hq.panel', '1'); $('#panel').classList.add('open'); syncHead(); renderPanelHead(); setTab(tab || S.tab); }
 function closePanel() { S.panel = false; localStorage.setItem('hq.panel', ''); $('#panel').classList.remove('open'); syncHead(); }
 // The pill lives inside the main pane (overflow hidden). On panel open/close it holds its old screen
@@ -449,15 +439,11 @@ function setTab(tab) {
 const sec = (title, body, right = '') => `<section class="psec"><div class="sech"><span>${esc(title)}</span>${right}</div>${body}</section>`;
 function renderInfo() {
   const root = $('#p-info');
-  // Node context: show the environment summary and a jump into the node view.
-  if (S.view === 'node' || S.view === 'pty') {
-    const id = S.nodeId || S.sessionNode; const n = S.nodes.find((x) => x.node_id === id);
-    let kv = `<div class="kv"><span>Node</span><span><span class="dot ${n && n.online ? 'ok' : ''}"></span> ${n && n.online ? 'online' : 'offline'}</span></div>`;
-    if (n && n.machine) { const m = n.machine; kv += `<div class="kv"><span>Host</span><span>${esc(m.hostname || '')} · ${esc(m.os)}/${esc(m.arch)}</span></div><div class="kv"><span>CPU/RAM</span><span>${m.cpu_cores}c · ${(m.ram_total_bytes / 1e9).toFixed(1)}G</span></div>`; }
-    const sess = (S.sessions[id] || []);
-    kv += `<div class="kv"><span>Sessions</span><span>${sess.filter((x) => x.live).length} live</span></div>`;
-    root.innerHTML = sec('Node', `<div class="pcard">${kv}</div>`) + sec('', `<div class="row"><button class="btn blue" id="goNode">Open node view</button></div>`);
-    const g = $('#goNode'); if (g) g.onclick = () => openNode(id);
+  // PTY session: which node it runs on, and that node's environment.
+  if (S.view === 'pty') {
+    const id = S.sessionNode; const n = S.nodes.find((x) => x.node_id === id); const x = S.ptySession || {};
+    const kv = `<div class="kv"><span>Provider</span><span>${esc(x.provider || '')}</span></div><div class="kv"><span>Status</span><span>${x.live ? 'live' : x.detached ? 'detached' : 'ended'}</span></div><div class="kv"><span>Size</span><span>${term.cols}×${term.rows}</span></div>`;
+    root.innerHTML = sec('Session', `<div class="pcard">${kv}</div>`) + sec('Runs on node', `<div class="pcard"><div class="kv"><span>${esc(id || '')}</span><span>${nodeStatus(n)}</span></div></div>`) + sec('Environment', `<div class="pcard">${envHtml(n)}</div>`);
     return;
   }
   const agent = S.chat && !isGroup(S.chat);
@@ -476,7 +462,34 @@ $('#closepanel').onclick = closePanel;
 // ---- PTY sessions: spawned from the node view, shown full-center as a native terminal
 const COLS = 100, ROWS = 30;
 const term = new Terminal({ rows: ROWS, cols: COLS, cursorBlink: true, fontSize: 13, fontFamily: 'ui-monospace,Menlo,Consolas,monospace', theme: { background: '#000000' } });
+const fit = new FitAddon.FitAddon(); term.loadAddon(fit);
+// Links open in the user's own browser (e.g. the claude OAuth login URL).
+term.loadAddon(new WebLinksAddon.WebLinksAddon((ev, uri) => { ev.preventDefault(); window.open(uri, '_blank', 'noopener,noreferrer'); }));
 term.open($('#terminal'));
+// Ctrl/Cmd+V: let the browser fire a real paste (xterm forwards it via onData); Ctrl+Shift+C copies a selection.
+term.attachCustomKeyEventHandler((e) => {
+  if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') return false;
+  if (e.type === 'keydown' && (e.metaKey || (e.ctrlKey && e.shiftKey)) && e.key.toLowerCase() === 'c' && term.hasSelection()) { navigator.clipboard?.writeText(term.getSelection()); return false; }
+  return true;
+});
+// Fill the center: fit to the pane, and tell the PTY its new size.
+function refit() {
+  if (S.view !== 'pty' || S.ptyLayout !== 'native') return;
+  try { fit.fit(); } catch (_) { return; }
+  if (term.cols !== S.sentCols || term.rows !== S.sentRows) { S.sentCols = term.cols; S.sentRows = term.rows; tsend({ t: 'resize', cols: term.cols, rows: term.rows }); if (S.panel && S.tab === 'info') renderInfo(); }
+}
+let fitT = 0; const refitSoon = () => { clearTimeout(fitT); fitT = setTimeout(refit, 60); };
+new ResizeObserver(refitSoon).observe($('.termwrap')); window.addEventListener('resize', refitSoon);
+// Wrapped URLs in a redrawn screen are not one line; rebuild the newest one from the frame text.
+function findUrl(text, cols) {
+  const L = String(text || '').split('\n');
+  for (let i = L.length - 1; i >= 0; i--) {
+    const m = L[i].match(/https?:\/\/\S+/); if (!m) continue; let u = m[0];
+    for (let j = i; j + 1 < L.length && L[j].replace(/\s+$/, '').length >= cols - 2; j++) { const nx = L[j + 1].trim(); if (!nx || /\s/.test(nx)) break; u += nx; }
+    return u;
+  }
+  return null;
+}
 // One live socket per on-screen PTY. S.sessions[node] records what we spawned.
 let tws = null;
 function tsend(o) { if (tws && tws.readyState === 1) tws.send(JSON.stringify(o)); }
@@ -488,9 +501,14 @@ function startSession(node, provider, parser) {
   if (!node) { toast('Pick a node first'); return; }
   if (tws) { try { tws.close(); } catch (_) {} tws = null; }
   const prov = parser ? 'fixture' : provider;
-  const q = new URLSearchParams({ node, provider, rows: ROWS, cols: COLS }); if (parser) q.set('parser', parser);
-  term.reset(); S.lastAnsi = ''; $('#tinfo').textContent = `spawning ${prov} on ${node}…`;
+  if (S.ptySession && S.ptySession.live) { S.ptySession.live = false; S.ptySession.detached = true; }
+  term.reset(); S.lastAnsi = '';
   openPty(node, { provider: prov, key: '', id: 'pending', live: true });
+  try { fit.fit(); } catch (_) {}
+  S.sentCols = term.cols; S.sentRows = term.rows;
+  const q = new URLSearchParams({ node, provider, rows: term.rows, cols: term.cols }); if (parser) q.set('parser', parser);
+  $('#tinfo').textContent = `spawning ${prov} on ${node}…`;
+  let mine = null;
   const sock = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/term?${q}`);
   tws = sock;
   sock.onmessage = (m) => {
@@ -500,9 +518,9 @@ function startSession(node, provider, parser) {
       S.events[node] = S.events[node] || new Map(); S.agentState[node] = 'idle';
       S.session = d.session; S.sessionNode = node; S.sessionProv = prov;
       const sess = { provider: prov, key: d.session, id, live: true, parser };
-      recordSession(node, sess); S.ptySession = sess;
+      recordSession(node, sess); mine = sess; if (tws === sock) S.ptySession = sess;
       $('#tinfo').textContent = `${prov} on ${node}`; logEv(`session ${prov} started on ${node}`);
-      renderSidebar(); if (S.view === 'node' && S.nodeId === node) renderNode();
+      renderSidebar(); renderPanelHead(); if (S.panel && S.tab === 'info') renderInfo(); refit();
     }
     if (d.type === 'error') { $('#tinfo').textContent = d.text; toast(d.text); }
     if (d.type === 'ack') { if (!d.ok) toast('Refused: ' + (/does not permit/.test(d.detail) ? 'node status does not permit operator requests (policy)' : String(d.detail).slice(0, 120))); }
@@ -511,25 +529,28 @@ function startSession(node, provider, parser) {
       const bytes = Uint8Array.from(atob(d.ansi), (c) => c.charCodeAt(0));
       window.lastFrameText = d.text; term.reset(); term.write(bytes); S.lastAnsi = bytes; S.lastFrame = Date.now();
       if (S.ptyLayout === 'chat') renderPtyChat(d.text);
+      const u = findUrl(d.text, d.cols || term.cols); const tl = $('#tlink'); if (u) { tl.href = u; tl.title = u; tl.hidden = false; } else tl.hidden = true;
     }
   };
   sock.onclose = () => {
-    if (tws === sock) { $('#tinfo').textContent += ' [closed]'; if (S.ptySession) { endSession(node, S.ptySession.id); } S.session = null; S.agentState[node] = 'idle'; if (S.view === 'node' && S.nodeId === node) renderNode(); renderSidebar(); }
+    if (mine && !mine.detached) mine.live = false;
+    if (tws === sock) { $('#tinfo').textContent += ' [closed]'; S.session = null; S.agentState[node] = 'idle'; }
+    renderSidebar(); if (S.panel && S.tab === 'info' && S.view === 'pty') renderInfo();
   };
 }
 function stopSession(sess) {
   if (S.ptySession && S.ptySession.id === sess.id && tws) tsend({ t: 'stop' });
-  endSession(S.nodeId || S.sessionNode, sess.id);
-  if (S.view === 'node') renderNode();
+  endSession(S.sessionNode, sess.id); renderSidebar();
 }
 // Open the full-center PTY for a session. Reconnecting to an existing session id is a later step;
 // for now this shows the live terminal of the session we hold a socket for.
 function openPty(node, sess) {
   showView('pty'); S.sessionNode = node; S.ptySession = sess;
-  $('#headname').textContent = `${sess.provider} · ${node}`; $('#headbtn').title = node; $('#headav').innerHTML = avatar(node, 'sm');
+  $('#headname').textContent = `${sess.provider} · ${node}`; $('#headbtn').title = 'Session info · runs on ' + node; $('#headav').innerHTML = avatar('pty:' + sess.id, 'sm');
+  renderSidebar(); renderPanelHead(); if (S.panel) setTab(S.tab);
   $('#tinfo').textContent = `${sess.provider} on ${node}`;
   setPtyLayout(S.ptyLayout || 'native');
-  setTimeout(() => term.focus(), 50);
+  setTimeout(() => { refit(); term.focus(); }, 30);
 }
 // Layout toggle: native xterm vs. a re-rendered chat-like PTY view (stub for later). Not m4a.
 function setPtyLayout(l) {
@@ -538,13 +559,13 @@ function setPtyLayout(l) {
   $('#terminal').style.display = l === 'native' ? '' : 'none';
   const pc = $('#ptychat'); pc.hidden = l !== 'chat';
   if (l === 'chat') renderPtyChat(window.lastFrameText || '');
-  else term.focus();
+  else { setTimeout(refit, 0); term.focus(); }
 }
 function renderPtyChat(text) {
   const pc = $('#ptychat'); if (!pc) return;
   pc.innerHTML = `<div class="ptychat-stub"><b>Chat-like PTY view</b><div class="sub">Re-rendered conversation layout over this PTY session is coming next. This is a PTY view, not an m4a chat.</div><pre class="ptychat-screen">${esc(text || '')}</pre></div>`;
 }
-$('#ptyback').onclick = () => { if (S.sessionNode) openNode(S.sessionNode); };
+$('#tpaste').onclick = async () => { try { const t = await navigator.clipboard.readText(); if (t) term.paste(t); term.focus(); } catch (_) { toast('Clipboard blocked: press Ctrl+V (Cmd+V) in the terminal'); term.focus(); } };
 $('#ptylayout').onclick = (e) => { const b = e.target.closest('button[data-l]'); if (b) setPtyLayout(b.dataset.l); };
 $('#tstop').onclick = () => { tsend({ t: 'stop' }); };
 term.onData((data) => tsend({ t: 'data', data }));
@@ -645,9 +666,8 @@ api('/api/config').then(async (c) => { S.chats = c.chats && c.chats.length ? c.c
     const nodeHash = decodeURIComponent((location.hash.match(/^#\/node\/(.+)$/) || [])[1] || '');
     const chatHash = decodeURIComponent((location.hash.match(/^#\/chat\/(.+)$/) || [])[1] || '');
     const want = nodeHash || chatHash || localStorage.getItem('hq.chat');
-    if (want && (S.nodes || []).some((n) => n.node_id === want)) openNode(want);
-    else if (want && (S.chats || []).some((c) => c.target === want)) openChat(want);
-    else openChat(S.chats[0].target);
+    if (want && (S.chats || []).some((c) => c.target === want)) openChat(want); else openChat(S.chats[0].target);
+    if (nodeHash && (S.nodes || []).some((n) => n.node_id === nodeHash)) openNode(nodeHash);
     if (localStorage.getItem('hq.panel')) openPanel(SAVED_TAB || 'info'); setTimeout(prefetch, 1500); setInterval(prefetch, 60000); }); let pollN = 0; setInterval(() => { pollN++; if (S.chat && !document.hidden && (String(S.chat).startsWith('m4a:') || pollN % 4 === 0)) loadThread(); }, 2500); setInterval(loadNodes, 4000);
 
 // ---- message actions: react / reply / more
