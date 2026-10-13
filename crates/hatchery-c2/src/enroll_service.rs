@@ -18,6 +18,7 @@ use tokio::sync::{mpsc, watch};
 use tokio::time::timeout;
 
 use crate::enrollment::{EnrollmentError, EnrollmentRegistry, NodeRecord, NodeStatus, TunnelPool};
+use hatchery_enroll::call::ForwardedCall;
 
 const MAX_BODY: usize = 16 * 1024;
 const IO_DEADLINE: Duration = Duration::from_secs(5);
@@ -28,6 +29,15 @@ const DEFAULT_CODE_TTL_MS: u64 = 15 * 60 * 1000;
 /// `None` means the node is not an enrolled node (a token node), which policy does not govern.
 pub trait CapabilityGate: Send + Sync {
     fn allows(&self, node_id: &str, capability: &str) -> Option<bool>;
+}
+
+/// Core-side applicator for admitted node calls (A2).
+///
+/// Invoked in-process after C2 policy checks. Must not dial core over the network —
+/// production wires this to a drain consumer; tests may apply directly to a Hub.
+#[async_trait::async_trait]
+pub trait NodeCallSink: Send + Sync {
+    async fn apply(&self, call: ForwardedCall) -> HttpReply;
 }
 
 /// Adds and removes node WireGuard peers.
@@ -107,6 +117,8 @@ pub struct EnrollConfig {
     /// Deprecated (A2): previously the core address C2 pushed node-calls to.
     /// Ignored — C2 never dials core; retained so old configs still parse.
     pub server_upstream: Option<(SocketAddr, String)>,
+    /// In-process sink for admitted node calls (no network push to core).
+    pub node_call_sink: Option<Arc<dyn NodeCallSink>>,
 }
 
 impl EnrollConfig {
@@ -123,6 +135,7 @@ impl EnrollConfig {
             policy_path: None,
             build_host: None,
             server_upstream: None,
+            node_call_sink: None,
         }
     }
 }
@@ -151,6 +164,7 @@ pub struct EnrollService {
     tls_only: bool,
     build_host: Option<(SocketAddr, String)>,
     server_upstream: Option<(SocketAddr, String)>,
+    node_call_sink: Option<Arc<dyn NodeCallSink>>,
     build_nonces: Mutex<HashMap<(String, String), u64>>,
     node_rate: Mutex<HashMap<(String, &'static str), (u64, u32)>>,
     pub listen: SocketAddr,
@@ -209,6 +223,7 @@ impl EnrollService {
             tls_only: config.tls_only,
             build_host: config.build_host.clone(),
             server_upstream: config.server_upstream.clone(),
+            node_call_sink: config.node_call_sink.clone(),
             build_nonces: Mutex::new(HashMap::new()),
             node_rate: Mutex::new(HashMap::new()),
             listen: config.listen,
@@ -397,17 +412,27 @@ impl EnrollService {
             tracing::warn!(node_id = %call.node_id, op = %call.op, "node call refused: status does not hold the capability");
             return HttpReply::error(403, "refused");
         }
-        // A2: C2 is a byte restreamer. It must not push to core (no POST /v1/node-call).
-        // Admitted signed calls belong on the multiplex uplink; core drains them.
+        // A2: never dial core. Apply through an in-process sink (drain consumer / test hub).
         let _ = capability;
-        if self.server_upstream.is_some() {
-            tracing::warn!(
-                node_id = %call.node_id,
-                op = %call.op,
-                "node-call push to core is removed (A2); use restreamer uplink"
-            );
-        }
-        HttpReply::error(410, "use restreamer uplink")
+        let Ok(payload) = serde_json::from_str::<serde_json::Value>(&call.payload) else {
+            return HttpReply::error(400, "malformed payload");
+        };
+        let forward = ForwardedCall {
+            node_id: call.node_id.clone(),
+            op: call.op.clone(),
+            payload,
+        };
+        let Some(sink) = &self.node_call_sink else {
+            if self.server_upstream.is_some() {
+                tracing::warn!(
+                    node_id = %call.node_id,
+                    op = %call.op,
+                    "node-call push to core is removed (A2); configure node_call_sink"
+                );
+            }
+            return HttpReply::error(410, "use restreamer uplink");
+        };
+        sink.apply(forward).await
     }
 
     /// Operator endpoints under `/v1/enroll/...` (the caller has checked the bearer).

@@ -46,6 +46,7 @@ memory = []
 
 [dev-dependencies]
 tempfile = "3"
+async-trait = "0.1"
 hatchery-c2 = { path = "../hatchery-c2", version = "0.2.3" }
 hatchery-node = { path = "../hatchery-node", version = "0.2.3", default-features = false }
 hatchery-harness-mcp = { path = "../hatchery-harness-mcp", version = "0.2.3" }
