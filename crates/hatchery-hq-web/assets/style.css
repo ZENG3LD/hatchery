@@ -303,3 +303,6 @@ body.rail #chats{order:2}body.rail .sidetop{order:3;padding:8px 0 0}body.rail .s
 #box.one #addbtn{order:0}#box.one #input{order:1;flex:1 1 auto;width:auto;min-height:0;padding:3px 0}#box.one .grow{display:none}#box.one #micbtn,#box.one #sendbtn{order:2}
 #box.one #micbtn{margin-left:auto}
 #box.one .cbtn,#box.one .sendb{width:28px;height:28px}
+
+/* encrypted history placeholder */
+.sys.encrun{color:#7a7a7a;font-size:12px;text-align:center;margin:6px auto}

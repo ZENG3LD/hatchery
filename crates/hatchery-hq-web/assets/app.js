@@ -89,7 +89,7 @@ async function loadThread() {
     if (String(id).startsWith('m4a:')) {
       const d = await post('/api/s/m4a/read', { room: id.slice(4), limit: 100 }); const rows = Array.isArray(d.result) ? d.result : d.result.messages || d.result.rows || [];
       const me = S.m4a.nick; const own = (f) => f === me || String(f).startsWith('@' + me + ':');
-      S.mail[id] = rows.filter((r) => r.body || r.kind === 'undecryptable').map((r) => ({ from: own(r.from) ? OPERATOR : String(r.from || '?').replace(/^@([^:]+):.*$/, '$1'), body: r.kind === 'undecryptable' ? '[cannot decrypt yet]' : r.body, created_at_ms: r.ts, message_id: r.event_id, failed: String(r.state || '').startsWith('failed') })).sort((a, b) => a.created_at_ms - b.created_at_ms);
+      S.mail[id] = rows.filter((r) => r.body || r.kind === 'undecryptable').map((r) => ({ from: own(r.from) ? OPERATOR : String(r.from || '?').replace(/^@([^:]+):.*$/, '$1'), body: r.kind === 'undecryptable' ? '[cannot decrypt yet]' : r.body, created_at_ms: r.ts, message_id: r.event_id, failed: String(r.state || '').startsWith('failed'), enc: r.kind === 'undecryptable' })).sort((a, b) => a.created_at_ms - b.created_at_ms);
       if (S.chat === id) renderChat(); renderSidebar(); return;
     }
     if (isGroup(id)) { const d = await post('/api/s/mail/inbox'); msgs = d.messages.filter((m) => m.to === id); }
@@ -122,7 +122,12 @@ function renderChat() {
     d.innerHTML = `${label}${html}<span class="ts" title="${esc(new Date(ts).toLocaleString())}">${fmtTime(ts).slice(0, 5)}</span>`;
     prevFrom = mine ? OPERATOR : from; box.appendChild(d);
   };
-  for (const it of items) {
+  for (let k = 0; k < items.length; k++) {
+    const it = items[k];
+    if (it.kind === 'mail' && it.m.enc) {
+      let n = 1; while (k + 1 < items.length && items[k + 1].kind === 'mail' && items[k + 1].m.enc) { k++; n++; }
+      const d = document.createElement('div'); d.className = 'sys encrun'; d.textContent = n === 1 ? '1 older encrypted message' : `${n} older encrypted messages`; d.title = 'Sent before this device joined; the keys were not shared with it'; box.appendChild(d); prevFrom = null; continue;
+    }
     if (it.kind === 'mail') {
       const m = it.m; const mine = m.from === OPERATOR;
       bubble(mine, m.from, `${m.subject && m.subject !== '-' ? `<b>${esc(m.subject)}</b><br>` : ''}${esc(m.body)}`, m.created_at_ms, m.failed ? ' failed' : '');
