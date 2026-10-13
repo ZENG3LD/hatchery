@@ -247,6 +247,19 @@ impl C2Config {
         Ok(self)
     }
 
+    /// Production restreamer: both listeners on the C2 WireGuard tunnel IP.
+    pub fn with_restreamer_wg(
+        self,
+        c2_tunnel_ip: std::net::IpAddr,
+        node_port: u16,
+        drain_port: u16,
+        core_token: impl Into<String>,
+    ) -> Result<Self, C2ConfigError> {
+        let bind = crate::restreamer::RestreamerWgBind::production(c2_tunnel_ip, node_port, drain_port)
+            .map_err(|_| C2ConfigError::RestreamerListenConflict)?;
+        self.with_restreamer(bind.node_listen, bind.drain_listen, core_token)
+    }
+
     /// Binds the address nodes call in on.
     ///
     /// Loopback, or one concrete C2 WireGuard tunnel address (same rule as

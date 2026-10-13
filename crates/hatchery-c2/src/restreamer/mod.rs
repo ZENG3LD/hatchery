@@ -8,6 +8,7 @@ mod buffer;
 mod crypto;
 mod journal;
 mod runtime;
+mod wg;
 
 pub use buffer::{BufferLimits, BufferedEvent, EnqueueOutcome, ReplayBuffer, StreamKey};
 pub use crypto::{
@@ -23,6 +24,7 @@ pub use runtime::{
     serve, DrainClient, DrainSession, Restreamer, RestreamerConfig, RestreamerError,
     UplinkPeers,
 };
+pub use wg::{CoreDrainTarget, RestreamerWgBind, WgBindError};
 
 #[cfg(test)]
 mod isolation_tests;
