@@ -451,6 +451,11 @@ async fn main() {
     let endpoint_for_bridge = endpoint.clone();
     let token_for_bridge = token.clone();
     let node_id_for_bridge = node_id.to_string();
+    // Resolve restream uplink early so we can disable legacy call-home when the
+    // node-initiated bidirectional restreamer carries both read and write.
+    let restream_uplink_early = restream_uplink.or_else(|| {
+        std::env::var("HATCHERY_RESTREAM_UPLINK").ok().and_then(|v| v.parse().ok())
+    });
     let config = NodeServerConfig::new(endpoint, token, node_id, workspaces)
         .and_then(|config| config.with_state_path(&state_path))
         .and_then(|config| config.with_api_listen(api_listen))
@@ -458,9 +463,15 @@ async fn main() {
             Some(addr) => config.with_bridge_listen(addr),
             None => Ok(config),
         })
-        .and_then(|config| match call_home {
-            Some(relay) => config.with_call_home(relay),
-            None => Ok(config),
+        .and_then(|config| match (call_home, restream_uplink_early) {
+            // Restreamer is the long-lived duplex stream; skip call-home to stop
+            // the 5s auth-churn against a restreamer-only C2.
+            (Some(_), Some(_)) => {
+                tracing::info!("restream uplink configured; skipping legacy call-home");
+                Ok(config)
+            }
+            (Some(relay), None) => config.with_call_home(relay),
+            (None, _) => Ok(config),
         })
         .unwrap_or_else(|error| fail(&error.to_string()));
     let call_home_identity_for_door = call_home_identity.clone();
@@ -590,9 +601,7 @@ async fn main() {
         fail("--door-listen and --door-c2 need each other and --enrolled");
     }
     // A2: opaque restreamer uplink (g4a bridged to core over Noise). Optional.
-    let restream_uplink = restream_uplink.or_else(|| {
-        std::env::var("HATCHERY_RESTREAM_UPLINK").ok().and_then(|v| v.parse().ok())
-    });
+    let restream_uplink = restream_uplink_early;
     if let Some(uplink) = restream_uplink {
         let keys = resolve_upstream_keys(enroll_state.as_deref())
             .unwrap_or_else(|e| fail(&e));

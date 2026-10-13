@@ -39,7 +39,7 @@ use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::{watch, Semaphore};
+use tokio::sync::{broadcast, watch, Semaphore};
 #[cfg(test)]
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -54,6 +54,8 @@ pub struct NodeOperatorMesh {
     inner: Arc<Mutex<BTreeMap<String, OperatorLink>>>,
     cursors: Arc<Mutex<BTreeMap<String, hatchery_core::NodeCursor>>>,
     topology: watch::Sender<Arc<StatusResponse>>,
+    /// Fan-out of node-initiated g4a events (PTY frames, etc.) to every operator client.
+    events: broadcast::Sender<hatchery_core::RoutedNodeEvent>,
 }
 
 impl NodeOperatorMesh {
@@ -65,10 +67,12 @@ impl NodeOperatorMesh {
             nodes: BTreeMap::new(),
         });
         let (topology, _) = watch::channel(initial);
+        let (events, _) = broadcast::channel(256);
         Self {
             inner: Arc::new(Mutex::new(BTreeMap::new())),
             cursors: Arc::new(Mutex::new(BTreeMap::new())),
             topology,
+            events,
         }
     }
 
@@ -98,6 +102,23 @@ impl NodeOperatorMesh {
     pub fn set_cursor(&self, node_id: &str, cursor: hatchery_core::NodeCursor) {
         self.cursors.lock().expect("cursors").insert(node_id.to_owned(), cursor);
         self.publish_topology();
+    }
+
+    /// Publish a node-initiated event to every connected operator client.
+    pub fn publish_event(&self, event: hatchery_core::RoutedNodeEvent) {
+        // Keep topology cursor fresh from live traffic.
+        self.set_cursor(
+            event.node_id.as_str(),
+            hatchery_core::NodeCursor {
+                incarnation_id: event.cursor.incarnation_id,
+                sequence: event.cursor.sequence,
+            },
+        );
+        let _ = self.events.send(event);
+    }
+
+    pub fn subscribe_events(&self) -> broadcast::Receiver<hatchery_core::RoutedNodeEvent> {
+        self.events.subscribe()
     }
 
     fn publish_topology(&self) {
@@ -153,7 +174,7 @@ pub async fn serve_local(
     let mut listener = OwnerOnlyLocalListener::bind(&endpoint).await?;
     tracing::info!(%endpoint, "core operator control listening");
     let preauth = Arc::new(Semaphore::new(4));
-    let authenticated = Arc::new(Semaphore::new(1));
+    let authenticated = Arc::new(Semaphore::new(8));
     let next_id = Arc::new(AtomicU64::new(1));
     let mut connections = JoinSet::new();
     loop {
@@ -246,6 +267,7 @@ where
 
     let connection_id = connection_ids.fetch_add(1, Ordering::AcqRel);
     let mut status_rx = mesh.subscribe();
+    let mut events_rx = mesh.subscribe_events();
     let hello_status = status_rx.borrow().as_ref().clone();
     timeout(AUTH_DEADLINE, write_json_frame_limited(
         &mut pipe,
@@ -278,6 +300,21 @@ where
                     }
                 }
             }
+            event = events_rx.recv() => {
+                match event {
+                    Ok(routed) => {
+                        if write_json_frame_limited(
+                            &mut writer,
+                            &C2ServerFrame::Event(routed),
+                            MAX_C2_SERVER_FRAME_BYTES,
+                        ).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
             frame = read_client_frame(&mut reader, MAX_C2_CLIENT_FRAME_BYTES) => {
                 match frame {
                     Ok(C2ClientFrame::Request(envelope)) => {
@@ -307,14 +344,32 @@ async fn dispatch_request(mesh: &NodeOperatorMesh, envelope: C2RequestEnvelope) 
         request: envelope.request.request.clone(),
     };
     match link.request(&routed, REQUEST_DEADLINE).await {
-        Ok(G4aMessage::Response(response)) => C2ReplyEnvelope {
-            request_id: envelope.request_id,
-            result: Ok(response),
-        },
+        Ok(G4aMessage::Response(response)) => {
+            mesh.set_cursor(
+                &node_id,
+                hatchery_core::NodeCursor {
+                    incarnation_id: response.incarnation_id,
+                    sequence: 0,
+                },
+            );
+            C2ReplyEnvelope {
+                request_id: envelope.request_id,
+                result: Ok(response),
+            }
+        }
         Ok(G4aMessage::Json(v)) => {
             // Forward-compatible: try as RoutedNodeResponse
             match serde_json::from_value::<RoutedNodeResponse>(v) {
-                Ok(response) => C2ReplyEnvelope { request_id: envelope.request_id, result: Ok(response) },
+                Ok(response) => {
+                    mesh.set_cursor(
+                        &node_id,
+                        hatchery_core::NodeCursor {
+                            incarnation_id: response.incarnation_id,
+                            sequence: 0,
+                        },
+                    );
+                    C2ReplyEnvelope { request_id: envelope.request_id, result: Ok(response) }
+                }
                 Err(_) => C2ReplyEnvelope {
                     request_id: envelope.request_id,
                     result: Err(fail(C2RelayFailureCode::RequestForbidden, "node reply was not a g4a response")),

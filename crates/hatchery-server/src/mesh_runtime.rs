@@ -9,7 +9,7 @@
 //! Secrets are read from named environment variables and scrubbed; never logged.
 
 use crate::drain_consumer::{DrainConsumer, NodeStream};
-use crate::node_controller::OperatorLink;
+use crate::node_controller::{G4aMessage, OperatorLink};
 use crate::operator_control::{serve_local, NodeOperatorMesh};
 use hatchery_c2_client::DrainClient;
 use hatchery_core::nested::HqRecipientSecret;
@@ -227,9 +227,19 @@ impl MeshRuntime {
         }));
 
         for node_id in &config.node_ids {
-            let (events_tx, _events_rx) = mpsc::unbounded_channel();
+            let (events_tx, mut events_rx) = mpsc::unbounded_channel();
             let (link, outbound) = OperatorLink::new(Some(events_tx));
             mesh.register(node_id, link.clone());
+            // Forward node-initiated g4a events (PTY frames, etc.) onto the
+            // operator broadcast bus so every HQ client sees live bytes.
+            let mesh_ev = mesh.clone();
+            tasks.push(tokio::spawn(async move {
+                while let Some(msg) = events_rx.recv().await {
+                    if let G4aMessage::Event(ev) = msg {
+                        mesh_ev.publish_event(ev);
+                    }
+                }
+            }));
             let consumer = DrainConsumer::new(
                 DrainClient::new(config.drain_addr, config.drain_token.clone()),
                 config.recipient.clone(),

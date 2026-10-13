@@ -411,11 +411,18 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     let (control, mut events) = hatchery_c2_client::connect_local(&cfg.c2_control, &cfg.c2_token).await.map_err(|e| e.to_string())?;
     let topo = control.current_topology();
     let observed = topo.nodes.iter().find(|n| n.node_id == node && n.transport == NodeTransportState::Online);
-    let Some(observed) = observed else {
+    let Some(_observed) = observed else {
         let _ = socket.send(Message::text(say("error", format!("node {} is not online on core operator", q.node)))).await;
         return Err("node not online".into());
     };
-    let route = NodeRoute { node_id: node.clone(), expected_incarnation_id: observed.current_incarnation_id.ok_or("no cursor")? };
+    // Wildcard expected incarnation: the restream bridge accepts all-zero and
+    // the reply carries the live incarnation. This stays correct across node
+    // restarts even when the topology cursor is momentarily stale.
+    use gate4agent_node_protocol::NodeIncarnationId;
+    let mut route = NodeRoute {
+        node_id: node.clone(),
+        expected_incarnation_id: NodeIncarnationId::from_bytes([0; 16]),
+    };
     let spawned = control
         .request(
             route.clone(),
@@ -430,7 +437,11 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
         .await
         .map_err(|e| e.to_string())?;
     let session = match spawned.response {
-        Ok(C2NodeResponse::SpawnAccepted { session }) => session,
+        Ok(C2NodeResponse::SpawnAccepted { session }) => {
+            // Pin subsequent input/resize/stop to the incarnation that accepted Spawn.
+            route.expected_incarnation_id = spawned.incarnation_id;
+            session
+        }
         other => {
             let _ = socket.send(Message::text(say("error", format!("spawn refused: {other:?}")))).await;
             return Err("spawn refused".into());

@@ -2362,9 +2362,16 @@ async fn control_owner<E>(
                             break;
                         };
                         if reply.result.as_ref().is_ok_and(|routed| {
+                            // The all-zero expected incarnation is the operator
+                            // wildcard: accept whatever live incarnation the node
+                            // reports (used by HQ spawns that are robust to node
+                            // restarts). Otherwise the incarnation must match.
+                            let wildcard = expected_route.expected_incarnation_id
+                                == hatchery_core::NodeIncarnationId::from_bytes([0; 16]);
                             routed.node_id != expected_route.node_id
-                                || routed.incarnation_id
-                                    != expected_route.expected_incarnation_id
+                                || (!wildcard
+                                    && routed.incarnation_id
+                                        != expected_route.expected_incarnation_id)
                         }) {
                             let _ = waiter.send(Err(C2ControlError::Protocol(
                                 "C2 reply route or node incarnation does not match the request"
