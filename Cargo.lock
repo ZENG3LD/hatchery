@@ -570,7 +570,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -1290,7 +1290,7 @@ dependencies = [
 [[package]]
 name = "gate4agent"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "chrono",
  "gate4agent-catalog",
@@ -1309,7 +1309,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-adapters"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-types",
  "serde_json",
@@ -1319,12 +1319,12 @@ dependencies = [
 [[package]]
 name = "gate4agent-build-stamp"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 
 [[package]]
 name = "gate4agent-catalog"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1334,7 +1334,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-engine"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-types",
 ]
@@ -1342,7 +1342,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-handle"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-kernel",
  "gate4agent-tool-protocol",
@@ -1353,7 +1353,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-kernel"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-engine",
@@ -1366,7 +1366,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-node-core"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-runtime-native",
@@ -1380,7 +1380,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-node-protocol"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-build-stamp",
  "gate4agent-types",
@@ -1394,7 +1394,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-node-wire"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-node-protocol",
  "libc",
@@ -1407,7 +1407,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-provider-ports"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1417,12 +1417,12 @@ dependencies = [
 [[package]]
 name = "gate4agent-pty"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 
 [[package]]
 name = "gate4agent-runtime-native"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-catalog",
@@ -1441,7 +1441,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-shell-capabilities"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-types",
@@ -1451,7 +1451,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-shell-history"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-provider-ports",
@@ -1464,7 +1464,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-shell-native"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent",
  "gate4agent-adapters",
@@ -1481,7 +1481,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-shell-one-shot"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent",
  "gate4agent-adapters",
@@ -1493,7 +1493,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-testkit"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1502,7 +1502,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-tool-engine"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-tool-protocol",
  "gate4agent-types",
@@ -1511,7 +1511,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-tool-protocol"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "gate4agent-types",
  "serde",
@@ -1520,7 +1520,7 @@ dependencies = [
 [[package]]
 name = "gate4agent-types"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -1529,12 +1529,15 @@ dependencies = [
 [[package]]
 name = "gate4agent-wake"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"
 dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
  "tungstenite 0.29.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2325,7 +2328,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -2711,9 +2714,8 @@ dependencies = [
 
 [[package]]
 name = "m4a-agent"
-version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c461e45fde1c398da2f4af4f3c2645c4219eee324efe8862d8f4ea1d0515f389"
+version = "0.4.7"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -2733,9 +2735,8 @@ dependencies = [
 
 [[package]]
 name = "m4a-seam"
-version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "087211ebcc41b4f2cd8d134bc9f547786e1ab2f87f250917337d25611581cd56"
+version = "0.4.7"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -2748,9 +2749,8 @@ dependencies = [
 
 [[package]]
 name = "mail4agent"
-version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1993e5aec4a266042df36b8332c6fabb56774324872ba571176376d1e458d372"
+version = "0.4.7"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "axum",
  "clap",
@@ -2776,9 +2776,8 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-api"
-version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bd7cdc0c25105074846921e3e5bb898bdf95080152fcc8a030eb052a5d0821d"
+version = "0.4.7"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "serde",
  "serde_json",
@@ -2786,9 +2785,8 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-attest"
-version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb57046f168ec8e43a74ba360ee3c0e23b67ba6d2f3e4914ba541704889fb9f0"
+version = "0.4.7"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "libc",
  "sysinfo",
@@ -2798,9 +2796,8 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-client"
-version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f73b3f522bca25d3b8d39adb1e1eba4448c2551ac505dc657a911d1f92c017dd"
+version = "0.4.7"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "mail4agent-api",
  "reqwest",
@@ -2812,9 +2809,8 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-core"
-version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c3352e489a84dff021863da2df4bb6a229a699619695ed735082aed1cb2532b"
+version = "0.4.7"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "getrandom 0.2.17",
  "hex",
@@ -2830,9 +2826,8 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-messenger"
-version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c839a9421f8b15010f542bb95b9128b7435fe8d5c8ca1f5d4f3b19f6482d898"
+version = "0.4.7"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -2847,9 +2842,8 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-store-sqlite"
-version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa2cd937af7ac3ceb7bf93ccb0f374bb0b854925eec1b2575b4349e8db0978c2"
+version = "0.4.7"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "mail4agent-api",
  "mail4agent-core",
@@ -2863,9 +2857,8 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-vodozemac"
-version = "0.4.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "00e04a0fef11b3694106d566a32fc4c25b3d66388c72b4714349f4fdfa9c5f4b"
+version = "0.4.7"
+source = "git+https://github.com/ZENG3LD/mail4agent.git?branch=feat%2Fpure-messenger#9b67c95f21623593839ee55c9dc498b8070c8f90"
 dependencies = [
  "aes",
  "arrayvec",
@@ -5453,19 +5446,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "windows-core"
-version = "0.62.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8e83a14d34d0623b51dce9581199302a221863196a1dde71a7663a4c2be9deb"
-dependencies = [
- "windows-implement 0.60.2",
- "windows-interface 0.59.3",
- "windows-link",
- "windows-result 0.4.1",
- "windows-strings 0.5.1",
-]
-
-[[package]]
 name = "windows-implement"
 version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5488,17 +5468,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "windows-implement"
-version = "0.60.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "053e2e040ab57b9dc951b72c264860db7eb3b0200ba345b4e4c3b14f67855ddf"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "windows-interface"
 version = "0.57.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5514,17 +5483,6 @@ name = "windows-interface"
 version = "0.58.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "053c4c462dc91d3b1504c6fe5a726dd15e216ba718e84a0e46a88fbe5ded3515"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "windows-interface"
-version = "0.59.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f316c4a2570ba26bbec722032c4099d8c8bc095efccdc15688708623367e358"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6181,4 +6139,4 @@ dependencies = [
 [[patch.unused]]
 name = "gate4agent-bidi-relay"
 version = "0.5.0"
-source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fwake#7783c5f0e9713bfa9a0617d8aa59e70f34287e0e"
+source = "git+https://github.com/ZENG3LD/gate4agent.git?branch=feat%2Fdeliver-adapters#4762fbd05f09059027f2341dd0f80956c24b8c57"

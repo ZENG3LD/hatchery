@@ -40,6 +40,7 @@ pub(crate) use gate4agent_node_core::platform;
 pub mod enroll_client;
 pub mod m4a_accounts;
 pub mod door;
+pub mod wake_pipeline;
 #[cfg(unix)]
 pub mod isolation;
 pub use kit::{force_link, linked_core_names};
