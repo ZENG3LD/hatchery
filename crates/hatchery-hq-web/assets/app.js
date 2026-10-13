@@ -111,7 +111,7 @@ async function loadThread1(id) {
 }
 
 // @mentions in already-escaped html become clickable nicks.
-const linkify = (html) => html.replace(/(^|[\s(>])@([a-z0-9][a-z0-9._-]{1,63})/gi, (m, pre, n) => `${pre}<button class="mention nick" data-nick="${n}">@${n}</button>`);
+const linkify = (html) => html.replace(/(^|[\s(>])@([a-z0-9][a-z0-9._-]{1,63})/gi, (m, pre, n) => `${pre}<button class="mention nick" data-nick="${n}" style="color:${colorOf(n)}">@${n}</button>`);
 // profile card
 function profile(nick) {
   document.querySelector('#pcard')?.remove();
@@ -240,11 +240,25 @@ async function loadMe() {
     $('#acctav').innerHTML = avatar(u.username || nm, '', false, 'idle'); } catch (_) {}
 }
 const signOut = async () => { try { await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{}' }); } catch (_) {} location.href = '/'; };
-$('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); m.hidden = !m.hidden; if (m.hidden) return; const u = S.me || {}; m.className = 'pop amenu';
-  m.innerHTML = `<div class="hd"><b>${esc(u.display_name || u.username || 'Account')}</b><span>@${esc(u.username || '')}</span></div>`;
-  const it = (ic, label, fn, r) => { const b = document.createElement('button'); b.innerHTML = `<span class="ic">${ic}</span>${esc(label)}${r ? `<span class="r">${r}</span>` : ''}`; b.onclick = () => { m.hidden = true; fn(); }; m.appendChild(b); };
-  it('◔', 'Usage & plan', () => openSettings('usage'), '›'); it('?', 'Support', () => toast('Support: coming soon'), '›'); it('⚙', 'Settings', () => openSettings('general'));
-  m.insertAdjacentHTML('beforeend', '<hr>'); it('+', 'Add account', () => toast('Multiple accounts: coming soon')); it('⇥', 'Sign out', signOut); };
+const LUC = {
+  gauge: '<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
+  phone: '<rect width="14" height="20" x="5" y="2" rx="2"/><path d="M12 18h.01"/>',
+  book: '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>',
+  gear: '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>',
+  userplus: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/>',
+  chev: '<path d="m9 18 6-6-6-6"/>',
+};
+const ico = (k, sz = 16) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${LUC[k]}</svg>`;
+$('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); m.hidden = !m.hidden; if (m.hidden) return; m.className = 'pop amenu2'; m.innerHTML = '';
+  const it = (ic, label, fn, right, chev) => { const b = document.createElement('button'); b.innerHTML = `<span class="ic">${ico(ic)}</span><span class="l">${esc(label)}</span>${right ? `<span class="r">${esc(right)}</span>` : ''}${chev ? `<span class="cv">${ico('chev', 16)}</span>` : ''}`; b.onclick = () => { m.hidden = true; fn(); }; m.appendChild(b); };
+  it('gauge', 'Usage & plan', () => openSettings('usage'), '— % used', true);
+  it('phone', 'Get the apps', () => toast('Apps: coming soon'));
+  it('book', 'Support', () => toast('Support: coming soon'), '', true);
+  it('gear', 'Settings', () => openSettings('general'));
+  m.insertAdjacentHTML('beforeend', '<hr>');
+  it('userplus', 'Add account', () => toast('Multiple accounts: coming soon'));
+  it('logout', 'Sign out', signOut); };
 // ---- settings modal (stubs)
 const SNAV = [['general', '⚙', 'General'], ['computer', '▭', 'Computer & nodes'], ['usage', '◔', 'Usage'], ['updates', '↻', 'Updates']];
 function openSettings(sec) {
