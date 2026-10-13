@@ -64,6 +64,10 @@ impl Config {
     /// Everything from the environment; tokens are never printed.
     pub fn from_env() -> Result<Self, String> {
         let var = |n: &str| std::env::var(n).ok().filter(|v| !v.is_empty());
+        // Runtime env first, then a value baked in by the operator's own build (`option_env!`).
+        // Release builds from crates.io bake nothing.
+        let c2_api_v = var("HATCHERY_HQ_C2_API").or_else(|| baked(option_env!("HATCHERY_HQ_C2_API")));
+        let c2_control_v = var("HATCHERY_HQ_C2_CONTROL").or_else(|| baked(option_env!("HATCHERY_HQ_C2_CONTROL")));
         let listen: SocketAddr = var("HATCHERY_HQ_LISTEN").unwrap_or_else(|| "127.0.0.1:18500".into()).parse().map_err(|e| format!("HATCHERY_HQ_LISTEN: {e}"))?;
         if !listen.ip().is_loopback() {
             return Err("HATCHERY_HQ_LISTEN must be a loopback address (put a reverse proxy with its own auth in front for remote use)".into());
@@ -71,8 +75,8 @@ impl Config {
         Ok(Self {
             listen,
             bidi: var("HATCHERY_HQ_BIDI").and_then(|v| v.parse().ok()),
-            c2_api: var("HATCHERY_HQ_C2_API").ok_or("HATCHERY_HQ_C2_API is required")?.parse().map_err(|e| format!("HATCHERY_HQ_C2_API: {e}"))?,
-            c2_control: var("HATCHERY_HQ_C2_CONTROL").ok_or("HATCHERY_HQ_C2_CONTROL is required (C2 control endpoint)")?,
+            c2_api: c2_api_v.ok_or("HATCHERY_HQ_C2_API is required")?.parse().map_err(|e| format!("HATCHERY_HQ_C2_API: {e}"))?,
+            c2_control: c2_control_v.ok_or("HATCHERY_HQ_C2_CONTROL is required (C2 control endpoint)")?,
             c2_token: var("HATCHERY_HQ_C2_TOKEN").or_else(|| var("GATE4AGENT_C2_TOKEN")).ok_or("HATCHERY_HQ_C2_TOKEN is required")?,
             server: var("HATCHERY_HQ_SERVER").map(|v| v.parse().map_err(|e| format!("HATCHERY_HQ_SERVER: {e}"))).transpose()?,
             server_token: var("HATCHERY_SERVER_CONTROL_TOKEN"),
@@ -634,10 +638,20 @@ pub struct M4a {
 
 impl M4a {
     /// Server name of the operator's account, from `HATCHERY_HQ_M4A_SERVER`.
-    /// There is no default: unset or invalid means `None`.
+    /// Runtime env wins; otherwise a value baked in at build time via `option_env!`.
+    /// Neither (or invalid) means `None`.
     pub fn nick_server(&self) -> Option<String> {
-        std::env::var("HATCHERY_HQ_M4A_SERVER").ok().filter(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-'))
+        let ok = |v: &String| !v.is_empty() && v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-');
+        match std::env::var("HATCHERY_HQ_M4A_SERVER").ok().filter(|v| !v.is_empty()) {
+            Some(v) => Some(v).filter(ok),
+            None => baked(option_env!("HATCHERY_HQ_M4A_SERVER")).filter(ok),
+        }
     }
+}
+
+/// A compile-time default: `option_env!` output, empty treated as unset.
+fn baked(v: Option<&'static str>) -> Option<String> {
+    v.map(str::trim).filter(|v| !v.is_empty()).map(str::to_owned)
 }
 
 /// A room argument for the CLI: a room id, alias or nick. Never starts with `-`.

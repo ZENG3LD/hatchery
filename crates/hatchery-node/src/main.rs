@@ -123,7 +123,7 @@ async fn main() {
             let (identity, state) = hatchery_node::enroll_client::load_enrolled_signing_only(&dir).unwrap_or_else(|e| fail(&e.to_string()));
             let payload: serde_json::Value = serde_json::from_str(&payload).unwrap_or_else(|e| fail(&format!("--payload is not JSON: {e}")));
             match hatchery_node::enroll_client::node_call(
-                addr.unwrap_or_else(|| fail("--c2-enroll is required")),
+                addr.or_else(|| default_enroll_addr().map(|a| a.pipe_resolve("HATCHERY_ENROLL_ADDR"))).unwrap_or_else(|| fail("--c2-enroll is required")),
                 &identity,
                 &state.node_id,
                 &op.unwrap_or_else(|| fail("--op is required")),
@@ -927,7 +927,9 @@ async fn run_enroll(args: &[String]) {
             other => fail(&format!("unknown enroll argument: {other}")),
         }
     }
-    let addr = addr.unwrap_or_else(|| fail("--c2-enroll is required"));
+    let addr = addr
+        .or_else(|| default_enroll_addr().map(|a| hatchery_node::enroll_client::EnrollTarget::parse(&a).unwrap_or_else(|e| fail(&format!("HATCHERY_ENROLL_ADDR is invalid: {e}")))))
+        .unwrap_or_else(|| fail("--c2-enroll is required (or HATCHERY_ENROLL_ADDR)"));
     let id = id.unwrap_or_else(|| fail("--node-id is required"));
     let dir = dir.unwrap_or_else(|| fail("no state directory (set --state-dir)"));
     if let hatchery_node::enroll_client::EnrollTarget::Plain(a) = &addr {
@@ -999,7 +1001,7 @@ async fn run_build(args: &[String]) {
     let dir: PathBuf = dir.unwrap_or_else(|| fail("no state directory (set --state-dir)"));
     let (identity, state) = hatchery_node::enroll_client::load_enrolled_signing_only(&dir).unwrap_or_else(|e| fail(&e.to_string()));
     let result = hatchery_node::enroll_client::request_build(
-        addr.unwrap_or_else(|| fail("--c2-enroll is required")),
+        addr.or_else(|| default_enroll_addr().map(|a| a.pipe_resolve("HATCHERY_ENROLL_ADDR"))).unwrap_or_else(|| fail("--c2-enroll is required")),
         &identity,
         &state.node_id,
         &recipe.unwrap_or_else(|| fail("--recipe is required")),
@@ -1066,4 +1068,14 @@ async fn node_mail_wake(
         }
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
     }
+}
+
+/// Enroll address when `--c2-enroll` is absent: runtime `HATCHERY_ENROLL_ADDR`, then a value
+/// baked in by the operator's own build via `option_env!`. Published builds bake nothing.
+fn default_enroll_addr() -> Option<String> {
+    std::env::var("HATCHERY_ENROLL_ADDR")
+        .ok()
+        .or_else(|| option_env!("HATCHERY_ENROLL_ADDR").map(str::to_owned))
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty())
 }
