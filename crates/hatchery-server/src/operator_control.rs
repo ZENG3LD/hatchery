@@ -52,6 +52,7 @@ const REQUEST_DEADLINE: Duration = Duration::from_secs(60);
 #[derive(Clone)]
 pub struct NodeOperatorMesh {
     inner: Arc<Mutex<BTreeMap<String, OperatorLink>>>,
+    cursors: Arc<Mutex<BTreeMap<String, hatchery_c2_protocol::NodeCursor>>>,
     topology: watch::Sender<Arc<StatusResponse>>,
 }
 
@@ -64,7 +65,11 @@ impl NodeOperatorMesh {
             nodes: BTreeMap::new(),
         });
         let (topology, _) = watch::channel(initial);
-        Self { inner: Arc::new(Mutex::new(BTreeMap::new())), topology }
+        Self {
+            inner: Arc::new(Mutex::new(BTreeMap::new())),
+            cursors: Arc::new(Mutex::new(BTreeMap::new())),
+            topology,
+        }
     }
 
     pub fn subscribe(&self) -> watch::Receiver<Arc<StatusResponse>> {
@@ -81,6 +86,7 @@ impl NodeOperatorMesh {
 
     pub fn unregister(&self, node_id: &str) {
         self.inner.lock().expect("mesh").remove(node_id);
+        self.cursors.lock().expect("cursors").remove(node_id);
         self.publish_topology();
     }
 
@@ -88,8 +94,15 @@ impl NodeOperatorMesh {
         self.inner.lock().expect("mesh").get(node_id).cloned()
     }
 
+    /// Publish the node's incarnation (from Snapshot / bridge hello) into operator topology.
+    pub fn set_cursor(&self, node_id: &str, cursor: hatchery_c2_protocol::NodeCursor) {
+        self.cursors.lock().expect("cursors").insert(node_id.to_owned(), cursor);
+        self.publish_topology();
+    }
+
     fn publish_topology(&self) {
         let ids: Vec<String> = self.inner.lock().expect("mesh").keys().cloned().collect();
+        let cursors = self.cursors.lock().expect("cursors").clone();
         let mut nodes = BTreeMap::new();
         for id in &ids {
             let node_id = NodeId::new(id.clone()).expect("registered ids are valid");
@@ -100,7 +113,7 @@ impl NodeOperatorMesh {
                     transport_label: "drain".into(),
                     transport: NodeTransportState::Online,
                     freshness: NodeFreshness::Fresh,
-                    cursor: None,
+                    cursor: cursors.get(id).cloned(),
                     inventory: None,
                     last_attempt_unix_ms: None,
                     last_success_unix_ms: Some(unix_ms()),

@@ -1,5 +1,5 @@
 //! A2: dials core operator control (`connect_core_operator`), not C2.
-//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
+//! Uses restream g4a bridge + core NodeOperatorMesh (A2); C2 is opaque restreamer only.
 
 #![cfg(windows)]
 
@@ -8,8 +8,7 @@ use hatchery_c2::protocol::{
     NodeId, NodeRoute, NodeTransportState, RoutedNodeEvent,
     C2_CHILD_ENVIRONMENT_PROFILE_CAPABILITY, C2_TERMINAL_FRAME_EVENTS_CAPABILITY,
 };
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::{connect_core_operator, C2Client, C2ControlHandle};
+use hatchery_c2_client::{connect_core_operator, C2ControlHandle};
 use gate4agent_catalog::EnvMutation;
 use hatchery_node::protocol::{
     CapabilityId, ManagedSessionState, NodeRequest, SessionAddress, SessionMode,
@@ -102,26 +101,6 @@ fn exact_cmd_launcher() -> String {
         .expect("Windows command processor path is not Unicode")
 }
 
-async fn wait_online(client: &C2Client, node_id: &NodeId) -> NodeRoute {
-    timeout(Duration::from_secs(10), async {
-        loop {
-            if let Ok(status) = client.status().await {
-                if status.nodes[node_id].transport == NodeTransportState::Online {
-                    return NodeRoute {
-                        node_id: node_id.clone(),
-                        expected_incarnation_id: status.nodes[node_id]
-                            .cursor
-                            .expect("online fixture node has no cursor")
-                            .incarnation_id,
-                    };
-                }
-            }
-            sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("fixture node did not become online through C2")
-}
 
 async fn snapshot(
     control: &C2ControlHandle,
@@ -273,7 +252,6 @@ async fn wait_sentinel_terminal_frame(
     }
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn windows_fixture_spawn_spec_environment_profile_runs_exact_pty_end_to_end() {
     require_headless_windows_fixture();
@@ -347,33 +325,19 @@ async fn windows_fixture_spawn_spec_environment_profile_runs_exact_pty_end_to_en
     let node_shutdown = server.shutdown_handle();
     let node_task = tokio::spawn(server.run());
 
-    let timings = C2Timings {
-        poll_interval: Duration::from_millis(20),
-        fresh_for: Duration::from_secs(2),
-        attempt_deadline: Duration::from_secs(2),
-        transient_backoffs: [Duration::from_millis(20); 5],
-        parked_backoff: Duration::from_millis(100),
-        http_io_deadline: Duration::from_secs(1),
-    };
-    let config = C2Config::new(
-        "127.0.0.1:0".parse().unwrap(),
-        c2_token,
-        vec![C2NodeConfig::new(
-            node_id.clone(),
-            node_endpoint,
-            node_token,
-        )
-        .unwrap()],
+
+    let _rig = hatchery_node::restream_test_rig::RestreamRig::start(
+        hatchery_node::restream_test_rig::RestreamRigConfig {
+            node_id: node_id.clone(),
+            local_endpoint: node_endpoint.clone(),
+            local_token: node_token.to_owned(),
+            control_endpoint: control_endpoint.clone(),
+            operator_token: c2_token.to_owned(),
+        },
     )
-    .unwrap()
-    .with_control_endpoint(control_endpoint.clone())
-    .unwrap()
-    .with_timings(timings);
-    let running = C2Running::start(config).await.unwrap();
-    let http = C2Client::new(running.api_addr(), c2_token)
-        .unwrap()
-        .with_deadline(Duration::from_secs(1));
-    let route = wait_online(&http, &node_id).await;
+    .await;
+
+    let route = _rig.route();
     let (control, mut events) = connect_core_operator(&control_endpoint, c2_token).await.unwrap();
     let negotiated = &control.hello().compatibility.as_ref().unwrap().capabilities;
     assert!(negotiated.iter().any(|capability| {
@@ -583,12 +547,7 @@ async fn windows_fixture_spawn_spec_environment_profile_runs_exact_pty_end_to_en
         NodeTransportState::Online,
     );
 
-    let c2_shutdown = running.shutdown_handle();
-    c2_shutdown.shutdown();
-    timeout(Duration::from_secs(5), running.wait())
-        .await
-        .expect("C2 shutdown timed out")
-        .expect("C2 shutdown failed");
+    drop(_rig);
     drop(control);
     timeout(Duration::from_secs(2), event_collector)
         .await

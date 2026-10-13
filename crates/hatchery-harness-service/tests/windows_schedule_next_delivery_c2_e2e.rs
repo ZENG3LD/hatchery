@@ -1,5 +1,5 @@
 //! A2: dials core operator control (`connect_core_operator`), not C2.
-//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
+//! Uses restream g4a bridge + core NodeOperatorMesh (A2); C2 is opaque restreamer only.
 
 #![cfg(windows)]
 
@@ -12,8 +12,6 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::C2Client;
 use hatchery_harness_api::HarnessOperatorCredential;
 use hatchery_harness_client::{HarnessOperatorClient, HarnessOperatorClientError};
 use hatchery_harness_delivery::{
@@ -349,16 +347,6 @@ fn launch_catalog(
     }]).unwrap()
 }
 
-async fn wait_online(client: &C2Client, node_id: &NodeId) {
-    timeout(Duration::from_secs(10), async {
-        loop {
-            if client.status().await.ok().and_then(|status| status.nodes.get(node_id)
-                .map(|node| node.transport == hatchery_c2_protocol::NodeTransportState::Online))
-                == Some(true) { break; }
-            sleep(Duration::from_millis(20)).await;
-        }
-    }).await.expect("Node did not become online through C2");
-}
 
 async fn connect_adapter(endpoint: &str, token: &str) -> (HarnessC2Adapter, HarnessC2EventReceiver) {
     timeout(Duration::from_secs(5), async {
@@ -415,7 +403,6 @@ fn install_diagnostic_tracing() {
     });
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn schedule_next_delivery_stages_materializes_and_does_not_resend() {
     install_diagnostic_tracing();
@@ -517,22 +504,17 @@ async fn schedule_next_delivery_stages_materializes_and_does_not_resend() {
     ).unwrap();
     let node_shutdown = node.shutdown_handle();
     let node_task = tokio::spawn(node.run());
-    let c2 = C2Running::start(C2Config::new(
-        "127.0.0.1:0".parse().unwrap(),
-        c2_token,
-        vec![C2NodeConfig::new(node_id.clone(), node_endpoint, node_token).unwrap()],
-    ).unwrap().with_control_endpoint(control_endpoint.clone()).unwrap()
-        .with_timings(C2Timings {
-            poll_interval: Duration::from_millis(20),
-            fresh_for: Duration::from_secs(2),
-            attempt_deadline: Duration::from_secs(2),
-            transient_backoffs: [Duration::from_millis(20); 5],
-            parked_backoff: Duration::from_millis(100),
-            http_io_deadline: Duration::from_secs(1),
-        })).await.unwrap();
-    let http = C2Client::new(c2.api_addr(), c2_token).unwrap()
-        .with_deadline(Duration::from_secs(1));
-    wait_online(&http, &node_id).await;
+    let _rig = hatchery_node::restream_test_rig::RestreamRig::start(
+        hatchery_node::restream_test_rig::RestreamRigConfig {
+            node_id: node_id.clone(),
+            local_endpoint: node_endpoint.clone(),
+            local_token: node_token.to_owned(),
+            control_endpoint: control_endpoint.clone(),
+            operator_token: c2_token.to_owned(),
+        },
+    )
+    .await;
+
 
     let negative_harness = fixture.path().join("negative-harness.sqlite3");
     let negative_observation = fixture.path().join("negative-observation.sqlite3");
@@ -799,9 +781,7 @@ async fn schedule_next_delivery_stages_materializes_and_does_not_resend() {
         node_token, c2_token, operator_secret.as_str(),
         workspace.to_string_lossy().as_ref(), source.to_string_lossy().as_ref(),
     ]);
-    let c2_shutdown = c2.shutdown_handle();
-    c2_shutdown.shutdown();
-    timeout(Duration::from_secs(5), c2.wait()).await.unwrap().unwrap();
+    drop(_rig);
     node_shutdown.request_shutdown().await.unwrap();
     timeout(Duration::from_secs(10), node_task).await.unwrap().unwrap().unwrap();
 }

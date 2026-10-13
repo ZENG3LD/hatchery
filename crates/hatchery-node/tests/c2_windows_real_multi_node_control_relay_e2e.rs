@@ -1,5 +1,5 @@
 //! A2: dials core operator control (`connect_core_operator`), not C2.
-//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
+//! Needs multi-node RestreamRig (shared mesh + per-node bridges); still uses deleted C2 binary relay.
 
 #![cfg(windows)]
 
@@ -125,7 +125,7 @@ fn route(status: &hatchery_c2::protocol::StatusResponse, node_id: &NodeId) -> No
     }
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
+#[ignore = "A2: needs multi-node RestreamRig; C2 binary relay removed"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn windows_real_two_node_c2_control_relay_routes_commands_events_and_preserves_nodes_on_exit() {
     let endpoint_a = endpoint("a");
@@ -618,7 +618,7 @@ async fn windows_real_two_node_c2_control_relay_routes_commands_events_and_prese
     timeout(Duration::from_secs(5), restarted_task_b).await.unwrap().unwrap().unwrap();
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
+#[ignore = "A2: needs multi-node RestreamRig; C2 binary relay removed"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn windows_real_multi_node_task_correlation_survives_restart_and_rejects_stale_revision() {
     let endpoint_a = endpoint("task-a");

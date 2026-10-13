@@ -1,5 +1,5 @@
 //! A2: dials core operator control (`connect_core_operator`), not C2.
-//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
+//! Uses restream g4a bridge + core NodeOperatorMesh (A2); C2 is opaque restreamer only.
 
 #![cfg(windows)]
 
@@ -12,8 +12,6 @@ use std::{
 };
 
 use hatchery_c2::protocol::NodeTransportState;
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::C2Client;
 use hatchery_harness_api::{
     ActivityClassV1, ActivityStateV1, FeatureObservationStateV1,
     HarnessOperatorCredential, HarnessOperatorMutationOutcomeV1,
@@ -155,18 +153,6 @@ fn launch_catalog(node_id: &NodeId, workspace_id: &WorkspaceId) -> HarnessLaunch
     }]).unwrap()
 }
 
-async fn wait_online(client: &C2Client, node_id: &NodeId) {
-    timeout(Duration::from_secs(10), async {
-        loop {
-            if client.status().await.is_ok_and(|status| {
-                status.nodes[node_id].transport == NodeTransportState::Online
-            }) {
-                break;
-            }
-            sleep(Duration::from_millis(20)).await;
-        }
-    }).await.expect("fixture Node did not become online through C2");
-}
 
 async fn connect_harness_adapter(
     endpoint: &str,
@@ -191,7 +177,6 @@ fn assert_redacted(serialized: &str, forbidden: &[&str]) {
     }
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tui_like_task_detail_observes_exact_bound_provider_timeline() {
     require_headless_supervisor();
@@ -228,27 +213,17 @@ async fn tui_like_task_detail_observes_exact_bound_provider_timeline() {
     let node_shutdown = node.shutdown_handle();
     let node_task = tokio::spawn(node.run());
 
-    let c2 = C2Running::start(C2Config::new(
-        "127.0.0.1:0".parse().unwrap(),
-        c2_token,
-        vec![C2NodeConfig::new(
-            node_id.clone(),
-            node_endpoint,
-            node_token,
-        ).unwrap()],
-    ).unwrap()
-        .with_control_endpoint(control_endpoint.clone()).unwrap()
-        .with_timings(C2Timings {
-            poll_interval: Duration::from_millis(20),
-            fresh_for: Duration::from_secs(2),
-            attempt_deadline: Duration::from_secs(2),
-            transient_backoffs: [Duration::from_millis(20); 5],
-            parked_backoff: Duration::from_millis(100),
-            http_io_deadline: Duration::from_secs(1),
-        })).await.unwrap();
-    let c2_client = C2Client::new(c2.api_addr(), c2_token).unwrap()
-        .with_deadline(Duration::from_secs(1));
-    wait_online(&c2_client, &node_id).await;
+    let _rig = hatchery_node::restream_test_rig::RestreamRig::start(
+        hatchery_node::restream_test_rig::RestreamRigConfig {
+            node_id: node_id.clone(),
+            local_endpoint: node_endpoint.clone(),
+            local_token: node_token.to_owned(),
+            control_endpoint: control_endpoint.clone(),
+            operator_token: c2_token.to_owned(),
+        },
+    )
+    .await;
+
 
     let (adapter, events) = connect_harness_adapter(&control_endpoint, c2_token).await;
     let catalogs = HarnessRuntimeCatalogs::new(
@@ -328,9 +303,7 @@ async fn tui_like_task_detail_observes_exact_bound_provider_timeline() {
 
     host.shutdown().await.unwrap();
     timeout(Duration::from_secs(5), host_task).await.unwrap().unwrap().unwrap();
-    let c2_shutdown = c2.shutdown_handle();
-    c2_shutdown.shutdown();
-    timeout(Duration::from_secs(5), c2.wait()).await.unwrap().unwrap();
+    drop(_rig);
     node_shutdown.request_shutdown().await.unwrap();
     timeout(Duration::from_secs(10), node_task).await.unwrap().unwrap().unwrap();
 

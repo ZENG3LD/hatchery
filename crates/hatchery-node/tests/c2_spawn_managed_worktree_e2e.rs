@@ -1,5 +1,5 @@
 //! A2: dials core operator control (`connect_core_operator`), not C2.
-//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
+//! Uses restream g4a bridge + core NodeOperatorMesh (A2); C2 is opaque restreamer only.
 
 #![cfg(windows)]
 
@@ -8,8 +8,7 @@ use hatchery_c2::protocol::{
     NodeId, NodeRoute, NodeTransportState, RoutedNodeEvent,
     C2_MANAGED_WORKTREE_LIFECYCLE_CAPABILITY, C2_TERMINAL_FRAME_EVENTS_CAPABILITY,
 };
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::{connect_core_operator, C2Client, C2ControlHandle};
+use hatchery_c2_client::{connect_core_operator, C2ControlHandle};
 use hatchery_node::protocol::{
     CapabilityId, ManagedSessionState, ManagedWorktreeCleanupFailure,
     ManagedWorktreeLeaseSnapshot, ManagedWorktreeLeaseState, ManagedWorktreeRetention,
@@ -286,48 +285,7 @@ fn assert_public_lease_is_path_free(lease: &ManagedWorktreeLeaseSnapshot, target
     inspect(&serde_json::to_value(lease).unwrap(), &target);
 }
 
-async fn wait_online_after(
-    client: &C2Client,
-    node_id: &NodeId,
-    previous: Option<&NodeRoute>,
-) -> NodeRoute {
-    timeout(Duration::from_secs(10), async {
-        loop {
-            if let Ok(status) = client.status().await {
-                if status.nodes[node_id].transport == NodeTransportState::Online {
-                    let incarnation_id = status.nodes[node_id]
-                        .cursor
-                        .expect("online fixture node has no cursor")
-                        .incarnation_id;
-                    if previous.is_none_or(|route| route.expected_incarnation_id != incarnation_id) {
-                        return NodeRoute {
-                            node_id: node_id.clone(),
-                            expected_incarnation_id: incarnation_id,
-                        };
-                    }
-                }
-            }
-            sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("fixture node did not become online through C2")
-}
 
-async fn wait_offline(client: &C2Client, node_id: &NodeId) {
-    timeout(Duration::from_secs(10), async {
-        loop {
-            if client.status().await.is_ok_and(|status| {
-                status.nodes[node_id].transport != NodeTransportState::Online
-            }) {
-                return;
-            }
-            sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .expect("fixture node remained online after shutdown");
-}
 
 async fn snapshot(control: &C2ControlHandle, route: &NodeRoute) -> C2NodeSnapshot {
     let response = control
@@ -558,7 +516,6 @@ async fn wait_released(
     .expect("managed worktree did not reach released Retained state")
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn spawn_managed_worktree_is_durable_path_free_and_safely_cleaned_end_to_end() {
     require_headless_windows_fixture();
@@ -623,33 +580,19 @@ async fn spawn_managed_worktree_is_durable_path_free_and_safely_cleaned_end_to_e
     let node_shutdown = server.shutdown_handle();
     let node_task = tokio::spawn(server.run());
 
-    let timings = C2Timings {
-        poll_interval: Duration::from_millis(20),
-        fresh_for: Duration::from_secs(2),
-        attempt_deadline: Duration::from_secs(2),
-        transient_backoffs: [Duration::from_millis(20); 5],
-        parked_backoff: Duration::from_millis(100),
-        http_io_deadline: Duration::from_secs(1),
-    };
-    let config = C2Config::new(
-        "127.0.0.1:0".parse().unwrap(),
-        c2_token,
-        vec![C2NodeConfig::new(
-            node_id.clone(),
-            node_endpoint.clone(),
-            node_token,
-        )
-        .unwrap()],
+
+    let _rig = hatchery_node::restream_test_rig::RestreamRig::start(
+        hatchery_node::restream_test_rig::RestreamRigConfig {
+            node_id: node_id.clone(),
+            local_endpoint: node_endpoint.clone(),
+            local_token: node_token.to_owned(),
+            control_endpoint: control_endpoint.clone(),
+            operator_token: c2_token.to_owned(),
+        },
     )
-    .unwrap()
-    .with_control_endpoint(control_endpoint.clone())
-    .unwrap()
-    .with_timings(timings);
-    let running = C2Running::start(config).await.unwrap();
-    let http = C2Client::new(running.api_addr(), c2_token)
-        .unwrap()
-        .with_deadline(Duration::from_secs(1));
-    let mut route = wait_online_after(&http, &node_id, None).await;
+    .await;
+
+    let route = _rig.route();
     let (control, mut events) = connect_core_operator(&control_endpoint, c2_token).await.unwrap();
     let capabilities = &control.hello().compatibility.as_ref().unwrap().capabilities;
     assert!(capabilities
@@ -870,7 +813,7 @@ async fn spawn_managed_worktree_is_durable_path_free_and_safely_cleaned_end_to_e
         .expect("node shutdown timed out")
         .expect("node task panicked")
         .expect("node shutdown failed");
-    wait_offline(&http, &node_id).await;
+    // Node stopped; bridge will reconnect after restart.
     let restarted = NodeServer::new_exact_launcher_fixture(
         node_config(
             &node_endpoint,
@@ -887,8 +830,10 @@ async fn spawn_managed_worktree_is_durable_path_free_and_safely_cleaned_end_to_e
     .unwrap();
     let restarted_shutdown = restarted.shutdown_handle();
     let restarted_task = tokio::spawn(restarted.run());
-    let previous_route = route.clone();
-    route = wait_online_after(&http, &node_id, Some(&previous_route)).await;
+    let _previous_route = route.clone();
+    route = _rig
+        .refresh_route_after_local_restart(&node_endpoint, node_token)
+        .await;
     wait_relay_ready(&control, &route).await;
     let recovered = snapshot(&control, &route).await;
     let recovered_lease = find_lease(&recovered, &released)
@@ -977,12 +922,7 @@ async fn spawn_managed_worktree_is_durable_path_free_and_safely_cleaned_end_to_e
     assert_eq!(final_snapshot.workspaces.len(), 1);
     assert_eq!(final_snapshot.workspaces[0].workspace_id, source_workspace_id);
 
-    let c2_shutdown = running.shutdown_handle();
-    c2_shutdown.shutdown();
-    timeout(Duration::from_secs(5), running.wait())
-        .await
-        .expect("C2 shutdown timed out")
-        .expect("C2 shutdown failed");
+    drop(_rig);
     drop(control);
     timeout(Duration::from_secs(2), event_collector)
         .await

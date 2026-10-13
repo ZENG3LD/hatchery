@@ -1,5 +1,5 @@
 //! A2: dials core operator control (`connect_core_operator`), not C2.
-//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
+//! Uses restream g4a bridge + core NodeOperatorMesh (A2); C2 is opaque restreamer only.
 
 #![cfg(windows)]
 
@@ -7,8 +7,7 @@ use hatchery_c2::protocol::{
     C2ManagedSessionRecord, C2NodeEvent, C2NodeResponse, C2NodeSnapshot, C2SessionStatus,
     NodeId, NodeRoute, NodeTransportState,
 };
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::{connect_core_operator, C2Client, C2ControlHandle};
+use hatchery_c2_client::{connect_core_operator, C2ControlHandle};
 use hatchery_node::protocol::{
     AdapterId, CapabilityId, ClientRole, ManagedSessionState, ManagedWorktreeRetention,
     ManagedWorktreeSpawnRequest, NodeEvent, NodeFailureCode, NodeRequest, ServerFrame,
@@ -672,7 +671,6 @@ fn assert_target_result(root: &Path, base: &str, lane: LaneSpec) {
     let host_acceptance = match lane.source_provider {
         Provider::Claude => br#"use restore_lane::normalize_display_name;
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[test]
 fn display_name_acceptance() {
     assert_eq!(normalize_display_name("  Alpha\t Beta\nGamma  "), Some("Alpha Beta Gamma".to_owned()));
@@ -684,7 +682,6 @@ fn display_name_acceptance() {
         .as_slice(),
         Provider::Codex => r#"use restore_lane::parse_review_tags;
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[test]
 fn review_tags_acceptance() {
     assert_eq!(parse_review_tags(" Bug,bug, PERF ,,perf"), vec!["bug", "perf"]);
@@ -945,26 +942,6 @@ fn target_spawn_request(
     }
 }
 
-async fn wait_online(client: &C2Client, node_id: &NodeId) -> NodeRoute {
-    timeout(Duration::from_secs(15), async {
-        loop {
-            if let Ok(status) = client.status().await {
-                if status.nodes[node_id].transport == NodeTransportState::Online {
-                    return NodeRoute {
-                        node_id: node_id.clone(),
-                        expected_incarnation_id: status.nodes[node_id]
-                            .cursor
-                            .expect("online node omitted its cursor")
-                            .incarnation_id,
-                    };
-                }
-            }
-            sleep(Duration::from_millis(25)).await;
-        }
-    })
-    .await
-    .expect("Node did not become online through C2")
-}
 
 async fn wait_relay_ready(control: &C2ControlHandle, route: &NodeRoute) {
     timeout(Duration::from_secs(15), async {
@@ -1047,8 +1024,6 @@ async fn wait_record(
 async fn rename_record(
     control: &C2ControlHandle,
     route: &NodeRoute,
-    client: &C2Client,
-    node_id: &NodeId,
     record: &C2ManagedSessionRecord,
     display_name: &str,
 ) -> C2ManagedSessionRecord {
@@ -1071,17 +1046,11 @@ async fn rename_record(
     assert!(!renamed.provider_identity_present);
     timeout(Duration::from_secs(10), async {
         loop {
-            if client.status().await.is_ok_and(|status| {
-                status.nodes[node_id]
-                    .inventory
-                    .as_ref()
-                    .is_some_and(|inventory| {
-                        inventory.managed_sessions.iter().any(|candidate| {
-                            candidate.record_id == record.record_id
-                                && candidate.display_name == display_name
-                                && !candidate.provider_identity_present
-                        })
-                    })
+            let snap = snapshot(control, route).await;
+            if snap.session_records.iter().any(|candidate| {
+                candidate.record_id == record.record_id
+                    && candidate.display_name == display_name
+                    && !candidate.provider_identity_present
             }) {
                 return;
             }
@@ -2638,7 +2607,6 @@ async fn forget_record(
 async fn run_source_session(
     control: &C2ControlHandle,
     route: &NodeRoute,
-    http: &C2Client,
     ids: &TestIds,
     lane: LaneSpec,
     workspace_id: &WorkspaceId,
@@ -2713,8 +2681,6 @@ async fn run_source_session(
     let record = rename_record(
         control,
         route,
-        http,
-        &ids.node,
         &record,
         lane.source_name,
     )
@@ -2857,7 +2823,6 @@ async fn wait_target_commit(
 async fn run_target_session(
     control: &C2ControlHandle,
     route: &NodeRoute,
-    http: &C2Client,
     ids: &TestIds,
     lane: LaneSpec,
     workspace_id: &WorkspaceId,
@@ -2907,8 +2872,6 @@ async fn run_target_session(
     let record = rename_record(
         control,
         route,
-        http,
-        &ids.node,
         &record,
         lane.target_name,
     )
@@ -3089,7 +3052,6 @@ async fn run_target_session(
     }
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[test]
 fn claude_draft_prefix_is_nonempty_control_free_and_bounded() {
     assert_eq!(control_free_prompt_prefix("visible prompt"), Some("visible prompt".to_owned()));
@@ -3101,7 +3063,6 @@ fn claude_draft_prefix_is_nonempty_control_free_and_bounded() {
     assert!(control_free_prompt_prefix("draft\nline").is_none());
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[test]
 fn startup_gate_actions_require_exact_selected_safe_option_and_enter_key() {
     let workspace = Path::new(r"C:\fixture\workspace");
@@ -3128,7 +3089,6 @@ fn startup_gate_actions_require_exact_selected_safe_option_and_enter_key() {
     assert!(known_noncomposer_operator_screen(update));
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[test]
 fn codex_trust_gate_requires_exact_workspace_selection_and_footer() {
     let workspace = Path::new(r"C:\fixture\codex-workspace");
@@ -3163,7 +3123,6 @@ fn codex_trust_gate_requires_exact_workspace_selection_and_footer() {
     ));
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[test]
 fn provider_composer_gate_requires_each_vendor_prompt_glyph() {
     assert!(!expected_provider_composer_visible(Provider::Claude, ">"));
@@ -3180,7 +3139,6 @@ fn provider_composer_gate_requires_each_vendor_prompt_glyph() {
     ));
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[test]
 fn history_session_identity_requires_uuid_and_exact_or_suffix_hint() {
     let session_id = "01234567-89ab-cdef-0123-456789abcdef";
@@ -3199,7 +3157,6 @@ fn history_session_identity_requires_uuid_and_exact_or_suffix_hint() {
     ));
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[test]
 fn codex_submit_prompt_encoder_preserves_bracketed_paste_across_terminal_byte_chunks() {
     let text = "x".repeat(MAX_NODE_TERMINAL_BYTES + 1);
@@ -3240,7 +3197,6 @@ fn codex_submit_prompt_encoder_preserves_bracketed_paste_across_terminal_byte_ch
     assert_eq!(chunks.into_iter().flatten().collect::<Vec<_>>(), expected);
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[test]
 fn turn_readiness_counts_ready_samples_independently_of_frame_changes() {
     let mut ready_samples = 0;
@@ -3252,7 +3208,6 @@ fn turn_readiness_counts_ready_samples_independently_of_frame_changes() {
     assert_eq!(next_ready_sample_count(7, false, true), 0);
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[test]
 fn source_history_progression_requires_two_new_messages_per_turn() {
     let codex = |selected: Option<&SourceHistorySelection>| {
@@ -3277,7 +3232,6 @@ fn source_history_progression_requires_two_new_messages_per_turn() {
 /// Claude's progression is counted in completed turns, not messages --
 /// the branch that has no message-count requirement at all, so the
 /// message-based assertions above cannot cover it.
-#[ignore = "A2: needs node restream g4a bridge"]
 #[test]
 fn claude_source_history_progression_requires_one_new_completed_turn() {
     let claude = |selected: Option<&SourceHistorySelection>| {
@@ -3295,7 +3249,6 @@ fn claude_source_history_progression_requires_one_new_completed_turn() {
     assert_eq!(claude(Some(&retained)).message_count, 0);
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[test]
 fn private_root_restores_marker_after_final_remove_failure() {
     let mut root = PrivateRoot::create(test_root());
@@ -3308,7 +3261,6 @@ fn private_root_restores_marker_after_final_remove_failure() {
     root.remove();
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "requires installed Claude and Codex CLIs, GATE4AGENT_LIVE_SKILL_RESTORE=1, and windows-headless-supervisor"]
 async fn windows_live_skill_restore_continues_two_cross_provider_worktrees() {
@@ -3357,27 +3309,18 @@ async fn windows_live_skill_restore_continues_two_cross_provider_worktrees() {
     let node_shutdown = server.shutdown_handle();
     let node_task = tokio::spawn(server.run());
 
-    let c2_config = C2Config::new(
-        "127.0.0.1:0".parse().unwrap(),
-        c2_token,
-        vec![C2NodeConfig::new(ids.node.clone(), &node_endpoint, node_token).unwrap()],
+    let _rig = hatchery_node::restream_test_rig::RestreamRig::start(
+        hatchery_node::restream_test_rig::RestreamRigConfig {
+            node_id: ids.node.clone(),
+            local_endpoint: node_endpoint.clone(),
+            local_token: node_token.to_owned(),
+            control_endpoint: control_endpoint.clone(),
+            operator_token: c2_token.to_owned(),
+        },
     )
-    .unwrap()
-    .with_control_endpoint(&control_endpoint)
-    .unwrap()
-    .with_timings(C2Timings {
-        poll_interval: Duration::from_millis(25),
-        fresh_for: Duration::from_secs(2),
-        attempt_deadline: Duration::from_secs(2),
-        transient_backoffs: [Duration::from_millis(25); 5],
-        parked_backoff: Duration::from_millis(100),
-        http_io_deadline: Duration::from_secs(1),
-    });
-    let running = C2Running::start(c2_config).await.unwrap();
-    let http = C2Client::new(running.api_addr(), c2_token)
-        .unwrap()
-        .with_deadline(Duration::from_secs(1));
-    let route = wait_online(&http, &ids.node).await;
+    .await;
+
+    let route = _rig.route();
     let (control, mut events) = connect_core_operator(&control_endpoint, c2_token).await.unwrap();
     wait_relay_ready(&control, &route).await;
     let mut node_observer = NamedPipeNodeClient::connect(
@@ -3426,7 +3369,6 @@ async fn windows_live_skill_restore_continues_two_cross_provider_worktrees() {
     let claude_source = run_source_session(
         &control,
         &route,
-        &http,
         &ids,
         DISPLAY_LANE,
         &ids.claude_source_workspace,
@@ -3440,7 +3382,6 @@ async fn windows_live_skill_restore_continues_two_cross_provider_worktrees() {
     let codex_source = run_source_session(
         &control,
         &route,
-        &http,
         &ids,
         TAGS_LANE,
         &ids.codex_source_workspace,
@@ -3455,7 +3396,6 @@ async fn windows_live_skill_restore_continues_two_cross_provider_worktrees() {
     let codex_target = run_target_session(
         &control,
         &route,
-        &http,
         &ids,
         DISPLAY_LANE,
         &ids.codex_target_workspace,
@@ -3475,7 +3415,6 @@ async fn windows_live_skill_restore_continues_two_cross_provider_worktrees() {
     let claude_target = run_target_session(
         &control,
         &route,
-        &http,
         &ids,
         TAGS_LANE,
         &ids.claude_target_workspace,
@@ -3545,12 +3484,7 @@ async fn windows_live_skill_restore_continues_two_cross_provider_worktrees() {
         .all(|workspace| workspace.sessions.is_empty()));
     assert_no_context(&final_snapshot);
 
-    let c2_shutdown = running.shutdown_handle();
-    c2_shutdown.shutdown();
-    timeout(Duration::from_secs(10), running.wait())
-        .await
-        .expect("C2 shutdown timed out")
-        .expect("C2 shutdown failed");
+    drop(_rig);
     drop(control);
     timeout(Duration::from_secs(5), event_collector)
         .await

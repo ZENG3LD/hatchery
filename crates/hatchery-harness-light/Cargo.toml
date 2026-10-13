@@ -27,7 +27,7 @@ tracing = "0.1"
 [dev-dependencies]
 hatchery-c2 = { version = "0.2.3", path = "../hatchery-c2" }
 hatchery-harness-client = { version = "0.2.3", path = "../hatchery-harness-client" }
-hatchery-node = { version = "0.2.3", path = "../hatchery-node", features = ["fixture"] }
+hatchery-node = { version = "0.2.3", path = "../hatchery-node", features = ["fixture", "restream-rig"] }
 tokio = { version = "1", features = ["full", "test-util"] }
 
 [target.'cfg(windows)'.dev-dependencies]

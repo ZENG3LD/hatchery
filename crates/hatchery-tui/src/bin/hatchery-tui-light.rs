@@ -415,7 +415,7 @@ mod tests {
         let startup = parse(
             &[
                 "hatchery-tui-light",
-                "--core-control" | "--c2-control",
+                "--c2-control",
                 r"\\.\pipe\hatchery-c2",
                 "--style",
                 "gate",
@@ -475,7 +475,7 @@ mod tests {
         let allowed = parse(&allowed, &[(C2_TOKEN_ENV, "token")]).err().unwrap();
         assert_eq!(allowed, "HQ WireGuard allowed IPs must be only the single C2 tunnel address");
 
-        let both = ["hatchery-tui-light", "--core-control" | "--c2-control", "/tmp/hatchery-c2.sock", "--wg-client"];
+        let both = ["hatchery-tui-light", "--c2-control", "/tmp/hatchery-c2.sock", "--wg-client"];
         let both = parse(&both, &[]).err().unwrap();
         assert_eq!(both, "unix --c2-control and --wg-client are alternatives");
     }
@@ -485,7 +485,7 @@ mod tests {
         let error = parse(
             &[
                 "hatchery-tui-light",
-                "--core-control" | "--c2-control",
+                "--c2-control",
                 r"\\.\pipe\hatchery-c2",
                 "--cwd",
                 r"C:\work",

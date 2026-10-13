@@ -34,7 +34,7 @@ hatchery-c2-client = { version = "0.2.3", path = "../hatchery-c2-client" }
 hatchery-harness-engine = { version = "0.2.3", path = "../hatchery-harness-engine" }
 hatchery-harness-protocol = { version = "0.2.3", path = "../hatchery-harness-protocol" }
 hatchery-harness-service = { version = "0.2.3", path = "../hatchery-harness-service" }
-hatchery-node = { version = "0.2.3", path = "../hatchery-node", features = ["fixture"] }
+hatchery-node = { version = "0.2.3", path = "../hatchery-node", features = ["fixture", "restream-rig"] }
 hatchery-observation-service = { version = "0.2.3", path = "../hatchery-observation-service" }
 gate4agent-testkit = { version = "0.5.2" }
 gate4agent-types = { version = "0.5.2" }
