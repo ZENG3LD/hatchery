@@ -161,7 +161,15 @@ $('#micbtn').onclick = () => {
   r.onresult = (e) => { $('#input').value = base + [...e.results].map((x) => x[0].transcript).join(''); autosize(); };
   r.onend = () => { S.rec = null; $('#micbtn').classList.remove('rec'); }; r.start();
 };
-const autosize = () => { const i = $('#input'); const max = 118; i.style.height = 'auto'; const h = Math.min(i.scrollHeight, max); i.style.height = h + 'px'; i.classList.toggle('scroll', i.scrollHeight > max); };
+const autosize = () => {
+  const i = $('#input'); const box = $('#box'); const max = 118;
+  // Try the one-row layout first; fall back to stacked when the text needs more than one line.
+  box.classList.add('one'); i.style.height = 'auto';
+  const line = parseFloat(getComputedStyle(i).lineHeight) || 21; const pad = parseFloat(getComputedStyle(i).paddingTop) + parseFloat(getComputedStyle(i).paddingBottom);
+  if (i.value.includes('\n') || i.scrollHeight > line + pad + 2) { box.classList.remove('one'); i.style.height = 'auto'; }
+  const h = Math.min(i.scrollHeight, max); i.style.height = h + 'px'; i.classList.toggle('scroll', i.scrollHeight > max);
+};
+autosize();
 $('#input').oninput = autosize; ['keyup', 'cut', 'paste', 'change', 'focus'].forEach((ev) => $('#input').addEventListener(ev, () => setTimeout(autosize, 0)));
 $('#input').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
 $('#sendbtn').onclick = send;
