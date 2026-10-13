@@ -202,7 +202,7 @@ fn safe_rest(rest: &str) -> bool {
 // ---------------------------------------------------------------------------------- handlers
 
 async fn api_config(State(s): State<Shared>) -> Response {
-    json_reply(200, json!({ "server": s.config.server.is_some(), "version": env!("CARGO_PKG_VERSION"), "m4a": s.config.m4a.as_ref().map(|m| json!({"nick": m.nick, "groups": m.groups})), "chats": s.config.chats.iter().map(|(l, t)| json!({"label": l, "target": t})).collect::<Vec<_>>() }).to_string().into_bytes())
+    json_reply(200, json!({ "server": s.config.server.is_some(), "version": env!("CARGO_PKG_VERSION"), "m4a": s.config.m4a.as_ref().map(|m| json!({"nick": m.nick, "groups": m.groups, "server": m.nick_server()})), "chats": s.config.chats.iter().map(|(l, t)| json!({"label": l, "target": t})).collect::<Vec<_>>() }).to_string().into_bytes())
 }
 
 /// Allowlisted pass-through to the C2 operator API (`/v1/enroll/...`).
@@ -633,9 +633,10 @@ pub struct M4a {
 }
 
 impl M4a {
-    /// Server name of the operator's account (`HATCHERY_HQ_M4A_SERVER`, default `message.sarl`).
-    pub fn nick_server(&self) -> String {
-        std::env::var("HATCHERY_HQ_M4A_SERVER").ok().filter(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')).unwrap_or_else(|| "message.sarl".into())
+    /// Server name of the operator's account, from `HATCHERY_HQ_M4A_SERVER`.
+    /// There is no default: unset or invalid means `None`.
+    pub fn nick_server(&self) -> Option<String> {
+        std::env::var("HATCHERY_HQ_M4A_SERVER").ok().filter(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-'))
     }
 }
 
@@ -658,7 +659,10 @@ async fn api_m4a(s: &Shared, op: &str, body: &[u8]) -> Response {
             if nick.is_empty() || nick.len() > 64 || !nick.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')) || nick.starts_with('-') {
                 return err(StatusCode::BAD_REQUEST, "bad nick");
             }
-            let url = format!("https://{}/product/v1/profile/{nick}", m.nick_server());
+            let Some(server) = m.nick_server() else {
+                return err(StatusCode::SERVICE_UNAVAILABLE, "HATCHERY_HQ_M4A_SERVER is not set");
+            };
+            let url = format!("https://{server}/product/v1/profile/{nick}");
             let out = tokio::process::Command::new("/usr/bin/curl").args(["-sf", "--max-time", "10", &url]).env_clear().kill_on_drop(true).output().await;
             return match out {
                 Ok(o) if o.status.success() => match serde_json::from_slice::<Value>(&o.stdout) {
@@ -675,7 +679,9 @@ async fn api_m4a(s: &Shared, op: &str, body: &[u8]) -> Response {
         }
         "dm" if !room.starts_with('!') && !room.starts_with('#') && !room.contains(':') => {
             // A 1:1 room with that nick, created silently (an invite, no message).
-            let server = m.nick_server();
+            let Some(server) = m.nick_server() else {
+                return err(StatusCode::SERVICE_UNAVAILABLE, "HATCHERY_HQ_M4A_SERVER is not set");
+            };
             args.extend(["create".into(), room.clone(), "--invite".into(), format!("@{room}:{server}")]);
         }
         "react" => {
@@ -731,9 +737,9 @@ async fn api_m4a(s: &Shared, op: &str, body: &[u8]) -> Response {
 mod m4a_tests {
     #[test]
     fn room_args_are_safe() {
-        assert!(super::m4a_room_ok("!abc:message.sarl"));
+        assert!(super::m4a_room_ok("!abc:chat.example"));
         assert!(super::m4a_room_ok("#open-talk"));
-        assert!(super::m4a_room_ok("hatcheryweb"));
+        assert!(super::m4a_room_ok("web-agent"));
         assert!(!super::m4a_room_ok("--as"));
         assert!(!super::m4a_room_ok("a b"));
         assert!(!super::m4a_room_ok(""));

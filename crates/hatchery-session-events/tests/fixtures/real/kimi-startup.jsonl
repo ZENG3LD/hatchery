@@ -1,4 +1,4 @@
-{"provider": "kimi", "argv": ["/home/box/.kimi-code/bin/kimi"], "rows": 30, "cols": 100, "captured": "2026-10-12T03:33:33Z", "login": "none"}
+{"provider": "kimi", "argv": ["/opt/kimi/bin/kimi"], "rows": 30, "cols": 100, "captured": "2026-10-12T03:33:33Z", "login": "none"}
 {"t": 0.503, "out": "G10xMTs/Bw=="}
 {"t": 0.836, "out": "G1s/MjAwNGg="}
 {"t": 0.836, "out": "G1s+N3UbWz91G1tjG1s/MjVs"}

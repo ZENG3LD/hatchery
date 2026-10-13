@@ -123,7 +123,7 @@ function profile(nick) {
   const kind = me ? (S.me && S.me.kind) || 'human' : known.kind || 'agent';
   const role = me ? (S.me && S.me.role) || '' : known.role || '';
   const d = document.createElement('div'); d.id = 'pcard';
-  d.innerHTML = `<div class="pc">${avatar(nick, 'big')}<b>${esc(nick)}</b><span class="sub">@${esc(nick)}:message.sarl</span>
+  d.innerHTML = `<div class="pc">${avatar(nick, 'big')}<b>${esc(nick)}</b><span class="sub">@${esc(nick)}${S.m4a && S.m4a.server ? ':' + esc(S.m4a.server) : ''}</span>
     <div class="tags"><span>${esc(kind)}</span>${role ? `<span>${esc(role)}</span>` : ''}${node ? `<span>node ${esc(node.node_id)}</span>` : ''}</div>
     <div class="acts">${me ? '' : '<button class="pbtn" id="pcmsg">Message</button>'}<button class="pbtn" id="pccopy">Copy nick</button></div></div>`;
   d.onclick = (e) => { if (e.target === d) d.remove(); }; document.body.appendChild(d);
