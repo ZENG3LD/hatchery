@@ -1982,6 +1982,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tokio-tungstenite 0.26.2",

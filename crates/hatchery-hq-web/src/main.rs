@@ -6,6 +6,8 @@
 //!   HATCHERY_HQ_SERVER            hatchery-server control address (optional: mail and tasks)
 //!   HATCHERY_SERVER_CONTROL_TOKEN hatchery-server control bearer (optional)
 //!   HATCHERY_HQ_BASE_PATH         asset prefix behind a reverse proxy, e.g. /app (optional)
+//!   HATCHERY_HQ_CHATS             sidebar chats: label=node-id or label=room:NAME, comma separated (optional)
+//!   HATCHERY_HQ_STATE_DIR         directory for the operator's sent-message journal (optional)
 
 #[tokio::main]
 async fn main() {

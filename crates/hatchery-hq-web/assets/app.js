@@ -54,11 +54,12 @@ document.addEventListener('mousemove', (e) => {
 
 // ---- state
 const S = { mode: 'chat', view: 'chat', space: '*', log: [], events: {}, agentState: {}, lastFrame: 0, promptAt: 0, lastAnsi: '', nodes: [], ready: null, chat: '*', mail: {}, local: {}, session: null, sessionNode: null, sessionProv: null, target: 'mail', working: {}, panel: false, tab: 'activity', lastStatus: {}, wake: null, library: [] };
-const chatName = (id) => (id === '*' ? 'general' : id);
+const chatName = (id) => { const c = (S.chats || []).find((x) => x.target === id); return c ? c.label : id === '*' ? 'general' : String(id).replace(/^room:/, ''); };
 const addLocal = (chat, item) => { (S.local[chat] ||= []).push({ ts: Date.now(), ...item }); renderChat(); };
 const logEv = (text) => { S.log.push({ ts: Date.now(), text }); if (S.log.length > 300) S.log.shift(); if (S.panel && S.tab === 'status') renderStatus(); };
 const visibleNodes = () => S.nodes.filter((n) => n.status !== 'revoked');
 
+const isGroup = (id) => id === '*' || String(id).startsWith('room:');
 // ---- sidebar: only chats (groups, DMs, agent sessions); kind is shown by creature shape only
 function renderSidebar() {
   const q = $('#search').value.toLowerCase(); const match = (n) => !q || n.toLowerCase().includes(q);
@@ -66,7 +67,7 @@ function renderSidebar() {
   const last = (id) => { const m = S.mail[id] || []; const l = m[m.length - 1]; return l ? l.body : ''; };
   const item = (id, name, preview) => { if (!match(name)) return; const b = document.createElement('button'); b.className = 'chatitem' + (S.chat === id ? ' on' : ''); b.title = name; b.innerHTML = avatar(id) + `<div class="t"><div class="n">${esc(name)}</div><div class="p">${esc(preview)}</div></div>`; b.onclick = () => { openChat(id); document.body.classList.remove('sideopen'); }; root.appendChild(b); };
   if (S.session) item(S.sessionNode, S.sessionNode, last(S.sessionNode) || S.sessionProv);
-  item('*', 'general', last('*') || '');
+  for (const c of S.chats || []) if (!(S.session && S.sessionNode === c.target)) item(c.target, c.label, last(c.target) || '');
 }
 $('#searchbtn').onclick = () => { const s = $('#search'); s.hidden = !s.hidden; if (!s.hidden) s.focus(); };
 $('#search').oninput = renderSidebar;
@@ -77,17 +78,23 @@ function openChat(id) {
   setMode('chat');
   S.chat = id; S.target = id === '*' ? 'room' : S.session && S.sessionNode === id ? 'agent' : 'mail';
   $('#headname').textContent = chatName(id); $('#headbtn').title = chatName(id); $('#headav').innerHTML = avatar(id, 'sm');
-  $('#input').placeholder = id === '*' ? 'Message general' : `Message ${id}`;
+  $('#input').placeholder = `Message ${chatName(id)}`;
   renderSidebar(); loadThread(); renderPanelHead(); if (S.panel) setTab(S.tab);
 }
 async function loadThread() {
+  const id = S.chat; if (!id) return;
   try {
-    if (S.chat === '*') { const d = await post('/api/s/mail/inbox'); S.mail["*"] = d.messages.slice().sort((a, b) => a.created_at_ms - b.created_at_ms); }
-    else { const d = await post('/api/s/mail/thread', { node: S.chat }); S.mail[S.chat] = d.messages; }
-  } catch (_) { S.mail[S.chat] = S.mail[S.chat] || []; }
-  renderChat(); renderSidebar();
+    let msgs;
+    if (isGroup(id)) { const d = await post('/api/s/mail/inbox'); msgs = d.messages.filter((m) => m.to === id); }
+    else { const d = await post('/api/s/mail/thread', { node: id }); msgs = d.messages; }
+    let sent = []; try { sent = (await post('/api/s/mail/sent', { to: id })).messages; } catch (_) {}
+    const have = new Set(msgs.map((m) => m.message_id));
+    for (const m of sent) if (!m.message_id || !have.has(m.message_id)) { if (!msgs.some((x) => x.from === m.from && x.body === m.body && Math.abs(x.created_at_ms - m.created_at_ms) < 5000)) msgs.push(m); }
+    S.mail[id] = msgs.sort((a, b) => a.created_at_ms - b.created_at_ms);
+  } catch (_) { S.mail[id] = S.mail[id] || []; }
+  if (S.chat === id) renderChat(); renderSidebar();
 }
-const isGroup = (id) => id === '*' || String(id).startsWith('room:');
+
 function renderChat() {
   const items = []; const group = isGroup(S.chat);
   const mail = S.mail[S.chat] || [];
@@ -133,8 +140,8 @@ function renderChip() {}
 async function send() {
   const text = $('#input').value.trim(); if (!text) return; $('#input').value = ''; autosize();
   try {
-    if (S.chat === '*' || isGroup(S.chat)) {
-      const to = S.chat === '*' ? 'room:general' : S.chat; const l = { ts: Date.now(), text, pending: true }; (S.local[S.chat] ||= []).push(l); renderChat(); $('#chat').scrollTop = 1e9;
+    if (!(S.target === 'agent' && S.session)) {
+      const to = S.chat; const l = { ts: Date.now(), text, pending: true }; (S.local[S.chat] ||= []).push(l); renderChat(); $('#chat').scrollTop = 1e9;
       try { await post('/api/s/mail/send', { to, subject: '-', body: text }); l.pending = false; l.sent = true; } catch (e) { l.pending = false; l.failed = true; renderChat(); toast('Not sent: ' + e.message); return; }
       renderChat(); await loadThread(); return;
     }
@@ -166,7 +173,7 @@ function menu(items, anchorLeft) {
 }
 document.addEventListener('click', (e) => { if (!e.target.closest('#menu') && !e.target.closest('#addbtn') && !e.target.closest('#plusbtn')) $('#menu').hidden = true; if (!e.target.closest('#acctmenu')) $('#acctmenu').hidden = true; });
 $('#addbtn').onclick = () => menu([
-  ['Open terminal for this agent', () => { if (S.chat !== '*') setMode('pty'); else toast('Open an agent chat first'); }],
+  ['Open terminal for this agent', () => { if (!isGroup(S.chat)) setMode('pty'); else toast('Open an agent chat first'); }],
   ['Create a task…', () => { openPanel('computer'); }],
   ['Issue enrollment code', issueCode],
   ['Open browser stream…', () => openPanel('computer')],
@@ -292,7 +299,7 @@ function setTab(tab) {
   if (tab === 'info') renderInfo(); if (tab === 'status') renderStatus(); if (tab === 'computer') renderTasksTab(); if (tab === 'library') renderLibraryTab();
 }
 function renderInfo() {
-  const root = $('#p-info'); const agent = S.chat && S.chat !== '*'; const n = S.nodes.find((x) => x.node_id === S.chat);
+  const root = $('#p-info'); const agent = S.chat && !isGroup(S.chat); const n = S.nodes.find((x) => x.node_id === S.chat);
   let h = `<div class="pcard">${agent ? `<div class="kv"><span>Session</span><span>${S.session && S.sessionNode === S.chat ? esc(S.sessionProv) + ' · live' : 'not running'}</span></div>` : '<div class="kv"><span>Room</span><span>room:general</span></div>'}${n ? `<div class="kv"><span>Node</span><span>${esc(n.node_id)} · ${n.online ? 'online' : 'offline'}</span></div>` : ''}</div>`;
   if (agent) h += `<div class="pcard"><h4>View</h4><div class="tog" id="vtog"><button data-m="chat" class="${S.mode === 'chat' ? 'on' : ''}">Chat</button><button data-m="pty" class="${S.mode === 'pty' ? 'on' : ''}">Terminal</button></div></div>`;
   root.innerHTML = h + '<div id="p-activity"></div>';
@@ -315,7 +322,7 @@ function setMode(m) {
 let tws = null;
 function tsend(o) { if (tws && tws.readyState === 1) tws.send(JSON.stringify(o)); }
 $('#tspawn').onclick = () => {
-  const node = S.chat && S.chat !== '*' ? S.chat : null; if (!node) { toast('Open an agent first'); return; }
+  const node = S.chat && !isGroup(S.chat) ? S.chat : null; if (!node) { toast('Open an agent first'); return; }
   if (tws) tws.close();
   const opt = $('#tprov').selectedOptions[0]; const prov = opt.dataset.parser ? 'fixture' : opt.value; const q = new URLSearchParams({ node, provider: opt.value, rows: ROWS, cols: COLS }); if (opt.dataset.parser) q.set('parser', opt.dataset.parser);
   term.reset(); if (mini) mini.reset(); S.lastAnsi = ''; $('#tinfo').textContent = 'spawning…';
@@ -338,7 +345,7 @@ $('#tstop').onclick = () => tsend({ t: 'stop' });
 term.onData((data) => tsend({ t: 'data', data }));
 
 // ---- event layer: the browser reads ONLY typed session events from the server (no screen parsing here)
-function refreshAvatars() { renderSidebar(); if (S.chat && S.chat !== '*') $('#headav').innerHTML = avatar(S.chat, 'mid'); renderChat(); }
+function refreshAvatars() { renderSidebar(); if (S.chat) $('#headav').innerHTML = avatar(S.chat, 'mid'); renderChat(); }
 function onEvents(node, evs) {
   const m = (S.events[node] ||= new Map()); let chatChanged = false; let stateChanged = false;
   for (const e of evs) {
@@ -357,7 +364,7 @@ function onEvents(node, evs) {
 const confTag = (e) => `<span class="tagh" title="source ${esc(e.source)}">${e.confidence === 'structured' ? 'structured' : 'heuristic'} · ${esc(e.source)}</span>`;
 function diffHtml(t) { return t.split('\n').map((l) => `<span class="${l.startsWith('+') ? 'd-add' : l.startsWith('-') ? 'd-del' : l.startsWith('@@') ? 'd-hunk' : ''}">${esc(l)}</span>`).join('\n'); }
 function renderActivity() {
-  const root = $('#p-activity'); const node = !S.chat || S.chat === '*' ? S.sessionNode : S.chat; const evs = node && S.events[node] ? [...S.events[node].values()] : [];
+  const root = $('#p-activity'); const node = !S.chat || isGroup(S.chat) ? S.sessionNode : S.chat; const evs = node && S.events[node] ? [...S.events[node].values()] : [];
   const st = node ? S.agentState[node] || 'idle' : 'idle';
   let h = `<div class="sub" style="margin-bottom:8px">Agent activity${node ? ' on ' + esc(node) : ''} · state <b>${esc(st)}</b> <span class="tagh">from the session event layer</span></div>`;
   h += evs.filter((e) => ['thought', 'action', 'diff', 'prompt_needed'].includes(e.kind)).slice(-14).reverse().map((e) => {
@@ -375,7 +382,7 @@ function renderActivity() {
 async function renderTasksTab() {
   const root = $('#p-tasks'); let tasks = [];
   try { tasks = (await api('/api/s/tasks')).tasks; } catch (e) { root.innerHTML = `<div class="sub">${esc(e.message)}</div>`; return; }
-  const def = S.chat !== '*' ? S.chat : '';
+  const def = S.chat && !isGroup(S.chat) ? S.chat : '';
   root.innerHTML = `<div class="pcard"><h4>New task</h4><div class="row"><input id="tt" placeholder="Title" style="flex:1"></div><div class="row"><input id="tb" placeholder="Details" style="flex:1"></div><div class="row"><input id="ta" placeholder="Assign to node" value="${esc(def)}"><button class="btn blue" id="tc">Create</button></div></div>`
     + (tasks.map((t) => `<div class="pcard"><div class="row"><b>#${t.id} ${esc(t.title)}</b><span class="st">${esc(t.status)}</span></div><div class="sub">${esc(t.body)} · ${t.assignee ? 'assigned to ' + esc(t.assignee) : 'unassigned'}</div>${['done', 'cancelled'].includes(t.status) ? '' : `<div class="row" style="margin-top:8px"><button class="btn" data-as="${t.id}">assign…</button><button class="btn red" data-cx="${t.id}">cancel</button></div>`}</div>`).join('') || '<div class="sub">No tasks yet.</div>');
   $('#tc').onclick = async () => { try { const a = $('#ta').value.trim(); await post('/api/s/tasks', { title: $('#tt').value, body: $('#tb').value, assignee: a || undefined }); addLocal(a || S.chat, { sys: true, text: `Task created: ${$('#tt').value}${a ? ' → ' + a : ''}` }); toast('task created'); renderTasksTab(); } catch (e) { toast('error: ' + e.message); } };
@@ -420,8 +427,8 @@ es.onmessage = (m) => {
     const msg = d.message; window.lastWake = d;
     logEv(`mail from ${msg.from}`);
     S.working[msg.from] = 0;
-    if (S.chat === msg.from || S.chat === '*') loadThread(); else { S.mail[msg.from] = (S.mail[msg.from] || []).concat([msg]); renderSidebar(); }
+    if (S.chat === msg.from || isGroup(S.chat)) loadThread(); else { S.mail[msg.from] = (S.mail[msg.from] || []).concat([msg]); renderSidebar(); }
   }
 };
 setTab('info');
-loadNodes().then(() => { openChat('*'); }); setInterval(loadNodes, 4000);
+api('/api/config').then((c) => { S.chats = c.chats && c.chats.length ? c.chats : [{ label: 'general', target: 'room:general' }]; }).catch(() => { S.chats = [{ label: 'general', target: 'room:general' }]; }).then(loadNodes).then(() => openChat(S.chats[0].target)); setInterval(() => { if (S.chat && !S.panel) loadThread(); }, 10000); setInterval(loadNodes, 4000);

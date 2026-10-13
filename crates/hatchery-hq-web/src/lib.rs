@@ -37,6 +37,24 @@ pub struct Config {
     /// Path prefix the UI assets are served under behind a reverse proxy (e.g. `/app`); empty
     /// for root. The `/api/*` routes are not prefixed.
     pub base_path: String,
+    /// Chats the sidebar lists, in order: `(label, target)` where target is a node id (a 1:1
+    /// chat through that node's mailbox) or `room:NAME`. From `HATCHERY_HQ_CHATS=label=target,...`.
+    pub chats: Vec<(String, String)>,
+    /// Where the operator's own sent messages are journaled so a chat keeps its full history
+    /// across reloads (the mailbox inbox only holds received mail). Unset: no journal.
+    pub state_dir: Option<std::path::PathBuf>,
+}
+
+/// `label=target,label2=room:x` → pairs; blank or malformed items are skipped.
+pub fn parse_chats(raw: &str) -> Vec<(String, String)> {
+    raw.split(',')
+        .filter_map(|item| {
+            let (label, target) = item.split_once('=')?;
+            let (label, target) = (label.trim(), target.trim());
+            let ok = |v: &str| !v.is_empty() && v.len() <= 96 && v.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b':'));
+            (ok(label) && ok(target)).then(|| (label.to_owned(), target.to_owned()))
+        })
+        .collect()
 }
 
 impl Config {
@@ -57,6 +75,8 @@ impl Config {
             server_token: var("HATCHERY_SERVER_CONTROL_TOKEN"),
             library: var("HATCHERY_HQ_LIBRARY").map(Into::into),
             base_path: normalize_base_path(var("HATCHERY_HQ_BASE_PATH").as_deref().unwrap_or(""))?,
+            chats: parse_chats(var("HATCHERY_HQ_CHATS").as_deref().unwrap_or("")),
+            state_dir: var("HATCHERY_HQ_STATE_DIR").map(Into::into),
         })
     }
 }
@@ -175,7 +195,7 @@ fn safe_rest(rest: &str) -> bool {
 // ---------------------------------------------------------------------------------- handlers
 
 async fn api_config(State(s): State<Shared>) -> Response {
-    json_reply(200, json!({ "server": s.config.server.is_some(), "version": env!("CARGO_PKG_VERSION") }).to_string().into_bytes())
+    json_reply(200, json!({ "server": s.config.server.is_some(), "version": env!("CARGO_PKG_VERSION"), "chats": s.config.chats.iter().map(|(l, t)| json!({"label": l, "target": t})).collect::<Vec<_>>() }).to_string().into_bytes())
 }
 
 /// Allowlisted pass-through to the C2 operator API (`/v1/enroll/...`).
@@ -199,9 +219,18 @@ async fn api_server(State(s): State<Shared>, Path(rest): Path<String>, method: M
     if !safe_rest(&rest) || !matches!(first, "mail" | "tasks") || !matches!(method, Method::GET | Method::POST) {
         return err(StatusCode::NOT_FOUND, "not found");
     }
+    if rest == "mail/sent" {
+        let to = serde_json::from_slice::<Value>(&body).ok().and_then(|v| v.get("to").and_then(Value::as_str).map(str::to_owned)).unwrap_or_default();
+        return json_reply(200, json!({ "messages": read_sent(s.config.state_dir.as_deref(), &to) }).to_string().into_bytes());
+    }
     let deadline = if rest == "mail/wait" { Duration::from_secs(40) } else { Duration::from_secs(15) };
     match upstream(addr, method.as_str(), &format!("/v1/{rest}"), Some(token), &body, deadline).await {
-        Ok((status, body)) => json_reply(status, body),
+        Ok((status, reply)) => {
+            if rest == "mail/send" && (200..300).contains(&status) {
+                journal_sent(s.config.state_dir.as_deref(), &body, &reply);
+            }
+            json_reply(status, reply)
+        }
         Err(e) => err(StatusCode::BAD_GATEWAY, &e),
     }
 }
@@ -522,5 +551,62 @@ mod base_path_tests {
         let html = index_html("/app");
         assert!(html.contains("src=\"/app/app.js\"") && html.contains("href=\"/app/style.css\""));
         assert!(!html.contains("src=\"/app.js\""));
+    }
+}
+
+const OPERATOR_ID: &str = "hatchery.operator";
+
+/// Append one operator-sent message (request + server reply) to `sent.jsonl`. Best effort.
+pub fn journal_sent(dir: Option<&std::path::Path>, request: &[u8], reply: &[u8]) {
+    let Some(dir) = dir else { return };
+    let Ok(req) = serde_json::from_slice::<Value>(request) else { return };
+    let rep = serde_json::from_slice::<Value>(reply).unwrap_or(Value::Null);
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
+    let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default().to_owned();
+    let line = json!({
+        "message_id": s(&rep, "message_id"),
+        "from": OPERATOR_ID,
+        "to": s(&req, "to"),
+        "subject": s(&req, "subject"),
+        "body": s(&req, "body"),
+        "created_at_ms": now,
+    });
+    let _ = std::fs::create_dir_all(dir);
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("sent.jsonl")) {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
+/// The operator's journaled messages to `to`, oldest first, at most the last 500.
+pub fn read_sent(dir: Option<&std::path::Path>, to: &str) -> Vec<Value> {
+    let Some(dir) = dir else { return Vec::new() };
+    let text = std::fs::read_to_string(dir.join("sent.jsonl")).unwrap_or_default();
+    let mut out: Vec<Value> = text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).filter(|v| v.get("to").and_then(Value::as_str) == Some(to)).collect();
+    let skip = out.len().saturating_sub(500);
+    out.drain(..skip);
+    out
+}
+
+#[cfg(test)]
+mod chat_tests {
+    use super::*;
+
+    #[test]
+    fn chats_parse_and_skip_bad_items() {
+        assert_eq!(parse_chats("dm-a=node-1, team=room:general,bad,=x,y=, z=a b"), vec![("dm-a".into(), "node-1".into()), ("team".into(), "room:general".into())]);
+    }
+
+    #[test]
+    fn sent_journal_round_trip_per_target() {
+        let dir = tempfile::tempdir().unwrap();
+        journal_sent(Some(dir.path()), br#"{"to":"room:team","subject":"-","body":"one"}"#, br#"{"message_id":"m1"}"#);
+        journal_sent(Some(dir.path()), br#"{"to":"node-1","subject":"-","body":"two"}"#, b"{}");
+        let team = read_sent(Some(dir.path()), "room:team");
+        assert_eq!(team.len(), 1);
+        assert_eq!(team[0]["body"], "one");
+        assert_eq!(team[0]["from"], OPERATOR_ID);
+        assert_eq!(read_sent(Some(dir.path()), "node-1").len(), 1);
+        assert!(read_sent(None, "node-1").is_empty());
     }
 }
