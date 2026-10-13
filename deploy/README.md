@@ -74,3 +74,7 @@ Defaults, where present, are generic (QEMU user-net addresses, private ranges, u
 | `INSTALL_PROVIDER_CLIS`, `PROVIDER_CLI_INSTALL` | `install-provider-clis.sh` | no | opt-in install of provider CLIs from official packages |
 
 Landing pages, if wanted, live in `site/` and can be served by the edge reverse proxy.
+
+## Build-time defaults (operator builds only)
+
+`HATCHERY_HQ_M4A_SERVER`, `HATCHERY_HQ_C2_API`, `HATCHERY_HQ_C2_CONTROL` (hq-web) and `HATCHERY_ENROLL_ADDR` (node `enroll`/`call`/`build` when `--c2-enroll` is absent) are read at runtime first; if unset, a value present in the environment of `cargo build` is used (`option_env!`). Keep your values in a private env file outside the repo and source it before building. Tokens and keys are never baked; crates.io builds contain no values.
