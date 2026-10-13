@@ -2,7 +2,7 @@
 #![cfg(unix)]
 
 use hatchery_c2_client::connect_core_operator;
-use hatchery_c2_protocol::{
+use hatchery_core::{
     C2NodeResponse, C2NodeSnapshot, NodeId, NodeIncarnationId, NodeRequest, NodeRoute,
     NodeTransportState, RoutedNodeResponse,
 };
@@ -52,7 +52,7 @@ async fn operator_request_round_trips_through_operator_link() {
             };
             let plain = serde_json::to_vec(&json!({ "op_id": op_id, "g4a": response })).unwrap();
             let h = answering.clone().handler();
-            let _ = h("node-a", hatchery_c2_protocol::ChannelKind::G4aControl, &plain);
+            let _ = h("node-a", hatchery_core::ChannelKind::G4aControl, &plain);
         }
     });
     mesh.register("node-a", link);

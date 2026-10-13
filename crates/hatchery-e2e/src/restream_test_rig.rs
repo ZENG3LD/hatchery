@@ -9,8 +9,8 @@ use hatchery_c2::restreamer::{
     serve, BufferLimits, MemoryJournal, Restreamer, RestreamerConfig, RestreamerKeys,
 };
 use hatchery_c2_client::DrainClient;
-use hatchery_c2_protocol::nested::HqRecipientSecret;
-use hatchery_c2_protocol::{
+use hatchery_core::nested::HqRecipientSecret;
+use hatchery_core::{
     C2NodeResponse, ChannelKind, NodeCursor, NodeId, NodeRequest, NodeRoute,
 };
 use hatchery_server::drain_consumer::{DrainConsumer, NodeStream};
@@ -118,8 +118,8 @@ impl RestreamRig {
         });
 
         let upstream = UpstreamKeys {
-            c2_public: hatchery_c2_protocol::nested::PublicKeyBytes(c2_public.0),
-            recipient_public: hatchery_c2_protocol::nested::PublicKeyBytes(recipient_public.0),
+            c2_public: hatchery_core::nested::PublicKeyBytes(c2_public.0),
+            recipient_public: hatchery_core::nested::PublicKeyBytes(recipient_public.0),
         };
         let (bridge_stop, bridge_rx) = watch::channel(false);
         let endpoint = cfg.local_endpoint.clone();
@@ -178,7 +178,7 @@ impl RestreamRig {
     async fn wait_snapshot(&self, budget: Duration) {
         let deadline = tokio::time::Instant::now() + budget;
         let route = self.route();
-        let routed = hatchery_c2_protocol::RoutedNodeRequest {
+        let routed = hatchery_core::RoutedNodeRequest {
             route,
             request: NodeRequest::Snapshot,
         };

@@ -2,7 +2,7 @@
 #![cfg(unix)]
 
 use hatchery_c2_client::{connect_core_operator, C2ControlError};
-use hatchery_c2_protocol::{NodeId, NodeIncarnationId, NodeRequest, NodeRoute};
+use hatchery_core::{NodeId, NodeIncarnationId, NodeRequest, NodeRoute};
 use hatchery_server::operator_control::{serve_local, NodeOperatorMesh};
 use std::os::unix::fs::DirBuilderExt;
 use std::time::Duration;

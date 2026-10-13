@@ -8,9 +8,9 @@
 //! reconnect RESUMEs after the last ACK.
 
 use hatchery_c2_client::{DrainClient, DrainSession};
-use hatchery_c2_protocol::inner::{decode_inner, encode_inner, InnerKind};
-use hatchery_c2_protocol::nested::{HqRecipientSecret, NoiseResponder, NoiseTransport};
-use hatchery_c2_protocol::ChannelKind;
+use hatchery_core::inner::{decode_inner, encode_inner, InnerKind};
+use hatchery_core::nested::{HqRecipientSecret, NoiseResponder, NoiseTransport};
+use hatchery_core::ChannelKind;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;

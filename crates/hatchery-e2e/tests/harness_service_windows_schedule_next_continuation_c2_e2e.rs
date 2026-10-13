@@ -15,7 +15,7 @@ use std::{
 };
 
 use hatchery_c2_client::{connect_core_operator};
-use hatchery_c2_protocol::{C2NodeResponse, NodeRoute};
+use hatchery_core::{C2NodeResponse, NodeRoute};
 use hatchery_harness_api::HarnessOperatorCredential;
 use hatchery_harness_client::HarnessOperatorClient;
 use hatchery_harness_delivery::DeliveryCatalogV2;

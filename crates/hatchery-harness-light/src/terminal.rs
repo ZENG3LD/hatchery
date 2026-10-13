@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use hatchery_c2_protocol::{C2NodeEvent, C2Topology, NodeRoute, NodeTransportState, RoutedNodeEvent};
+use hatchery_core::{C2NodeEvent, C2Topology, NodeRoute, NodeTransportState, RoutedNodeEvent};
 use hatchery_harness_api::{
     HarnessOperatorHostErrorV1, HarnessOperatorReplyV1, HarnessOperatorResponseV1,
     HarnessRuntimeSessionAddressV1, HarnessRuntimeTerminalPageV1,
@@ -249,7 +249,7 @@ mod tests {
     /// `hatchery-harness-service::runtime`'s own event-loop handling.
     #[tokio::test]
     async fn handle_event_ingests_frames_and_resync_required_invalidates_the_route() {
-        use hatchery_c2_protocol::NodeCursor;
+        use hatchery_core::NodeCursor;
         use gate4agent_node_protocol::{SessionAddress, SessionKey};
 
         let registry = new_shared();

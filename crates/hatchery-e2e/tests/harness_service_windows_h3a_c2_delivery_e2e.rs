@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use hatchery_c2_client::{connect_core_operator};
-use hatchery_c2_protocol::C2NodeResponse;
+use hatchery_core::C2NodeResponse;
 use hatchery_harness_delivery::{
     compile_reviewed_delivery_bundle_v2, ReviewedDeliverySourceV2,
 };
@@ -204,7 +204,7 @@ async fn windows_c2_delivery_wire_rejects_invalid_chunks_and_abort_publishes_not
     let event_drain = tokio::spawn(async move {
         while events.recv().await.is_some() {}
     });
-    let route = hatchery_c2_protocol::NodeRoute {
+    let route = hatchery_core::NodeRoute {
         node_id: node_id.clone(),
         expected_incarnation_id: http.status().await.unwrap().nodes[&node_id]
             .cursor.as_ref().unwrap().incarnation_id,

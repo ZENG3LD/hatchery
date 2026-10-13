@@ -7,7 +7,7 @@ use gate4agent_node_protocol::{
     read_json_frame_limited_body_timeout, write_json_frame_limited, FrameError,
 };
 use gate4agent_node_wire::{local_hmac_sha256, proofs_match, random_nonce, OwnerOnlyLocalListener};
-use hatchery_c2_protocol::{
+use hatchery_core::{
     c2_auth_transcript, c2_bound_auth_transcript, ArchitectureId, BUILD_STAMP, C2AuthDirection,
     C2ClientAuthentication, C2ClientFrame, C2ClientHello, C2ControlCompatibilitySupport, C2Hello,
     C2RelayFailure, C2RelayFailureCode, C2ReplyEnvelope, C2RequestEnvelope, C2ServerChallenge,
@@ -52,7 +52,7 @@ const REQUEST_DEADLINE: Duration = Duration::from_secs(60);
 #[derive(Clone)]
 pub struct NodeOperatorMesh {
     inner: Arc<Mutex<BTreeMap<String, OperatorLink>>>,
-    cursors: Arc<Mutex<BTreeMap<String, hatchery_c2_protocol::NodeCursor>>>,
+    cursors: Arc<Mutex<BTreeMap<String, hatchery_core::NodeCursor>>>,
     topology: watch::Sender<Arc<StatusResponse>>,
 }
 
@@ -95,7 +95,7 @@ impl NodeOperatorMesh {
     }
 
     /// Publish the node's incarnation (from Snapshot / bridge hello) into operator topology.
-    pub fn set_cursor(&self, node_id: &str, cursor: hatchery_c2_protocol::NodeCursor) {
+    pub fn set_cursor(&self, node_id: &str, cursor: hatchery_core::NodeCursor) {
         self.cursors.lock().expect("cursors").insert(node_id.to_owned(), cursor);
         self.publish_topology();
     }

@@ -10,7 +10,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use hatchery_c2_protocol::{JournalReplyBody, JournalWireEntry};
+use crate::{JournalReplyBody, JournalWireEntry};
 
 use crate::buffer::BufferedEvent;
 

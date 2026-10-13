@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-observation-engine"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
@@ -13,8 +13,8 @@ name = "hatchery_observation_engine"
 [dependencies]
 gate4agent-node-protocol = { version = "0.5.2" }
 gate4agent-types = { version = "0.5.2" }
-hatchery-observation-api = { version = "0.2.4", path = "../hatchery-observation-api" }
-hatchery-observation-protocol = { version = "0.2.4", path = "../hatchery-observation-protocol" }
+hatchery-observation-api = { version = "0.2.5", path = "../hatchery-observation-api" }
+hatchery-observation-protocol = { version = "0.2.5", path = "../hatchery-observation-protocol" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 tracing = "0.1"

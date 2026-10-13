@@ -8,7 +8,7 @@ mod buffer {
     pub use hatchery_core::buffer::*;
 }
 mod crypto {
-    pub use hatchery_c2_protocol::nested::*;
+    pub use hatchery_core::nested::*;
 }
 mod journal {
     pub use hatchery_core::journal::*;

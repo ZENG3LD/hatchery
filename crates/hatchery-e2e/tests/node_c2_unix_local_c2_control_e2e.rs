@@ -2,7 +2,7 @@
 #![cfg(unix)]
 
 use hatchery_c2_client::connect_core_operator;
-use hatchery_c2_protocol::{BUILD_STAMP, NodeId};
+use hatchery_core::{BUILD_STAMP, NodeId};
 use hatchery_server::node_controller::OperatorLink;
 use hatchery_server::operator_control::{serve_local, NodeOperatorMesh};
 use std::fs;

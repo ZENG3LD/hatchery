@@ -1161,7 +1161,7 @@ fn capture_frame(app: &App) -> Result<ControlCapturedFrameV1, ControlErrorV1> {
 mod tests {
     use super::*;
     use crossterm::event::{KeyCode, KeyEvent};
-    use hatchery_c2_protocol::C2RelayRoute;
+    use hatchery_core::C2RelayRoute;
     use std::io::BufRead;
 
     use gate4agent_node_protocol::{NodeIncarnationId, OpaqueHostPath};

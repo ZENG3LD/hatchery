@@ -152,7 +152,7 @@ fn launch_catalog(node_id: &NodeId, workspace_id: &WorkspaceId) -> HarnessLaunch
     }]).unwrap()
 }
 
-fn session_count(snapshot: &hatchery_c2_protocol::C2NodeSnapshot) -> usize {
+fn session_count(snapshot: &hatchery_core::C2NodeSnapshot) -> usize {
     snapshot.workspaces.iter().map(|workspace| workspace.sessions.len()).sum()
 }
 

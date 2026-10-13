@@ -17,7 +17,6 @@ m4a = ["hatchery-server/m4a"]
 hatchery-core = { path = "../hatchery-core" }
 hatchery-c2 = { path = "../hatchery-c2" }
 hatchery-c2-client = { path = "../hatchery-c2-client" }
-hatchery-c2-protocol = { path = "../hatchery-c2-protocol", features = ["nested-crypto"] }
 hatchery-server = { path = "../hatchery-server" }
 hatchery-node = { path = "../hatchery-node", features = ["fixture"] }
 tokio = { version = "1", features = ["full"] }

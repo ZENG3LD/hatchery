@@ -5,7 +5,7 @@
 
 use crate::drain_consumer::CoreHandler;
 use crate::hub::Hub;
-use hatchery_c2_protocol::ChannelKind;
+use hatchery_core::ChannelKind;
 use hatchery_enroll::call::ForwardedCall;
 use serde_json::{json, Value};
 use std::sync::Arc;

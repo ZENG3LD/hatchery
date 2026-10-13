@@ -39,7 +39,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use hatchery_c2_client::{C2ReconnectingEventReceiver, C2ReconnectingHandle};
-use hatchery_c2_protocol::C2Topology;
+use hatchery_core::C2Topology;
 use hatchery_harness_api::{
     HarnessOperatorApiError, HarnessOperatorCredential, HarnessOperatorEnvelopeV1,
     HarnessOperatorEventV1, HarnessOperatorHostErrorV1, HarnessOperatorReplyV1,

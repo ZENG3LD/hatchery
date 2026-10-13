@@ -47,7 +47,7 @@ use crate::terminal::{
     HOST_TERMINAL_SUBSCRIBER_LIMIT, HOST_TERMINAL_SUBSCRIBER_QUEUE_CAPACITY,
 };
 use hatchery_harness_delivery::DeliveryCatalogV2;
-use hatchery_c2_protocol::{
+use hatchery_core::{
     C2ManagedSessionRecord, C2NodeEvent, C2SessionStatus,
     NodeRoute, RoutedNodeEvent,
 };
@@ -8323,7 +8323,7 @@ impl HarnessRuntimeInventoryCache {
             observed_at_unix_ms,
             event_sequence: resync.event_sequence(),
             inventory: redact_runtime_inventory(
-                hatchery_c2_protocol::SlimNodeInventory::from_c2_snapshot(resync.snapshot()),
+                hatchery_core::SlimNodeInventory::from_c2_snapshot(resync.snapshot()),
             ),
         };
         let changed = self.nodes.get(&route.node_id) != Some(&node);
@@ -8728,7 +8728,7 @@ fn project_run_correlation(
 /// fanned out to every currently
 /// polling/subscribed peer with no per-recipient variation.
 pub fn redact_runtime_inventory(
-    inventory: hatchery_c2_protocol::SlimNodeInventory,
+    inventory: hatchery_core::SlimNodeInventory,
 ) -> HarnessRuntimeInventoryV1 {
     let enabled_providers = inventory.enabled_providers.into_iter()
         .map(|provider| provider.as_str().to_owned())
@@ -8745,22 +8745,22 @@ pub fn redact_runtime_inventory(
                 gate4agent_types::TransportKind::Acp => HarnessRuntimeTransportV1::Acp,
             },
             status: match session.status {
-                hatchery_c2_protocol::SlimSessionStatus::Registered => {
+                hatchery_core::SlimSessionStatus::Registered => {
                     HarnessRuntimeSessionStatusV1::Registered
                 }
-                hatchery_c2_protocol::SlimSessionStatus::Starting => {
+                hatchery_core::SlimSessionStatus::Starting => {
                     HarnessRuntimeSessionStatusV1::Starting
                 }
-                hatchery_c2_protocol::SlimSessionStatus::Running => {
+                hatchery_core::SlimSessionStatus::Running => {
                     HarnessRuntimeSessionStatusV1::Running
                 }
-                hatchery_c2_protocol::SlimSessionStatus::Stopping => {
+                hatchery_core::SlimSessionStatus::Stopping => {
                     HarnessRuntimeSessionStatusV1::Stopping
                 }
-                hatchery_c2_protocol::SlimSessionStatus::Exited => {
+                hatchery_core::SlimSessionStatus::Exited => {
                     HarnessRuntimeSessionStatusV1::Exited
                 }
-                hatchery_c2_protocol::SlimSessionStatus::Failed => {
+                hatchery_core::SlimSessionStatus::Failed => {
                     HarnessRuntimeSessionStatusV1::Failed
                 }
             },
@@ -12155,7 +12155,7 @@ fn apply_context_pack_receipt_for_record(
 fn apply_snapshot_context_pack_receipts(
     harness: &mut HarnessService,
     route: &NodeRoute,
-    snapshot: &hatchery_c2_protocol::C2NodeSnapshot,
+    snapshot: &hatchery_core::C2NodeSnapshot,
     received_at_ms: u64,
 ) -> Result<Vec<hatchery_harness_protocol::HarnessRunId>, HarnessRuntimeError> {
     if snapshot.node_id != route.node_id {
@@ -12363,8 +12363,8 @@ fn apply_snapshot_lifecycle(
     harness: &mut HarnessService,
     route: &NodeRoute,
     event_sequence: u64,
-    snapshot: &hatchery_c2_protocol::C2NodeSnapshot,
-    lifecycle_control_events: &[hatchery_c2_protocol::C2NodeEventEnvelope],
+    snapshot: &hatchery_core::C2NodeSnapshot,
+    lifecycle_control_events: &[hatchery_core::C2NodeEventEnvelope],
     received_at_ms: u64,
 ) -> Result<EngineTouch, HarnessRuntimeError> {
     if event_sequence == 0 {
@@ -12406,7 +12406,7 @@ fn apply_snapshot_lifecycle(
 fn replay_contains_exact_lifecycle(
     run: &hatchery_harness_protocol::HarnessRunV1,
     route: &NodeRoute,
-    events: &[hatchery_c2_protocol::C2NodeEventEnvelope],
+    events: &[hatchery_core::C2NodeEventEnvelope],
 ) -> bool {
     events.iter().any(|event| {
         exact_bound_control_lifecycle(
@@ -12426,7 +12426,7 @@ fn replay_contains_exact_lifecycle(
 fn exact_snapshot_lifecycle(
     run: &hatchery_harness_protocol::HarnessRunV1,
     route: &NodeRoute,
-    snapshot: &hatchery_c2_protocol::C2NodeSnapshot,
+    snapshot: &hatchery_core::C2NodeSnapshot,
 ) -> Option<(HarnessLifecycleEventKindV1, HarnessLifecycleProjectionV1)> {
     let binding = run.binding.as_ref()?;
     let HarnessSessionIdentityV1::Managed { record_id, active_session: Some(active) } =
@@ -12494,7 +12494,7 @@ fn apply_replayed_lifecycle_events(
     harness: &mut HarnessService,
     route: &NodeRoute,
     eviction_gap_sequence: Option<u64>,
-    events: &[hatchery_c2_protocol::C2NodeEventEnvelope],
+    events: &[hatchery_core::C2NodeEventEnvelope],
     received_at_ms: u64,
 ) -> Result<EngineTouch, HarnessRuntimeError> {
     let mut touch = EngineTouch::default();
@@ -12812,7 +12812,7 @@ pub enum HarnessRuntimeError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hatchery_c2_protocol::{
+    use hatchery_core::{
         C2ControlEvent, C2ControlEventKind, C2ManagedSessionRecord,
         C2NodeEventEnvelope, C2NodeSnapshot,
         C2SessionSnapshot, C2SessionStatus, C2WorkspaceSnapshot,
@@ -12848,7 +12848,7 @@ mod tests {
         AgentId, AgentInstanceId, ApprovalLevel, ProviderActivity, PtyScreenState, SessionGeneration,
         TerminalSize, TransportKind,
     };
-    use hatchery_c2_protocol::{SlimNodeInventory, SlimSession, SlimSessionStatus, SlimWorkspace};
+    use hatchery_core::{SlimNodeInventory, SlimSession, SlimSessionStatus, SlimWorkspace};
 
     fn database_path() -> PathBuf {
         let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();

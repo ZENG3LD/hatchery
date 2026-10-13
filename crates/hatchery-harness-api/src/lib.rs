@@ -4622,7 +4622,7 @@ pub struct HarnessRuntimeInventoryV1 {
     pub managed_session_count: usize,
     pub managed_sessions_truncated: bool,
     /// Lifetime count of managed session records the node's own retention
-    /// sweep has retired (mirrors `hatchery_c2_protocol::SlimNodeInventory::
+    /// sweep has retired (mirrors `hatchery_core::SlimNodeInventory::
     /// retired_count`). Additive and informational only, `#[serde(default)]`
     /// so a payload from before this field existed still deserializes.
     #[serde(default)]
@@ -4639,7 +4639,7 @@ pub struct HarnessRuntimeInventoryV1 {
 }
 
 /// Same liveness-first rationale and exact rank table as c2-protocol's own
-/// `managed_session_liveness_rank` (`hatchery_c2_protocol::SlimNodeInventory`
+/// `managed_session_liveness_rank` (`hatchery_core::SlimNodeInventory`
 /// page-cut ordering): `Live` ranks first, `IdentityPending` next, `Dormant`
 /// next, terminal `Unavailable` last. The producer orders a page by this
 /// rank before the `MAX_C2_MANAGED_SESSIONS_PER_NODE` cut, so a page is

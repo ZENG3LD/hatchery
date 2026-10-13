@@ -4,7 +4,7 @@
 //! strips the inner Noise layer (caller-supplied transport), then this module
 //! decodes g4a frames (`RoutedNodeEvent` / `RoutedNodeResponse` / `C2ServerFrame`).
 
-use hatchery_c2_protocol::{
+use hatchery_core::{
     ChannelKind, DrainEnvelope, RoutedNodeEvent, RoutedNodeRequest, RoutedNodeResponse,
     C2ServerFrame,
 };
@@ -190,7 +190,7 @@ impl OperatorLink {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hatchery_c2_protocol::Frame;
+    use hatchery_core::Frame;
 
     #[test]
     fn parses_unknown_json_as_forward_compatible() {

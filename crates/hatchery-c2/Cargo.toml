@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-c2"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 repository = "https://github.com/ZENG3LD/hatchery"
 description = "Edge restreamer: opaque multiplex uplink and core drain (A2). No operator control socket."
@@ -14,8 +14,7 @@ name = "hatchery-c2"
 path = "src/main.rs"
 
 [dependencies]
-hatchery-core = { path = "../hatchery-core", version = "0.2.4" }
-hatchery-c2-protocol = { path = "../hatchery-c2-protocol", version = "0.2.4", features = ["nested-crypto"] }
+hatchery-core = { path = "../hatchery-core", version = "0.2.5" }
 gate4agent-node-protocol = { version = "0.5.2" }
 gate4agent-node-wire = { version = "0.5.2" }
 serde = { version = "1", features = ["derive"] }
@@ -24,8 +23,8 @@ thiserror = "2"
 async-trait = "0.1"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "signal", "sync", "time"] }
 tracing = "0.1"
-hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.4" }
-hatchery-build = { path = "../hatchery-build", version = "0.2.4" }
+hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.5" }
+hatchery-build = { path = "../hatchery-build", version = "0.2.5" }
 sha2 = "0.10"
 getrandom = "0.2"
 x25519-dalek = { version = "2", default-features = false, features = ["static_secrets"] }

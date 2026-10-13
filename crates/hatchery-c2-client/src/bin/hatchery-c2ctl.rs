@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::time::Duration;
 
 use hatchery_c2_client::{connect_core_operator, C2ControlHandle};
-use hatchery_c2_protocol::{
+use hatchery_core::{
     C2NodeResponse, C2NodeSnapshot, C2SessionSnapshot, C2SessionStatus, NodeRoute,
     NodeTransportState, RoutedNodeResponse,
 };
@@ -527,7 +527,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hatchery_c2_protocol::C2WorkspaceSnapshot;
+    use hatchery_core::C2WorkspaceSnapshot;
     use gate4agent_node_protocol::{NodeIncarnationId, SessionAddress, SessionKey};
     use gate4agent_types::{
         AgentId, AgentInstanceId, OperatorGateKind, OperatorGateState, ProviderActivity,

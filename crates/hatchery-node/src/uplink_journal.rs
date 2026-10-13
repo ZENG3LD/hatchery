@@ -4,7 +4,7 @@
 //! the multiplex uplink, this module serves `JournalReply` from disk.
 
 use hatchery_core::FileJournal;
-use hatchery_c2_protocol::{
+use hatchery_core::{
     ChannelKind, Frame, FrameError, FrameType, OpenPayload,
 };
 use std::path::PathBuf;

@@ -2,7 +2,7 @@
 #![cfg(unix)]
 
 use hatchery_c2_client::connect_core_operator;
-use hatchery_c2_protocol::{
+use hatchery_core::{
     C2NodeResponse, C2NodeSnapshot, NodeId, NodeIncarnationId, NodeRequest, NodeRoute,
     NodeTransportState, RoutedNodeResponse,
 };
@@ -53,7 +53,7 @@ async fn unix_core_operator_snapshot_request_reaches_mesh_node() {
             let plain = serde_json::to_vec(&json!({ "op_id": op_id, "g4a": response })).unwrap();
             let _ = answering.clone().handler()(
                 "unix-local",
-                hatchery_c2_protocol::ChannelKind::G4aControl,
+                hatchery_core::ChannelKind::G4aControl,
                 &plain,
             );
         }

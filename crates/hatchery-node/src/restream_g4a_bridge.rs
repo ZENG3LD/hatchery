@@ -11,7 +11,7 @@ use gate4agent_node_protocol::{
     NodeResponse, ServerFrame,
 };
 use gate4agent_node_wire::{LocalNodeClient, NodeClientError};
-use hatchery_c2_protocol::{
+use hatchery_core::{
     C2NodeEvent, C2NodeFailure, C2NodeResponse, ChannelKind, NodeCursor, RoutedNodeEvent,
     RoutedNodeRequest, RoutedNodeResponse,
 };
