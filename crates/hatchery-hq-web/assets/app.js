@@ -207,7 +207,7 @@ $('#tspawn').onclick = () => {
   if (tws) tws.close();
   const opt = $('#tprov').selectedOptions[0]; const prov = opt.dataset.parser ? 'fixture' : opt.value; const q = new URLSearchParams({ node, provider: opt.value, rows: ROWS, cols: COLS }); if (opt.dataset.parser) q.set('parser', opt.dataset.parser);
   term.reset(); if (mini) mini.reset(); S.lastAnsi = ''; $('#tinfo').textContent = 'spawning…';
-  tws = new WebSocket(`ws://${location.host}/api/term?${q}`);
+  tws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/term?${q}`);
   tws.onmessage = (m) => {
     const d = JSON.parse(m.data);
     if (d.type === 'spawned') { S.events[node] = new Map(); S.agentState[node] = 'idle'; S.session = d.session; S.sessionNode = node; S.sessionProv = prov; S.target = 'agent'; $('#tinfo').textContent = `${prov} on ${node}`; addLocal(node, { sys: true, text: `Agent ${prov} started on ${node}` }); if (S.chat === node) renderChip(); }
@@ -293,7 +293,7 @@ let bws = null; const canvas = $('#bcanvas'); const ctx = canvas.getContext('2d'
 function bsend(o) { if (bws && bws.readyState === 1) bws.send(JSON.stringify(o)); }
 $('#bopen').onclick = () => {
   if (bws) bws.close();
-  bws = new WebSocket(`ws://${location.host}/api/browser?session=${encodeURIComponent($('#bsess').value.trim())}`); bws.binaryType = 'blob';
+  bws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/browser?session=${encodeURIComponent($('#bsess').value.trim())}`); bws.binaryType = 'blob';
   bws.onmessage = async (m) => {
     if (typeof m.data === 'string') { const d = JSON.parse(m.data); if (d.type === 'sent') $('#binfo').textContent = `sent ${d.op} (${d.bytes} bytes) at ${d.x ?? ''},${d.y ?? ''}`; return; }
     const bmp = await createImageBitmap(m.data); canvas.width = bmp.width; canvas.height = bmp.height; ctx.drawImage(bmp, 0, 0); window.browserFrames = (window.browserFrames || 0) + 1;

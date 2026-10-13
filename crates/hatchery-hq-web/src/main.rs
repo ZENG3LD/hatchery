@@ -5,6 +5,7 @@
 //!   HATCHERY_HQ_C2_TOKEN          C2 operator token (or GATE4AGENT_C2_TOKEN)
 //!   HATCHERY_HQ_SERVER            hatchery-server control address (optional: mail and tasks)
 //!   HATCHERY_SERVER_CONTROL_TOKEN hatchery-server control bearer (optional)
+//!   HATCHERY_HQ_BASE_PATH         asset prefix behind a reverse proxy, e.g. /app (optional)
 
 #[tokio::main]
 async fn main() {

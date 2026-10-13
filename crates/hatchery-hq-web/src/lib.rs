@@ -34,6 +34,9 @@ pub struct Config {
     pub server_token: Option<String>,
     /// Optional read-only folder of PNG screenshots shown in the Library tab.
     pub library: Option<std::path::PathBuf>,
+    /// Path prefix the UI assets are served under behind a reverse proxy (e.g. `/app`); empty
+    /// for root. The `/api/*` routes are not prefixed.
+    pub base_path: String,
 }
 
 impl Config {
@@ -53,8 +56,27 @@ impl Config {
             server: var("HATCHERY_HQ_SERVER").map(|v| v.parse().map_err(|e| format!("HATCHERY_HQ_SERVER: {e}"))).transpose()?,
             server_token: var("HATCHERY_SERVER_CONTROL_TOKEN"),
             library: var("HATCHERY_HQ_LIBRARY").map(Into::into),
+            base_path: normalize_base_path(var("HATCHERY_HQ_BASE_PATH").as_deref().unwrap_or(""))?,
         })
     }
+}
+
+/// `""` or `/seg[/seg]` (no trailing slash, conservative characters).
+pub fn normalize_base_path(raw: &str) -> Result<String, String> {
+    let t = raw.trim().trim_end_matches('/');
+    if t.is_empty() {
+        return Ok(String::new());
+    }
+    let ok = t.starts_with('/') && !t.contains("..") && !t.contains("//") && t.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'-' | b'_'));
+    if !ok || t.starts_with("/api") {
+        return Err(format!("HATCHERY_HQ_BASE_PATH: invalid prefix {t:?}"));
+    }
+    Ok(t.to_owned())
+}
+
+/// index.html with asset URLs under `base`.
+pub fn index_html(base: &str) -> String {
+    include_str!("../assets/index.html").replace("href=\"/", &format!("href=\"{base}/")).replace("src=\"/", &format!("src=\"{base}/"))
 }
 
 pub struct AppState {
@@ -67,12 +89,19 @@ type Shared = Arc<AppState>;
 pub fn router(config: Config) -> (Router, Shared) {
     let (events, _) = broadcast::channel(256);
     let state = Arc::new(AppState { config, events });
-    let app = Router::new()
-        .route("/", get(|| async { asset("text/html; charset=utf-8", include_str!("../assets/index.html").as_bytes()) }))
-        .route("/app.js", get(|| async { asset("text/javascript; charset=utf-8", include_str!("../assets/app.js").as_bytes()) }))
-        .route("/style.css", get(|| async { asset("text/css; charset=utf-8", include_str!("../assets/style.css").as_bytes()) }))
-        .route("/vendor/xterm.js", get(|| async { asset("text/javascript; charset=utf-8", include_bytes!("../assets/vendor/xterm.js")) }))
-        .route("/vendor/xterm.css", get(|| async { asset("text/css; charset=utf-8", include_bytes!("../assets/vendor/xterm.css")) }))
+    let base = state.config.base_path.clone();
+    let index: &'static str = Box::leak(index_html(&base).into_boxed_str());
+    let mut app = Router::new()
+        .route(&format!("{base}/"), get(move || async move { asset("text/html; charset=utf-8", index.as_bytes()) }))
+        .route(&format!("{base}/app.js"), get(|| async { asset("text/javascript; charset=utf-8", include_str!("../assets/app.js").as_bytes()) }))
+        .route(&format!("{base}/style.css"), get(|| async { asset("text/css; charset=utf-8", include_str!("../assets/style.css").as_bytes()) }))
+        .route(&format!("{base}/vendor/xterm.js"), get(|| async { asset("text/javascript; charset=utf-8", include_bytes!("../assets/vendor/xterm.js")) }))
+        .route(&format!("{base}/vendor/xterm.css"), get(|| async { asset("text/css; charset=utf-8", include_bytes!("../assets/vendor/xterm.css")) }));
+    if !base.is_empty() {
+        let to: &'static str = Box::leak(format!("{base}/").into_boxed_str());
+        app = app.route(&base, get(move || async move { axum::response::Redirect::temporary(to) }));
+    }
+    let app = app
         .route("/api/config", get(api_config))
         .route("/api/nodes", get(api_nodes))
         .route("/api/c2/{*rest}", any(api_c2))
@@ -478,3 +507,20 @@ async fn browser_session(mut socket: WebSocket, s: Shared, session: String) -> R
     Ok(())
 }
 
+
+#[cfg(test)]
+mod base_path_tests {
+    use super::*;
+
+    #[test]
+    fn base_path_rules() {
+        assert_eq!(normalize_base_path("").unwrap(), "");
+        assert_eq!(normalize_base_path("/app/").unwrap(), "/app");
+        assert!(normalize_base_path("app").is_err());
+        assert!(normalize_base_path("/a/../b").is_err());
+        assert!(normalize_base_path("/api").is_err());
+        let html = index_html("/app");
+        assert!(html.contains("src=\"/app/app.js\"") && html.contains("href=\"/app/style.css\""));
+        assert!(!html.contains("src=\"/app.js\""));
+    }
+}
