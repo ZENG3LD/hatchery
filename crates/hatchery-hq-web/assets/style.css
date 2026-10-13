@@ -429,3 +429,4 @@ body.rail #chats{order:2}body.rail .sidetop{order:3;padding:8px 0 0}body.rail .s
 .rx:hover .rw{max-width:220px;opacity:1;margin:0 6px 0 3px}
 .rn{transition:opacity .15s}.rx:hover .rn{opacity:0;max-width:0;padding:0;overflow:hidden}
 .msg.them.hasrx>.ts.in{top:auto;bottom:8px}
+.msg.them .rx,.msg.me .rx{border-color:transparent}.msg .rx.mine,.msg .rx:has(.rpill.mine){border-color:#353535}
