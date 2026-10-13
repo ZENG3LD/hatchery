@@ -2153,6 +2153,9 @@ name = "hatchery-server"
 version = "0.2.3"
 dependencies = [
  "async-trait",
+ "gate4agent-node-protocol",
+ "gate4agent-node-wire",
+ "gate4agent-types",
  "hatchery-c2",
  "hatchery-c2-client",
  "hatchery-c2-protocol",

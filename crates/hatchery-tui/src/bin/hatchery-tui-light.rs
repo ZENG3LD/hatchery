@@ -1,8 +1,10 @@
+//! A2: operator control is on hatchery-server (core), not on C2.
 use std::str::FromStr;
 
 use hatchery_tui::{HarnessOperatorEndpoint, PtyColorMode, RunOptions};
 
 const C2_TOKEN_ENV: &str = "GATE4AGENT_C2_TOKEN";
+const CORE_TOKEN_ENV: &str = "GATE4AGENT_CORE_OPERATOR_TOKEN";
 
 /// Parsed CLI surface: unchanged from the direct-C2 era (c2 endpoint arg +
 /// `GATE4AGENT_C2_TOKEN` env, plus the mode-agnostic `--style` override) even
@@ -33,7 +35,7 @@ const USAGE: &str = "usage: hatchery-tui-light --c2-control PATH [--style inheri
      --wg-private-key PATH --hq-tunnel-address IP --c2-tunnel-address IP \\\n       \
      --control-port PORT [--wg-listen-port 0] [--wg-allowed-ip IP/PREFIX] \\\n       \
      [--wg-keepalive SECS] [--wg-interface NAME] [--style inherit|gate]\n\
-     credential env: GATE4AGENT_C2_TOKEN\n\
+     credential env: GATE4AGENT_CORE_OPERATOR_TOKEN (or GATE4AGENT_C2_TOKEN)\n\
      unix --c2-control and --wg-client are alternatives; --node is rejected";
 
 struct WgCli {
@@ -44,6 +46,7 @@ struct WgCli {
     hq_tunnel_address: Option<String>,
     c2_tunnel_address: Option<String>,
     control_port: Option<u16>,
+    drain_port: Option<u16>,
     listen_port: u16,
     allowed_ips: Vec<String>,
     keepalive: u16,
@@ -60,6 +63,7 @@ impl WgCli {
             hq_tunnel_address: None,
             c2_tunnel_address: None,
             control_port: None,
+            drain_port: None,
             listen_port: 0,
             allowed_ips: Vec::new(),
             keepalive: 25,
@@ -74,6 +78,7 @@ impl WgCli {
             || self.hq_tunnel_address.is_some()
             || self.c2_tunnel_address.is_some()
             || self.control_port.is_some()
+            || self.drain_port.is_some()
             || self.listen_port != 0
             || !self.allowed_ips.is_empty()
             || self.interface_name != "wg-hq"
@@ -99,7 +104,7 @@ fn parse_args_from(
             "--node" => {
                 return Err("direct Node mode is disabled; use --c2-control".to_owned());
             }
-            "--c2-control" => {
+            "--core-control" | "--c2-control" => {
                 if c2_control.is_some() {
                     return Err("--c2-control can be specified only once".to_owned());
                 }
@@ -146,6 +151,12 @@ fn parse_args_from(
                     return Err("--control-port can be specified only once".to_owned());
                 }
                 wg.control_port = Some(parse_port(&value(args, &mut index, "--control-port")?, "--control-port")?);
+            }
+            "--drain-port" => {
+                if wg.drain_port.is_some() {
+                    return Err("--drain-port can be specified only once".to_owned());
+                }
+                wg.drain_port = Some(parse_port(&value(args, &mut index, "--drain-port")?, "--drain-port")?);
             }
             "--wg-listen-port" => {
                 wg.listen_port = parse_port(&value(args, &mut index, "--wg-listen-port")?, "--wg-listen-port")?;
@@ -202,10 +213,16 @@ fn parse_args_from(
 }
 
 fn read_token(read_secret: &mut impl FnMut(&str) -> Result<String, String>) -> Result<String, String> {
-    let c2_token = read_secret(C2_TOKEN_ENV)?;
-    if c2_token.is_empty() {
-        return Err(format!("{C2_TOKEN_ENV} must not be empty"));
-    }
+    let c2_token = match std::env::var(CORE_TOKEN_ENV) {
+        Ok(t) if !t.is_empty() => t,
+        _ => {
+            let t = read_secret(C2_TOKEN_ENV)?;
+            if t.is_empty() {
+                return Err(format!("{CORE_TOKEN_ENV} or {C2_TOKEN_ENV} must not be empty"));
+            }
+            t
+        }
+    };
     Ok(c2_token)
 }
 
@@ -226,6 +243,7 @@ fn wg_config(wg: WgCli) -> Result<hatchery_c2_client::HqWgClientConfig, String> 
         .parse()
         .map_err(|_| "--hq-tunnel-address is invalid".to_owned())?;
     let control_port = wg.control_port.ok_or_else(|| "--wg-client requires --control-port".to_owned())?;
+    let drain_port = wg.drain_port.unwrap_or(control_port);
     let private_key_path = PathBuf::from(
         wg.private_key.ok_or_else(|| "--wg-client requires --wg-private-key".to_owned())?,
     );
@@ -252,6 +270,7 @@ fn wg_config(wg: WgCli) -> Result<hatchery_c2_client::HqWgClientConfig, String> 
         hq_tunnel_address,
         c2_tunnel_address,
         control_port,
+        drain_port,
         peers: vec![HqWgPeer {
             public_key,
             endpoint,
@@ -396,7 +415,7 @@ mod tests {
         let startup = parse(
             &[
                 "hatchery-tui-light",
-                "--c2-control",
+                "--core-control" | "--c2-control",
                 r"\\.\pipe\hatchery-c2",
                 "--style",
                 "gate",
@@ -456,7 +475,7 @@ mod tests {
         let allowed = parse(&allowed, &[(C2_TOKEN_ENV, "token")]).err().unwrap();
         assert_eq!(allowed, "HQ WireGuard allowed IPs must be only the single C2 tunnel address");
 
-        let both = ["hatchery-tui-light", "--c2-control", "/tmp/hatchery-c2.sock", "--wg-client"];
+        let both = ["hatchery-tui-light", "--core-control" | "--c2-control", "/tmp/hatchery-c2.sock", "--wg-client"];
         let both = parse(&both, &[]).err().unwrap();
         assert_eq!(both, "unix --c2-control and --wg-client are alternatives");
     }
@@ -466,7 +485,7 @@ mod tests {
         let error = parse(
             &[
                 "hatchery-tui-light",
-                "--c2-control",
+                "--core-control" | "--c2-control",
                 r"\\.\pipe\hatchery-c2",
                 "--cwd",
                 r"C:\work",

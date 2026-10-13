@@ -13,6 +13,7 @@ pub mod memory;
 pub mod hub;
 pub mod node_controller;
 pub mod drain_consumer;
+pub mod operator_control;
 #[cfg(feature = "m4a")]
 pub mod node_sink;
 #[cfg(feature = "m4a")]
