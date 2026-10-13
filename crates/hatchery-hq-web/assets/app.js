@@ -13,8 +13,8 @@ const fmtTime = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', m
 function toast(t) { document.querySelectorAll('.toast').forEach((x) => x.remove()); const d = document.createElement('div'); d.className = 'toast'; d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), 7000); }
 
 // ---- avatars (soft blob with two eyes, colour from the name)
-const PALETTE = ['#1677ff', '#ff7a1a', '#ff3d8b', '#8b5cf6', '#14b8a6', '#a855f7', '#22c55e'];
-function colorOf(name) { let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; }
+const PALETTE = ['#1677ff', '#ff7a1a', '#ff3d8b', '#8b5cf6', '#14b8a6', '#a855f7', '#22c55e', '#f5b014', '#ef4444', '#06b6d4'];
+function colorOf(name) { let h = 0; for (const c of String(name)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return PALETTE[h % PALETTE.length]; }
 function avatarState(name) {
   const n = S.nodes.find((x) => x.node_id === name);
   if (n && !n.online) return 'off';
@@ -24,42 +24,82 @@ function avatarState(name) {
   return 'idle';
 }
 // Avatar: round blob with two eyes; the state class (idle / working / thinking / attention / off) animates it.
+const SHAPES = [
+  'M32 5c15 0 27 11 27 27S47 59 32 59 5 47 5 32 17 5 32 5z',
+  'M32 4c16 0 28 10 28 26 0 18-10 30-28 30S4 48 4 30C4 14 16 4 32 4z',
+  'M32 6c5 0 26 38 26 46 0 6-6 8-26 8S6 58 6 52C6 44 27 6 32 6z',
+  'M16 6h32c6 0 10 4 10 10v32c0 6-4 10-10 10H16C10 58 6 54 6 48V16C6 10 10 6 16 6z',
+  'M23 5h18l17 17v20L41 59H23L6 42V22z',
+  'M30 5c14-2 29 9 28 27-1 17-13 27-28 26C14 57 4 46 6 30 7 16 17 6 30 5z',
+  'M32 4c6 0 9 6 15 8s12 4 12 12c0 6-4 9-4 15 0 12-9 21-23 21S9 51 9 39c0-6-4-9-4-15 0-8 6-10 12-12s9-8 15-8z',
+];
+function hashOf(name) { let h = 2166136261; for (const c of String(name)) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return h; }
+// Avatar "critter": shape + colour derived from the id; state class animates it, .look follows the cursor.
 function avatar(name, cls = '', online, force) {
-  const c = colorOf(name); const st = force || (name === 'Hatchery HQ' ? 'idle' : avatarState(name));
+  const h = hashOf(name); const c = colorOf(name); const shape = SHAPES[(h >>> 8) % SHAPES.length]; const st = force || avatarState(name);
   const extra = st === 'thinking' ? '<g class="tdots"><circle cx="50" cy="8" r="2.4"/><circle cx="56" cy="3" r="1.8"/></g>' : st === 'attention' ? '<circle class="ring" cx="32" cy="32" r="30" fill="none" stroke="#e0a63a" stroke-width="2.5"/>' : '';
-  return `<div class="av ${cls} st-${st}" data-av="${esc(name)}"><svg viewBox="0 0 64 64" width="100%" height="100%"><path class="body" d="M32 4c16 0 28 10 28 26 0 18-10 30-28 30S4 48 4 30C4 14 16 4 32 4z" fill="${c}"/><g class="eyes"><ellipse class="eye" cx="23" cy="28" rx="4" ry="6" fill="#0b0b0d" transform="rotate(-12 23 28)"/><ellipse class="eye" cx="41" cy="28" rx="4" ry="6" fill="#0b0b0d" transform="rotate(-12 41 28)"/></g>${extra}</svg>${online ? '<span class="on"></span>' : ''}</div>`;
+  const ey = 28 + ((h >>> 4) % 5) - 2;
+  return `<div class="av ${cls} st-${st}" data-av="${esc(name)}"><svg viewBox="0 0 64 64" width="100%" height="100%"><g class="bodyg"><path class="body" d="${shape}" fill="${c}"/><g class="look"><g class="eyes"><ellipse class="eye" cx="23" cy="${ey}" rx="4" ry="6" fill="#0b0b0d" transform="rotate(-12 23 ${ey})"/><ellipse class="eye" cx="41" cy="${ey}" rx="4" ry="6" fill="#0b0b0d" transform="rotate(-12 41 ${ey})"/></g></g></g>${extra}</svg>${online ? '<span class="on"></span>' : ''}</div>`;
 }
+// eyes of the open chat's avatars follow the cursor
+document.addEventListener('mousemove', (e) => {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  document.querySelectorAll('#headav .av .look, #chat .hello .av .look').forEach((g) => {
+    const r = g.closest('.av').getBoundingClientRect(); const dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2); const d = Math.hypot(dx, dy) || 1; const k = Math.min(1, d / 300) * 4;
+    g.setAttribute('transform', `translate(${(dx / d * k).toFixed(2)} ${(dy / d * k).toFixed(2)})`);
+  });
+});
 
 // ---- state
-const S = { mode: 'chat', events: {}, agentState: {}, lastFrame: 0, promptAt: 0, lastAnsi: '', nodes: [], chat: '*', mail: {}, local: {}, session: null, sessionNode: null, sessionProv: null, target: 'mail', working: {}, panel: false, tab: 'activity', lastStatus: {}, wake: null, library: [] };
-const chatName = (id) => (id === '*' ? 'Hatchery HQ' : id);
+const S = { mode: 'chat', view: 'chat', space: '*', log: [], events: {}, agentState: {}, lastFrame: 0, promptAt: 0, lastAnsi: '', nodes: [], ready: null, chat: '*', mail: {}, local: {}, session: null, sessionNode: null, sessionProv: null, target: 'mail', working: {}, panel: false, tab: 'activity', lastStatus: {}, wake: null, library: [] };
+const chatName = (id) => (id === '*' ? 'general' : id);
 const addLocal = (chat, item) => { (S.local[chat] ||= []).push({ ts: Date.now(), ...item }); renderChat(); };
+const logEv = (text) => { S.log.push({ ts: Date.now(), text }); if (S.log.length > 300) S.log.shift(); if (S.view === 'status') renderStatus(); };
+const visibleNodes = () => S.nodes.filter((n) => n.status !== 'revoked');
 
-// ---- sidebar
+// ---- sidebar: spaces (nodes) -> agents (1:1 chats) + groups (messenger rooms)
 function renderSidebar() {
-  $('#meav').innerHTML = avatar('Hatchery HQ', 'big');
-  const q = $('#search').value.toLowerCase();
-  const items = [{ id: '*', name: 'Hatchery HQ', status: null, online: true, kind: 'operator' }, ...S.nodes.map((n) => ({ id: n.node_id, name: n.node_id, status: n.status, online: n.online, kind: n.kind }))]
-    .filter((i) => !q || i.name.toLowerCase().includes(q));
-  $('#chats').innerHTML = '';
-  for (const i of items) {
-    const msgs = S.mail[i.id] || []; const last = msgs[msgs.length - 1];
-    const preview = last ? last.body : i.id === '*' ? 'All inbound mail and events' : `${i.kind} node · ${i.online ? 'online' : 'offline'}`;
-    const b = document.createElement('button'); b.className = 'chatitem' + (S.chat === i.id ? ' on' : ''); b.dataset.id = i.id;
-    b.innerHTML = avatar(i.name, '', i.online && i.id !== '*') + `<div class="t"><div class="n">${esc(i.name)}${i.status ? `<span class="st ${esc(i.status)}">${esc(i.status)}</span>` : ''}</div><div class="p">${esc(preview)}</div></div>`;
-    b.onclick = () => openChat(i.id);
-    $('#chats').appendChild(b);
+  const sp = S.space === '*' ? null : S.nodes.find((n) => n.node_id === S.space);
+  $('#spacename').textContent = sp ? sp.node_id : 'All spaces';
+  $('#spaceav').innerHTML = `<span class="gi" style="width:30px;height:30px;border-radius:9px;background:${sp ? colorOf(sp.node_id) : '#2a2a30'};display:grid;place-items:center;color:#fff;font-weight:600;font-size:13px">${esc((sp ? sp.node_id : 'H')[0].toUpperCase())}</span>`;
+  const q = $('#search').value.toLowerCase(); const match = (n) => !q || n.toLowerCase().includes(q);
+  const root = $('#chats'); root.innerHTML = '';
+  const sec = (t) => { const d = document.createElement('div'); d.className = 'sec'; d.textContent = t; root.appendChild(d); };
+  const item = (id, html, preview) => { const b = document.createElement('button'); b.className = 'chatitem' + (S.view === 'chat' && S.chat === id ? ' on' : ''); b.innerHTML = html + `<div class="t"><div class="n">${esc(chatName(id))}</div><div class="p">${esc(preview)}</div></div>`; b.onclick = () => { openChat(id); document.body.classList.remove('sideopen'); }; root.appendChild(b); };
+  const last = (id) => { const m = S.mail[id] || []; const l = m[m.length - 1]; return l ? l.body : ''; };
+  sec('Agents');
+  const sess = S.session && match(S.sessionNode) && (S.space === '*' || S.sessionNode === S.space) ? [S.sessionNode] : [];
+  if (!sess.length) root.insertAdjacentHTML('beforeend', '<div class="empty">No live agent sessions</div>');
+  for (const id of sess) item(id, avatar(id, '', true), last(id) || S.sessionProv + ' session');
+  sec('Groups');
+  if (match('general')) item('*', '<span class="gi">#</span>', last('*') || 'Team room');
+  $('#statusbtn').classList.toggle('on', S.view === 'status');
+}
+function renderSpaceMenu() {
+  const m = $('#spacemenu'); m.innerHTML = '';
+  for (const [id, label] of [['*', 'All spaces'], ...visibleNodes().map((n) => [n.node_id, n.node_id])]) {
+    const b = document.createElement('button'); b.className = S.space === id ? 'on' : ''; b.textContent = label;
+    b.onclick = () => { S.space = id; m.hidden = true; renderSidebar(); }; m.appendChild(b);
   }
 }
+$('#spacebtn').onclick = (e) => { e.stopPropagation(); const m = $('#spacemenu'); m.hidden = !m.hidden; if (!m.hidden) renderSpaceMenu(); };
 $('#searchbtn').onclick = () => { const s = $('#search'); s.hidden = !s.hidden; if (!s.hidden) s.focus(); };
 $('#search').oninput = renderSidebar;
+$('#sidetoggle').onclick = () => document.body.classList.toggle('sideopen');
+$('#statusbtn').onclick = () => openStatus();
 
 // ---- chat
+function setView(v) { S.view = v; document.body.classList.toggle('statusmode', v === 'status'); if (v === 'status') setMode('chat'); }
 function openChat(id) {
+  setView('chat'); setMode('chat');
   S.chat = id; S.target = id === '*' ? 'room' : S.session && S.sessionNode === id ? 'agent' : 'mail';
-  $('#headname').textContent = chatName(id); $('#headav').innerHTML = avatar(chatName(id), 'mid');
-  $('#input').placeholder = `Message for ${chatName(id)}`;
-  renderSidebar(); loadThread(); renderChip(); renderPanelHead();
+  const isAgent = id !== '*';
+  $('#headname').textContent = isAgent ? id : '# general';
+  $('#headsub').textContent = isAgent ? (S.session && S.sessionNode === id ? `${S.sessionProv} · live session` : 'Agent') : 'Group';
+  $('#headav').innerHTML = isAgent ? avatar(id, 'mid') : '<span class="gi" style="width:30px;height:30px;border-radius:9px;background:#1f1f23;display:grid;place-items:center;color:#8e8e96;font-weight:600">#</span>';
+  $('#seg').hidden = !isAgent;
+  $('#input').placeholder = isAgent ? `Message ${id}` : 'Message #general';
+  renderSidebar(); loadThread();
 }
 async function loadThread() {
   try {
@@ -73,11 +113,10 @@ function renderChat() {
   for (const m of S.mail[S.chat] || []) items.push({ ts: m.created_at_ms, kind: 'mail', m });
   for (const l of S.local[S.chat] || []) items.push({ ts: l.ts, kind: 'local', l });
   if (S.chat !== '*' && S.events[S.chat]) for (const e of S.events[S.chat].values()) if (e.kind === 'answer' || e.kind === 'prompt_needed') items.push({ ts: e.at, kind: 'ev', e });
-  if (S.chat === '*') for (const [id, ls] of Object.entries(S.local)) if (id !== '*') for (const l of ls) if (l.sys) items.push({ ts: l.ts, kind: 'local', l });
-  items.sort((a, b) => a.ts - b.ts);
+    items.sort((a, b) => a.ts - b.ts);
   const box = $('#chat'); const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 600;
   box.innerHTML = '';
-  if (!items.length) box.innerHTML = `<div class="sys">${S.chat === '*' ? 'Mail from your nodes and system events appear here.' : 'No messages yet. Nodes that are neutral have no mailbox until approved.'}</div>`;
+  if (!items.length) box.innerHTML = `<div class="hello">${S.chat === '*' ? '<span class="gi" style="width:56px;height:56px;border-radius:16px;background:#1f1f23;display:grid;place-items:center;font-size:24px">#</span><b>#general</b><span>Messages from your team and agents appear here.</span>' : avatar(S.chat, 'big') + '<b>' + esc(S.chat) + '</b><span>Send a message to wake this agent.</span>'}</div>`;
   for (const it of items) {
     if (it.kind === 'mail') {
       const m = it.m; const mine = m.from === OPERATOR;
@@ -102,12 +141,7 @@ function renderChat() {
   }
   $('#chat').dataset.n = items.length; if (nearBottom) box.scrollTop = box.scrollHeight;
 }
-function renderChip() {
-  const chip = $('#chip');
-  if (S.chat === '*') { chip.hidden = false; chip.textContent = '→ room:general'; chip.onclick = null; return; }
-  if (S.session && S.sessionNode === S.chat) { chip.hidden = false; chip.textContent = S.target === 'agent' ? `→ agent (${S.sessionProv}) · click to switch to mail` : '→ mail · click to talk to the agent'; chip.onclick = () => { S.target = S.target === 'agent' ? 'mail' : 'agent'; renderChip(); }; }
-  else { chip.hidden = false; chip.textContent = '→ mail to ' + S.chat; chip.onclick = null; }
-}
+function renderChip() {}
 async function send() {
   const text = $('#input').value.trim(); if (!text) return; $('#input').value = ''; autosize();
   try {
@@ -121,79 +155,93 @@ async function send() {
     }
   } catch (e) { addLocal(S.chat, { sys: true, text: 'Not sent: ' + e.message }); }
 }
-const autosize = () => { const i = $('#input'); i.style.height = 'auto'; i.style.height = Math.min(i.scrollHeight, 140) + 'px'; };
+const autosize = () => { const i = $('#input'); i.style.height = 'auto'; i.style.height = Math.min(i.scrollHeight, 160) + 'px'; };
 $('#input').oninput = autosize;
 $('#input').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
 $('#sendbtn').onclick = send;
-$('#micbtn').onclick = () => toast('Voice input is not available in web HQ yet');
 
 // ---- composer + menu
 function menu(items, anchorLeft) {
-  const m = $('#menu'); m.innerHTML = ''; m.hidden = false;
+  const m = $('#menu'); m.removeAttribute('style'); m.innerHTML = ''; m.hidden = false;
   for (const [label, fn] of items) { const b = document.createElement('button'); b.textContent = label; b.onclick = () => { m.hidden = true; fn(); }; m.appendChild(b); }
 }
-document.addEventListener('click', (e) => { if (!e.target.closest('#menu') && !e.target.closest('#addbtn') && !e.target.closest('#plusbtn')) $('#menu').hidden = true; });
+document.addEventListener('click', (e) => { if (!e.target.closest('#menu') && !e.target.closest('#addbtn') && !e.target.closest('#plusbtn')) $('#menu').hidden = true; if (!e.target.closest('#spacemenu')) $('#spacemenu').hidden = true; if (!e.target.closest('#acctmenu')) $('#acctmenu').hidden = true; });
 $('#addbtn').onclick = () => menu([
-  ['Run an agent on this node…', () => { openPanel('terminal'); }],
+  ['Open terminal for this agent', () => { if (S.chat !== '*') setMode('pty'); else toast('Open an agent chat first'); }],
   ['Create a task…', () => { openPanel('tasks'); }],
   ['Issue enrollment code', issueCode],
   ['Open browser stream…', () => openPanel('browser')],
 ]);
-$('#plusbtn').onclick = () => menu([['Issue enrollment code', issueCode], ['Refresh nodes', loadNodes]]);
+$('#plusbtn').onclick = (e) => { e.stopPropagation(); const m = $('#menu'); menu([['Start an agent session…', () => { const n = S.space !== '*' ? S.space : (visibleNodes().find((x) => x.online) || {}).node_id; if (!n) { toast('No online space'); return; } S.chat = n; openChat(n); setMode('pty'); }], ['Add a node (enrollment code)', () => { openStatus(); issueCode(); }]]); m.style.left = '180px'; m.style.top = '56px'; m.style.bottom = 'auto'; m.style.position = 'fixed'; };
+// ---- account pill
+async function loadMe() {
+  try { const r = await fetch('/api/me', { credentials: 'same-origin' }); const d = await r.json(); const u = d.user || {}; S.me = u; const nm = u.display_name || u.username || 'Account';
+    $('#acctname').textContent = nm; $('#acctav').innerHTML = avatar(u.username || nm, '', false, 'idle'); } catch (_) {}
+}
+$('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); m.hidden = !m.hidden; if (m.hidden) return; const u = S.me || {};
+  m.innerHTML = `<div class="who">${esc(u.display_name || '')} ${u.username ? '@' + esc(u.username) : ''}</div>`; const b = document.createElement('button'); b.textContent = 'Sign out';
+  b.onclick = async () => { try { await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: '{}' }); } catch (_) {} location.href = '/'; }; m.appendChild(b); };
+loadMe();
 async function issueCode() {
   try {
     const d = await post('/api/c2/codes');
-    addLocal(S.chat, { card: `<b>Enrollment code</b><br><code class="big" id="codetext">${esc(d.code)}</code><br><span class="sub">Single use. Give it to the node operator; the node generates its own keys.</span>` });
+    S.code = d.code; logEv('enrollment code issued'); if (S.view === 'status') renderStatus(); else addLocal(S.chat, { card: `<b>Enrollment code</b><br><code class="big" id="codetext">${esc(d.code)}</code><br><span class="sub">Single use. Give it to the node operator; the node generates its own keys.</span>` });
   } catch (e) { toast('error: ' + e.message); }
 }
 
 // ---- nodes loading and change notices
 async function loadNodes() {
   try {
-    const d = await api('/api/nodes'); S.nodes = d.nodes;
-    $('#conn').className = 'dot ' + (d.ready ? 'ok' : 'bad'); $('#connt').textContent = d.ready ? 'C2 ready' : 'C2 not ready';
+    const d = await api('/api/nodes'); S.nodes = d.nodes; S.ready = !!d.ready;
     for (const n of S.nodes) {
       const key = n.status + '/' + (n.online ? 'on' : 'off'); const prev = S.lastStatus[n.node_id];
-      if (prev && prev !== key) addLocal(n.node_id, { sys: true, text: `${n.node_id}: ${prev.replace('/', ' · ')} → ${n.status} · ${n.online ? 'online' : 'offline'}` });
-      else if (!prev) addLocal(n.node_id, { sys: true, text: `${n.node_id} (${n.kind}) is ${n.status} · ${n.online ? 'online' : 'offline'}` });
+      if (prev && prev !== key) logEv(`${n.node_id}: ${prev.replace('/', ' · ')} → ${n.status} · ${n.online ? 'online' : 'offline'}`);
+      else if (!prev) logEv(`${n.node_id} (${n.kind}) ${n.status} · ${n.online ? 'online' : 'offline'}`);
       S.lastStatus[n.node_id] = key;
     }
-  } catch (_) { $('#conn').className = 'dot bad'; $('#connt').textContent = 'C2 unreachable'; }
-  renderSidebar(); renderPanelHead(); if (S.panel && S.tab === 'nodes') renderNodesTab();
+  } catch (_) { if (S.ready !== false) logEv('C2 unreachable'); S.ready = false; }
+  $('#statusdot').className = 'dot ' + (S.ready ? 'ok' : 'bad');
+  renderSidebar(); if (S.view === 'status') renderStatus();
 }
 
-// ---- right panel
-const TABS = [['activity', 'Activity'], ['nodes', 'Nodes'], ['terminal', 'Terminal'], ['browser', 'Browser'], ['tasks', 'Tasks'], ['mail', 'Mail'], ['library', 'Library']];
-function renderPanelHead() { $('#panelav').innerHTML = avatar(chatName(S.chat), 'big'); $('#panelname').textContent = chatName(S.chat); const n = S.nodes.find((x) => x.node_id === S.chat); $('#panelsub').textContent = n ? `${n.kind} · ${n.status} · ${n.online ? 'online' : 'offline'}` : 'operator'; }
-function openPanel(tab) { S.panel = true; $('#panel').classList.add('open'); setTab(tab || S.tab); renderPanelHead(); }
+// ---- status: the one place for C2 state, node trust, policy and the event log
+function openStatus() { setView('status'); S.chat = null; $('#seg').hidden = true; $('#headname').textContent = 'Status'; $('#headsub').textContent = 'C2, nodes and events'; $('#headav').innerHTML = '<span class="gi" style="width:30px;height:30px;border-radius:9px;background:#1f1f23;display:grid;place-items:center;color:#8e8e96">◉</span>'; renderSidebar(); renderStatus(); }
+async function renderStatus() {
+  const root = $('#statusview'); const on = S.nodes.filter((n) => n.online).length; let policy = '';
+  try { policy = JSON.stringify(await api('/api/c2/policy'), null, 2); } catch (e) { policy = e.message; }
+  if (S.view !== 'status') return;
+  root.innerHTML = `<div class="stgrid"><div class="stat"><div class="l">C2</div><div class="v"><span class="dot ${S.ready ? 'ok' : 'bad'}"></span>${S.ready ? 'Ready' : 'Not ready'}</div></div><div class="stat"><div class="l">Nodes online</div><div class="v">${on} / ${S.nodes.length}</div></div><div class="stat"><div class="l">Agent session</div><div class="v">${S.session ? esc(S.sessionProv + ' · ' + S.sessionNode) : 'None'}</div></div></div>`
+    + `<div class="row"><button class="btn blue" id="nc">Issue enrollment code</button><button class="btn" id="pr">Reload policy</button></div>${S.code ? `<div class="pcard"><h4>Enrollment code</h4><code class="big">${esc(S.code)}</code><div class="sub" style="margin-top:6px">Single use. The node generates its own keys.</div></div>` : ''}`
+    + `<h3>Nodes</h3><div class="pcard" style="padding:4px 6px"><table><tr><th>Node</th><th>Trust</th><th>Link</th><th></th></tr>${S.nodes.map((n) => `<tr><td><b>${esc(n.node_id)}</b><div class="sub">${esc(n.kind)}${n.tunnel_ip ? ' · ' + esc(n.tunnel_ip) : ''}</div></td><td><span class="badge ${esc(n.status)}">${esc(n.status)}</span></td><td><span class="dot ${n.online ? 'ok' : ''}"></span> ${n.online ? 'online' : esc(n.transport || 'offline')}</td><td>${n.enrolled && n.status !== 'revoked' ? `<select data-id="${esc(n.node_id)}"><option value="">Set trust…</option>${['neutral', 'member', 'trusted', 'suspended'].filter((s) => s !== n.status).map((s) => `<option>${s}</option>`).join('')}<option value="revoke">revoke</option></select>` : ''}</td></tr>`).join('')}</table></div>`
+    + `<h3>Events</h3><div class="pcard log">${S.log.slice().reverse().map((l) => `<div>${fmtTime(l.ts)}  ${esc(l.text)}</div>`).join('') || '<div>No events yet</div>'}</div>`
+    + `<h3>Policy</h3><pre>${esc(policy)}</pre>`;
+  $('#nc').onclick = issueCode; $('#pr').onclick = async () => { try { await post('/api/c2/policy/reload'); toast('Policy reloaded'); renderStatus(); } catch (e) { toast('Error: ' + e.message); } };
+  root.querySelectorAll('select[data-id]').forEach((sel) => (sel.onchange = async () => {
+    const id = sel.dataset.id, v = sel.value; if (!v) return;
+    try { if (v === 'revoke') { if (!confirm('Revoke ' + id + '? This is final.')) { sel.value = ''; return; } await post(`/api/c2/nodes/${id}/revoke`); } else await post(`/api/c2/nodes/${id}/status`, { status: v }); toast(`${id} → ${v}`); await loadNodes(); } catch (e) { toast('Error: ' + e.message); }
+  }));
+}
+
+// ---- right panel: space / agent tools
+const TABS = [['activity', 'Activity'], ['browser', 'Browser'], ['tasks', 'Tasks'], ['library', 'Library']];
+function renderPanelHead() {}
+function openPanel(tab) { S.panel = true; $('#panel').classList.add('open'); setTab(tab || S.tab); }
+function closePanel() { S.panel = false; $('#panel').classList.remove('open'); document.querySelectorAll('#tools .icon').forEach((b) => b.classList.remove('on')); }
 function setTab(tab) {
   S.tab = tab; $('#panel').classList.toggle('wide', tab === 'browser'); $('#ptabs').innerHTML = '';
   for (const [id, label] of TABS) { const b = document.createElement('button'); b.textContent = label; b.className = id === tab ? 'on' : ''; b.onclick = () => setTab(id); $('#ptabs').appendChild(b); }
   document.querySelectorAll('.ptab').forEach((t) => t.classList.toggle('on', t.id === 'p-' + tab));
-  if (tab === 'activity') renderActivity(); if (tab === 'terminal') showMini(); if (tab === 'nodes') renderNodesTab(); if (tab === 'tasks') renderTasksTab(); if (tab === 'mail') renderMailTab(); if (tab === 'library') renderLibraryTab();
+  document.querySelectorAll('#tools .icon').forEach((b) => b.classList.toggle('on', S.panel && b.dataset.tab === tab));
+  if (tab === 'activity') renderActivity(); if (tab === 'tasks') renderTasksTab(); if (tab === 'library') renderLibraryTab();
 }
-$('#headbtn').onclick = () => { if (S.panel) { S.panel = false; $('#panel').classList.remove('open'); } else openPanel(); };
-$('#closepanel').onclick = () => { S.panel = false; $('#panel').classList.remove('open'); };
-
-async function renderNodesTab() {
-  const root = $('#p-nodes'); let policy = '';
-  try { policy = JSON.stringify(await api('/api/c2/policy'), null, 2); } catch (e) { policy = e.message; }
-  root.innerHTML = `<div class="row"><button class="btn blue" id="nc">Issue enrollment code</button><button class="btn" id="pr">Reload policy</button></div>`
-    + S.nodes.map((n) => `<div class="pcard"><div class="row"><b>${esc(n.node_id)}</b><span class="st ${esc(n.status)}">${esc(n.status)}</span><span class="sub">${esc(n.kind)} · ${n.online ? 'online' : esc(n.transport || 'offline')} ${n.tunnel_ip ? '· ' + esc(n.tunnel_ip) : ''}</span></div>`
-      + (n.enrolled ? `<div class="row">${['neutral', 'member', 'trusted', 'suspended'].filter((s) => s !== n.status).map((s) => `<button class="btn" data-st="${s}" data-id="${esc(n.node_id)}">${s}</button>`).join('')}<button class="btn red" data-rv="${esc(n.node_id)}">revoke</button></div><div class="sub">rooms: ${esc((n.grants?.rooms || []).join(', ') || '—')} · capabilities: ${esc((n.grants?.capabilities || []).join(', ') || '—')}</div>` : '<div class="sub">token node (not enrolled)</div>')
-      + '</div>').join('')
-    + `<div class="pcard"><h4>Policy</h4><pre>${esc(policy)}</pre></div>`;
-  $('#nc').onclick = issueCode; $('#pr').onclick = async () => { try { await post('/api/c2/policy/reload'); toast('policy reloaded'); renderNodesTab(); } catch (e) { toast('error: ' + e.message); } };
-  root.querySelectorAll('[data-st]').forEach((b) => (b.onclick = async () => { try { await post(`/api/c2/nodes/${b.dataset.id}/status`, { status: b.dataset.st }); toast(`${b.dataset.id} → ${b.dataset.st}`); await loadNodes(); } catch (e) { toast('error: ' + e.message); } }));
-  root.querySelectorAll('[data-rv]').forEach((b) => (b.onclick = async () => { if (!confirm('Revoke ' + b.dataset.rv + '? This is final.')) return; try { await post(`/api/c2/nodes/${b.dataset.rv}/revoke`); await loadNodes(); } catch (e) { toast('error: ' + e.message); } }));
-}
+document.querySelectorAll('#tools .icon').forEach((b) => (b.onclick = () => { if (S.panel && S.tab === b.dataset.tab) closePanel(); else openPanel(b.dataset.tab); }));
+$('#closepanel').onclick = closePanel;
 
 // ---- terminal tab
 const COLS = 100, ROWS = 30;
-const term = new Terminal({ rows: ROWS, cols: COLS, cursorBlink: true, fontSize: 12.5, theme: { background: '#000000' } });
+const term = new Terminal({ rows: ROWS, cols: COLS, cursorBlink: true, fontSize: 13, fontFamily: 'ui-monospace,Menlo,Consolas,monospace', theme: { background: '#000000' } });
 term.open($('#terminal'));
 let mini = null;
-function showMini() { if (!mini) { mini = new Terminal({ rows: ROWS, cols: COLS, fontSize: 8, theme: { background: '#000000' } }); mini.open($('#miniterm')); mini.onData((data) => tsend({ t: 'data', data })); } if (S.lastAnsi) { mini.reset(); mini.write(S.lastAnsi); } }
 function setMode(m) {
   S.mode = m; document.body.classList.toggle('ptymode', m === 'pty'); $('#ptyview').classList.toggle('on', m === 'pty');
   document.querySelectorAll('#seg button').forEach((b) => b.classList.toggle('on', b.dataset.m === m));
@@ -203,14 +251,14 @@ document.querySelectorAll('#seg button').forEach((b) => (b.onclick = () => setMo
 let tws = null;
 function tsend(o) { if (tws && tws.readyState === 1) tws.send(JSON.stringify(o)); }
 $('#tspawn').onclick = () => {
-  const node = S.chat === '*' ? (S.nodes[0] && S.nodes[0].node_id) : S.chat; if (!node) { toast('select a node chat first'); return; }
+  const node = S.chat && S.chat !== '*' ? S.chat : null; if (!node) { toast('Open an agent first'); return; }
   if (tws) tws.close();
   const opt = $('#tprov').selectedOptions[0]; const prov = opt.dataset.parser ? 'fixture' : opt.value; const q = new URLSearchParams({ node, provider: opt.value, rows: ROWS, cols: COLS }); if (opt.dataset.parser) q.set('parser', opt.dataset.parser);
   term.reset(); if (mini) mini.reset(); S.lastAnsi = ''; $('#tinfo').textContent = 'spawning…';
   tws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/term?${q}`);
   tws.onmessage = (m) => {
     const d = JSON.parse(m.data);
-    if (d.type === 'spawned') { S.events[node] = new Map(); S.agentState[node] = 'idle'; S.session = d.session; S.sessionNode = node; S.sessionProv = prov; S.target = 'agent'; $('#tinfo').textContent = `${prov} on ${node}`; addLocal(node, { sys: true, text: `Agent ${prov} started on ${node}` }); if (S.chat === node) renderChip(); }
+    if (d.type === 'spawned') { S.events[node] = new Map(); S.agentState[node] = 'idle'; S.session = d.session; S.sessionNode = node; S.sessionProv = prov; S.target = 'agent'; $('#tinfo').textContent = `${prov} on ${node}`; logEv(`agent ${prov} started on ${node}`); if (S.chat === node) openChat(node); }
     if (d.type === 'error') { $('#tinfo').textContent = d.text; addLocal(node, { sys: true, text: d.text }); }
     if (d.type === 'ack') { $('#tinfo').textContent = `${d.op}: ${d.ok ? 'ok' : 'failed'}`; if (!d.ok) { S.working[node] = 0; addLocal(node, { sys: true, text: 'Refused: ' + (/does not permit/.test(d.detail) ? 'node status does not permit operator requests (policy)' : d.detail.slice(0, 120)) }); } }
     if (d.type === 'events') onEvents(node, d.events);
@@ -220,13 +268,13 @@ $('#tspawn').onclick = () => {
       S.lastFrame = Date.now();
     }
   };
-  tws.onclose = () => { $('#tinfo').textContent += ' [closed]'; if (S.sessionNode) { addLocal(S.sessionNode, { sys: true, text: `Agent session on ${S.sessionNode} ended` }); } S.session = null; if (S.sessionNode) S.agentState[S.sessionNode] = 'idle'; S.target = 'mail'; renderChip(); };
+  tws.onclose = () => { $('#tinfo').textContent += ' [closed]'; if (S.sessionNode) { logEv(`agent session on ${S.sessionNode} ended`); } S.session = null; if (S.sessionNode) S.agentState[S.sessionNode] = 'idle'; S.target = 'mail'; renderChip(); };
 };
 $('#tstop').onclick = () => tsend({ t: 'stop' });
 term.onData((data) => tsend({ t: 'data', data }));
 
 // ---- event layer: the browser reads ONLY typed session events from the server (no screen parsing here)
-function refreshAvatars() { renderSidebar(); renderPanelHead(); $('#headav').innerHTML = avatar(chatName(S.chat), 'mid'); renderChat(); }
+function refreshAvatars() { renderSidebar(); if (S.chat && S.chat !== '*') $('#headav').innerHTML = avatar(S.chat, 'mid'); renderChat(); }
 function onEvents(node, evs) {
   const m = (S.events[node] ||= new Map()); let chatChanged = false; let stateChanged = false;
   for (const e of evs) {
@@ -245,7 +293,7 @@ function onEvents(node, evs) {
 const confTag = (e) => `<span class="tagh" title="source ${esc(e.source)}">${e.confidence === 'structured' ? 'structured' : 'heuristic'} · ${esc(e.source)}</span>`;
 function diffHtml(t) { return t.split('\n').map((l) => `<span class="${l.startsWith('+') ? 'd-add' : l.startsWith('-') ? 'd-del' : l.startsWith('@@') ? 'd-hunk' : ''}">${esc(l)}</span>`).join('\n'); }
 function renderActivity() {
-  const root = $('#p-activity'); const node = S.chat === '*' ? S.sessionNode : S.chat; const evs = node && S.events[node] ? [...S.events[node].values()] : [];
+  const root = $('#p-activity'); const node = !S.chat || S.chat === '*' ? S.sessionNode : S.chat; const evs = node && S.events[node] ? [...S.events[node].values()] : [];
   const st = node ? S.agentState[node] || 'idle' : 'idle';
   let h = `<div class="sub" style="margin-bottom:8px">Agent activity${node ? ' on ' + esc(node) : ''} · state <b>${esc(st)}</b> <span class="tagh">from the session event layer</span></div>`;
   h += evs.filter((e) => ['thought', 'action', 'diff', 'prompt_needed'].includes(e.kind)).slice(-14).reverse().map((e) => {
@@ -269,15 +317,6 @@ async function renderTasksTab() {
   $('#tc').onclick = async () => { try { const a = $('#ta').value.trim(); await post('/api/s/tasks', { title: $('#tt').value, body: $('#tb').value, assignee: a || undefined }); addLocal(a || S.chat, { sys: true, text: `Task created: ${$('#tt').value}${a ? ' → ' + a : ''}` }); toast('task created'); renderTasksTab(); } catch (e) { toast('error: ' + e.message); } };
   root.querySelectorAll('[data-cx]').forEach((b) => (b.onclick = async () => { await post(`/api/s/tasks/${b.dataset.cx}/cancel`); renderTasksTab(); }));
   root.querySelectorAll('[data-as]').forEach((b) => (b.onclick = async () => { const who = prompt('Assign to node:'); if (who) { try { await post(`/api/s/tasks/${b.dataset.as}/assign`, { assignee: who }); } catch (e) { toast(e.message); } renderTasksTab(); } }));
-}
-
-// ---- mail tab (all inbound mail and rooms; conversations live in the chat)
-async function renderMailTab() {
-  const root = $('#p-mail'); let msgs = [];
-  try { msgs = (await post('/api/s/mail/inbox')).messages.slice().reverse(); } catch (e) { root.innerHTML = `<div class="sub">${esc(e.message)}</div>`; return; }
-  root.innerHTML = `<div class="pcard"><h4>Send to a room or node</h4><div class="row"><input id="mt" placeholder="room:general or node" value="room:general"><input id="ms" placeholder="Subject"></div><div class="row"><input id="mbx" placeholder="Message" style="flex:1"><button class="btn blue" id="mgo">Send</button></div></div>`
-    + `<div class="pcard"><h4>Inbox of hatchery.operator</h4><table>${msgs.map((m) => `<tr><td>${fmtTime(m.created_at_ms)}</td><td>${esc(m.from)}</td><td>${esc(m.subject)}</td><td>${esc(m.body)}</td></tr>`).join('') || '<tr><td class="sub">empty</td></tr>'}</table></div>`;
-  $('#mgo').onclick = async () => { try { await post('/api/s/mail/send', { to: $('#mt').value.trim(), subject: $('#ms').value || '-', body: $('#mbx').value }); toast('sent'); } catch (e) { toast('error: ' + e.message); } };
 }
 
 // ---- library tab (evidence screens)
@@ -315,12 +354,10 @@ es.onmessage = (m) => {
   const d = JSON.parse(m.data);
   if (d.type === 'mail') {
     const msg = d.message; window.lastWake = d;
-    toast(`HQ woken: mail from ${msg.from}`);
+    logEv(`mail from ${msg.from}`);
     S.working[msg.from] = 0;
-    addLocal(msg.from, { sys: true, text: `HQ woken by mail from ${msg.from} (+${Math.max(0, d.woke_at_ms - msg.created_at_ms)} ms)` });
     if (S.chat === msg.from || S.chat === '*') loadThread(); else { S.mail[msg.from] = (S.mail[msg.from] || []).concat([msg]); renderSidebar(); }
-    if (S.panel && S.tab === 'mail') renderMailTab();
   }
 };
-$('#headav').innerHTML = avatar('Hatchery HQ', 'mid');  setTab('activity');
+setTab('activity');
 loadNodes().then(() => { openChat('*'); }); setInterval(loadNodes, 4000);

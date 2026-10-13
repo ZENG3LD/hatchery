@@ -5,47 +5,60 @@
 <body>
 <div id="app">
  <aside id="side">
-  <div class="sidetop"><button class="round" id="searchbtn" title="Search">⌕</button><button class="round" id="plusbtn" title="New">+</button></div>
-  <input id="search" placeholder="Search nodes" hidden>
-  <div id="me"><div id="meav"></div><div class="mename">Hatchery HQ</div></div>
-  <div id="chats"></div>
-  <div class="sidebottom"><span id="conn" class="dot"></span><span id="connt">connecting…</span></div>
+  <div class="sidetop">
+   <button id="spacebtn" class="spacebtn" title="Switch space"><span id="spaceav"></span><span class="sn"><span id="spacename">All spaces</span><span class="sk">Space</span></span><span class="chev">▾</span></button>
+   <div class="pair"><button class="round" id="searchbtn" title="Search"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4-4"/></svg></button><button class="round" id="plusbtn" title="New"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button></div>
+  </div>
+  <div id="spacemenu" class="pop" hidden></div>
+  <input id="search" placeholder="Search" hidden>
+  <nav id="chats"></nav>
+  <div class="sidebottom">
+   <button class="navitem" id="statusbtn"><span class="ic">◉</span><span>Status</span><span id="statusdot" class="dot"></span></button>
+   <button class="acct" id="acctbtn"><span id="acctav" class="acctav"></span><span id="acctname" class="acctname">Account</span></button>
+   <div id="acctmenu" class="pop" hidden></div>
+  </div>
  </aside>
  <main id="main">
-  <header id="head"><button id="headbtn"><span id="headav"></span><span id="headname">Hatchery HQ</span></button><div id="seg"><button data-m="chat" class="on">Chat</button><button data-m="pty">PTY</button></div></header>
-  <div id="ptyview"><div id="terminal"></div></div>
-  <div id="chat"></div>
-  <div id="composer">
-   <div id="chiprow"><button id="chip" hidden></button></div>
-   <div id="pill">
-    <button class="round small" id="addbtn" title="Actions">+</button>
-    <textarea id="input" rows="1" placeholder="Message"></textarea>
-    <button class="round small ghost" id="micbtn" title="Voice (not available in web HQ yet)">🎙</button>
-    <button class="round small blue" id="sendbtn" title="Send">➤</button>
+  <header id="head">
+   <button id="sidetoggle" class="icon" title="Menu">☰</button>
+   <div id="headid"><span id="headav"></span><div class="hn"><div id="headname">Hatchery HQ</div><div id="headsub" class="hs"></div></div></div>
+   <div id="seg" hidden><button data-m="chat" class="on">Chat</button><button data-m="pty">Terminal</button></div>
+   <div class="tools" id="tools">
+    <button class="icon" data-tab="activity" title="Activity">≋</button>
+    <button class="icon" data-tab="browser" title="Browser">◫</button>
+    <button class="icon" data-tab="tasks" title="Tasks">☑</button>
+    <button class="icon" data-tab="library" title="Library">▤</button>
    </div>
-   <div id="menu" hidden></div>
+  </header>
+  <div id="body">
+   <div id="ptyview">
+    <div class="ptybar"><select id="tprov"><option>claude</option><option>codex</option><option>kimi</option><option>grok</option><option value="grok" data-parser="claude">fixture agent (test)</option></select>
+     <button class="btn blue" id="tspawn">Start</button><button class="btn" id="tstop">Stop</button><span class="sub" id="tinfo"></span></div>
+    <div class="termwrap"><div id="terminal"></div></div>
+   </div>
+   <div id="statusview" class="view"></div>
+   <div id="chat" class="view"></div>
+  </div>
+  <div id="composer">
+   <div id="pill">
+    <button class="icon" id="addbtn" title="Actions">+</button>
+    <textarea id="input" rows="1" placeholder="Message"></textarea>
+    <button class="sendb" id="sendbtn" title="Send">↑</button>
+   </div>
+   <div id="menu" class="pop" hidden></div>
   </div>
  </main>
  <aside id="panel">
-  <div class="paneltop"><button class="round" id="closepanel">✕</button></div>
-  <div class="panelhead"><div id="panelav"></div><div id="panelname">Hatchery HQ</div><div class="sub" id="panelsub"></div></div>
-  <div id="ptabs"></div>
+  <div class="paneltop"><div id="ptabs"></div><button class="icon" id="closepanel" title="Close">✕</button></div>
   <div id="pbody">
    <div class="ptab" id="p-activity"></div>
-   <div class="ptab" id="p-nodes"></div>
-   <div class="ptab" id="p-terminal">
-    <div class="row"><select id="tprov"><option>claude</option><option>codex</option><option>kimi</option><option>grok</option><option value="grok" data-parser="claude">fixture agent (test)</option></select>
-     <button class="btn" id="tspawn">Spawn</button><button class="btn" id="tstop">Stop</button><span class="sub" id="tinfo"></span></div>
-    <div id="miniterm"></div>
-   </div>
    <div class="ptab" id="p-browser">
-    <div class="row"><input id="bsess" placeholder="browser session id"><button class="btn" id="bopen">Open</button></div>
+    <div class="row"><input id="bsess" placeholder="Browser session id"><button class="btn" id="bopen">Open</button></div>
     <div class="row"><input id="burl" value="https://example.org/"><button class="btn" id="bnav">Go</button></div>
-    <div class="row"><input id="btext" placeholder="type…"><button class="btn" id="btype">Type</button><button class="btn" id="benter">Enter</button><button class="btn" id="bup">▲</button><button class="btn" id="bdown">▼</button></div>
+    <div class="row"><input id="btext" placeholder="Type…"><button class="btn" id="btype">Type</button><button class="btn" id="benter">Enter</button><button class="btn" id="bup">▲</button><button class="btn" id="bdown">▼</button></div>
     <canvas id="bcanvas" width="800" height="500"></canvas><div class="sub" id="binfo"></div>
    </div>
    <div class="ptab" id="p-tasks"></div>
-   <div class="ptab" id="p-mail"></div>
    <div class="ptab" id="p-library"></div>
   </div>
  </aside>
