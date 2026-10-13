@@ -417,3 +417,4 @@ body.rail #chats{order:2}body.rail .sidetop{order:3;padding:8px 0 0}body.rail .s
 #rxtip div{display:flex;gap:8px;padding:2px 0}#rxtip .e{flex:none}
 .msg.them .rx{right:auto;left:calc(100% + 6px);top:-6px}.msg.me .rx{left:auto;right:calc(100% + 6px);top:-6px}.msg.hasrx{margin-top:8px!important}
 .msg.them .rx,.msg.me .rx{top:-22px}.msg.hasrx{margin-top:24px!important}
+.msg:has(>.ts.in){padding-right:52px}.msg .ts.in{background:none;padding-left:0;right:12px;top:10px}
