@@ -36,9 +36,10 @@ const SHAPES = [
 ];
 function hashOf(name) { let h = 2166136261; for (const c of String(name)) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return h; }
 // Avatar "critter": shape + colour derived from the id; state class animates it, .look follows the cursor.
-const FAMILY = { dm: [0, 5], group: [3, 4], agent: [1, 2, 6] };
+const FAMILY = { dm: [0, 5], group: [3], agent: [1, 2, 6], node: [4] };
+const isNode = (id) => (S.nodes || []).some((n) => n.node_id === id);
 const chatKind = (id) => ((S.chats || []).find((x) => x.target === id) || {}).kind;
-const kindOf = (id) => (chatKind(id) ? chatKind(id) : id === '*' || String(id).startsWith('room:') ? 'group' : S.session && S.sessionNode === id ? 'agent' : 'dm');
+const kindOf = (id) => (isNode(id) ? 'node' : chatKind(id) ? chatKind(id) : id === '*' || String(id).startsWith('room:') ? 'group' : S.session && S.sessionNode === id ? 'agent' : 'dm');
 function avatar(name, cls = '', online, force, fam) {
   const h = hashOf(name); const c = colorOf(name); const f = FAMILY[fam || kindOf(name)] || FAMILY.dm; const shape = SHAPES[f[(h >>> 8) % f.length]]; const st = force || avatarState(name);
   const extra = st === 'thinking' ? '<g class="tdots"><circle cx="50" cy="8" r="2.4"/><circle cx="56" cy="3" r="1.8"/></g>' : st === 'attention' ? '<circle class="ring" cx="32" cy="32" r="30" fill="none" stroke="#e0a63a" stroke-width="2.5"/>' : '';
@@ -55,21 +56,41 @@ document.addEventListener('mousemove', (e) => {
 });
 
 // ---- state
-const S = { mode: 'chat', view: 'chat', space: '*', log: [], events: {}, agentState: {}, lastFrame: 0, promptAt: 0, lastAnsi: '', nodes: [], ready: null, chat: '*', mail: {}, local: {}, session: null, sessionNode: null, sessionProv: null, target: 'mail', working: {}, panel: false, tab: 'activity', lastStatus: {}, wake: null, library: [] };
+const S = { mode: 'chat', view: 'chat', space: '*', log: [], events: {}, agentState: {}, lastFrame: 0, promptAt: 0, lastAnsi: '', nodes: [], ready: null, chat: '*', nodeId: null, sessions: {}, ptyLayout: 'native', mail: {}, local: {}, session: null, sessionNode: null, sessionProv: null, target: 'mail', working: {}, panel: false, tab: 'activity', lastStatus: {}, wake: null, library: [] };
+// Providers offered by the node Start control. `parser` overrides the event parser (test fixtures).
+const PROVIDERS = [{ v: 'shell', label: 'shell' }, { v: 'claude' }, { v: 'codex' }, { v: 'kimi' }, { v: 'grok' }, { v: 'grok', label: 'fixture agent (test)', parser: 'claude' }];
+const provOptions = (sel) => PROVIDERS.map((p, i) => `<option value="${esc(p.v)}"${p.parser ? ` data-parser="${esc(p.parser)}"` : ''}${i === sel ? ' selected' : ''}>${esc(p.label || p.v)}</option>`).join('');
 const chatName = (id) => { const c = (S.chats || []).find((x) => x.target === id); return c ? c.label : id === '*' ? 'general' : String(id).replace(/^room:/, ''); };
 const addLocal = (chat, item) => { (S.local[chat] ||= []).push({ ts: Date.now(), ...item }); renderChat(); };
 const logEv = (text) => { S.log.push({ ts: Date.now(), text }); if (S.log.length > 300) S.log.shift(); if (S.panel && S.tab === 'status') renderStatus(); };
 const visibleNodes = () => S.nodes.filter((n) => n.status !== 'revoked');
 
 const isGroup = (id) => chatKind(id) ? chatKind(id) === 'group' : id === '*' || String(id).startsWith('room:');
-// ---- sidebar: only chats (groups, DMs, agent sessions); kind is shown by creature shape only
+// ---- sidebar: nodes (environments) and chats together, no section labels; kind shown by creature shape
 function renderSidebar() {
   const q = $('#search').value.toLowerCase(); const match = (n) => !q || n.toLowerCase().includes(q);
   const root = $('#chats'); root.innerHTML = '';
   const last = (id) => { const m = S.mail[id] || []; const l = m[m.length - 1]; return l ? l.body : ''; };
-  const item = (id, name, preview) => { if (!match(name)) return; const b = document.createElement('button'); b.className = 'chatitem' + (S.chat === id ? ' on' : ''); b.title = name; b.innerHTML = avatar(id) + `<div class="t"><div class="n">${esc(name)}</div><div class="p">${esc(preview)}</div></div>`; b.onclick = () => { openChat(id); document.body.classList.remove('sideopen'); }; root.appendChild(b); };
-  if (S.session) item(S.sessionNode, S.sessionNode, last(S.sessionNode) || S.sessionProv);
-  for (const c of S.chats || []) if (!(S.session && S.sessionNode === c.target)) item(c.target, c.label, last(c.target) || '');
+  const item = (id, name, preview, active, onclick) => { if (!match(name)) return; const b = document.createElement('button'); b.className = 'chatitem' + (active ? ' on' : ''); b.title = name; b.innerHTML = avatar(id) + `<div class="t"><div class="n">${esc(name)}</div><div class="p">${esc(preview)}</div></div>`; b.onclick = () => { onclick(); document.body.classList.remove('sideopen'); }; root.appendChild(b); };
+  // Nodes are environments: their own entries, opened into the node view.
+  for (const n of visibleNodes()) {
+    const nsess = (S.sessions[n.node_id] || []).length;
+    const preview = n.online ? (nsess ? nsess + ' session' + (nsess > 1 ? 's' : '') : 'node · online') : 'node · ' + (n.transport || 'offline');
+    const active = (S.view === 'node' && S.nodeId === n.node_id) || (S.view === 'pty' && S.sessionNode === n.node_id);
+    item(n.node_id, n.node_id, preview, active, () => openNode(n.node_id));
+  }
+  // Chats (m4a rooms / DMs) are not owned by a node.
+  for (const c of S.chats || []) item(c.target, c.label, last(c.target) || '', S.view === 'chat' && S.chat === c.target, () => openChat(c.target));
+}
+
+// ---- center view switching: chat | node | pty
+function showView(v) {
+  S.view = v;
+  document.body.classList.toggle('ptymode', v === 'pty');
+  document.body.classList.toggle('nodemode', v === 'node');
+  $('#ptyview').classList.toggle('on', v === 'pty');
+  $('#nodeview').classList.toggle('on', v === 'node');
+  $('#chat').style.display = v === 'chat' ? '' : 'none';
 }
 $('#searchbtn').onclick = () => { const s = $('#search'); s.hidden = !s.hidden; if (!s.hidden) s.focus(); };
 $('#search').oninput = renderSidebar;
@@ -78,11 +99,44 @@ $('#sidetoggle').onclick = () => document.body.classList.toggle('sideopen');
 // ---- chat
 function openChat(id) {
   try { localStorage.setItem('hq.chat', id); history.replaceState(null, '', '#/chat/' + encodeURIComponent(id)); } catch (_) {}
-  setMode('chat');
-  S.chat = id; S.target = id === '*' ? 'room' : S.session && S.sessionNode === id ? 'agent' : 'mail';
+  showView('chat');
+  S.chat = id; S.target = id === '*' ? 'room' : 'mail';
   $('#headname').textContent = chatName(id); $('#headbtn').title = chatName(id); $('#headav').innerHTML = avatar(id, 'sm');
   $('#input').placeholder = `Message ${chatName(id)}`;
   renderChat(); $('#chat').scrollTop = 1e9; renderSidebar(); loadThread(); renderPanelHead(); if (S.panel) setTab(S.tab);
+}
+
+// ---- node view: an environment (resources card), its sessions, and a Start control
+function openNode(id) {
+  try { localStorage.setItem('hq.chat', id); history.replaceState(null, '', '#/node/' + encodeURIComponent(id)); } catch (_) {}
+  showView('node'); S.nodeId = id;
+  $('#headname').textContent = id; $('#headbtn').title = id; $('#headav').innerHTML = avatar(id, 'sm');
+  renderNode(); renderSidebar(); renderPanelHead(); if (S.panel) setTab(S.tab);
+}
+const fmtBytes = (b) => (!b && b !== 0) ? '?' : (b >= 1e9 ? (b / 1e9).toFixed(1) + 'G' : (b >= 1e6 ? (b / 1e6).toFixed(0) + 'M' : b + 'B'));
+function renderNode() {
+  const root = $('#nodeview'); const n = (S.nodes || []).find((x) => x.node_id === S.nodeId);
+  if (!n) { root.innerHTML = `<div class="nodewrap"><div class="pcard sub">Node ${esc(S.nodeId || '')} is not known.</div></div>`; return; }
+  const m = n.machine; const clis = (m && m.provider_clis || []).map((c) => `${esc(c.id)}${c.version ? ' ' + esc(c.version) : ''}`);
+  const envRows = m ? `
+    <div class="kv"><span>Host</span><span>${esc(m.hostname || '')} · ${esc(m.os)}/${esc(m.arch)}</span></div>
+    <div class="kv"><span>Kernel</span><span>${esc(m.kernel)}</span></div>
+    <div class="kv"><span>CPU</span><span>${m.cpu_cores} cores${m.cpu_model ? ' · ' + esc(m.cpu_model) : ''}</span></div>
+    <div class="kv"><span>Memory</span><span>${fmtBytes(m.ram_available_bytes)} free / ${fmtBytes(m.ram_total_bytes)}</span></div>
+    <div class="kv"><span>Disk</span><span>${fmtBytes(m.disk_available_bytes)} free / ${fmtBytes(m.disk_total_bytes)}</span></div>
+    <div class="kv"><span>Uptime</span><span>${Math.floor((m.uptime_secs || 0) / 3600)}h</span></div>
+    <div class="kv"><span>Provider CLIs</span><span>${clis.length ? clis.map(esc).join(', ') : '—'}</span></div>` : '<div class="sub">No environment inventory yet.</div>';
+  const sess = S.sessions[n.node_id] || [];
+  const sessList = sess.length ? sess.map((x) => `<div class="pcard srow2"><div><b>${esc(x.provider)}</b><div class="sub">${esc(x.key)}${x.live ? '' : ' · ended'}</div></div><div class="row"><button class="btn blue" data-open="${esc(x.id)}">Open</button><button class="btn" data-stop="${esc(x.id)}">Stop</button></div></div>`).join('') : '<div class="pcard sub">No sessions yet. Start one below.</div>';
+  root.innerHTML = `<div class="nodewrap">
+    <div class="nhero">${avatar(n.node_id, 'big')}<div><h2>${esc(n.node_id)}</h2><div class="sub"><span class="dot ${n.online ? 'ok' : ''}"></span> ${n.online ? 'online' : esc(n.transport || 'offline')} · ${esc(n.kind)}${n.tunnel_ip ? ' · ' + esc(n.tunnel_ip) : ''}</div></div></div>
+    <section class="nsec"><h3>Environment</h3><div class="pcard">${envRows}</div></section>
+    <section class="nsec"><h3>Start a session</h3><div class="pcard"><div class="row"><select id="nprov">${provOptions(0)}</select><button class="btn blue" id="nstart"${n.online ? '' : ' disabled'}>Start</button>${n.online ? '' : '<span class="sub">node offline</span>'}</div></div></section>
+    <section class="nsec"><h3>Sessions</h3>${sessList}</section>
+  </div>`;
+  const st = $('#nstart'); if (st) st.onclick = () => { const sel = $('#nprov'); const opt = sel.selectedOptions[0]; startSession(n.node_id, opt.value, opt.dataset.parser); };
+  root.querySelectorAll('[data-open]').forEach((b) => (b.onclick = () => { const x = (S.sessions[n.node_id] || []).find((s) => s.id === b.dataset.open); if (x) openPty(n.node_id, x); }));
+  root.querySelectorAll('[data-stop]').forEach((b) => (b.onclick = () => { const x = (S.sessions[n.node_id] || []).find((s) => s.id === b.dataset.stop); if (x) stopSession(x); }));
 }
 // Timeline cache: in-memory S.mail, mirrored to sessionStorage so a reload or chat switch renders instantly.
 try { Object.assign(S.mail, JSON.parse(sessionStorage.getItem('hq.mail') || '{}')); } catch (_) {}
@@ -239,12 +293,12 @@ function menu(items, anchorLeft) {
 }
 document.addEventListener('click', (e) => { if (!e.target.closest('#menu') && !e.target.closest('#addbtn') && !e.target.closest('#plusbtn')) $('#menu').hidden = true; if (!e.target.closest('#acctmenu')) $('#acctmenu').hidden = true; });
 $('#addbtn').onclick = () => menu([
-  ['Open terminal for this agent', () => { if (!isGroup(S.chat)) setMode('pty'); else toast('Open an agent chat first'); }],
+  ['Open a node…', () => { const n = (visibleNodes().find((x) => x.online) || visibleNodes()[0]); if (n) openNode(n.node_id); else toast('No node yet. Add one with an enrollment code.'); }],
   ['Create a task…', () => { openPanel('tasks'); }],
   ['Issue enrollment code', issueCode],
   ['Open browser stream…', () => openPanel('computer')],
 ]);
-$('#plusbtn').onclick = (e) => { e.stopPropagation(); menu([['New agent session…', () => { const n = (visibleNodes().find((x) => x.online) || {}).node_id; if (!n) { toast('No online node'); return; } openChat(n); setMode('pty'); }], ['Add a node (enrollment code)', () => { openPanel('status'); issueCode(); }]]); const m = $('#menu'); m.style.position = 'fixed'; m.style.left = '120px'; m.style.top = '54px'; m.style.bottom = 'auto'; };
+$('#plusbtn').onclick = (e) => { e.stopPropagation(); menu([['Open a node…', () => { const n = (visibleNodes().find((x) => x.online) || visibleNodes()[0]); if (!n) { toast('No node yet'); return; } openNode(n.node_id); }], ['Add a node (enrollment code)', () => { openPanel('status'); issueCode(); }]]); const m = $('#menu'); m.style.position = 'fixed'; m.style.left = '120px'; m.style.top = '54px'; m.style.bottom = 'auto'; };
 // ---- account pill
 async function loadMe() {
   try { const r = await fetch('/api/me', { credentials: 'same-origin' }); const d = await r.json(); const u = d.user || {}; S.me = u; const nm = u.display_name || u.username || 'Account';
@@ -322,7 +376,7 @@ async function loadNodes() {
       S.lastStatus[n.node_id] = key;
     }
   } catch (_) { if (S.ready !== false) logEv('C2 unreachable'); S.ready = false; }
-  renderSidebar(); if (S.panel && S.tab === 'status') renderStatus();
+  renderSidebar(); if (S.panel && S.tab === 'status') renderStatus(); if (S.view === 'node') renderNode();
 }
 
 // ---- status: the one place for C2 state, node trust, policy and the event log
@@ -342,7 +396,7 @@ async function renderStatus() {
 }
 
 // ---- right panel: chat info + all status / control
-const TABS = [['info', 'Overview', 'info'], ['terminal', 'Terminal', 'term'], ['browser', 'Browser', 'globe'], ['tasks', 'Tasks', 'check'], ['library', 'Files', 'folder'], ['status', 'Fleet', 'server']];
+const TABS = [['info', 'Overview', 'info'], ['browser', 'Browser', 'globe'], ['tasks', 'Tasks', 'check'], ['library', 'Files', 'folder'], ['status', 'Fleet', 'server']];
 function renderPanelHead() { if (!S.chat) return; $('#panelav').innerHTML = avatar(S.chat, 'mid'); $('#panelname').textContent = chatName(S.chat); $('#panelsub').textContent = ''; }
 function openPanel(tab) { S.panel = true; localStorage.setItem('hq.panel', '1'); $('#panel').classList.add('open'); syncHead(); renderPanelHead(); setTab(tab || S.tab); }
 function closePanel() { S.panel = false; localStorage.setItem('hq.panel', ''); $('#panel').classList.remove('open'); syncHead(); }
@@ -390,74 +444,110 @@ function setTab(tab) {
   for (const [id, label, ic] of TABS) { const b = document.createElement('button'); b.innerHTML = `${ico(ic, 15)}<span class="l">${esc(label)}</span>`; b.title = label; b.setAttribute('role', 'tab'); b.className = id === tab ? 'on' : ''; b.onclick = () => setTab(id); $('#ptabs').appendChild(b); }
   document.querySelectorAll('.ptab').forEach((t) => t.classList.toggle('on', t.id === 'p-' + tab));
   $('#pbody').scrollTop = 0;
-  if (tab === 'info') renderInfo(); if (tab === 'status') renderStatus(); if (tab === 'tasks') renderTasksTab(); if (tab === 'library') renderLibraryTab(); if (tab === 'terminal') renderTermTab();
+  if (tab === 'info') renderInfo(); if (tab === 'status') renderStatus(); if (tab === 'tasks') renderTasksTab(); if (tab === 'library') renderLibraryTab();
 }
 const sec = (title, body, right = '') => `<section class="psec"><div class="sech"><span>${esc(title)}</span>${right}</div>${body}</section>`;
 function renderInfo() {
-  const root = $('#p-info'); const agent = S.chat && !isGroup(S.chat); const n = S.nodes.find((x) => x.node_id === S.chat);
-  const live = S.session && S.sessionNode === S.chat;
-  let kv = agent ? `<div class="kv"><span>Session</span><span>${live ? esc(S.sessionProv) + ' · live' : 'not running'}</span></div>` : `<div class="kv"><span>Room</span><span class="ell">${esc(chatName(S.chat))}</span></div>`;
-  if (n) { kv += `<div class="kv"><span>Node</span><span><span class="dot ${n.online ? 'ok' : ''}"></span> ${n.online ? 'online' : 'offline'}</span></div>`; if (n.machine) { const m=n.machine; kv += `<div class="kv"><span>Host</span><span>${esc(m.hostname||'')} · ${esc(m.os)}/${esc(m.arch)}</span></div><div class="kv"><span>CPU/RAM</span><span>${m.cpu_cores}c · ${(m.ram_total_bytes/1e9).toFixed(1)}G</span></div>`; } }
+  const root = $('#p-info');
+  // Node context: show the environment summary and a jump into the node view.
+  if (S.view === 'node' || S.view === 'pty') {
+    const id = S.nodeId || S.sessionNode; const n = S.nodes.find((x) => x.node_id === id);
+    let kv = `<div class="kv"><span>Node</span><span><span class="dot ${n && n.online ? 'ok' : ''}"></span> ${n && n.online ? 'online' : 'offline'}</span></div>`;
+    if (n && n.machine) { const m = n.machine; kv += `<div class="kv"><span>Host</span><span>${esc(m.hostname || '')} · ${esc(m.os)}/${esc(m.arch)}</span></div><div class="kv"><span>CPU/RAM</span><span>${m.cpu_cores}c · ${(m.ram_total_bytes / 1e9).toFixed(1)}G</span></div>`; }
+    const sess = (S.sessions[id] || []);
+    kv += `<div class="kv"><span>Sessions</span><span>${sess.filter((x) => x.live).length} live</span></div>`;
+    root.innerHTML = sec('Node', `<div class="pcard">${kv}</div>`) + sec('', `<div class="row"><button class="btn blue" id="goNode">Open node view</button></div>`);
+    const g = $('#goNode'); if (g) g.onclick = () => openNode(id);
+    return;
+  }
+  const agent = S.chat && !isGroup(S.chat);
+  let kv = agent ? `<div class="kv"><span>Kind</span><span>${esc(chatKind(S.chat) || 'chat')}</span></div>` : `<div class="kv"><span>Room</span><span class="ell">${esc(chatName(S.chat))}</span></div>`;
   let h = sec('Details', `<div class="pcard">${kv}</div>`);
-  if (agent) h += sec('View', `<div class="tog" id="vtog"><button data-m="chat" class="${S.mode === 'chat' ? 'on' : ''}">Chat</button><button data-m="pty" class="${S.mode === 'pty' ? 'on' : ''}">Terminal</button></div>`);
+  // A chat is not owned by a node; offer a link to run a session on a node instead.
+  const nodes = visibleNodes();
+  if (nodes.length) h += sec('Run on node', `<div class="pcard"><div class="chips">${nodes.map((n) => `<button class="chip" data-node="${esc(n.node_id)}"><span class="dot ${n.online ? 'ok' : ''}"></span>${esc(n.node_id)}</button>`).join('')}</div><div class="sub" style="margin-top:6px">Sessions run in a node environment, not in this chat.</div></div>`);
   root.innerHTML = h + '<div id="p-activity" class="secs"></div>';
-  root.querySelectorAll('#vtog button').forEach((b) => (b.onclick = () => { setMode(b.dataset.m); renderInfo(); }));
+  root.querySelectorAll('.chip[data-node]').forEach((b) => (b.onclick = () => openNode(b.dataset.node)));
   if (agent) renderActivity();
 }
 $('#headbtn').onclick = () => { if (S.panel) closePanel(); else openPanel('info'); };
 $('#closepanel').onclick = closePanel;
 
-// ---- terminal tab
+// ---- PTY sessions: spawned from the node view, shown full-center as a native terminal
 const COLS = 100, ROWS = 30;
 const term = new Terminal({ rows: ROWS, cols: COLS, cursorBlink: true, fontSize: 13, fontFamily: 'ui-monospace,Menlo,Consolas,monospace', theme: { background: '#000000' } });
 term.open($('#terminal'));
-let mini = null;
-function setMode(m) {
-  S.mode = m; document.body.classList.toggle('ptymode', m === 'pty'); $('#ptyview').classList.toggle('on', m === 'pty');
-  
-  if (m === 'pty') term.focus();
-}
+// One live socket per on-screen PTY. S.sessions[node] records what we spawned.
 let tws = null;
 function tsend(o) { if (tws && tws.readyState === 1) tws.send(JSON.stringify(o)); }
-$('#tspawn').onclick = () => {
-  const node = S.chat && !isGroup(S.chat) ? S.chat : null; if (!node) { toast('Open an agent first'); return; }
-  if (tws) tws.close();
-  const opt = $('#tprov').selectedOptions[0]; const prov = opt.dataset.parser ? 'fixture' : opt.value; const q = new URLSearchParams({ node, provider: opt.value, rows: ROWS, cols: COLS }); if (opt.dataset.parser) q.set('parser', opt.dataset.parser);
-  term.reset(); if (mini) mini.reset(); S.lastAnsi = ''; $('#tinfo').textContent = 'spawning…';
-  tws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/term?${q}`);
-  tws.onmessage = (m) => {
+function recordSession(node, sess) { const arr = (S.sessions[node] ||= []); if (!arr.some((x) => x.id === sess.id)) arr.push(sess); }
+function endSession(node, id) { const arr = S.sessions[node]; if (!arr) return; const x = arr.find((s) => s.id === id); if (x) x.live = false; }
+
+// Start a provider session on a real node and open it full-center.
+function startSession(node, provider, parser) {
+  if (!node) { toast('Pick a node first'); return; }
+  if (tws) { try { tws.close(); } catch (_) {} tws = null; }
+  const prov = parser ? 'fixture' : provider;
+  const q = new URLSearchParams({ node, provider, rows: ROWS, cols: COLS }); if (parser) q.set('parser', parser);
+  term.reset(); S.lastAnsi = ''; $('#tinfo').textContent = `spawning ${prov} on ${node}…`;
+  openPty(node, { provider: prov, key: '', id: 'pending', live: true });
+  const sock = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/term?${q}`);
+  tws = sock;
+  sock.onmessage = (m) => {
     const d = JSON.parse(m.data);
-    if (d.type === 'spawned') { S.events[node] = new Map(); S.agentState[node] = 'idle'; S.session = d.session; S.sessionNode = node; S.sessionProv = prov; S.target = 'agent'; $('#tinfo').textContent = `${prov} on ${node}`; logEv(`agent ${prov} started on ${node}`); if (S.chat === node) openChat(node); }
-    if (d.type === 'error') { $('#tinfo').textContent = d.text; addLocal(node, { sys: true, text: d.text }); }
-    if (d.type === 'ack') { $('#tinfo').textContent = `${d.op}: ${d.ok ? 'ok' : 'failed'}`; if (!d.ok) { S.working[node] = 0; addLocal(node, { sys: true, text: 'Refused: ' + (/does not permit/.test(d.detail) ? 'node status does not permit operator requests (policy)' : d.detail.slice(0, 120)) }); } }
+    if (d.type === 'spawned') {
+      const id = (d.session && JSON.stringify(d.session)) || String(Date.now());
+      S.events[node] = S.events[node] || new Map(); S.agentState[node] = 'idle';
+      S.session = d.session; S.sessionNode = node; S.sessionProv = prov;
+      const sess = { provider: prov, key: d.session, id, live: true, parser };
+      recordSession(node, sess); S.ptySession = sess;
+      $('#tinfo').textContent = `${prov} on ${node}`; logEv(`session ${prov} started on ${node}`);
+      renderSidebar(); if (S.view === 'node' && S.nodeId === node) renderNode();
+    }
+    if (d.type === 'error') { $('#tinfo').textContent = d.text; toast(d.text); }
+    if (d.type === 'ack') { if (!d.ok) toast('Refused: ' + (/does not permit/.test(d.detail) ? 'node status does not permit operator requests (policy)' : String(d.detail).slice(0, 120))); }
     if (d.type === 'events') onEvents(node, d.events);
     if (d.type === 'frame') {
       const bytes = Uint8Array.from(atob(d.ansi), (c) => c.charCodeAt(0));
-      window.lastFrameText = d.text; term.reset(); term.write(bytes); S.lastAnsi = bytes; if (mini) { mini.reset(); mini.write(bytes); $('#tempty').hidden = true; }
-      S.lastFrame = Date.now();
+      window.lastFrameText = d.text; term.reset(); term.write(bytes); S.lastAnsi = bytes; S.lastFrame = Date.now();
+      if (S.ptyLayout === 'chat') renderPtyChat(d.text);
     }
   };
-  tws.onclose = () => { $('#tinfo').textContent += ' [closed]'; if (S.sessionNode) { logEv(`agent session on ${S.sessionNode} ended`); } S.session = null; if (S.sessionNode) S.agentState[S.sessionNode] = 'idle'; S.target = 'mail'; renderChip(); };
-};
-$('#tstop').onclick = () => tsend({ t: 'stop' });
+  sock.onclose = () => {
+    if (tws === sock) { $('#tinfo').textContent += ' [closed]'; if (S.ptySession) { endSession(node, S.ptySession.id); } S.session = null; S.agentState[node] = 'idle'; if (S.view === 'node' && S.nodeId === node) renderNode(); renderSidebar(); }
+  };
+}
+function stopSession(sess) {
+  if (S.ptySession && S.ptySession.id === sess.id && tws) tsend({ t: 'stop' });
+  endSession(S.nodeId || S.sessionNode, sess.id);
+  if (S.view === 'node') renderNode();
+}
+// Open the full-center PTY for a session. Reconnecting to an existing session id is a later step;
+// for now this shows the live terminal of the session we hold a socket for.
+function openPty(node, sess) {
+  showView('pty'); S.sessionNode = node; S.ptySession = sess;
+  $('#headname').textContent = `${sess.provider} · ${node}`; $('#headbtn').title = node; $('#headav').innerHTML = avatar(node, 'sm');
+  $('#tinfo').textContent = `${sess.provider} on ${node}`;
+  setPtyLayout(S.ptyLayout || 'native');
+  setTimeout(() => term.focus(), 50);
+}
+// Layout toggle: native xterm vs. a re-rendered chat-like PTY view (stub for later). Not m4a.
+function setPtyLayout(l) {
+  S.ptyLayout = l; localStorage.setItem('hq.ptylayout', l);
+  $('#ptylayout').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.l === l));
+  $('#terminal').style.display = l === 'native' ? '' : 'none';
+  const pc = $('#ptychat'); pc.hidden = l !== 'chat';
+  if (l === 'chat') renderPtyChat(window.lastFrameText || '');
+  else term.focus();
+}
+function renderPtyChat(text) {
+  const pc = $('#ptychat'); if (!pc) return;
+  pc.innerHTML = `<div class="ptychat-stub"><b>Chat-like PTY view</b><div class="sub">Re-rendered conversation layout over this PTY session is coming next. This is a PTY view, not an m4a chat.</div><pre class="ptychat-screen">${esc(text || '')}</pre></div>`;
+}
+$('#ptyback').onclick = () => { if (S.sessionNode) openNode(S.sessionNode); };
+$('#ptylayout').onclick = (e) => { const b = e.target.closest('button[data-l]'); if (b) setPtyLayout(b.dataset.l); };
+$('#tstop').onclick = () => { tsend({ t: 'stop' }); };
 term.onData((data) => tsend({ t: 'data', data }));
-
-// ---- panel terminal tab: a read-only live preview of the agent PTY, scaled to the panel width
-function renderTermTab() {
-  const sel = $('#tprov2'); if (!sel.options.length) { sel.innerHTML = $('#tprov').innerHTML; sel.onchange = () => { $('#tprov').selectedIndex = sel.selectedIndex; }; }
-  sel.selectedIndex = $('#tprov').selectedIndex;
-  $('#tstate').textContent = S.session ? `${S.sessionProv} on ${S.sessionNode}` : 'no session';
-  if (!mini) { mini = new Terminal({ rows: ROWS, cols: COLS, fontSize: 13, disableStdin: true, cursorBlink: false, fontFamily: 'ui-monospace,Menlo,Consolas,monospace', theme: { background: '#000000' } }); mini.open($('#tmini')); if (S.lastAnsi && S.lastAnsi.length) mini.write(S.lastAnsi); new ResizeObserver(fitMini).observe($('#tminihost')); }
-  $('#tempty').hidden = !!(S.lastAnsi && S.lastAnsi.length); fitMini();
-}
-function fitMini() {
-  const host = $('#tminihost'), inner = $('#tmini'); if (!host || !inner.firstChild) return;
-  inner.style.transform = ''; const w = inner.scrollWidth || 1, h = inner.scrollHeight || 1; const k = Math.min(1, host.clientWidth / w);
-  inner.style.transform = `scale(${k})`; host.style.height = Math.round(h * k) + 'px';
-}
-$('#tspawn2').onclick = () => { $('#tprov').selectedIndex = $('#tprov2').selectedIndex; $('#tspawn').click(); setTimeout(renderTermTab, 600); };
-$('#tstop2').onclick = () => { $('#tstop').click(); setTimeout(renderTermTab, 600); };
-$('#tfull').onclick = () => { if (S.chat && !isGroup(S.chat)) setMode('pty'); else toast('Open an agent chat first'); };
 
 // ---- event layer: the browser reads ONLY typed session events from the server (no screen parsing here)
 function refreshAvatars() { renderSidebar(); if (S.chat) $('#headav').innerHTML = avatar(S.chat, 'mid'); renderChat(); }
@@ -546,14 +636,18 @@ es.onmessage = (m) => {
     if (S.chat === msg.from || isGroup(S.chat)) loadThread(); else { S.mail[msg.from] = (S.mail[msg.from] || []).concat([msg]); renderSidebar(); }
   }
 };
+S.ptyLayout = localStorage.getItem('hq.ptylayout') || 'native';
 setTab('info');
 api('/api/config').then(async (c) => { S.chats = c.chats && c.chats.length ? c.chats : [{ label: 'general', target: 'room:general' }];
   if (c.m4a) { S.m4a = c.m4a; try { const d = await post('/api/s/m4a/rooms', {}); const rows = Array.isArray(d.result) ? d.result : d.result.rooms || [];
     const rooms = rows.map((r) => { const rid = r.room_id || r.id || r.room; const label = r.title || r.name || r.alias || rid; return { label, target: 'm4a:' + rid, kind: (c.m4a.groups || []).includes(label) || r.kind === 'group' || r.kind === 'channel' ? 'group' : 'dm' }; }).filter((r) => r.target !== 'm4a:undefined');
     S.chats = [...rooms, ...S.chats.filter((x) => !String(x.target).startsWith('room:'))]; } catch (e) { toast('m4a: ' + e.message); } } }).catch(() => { S.chats = [{ label: 'general', target: 'room:general' }]; }).then(loadNodes).then(() => {
-    const h = decodeURIComponent((location.hash.match(/^#\/chat\/(.+)$/) || [])[1] || ''); const want = h || localStorage.getItem('hq.chat');
-    const ok = (t) => t && ((S.chats || []).some((c) => c.target === t) || (S.nodes || []).some((n) => n.node_id === t));
-    openChat(ok(want) ? want : S.chats[0].target);
+    const nodeHash = decodeURIComponent((location.hash.match(/^#\/node\/(.+)$/) || [])[1] || '');
+    const chatHash = decodeURIComponent((location.hash.match(/^#\/chat\/(.+)$/) || [])[1] || '');
+    const want = nodeHash || chatHash || localStorage.getItem('hq.chat');
+    if (want && (S.nodes || []).some((n) => n.node_id === want)) openNode(want);
+    else if (want && (S.chats || []).some((c) => c.target === want)) openChat(want);
+    else openChat(S.chats[0].target);
     if (localStorage.getItem('hq.panel')) openPanel(SAVED_TAB || 'info'); setTimeout(prefetch, 1500); setInterval(prefetch, 60000); }); let pollN = 0; setInterval(() => { pollN++; if (S.chat && !document.hidden && (String(S.chat).startsWith('m4a:') || pollN % 4 === 0)) loadThread(); }, 2500); setInterval(loadNodes, 4000);
 
 // ---- message actions: react / reply / more

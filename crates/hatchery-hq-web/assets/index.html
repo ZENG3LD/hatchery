@@ -15,10 +15,12 @@
   <header id="head"><button id="sidetoggle" class="round" title="Chats">☰</button><button id="headbtn"><span id="headav"></span><span id="headname">general</span><span class="hchev">›</span></button></header>
   <div id="body">
    <div id="ptyview">
-    <div class="ptybar"><select id="tprov"><option value="shell" selected>shell</option><option>claude</option><option>codex</option><option>kimi</option><option>grok</option><option value="grok" data-parser="claude">fixture agent (test)</option></select>
-     <button class="btn blue" id="tspawn">Start</button><button class="btn" id="tstop">Stop</button><span class="sub" id="tinfo"></span></div>
-    <div class="termwrap"><div id="terminal"></div></div>
+    <div class="ptybar"><button class="btn" id="ptyback">‹ Node</button><span class="sub" id="tinfo"></span><span class="grow"></span>
+     <div class="tog" id="ptylayout"><button data-l="native" class="on">Native</button><button data-l="chat">Chat view</button></div>
+     <button class="btn" id="tstop">Stop</button></div>
+    <div class="termwrap"><div id="terminal"></div><div id="ptychat" class="ptychat" hidden></div></div>
    </div>
+   <div id="nodeview" class="view"></div>
    <div id="chat" class="view"></div>
   </div>
   <div id="composer">
@@ -37,12 +39,6 @@
   <div id="ptabs" role="tablist"></div>
   <div id="pbody">
    <div class="ptab" id="p-info"></div>
-   <div class="ptab" id="p-terminal">
-    <section class="psec"><div class="sech"><span>Agent terminal</span><span class="sub" id="tstate">no session</span></div>
-     <div class="pcard"><div class="row"><select id="tprov2"></select><button class="btn blue" id="tspawn2">Start</button><button class="btn" id="tstop2">Stop</button></div>
-      <div class="tmini" id="tminihost"><div class="inner" id="tmini"></div><div class="tempty sub" id="tempty">No output yet. Open an agent chat and start a session.</div></div>
-      <div class="row end"><button class="btn" id="tfull">Open full terminal</button></div></div></section>
-   </div>
    <div class="ptab" id="p-browser">
     <section class="psec"><div class="sech"><span>Browser stream</span><span class="sub" id="binfo"></span></div>
      <div class="pcard">

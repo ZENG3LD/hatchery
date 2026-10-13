@@ -16,7 +16,7 @@ button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;paddin
 .icon{width:32px;height:32px;flex:none;border-radius:9px;display:grid;place-items:center;color:var(--sub);font-size:16px;transition:background .12s,color .12s}
 .icon:hover{background:var(--hover);color:var(--txt)}.icon.on{background:var(--el2);color:var(--txt)}
 #search{margin:0 12px 8px;background:var(--el);border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:7px 11px;outline:0}
-#search:focus{border-color:#34343b}
+#search:focus{border-color:var(--dim)}
 #chats{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:4px 8px 8px}
 .sec{font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.07em;padding:14px 10px 6px}
 .chatitem{display:flex;gap:10px;align-items:center;padding:7px 9px;border-radius:10px;width:100%;text-align:left;transition:background .12s}
@@ -430,3 +430,25 @@ body.rail #chats{order:2}body.rail .sidetop{order:3;padding:8px 0 0}body.rail .s
 .rn{transition:opacity .15s}.rx:hover .rn{opacity:0;max-width:0;padding:0;overflow:hidden}
 .msg.them.hasrx>.ts.in{top:auto;bottom:8px}
 .msg.them .rx,.msg.me .rx{border-color:transparent}.msg .rx.mine,.msg .rx:has(.rpill.mine){border-color:#353535}
+
+/* round 22: nodes as environments (node view), node-driven PTY, chat has no PTY */
+#nodeview{display:none}
+#nodeview.on{display:block}
+body.nodemode #composer{display:none}
+.nodewrap{max-width:760px;margin:0 auto;padding:20px max(16px,calc((100% - 760px)/2)) 40px}
+.nhero{display:flex;align-items:center;gap:14px;margin-bottom:8px}
+.nhero h2{margin:0;font-size:20px}
+.nsec{margin-top:18px}
+.nsec>h3{font-size:13px;color:var(--sub);font-weight:600;margin:0 0 8px;text-transform:uppercase;letter-spacing:.05em}
+.srow2{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:var(--el);font-size:13px}
+.chip:hover{background:var(--hover);border-color:var(--dim)}
+/* native PTY layout toggle (stub for chat-like view) */
+.ptybar .tog{display:flex;background:var(--el);border:1px solid var(--line);border-radius:9px;padding:3px}
+.ptybar .tog button{padding:4px 12px;border-radius:6px;color:var(--sub);font-size:13px}
+.ptybar .tog button.on{background:var(--el2);color:var(--txt)}
+.ptybar .grow{flex:1}
+.ptychat{flex:1;min-height:0;overflow:auto;padding:16px}
+.ptychat-stub{max-width:720px;margin:0 auto}
+.ptychat-screen{white-space:pre-wrap;background:var(--el);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:12px;font:13px/1.45 ui-monospace,Menlo,Consolas,monospace}
