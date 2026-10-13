@@ -120,13 +120,19 @@ pub struct AppState {
     /// `None` until `spawn_topology_watcher` establishes it; callers fall
     /// back to a one-shot dial while it is unset.
     pub topology: std::sync::OnceLock<hatchery_c2_client::C2ReconnectingHandle>,
+    /// Node events (terminal frames, controller changes, ...) fanned out from
+    /// the single held operator control to every live terminal view. Core
+    /// admits only one operator connection at a time, so all views must share
+    /// this one stream rather than each dialing its own.
+    pub node_events: broadcast::Sender<std::sync::Arc<Value>>,
 }
 
 type Shared = Arc<AppState>;
 
 pub fn router(config: Config) -> (Router, Shared) {
     let (events, _) = broadcast::channel(256);
-    let state = Arc::new(AppState { config, events, topology: std::sync::OnceLock::new() });
+    let (node_events, _) = broadcast::channel(1024);
+    let state = Arc::new(AppState { config, events, topology: std::sync::OnceLock::new(), node_events });
     let base = state.config.base_path.clone();
     let index: &'static str = Box::leak(index_html(&base).into_boxed_str());
     let mut app = Router::new()
@@ -399,8 +405,14 @@ pub fn spawn_topology_watcher(state: Shared) {
                     // Publish once; if already set (shouldn't happen), keep the first.
                     let _ = state.topology.set(handle);
                     tracing::info!("HQ topology watcher: held operator control established");
-                    // Drain forever so the supervisor keeps updating topology.
-                    while events.recv().await.is_some() {}
+                    // Drain forever so the supervisor keeps updating topology, and
+                    // fan each event out to any live terminal views. `send` on a
+                    // broadcast with no receivers is a no-op, so this never stalls.
+                    while let Some(ev) = events.recv().await {
+                        if let Ok(v) = serde_json::to_value(&ev) {
+                            let _ = state.node_events.send(std::sync::Arc::new(v));
+                        }
+                    }
                     tracing::warn!("HQ topology watcher: event stream ended; supervisor retains the handle");
                     // The handle self-reconnects; nothing more to do. Park.
                     std::future::pending::<()>().await;
@@ -461,10 +473,16 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     use gate4agent_node_protocol::{AgentId, NodeRequest, SessionMode, WorkspaceId};
     use gate4agent_types::TerminalSize;
     use hatchery_core::{C2NodeResponse, NodeId, NodeRoute, NodeTransportState};
-    let cfg = &s.config;
     let say = |kind: &str, text: String| json!({ "type": kind, "text": text }).to_string();
     let node = NodeId::new(q.node.clone()).map_err(|e| e.to_string())?;
-    let (control, mut events) = hatchery_c2_client::connect_local(&cfg.c2_control, &cfg.c2_token).await.map_err(|e| e.to_string())?;
+    // Core admits a single operator connection; use the one held by the
+    // topology watcher for all requests, and subscribe to its fanned-out
+    // event stream for this session's terminal frames.
+    let Some(control) = s.topology.get().cloned() else {
+        let _ = socket.send(Message::text(say("error", "operator control not ready yet".to_owned()))).await;
+        return Err("operator control not ready".into());
+    };
+    let mut events = s.node_events.subscribe();
     let topo = control.current_topology();
     let observed = topo.nodes.iter().find(|n| n.node_id == node && n.transport == NodeTransportState::Online);
     let Some(_observed) = observed else {
@@ -518,8 +536,11 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     loop {
         tokio::select! {
             event = events.recv() => {
-                let Some(event) = event else { break };
-                let Ok(value) = serde_json::to_value(&event) else { continue };
+                let value = match event {
+                    Ok(v) => v,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                };
                 let mut frames = Vec::new();
                 collect_frames(&value, &mut frames);
                 if !frames.is_empty() && (session_key.is_empty() || value.to_string().contains(&session_key)) {
