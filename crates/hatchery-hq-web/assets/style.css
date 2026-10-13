@@ -403,3 +403,15 @@ body.rail #chats{order:2}body.rail .sidetop{order:3;padding:8px 0 0}body.rail .s
 #panel .btn{color:#e6e6e6;background:#262626;border:0}#panel .btn:hover{background:#2e2e2e}#panel .btn.blue{background:#116dd2;color:#fff}
 #panel .tog{background:#1f1f1f;border:0}
 #p-status h3{text-transform:none;letter-spacing:0}#p-status .stgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr))!important}#p-status .stat{padding:10px 12px;border-radius:14px;min-width:0}#p-status .stat .v{font-size:15px}
+
+/* round 20: reactions as a round badge on the bubble's top corner */
+.msg.hasrx{margin-top:16px!important}
+.rx{position:absolute;top:-13px;display:flex;align-items:center;gap:1px;margin:0;padding:1px 6px;height:24px;border-radius:999px;background:#2a2a2a;border:2px solid #121212;z-index:2;flex-wrap:nowrap;white-space:nowrap}
+.msg.me .rx{left:-10px}.msg.them .rx{right:-10px}
+.rpill,.msg.me .rpill{background:none;border:0;padding:0 1px;font-size:14px;line-height:20px;border-radius:6px;color:inherit}
+.rpill:hover,.msg.me .rpill:hover{background:#ffffff1a}
+.rpill.mine,.msg.me .rpill.mine{background:none;border:0}
+.rx:has(.rpill.mine){background:#16365c}
+.rn{font-size:12px;color:#d0d0d0;padding:0 2px 0 3px;font-weight:600}
+#rxtip{position:fixed;z-index:60;background:#1f1f1f;border:1px solid #2c2c2c;border-radius:10px;padding:6px 10px;font-size:12.5px;box-shadow:0 6px 24px #0008;max-width:280px;pointer-events:none}
+#rxtip div{display:flex;gap:8px;padding:2px 0}#rxtip .e{flex:none}

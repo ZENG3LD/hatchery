@@ -98,6 +98,7 @@ async function loadThread1(id) {
       const d = await post('/api/s/m4a/read', { room: id.slice(4), limit: 100 }); const rows = Array.isArray(d.result) ? d.result : d.result.messages || d.result.rows || [];
       const me = S.m4a.nick; const own = (f) => f === me || String(f).startsWith('@' + me + ':');
       S.mail[id] = rows.filter((r) => (r.body || r.kind === 'undecryptable') && !String(r.state || '').startsWith('failed') && (r.kind === 'member' ? !own(r.subject) : !(r.kind && !['text', 'notice', 'emote', 'undecryptable'].includes(r.kind) && own(r.from)))).map((r) => ({ from: own(r.from) ? OPERATOR : String(r.from || '?').replace(/^@([^:]+):.*$/, '$1'), body: r.kind === 'undecryptable' ? '[cannot decrypt yet]' : (r.reply_to ? String(r.body).replace(/^(>.*\n)+\n?/, '') : r.body), reply_to: r.reply_to || null, reactions: r.reactions || [], created_at_ms: r.ts, message_id: r.event_id, failed: String(r.state || '').startsWith('failed'), enc: r.kind === 'undecryptable', sys: !!(r.kind && !['text', 'notice', 'emote', 'undecryptable'].includes(r.kind)) })).filter((m, i, a) => !m.message_id || a.findIndex((x) => x.message_id === m.message_id) === i).sort((a, b) => a.created_at_ms - b.created_at_ms);
+      const sig = JSON.stringify(S.mail[id]); if (sig === S.sig?.[id]) return; (S.sig = S.sig || {})[id] = sig;
       saveCache(); if (S.chat === id) renderChat(); renderSidebar(); return;
     }
     if (isGroup(id)) { const d = await post('/api/s/mail/inbox'); msgs = d.messages.filter((m) => m.to === id); }
@@ -154,7 +155,9 @@ function renderChat() {
     if (meta && meta.message_id) d.dataset.id = meta.message_id;
     let rq = '', rx = '';
     if (meta && meta.reply_to) { const o = mail.find((x) => x.message_id === meta.reply_to); rq = `<button class="rq" data-goto="${esc(meta.reply_to)}"><b style="color:${colorOf(o ? (o.from === OPERATOR ? 'me' : o.from) : '?')}">${esc(o ? (o.from === OPERATOR ? 'You' : o.from) : 'message')}</b><span>${esc(o ? String(o.body).slice(0, 90) : '…')}</span></button>`; }
-    if (meta && meta.reactions && meta.reactions.length) rx = `<div class="rx">${meta.reactions.map((r) => `<button class="rpill${r.mine || (r.by || []).includes(S.m4a && S.m4a.nick) ? ' mine' : ''}" data-key="${esc(r.key)}"${r.mine ? ` data-mine="${esc(r.mine)}"` : ''} title="${esc((r.by || []).join(', '))}">${esc(r.key)} ${r.count}</button>`).join('')}</div>`;
+    const rxs = meta && meta.message_id ? rxOf(meta) : [];
+    if (rxs.length) { const tot = rxs.reduce((a, r) => a + r.count, 0); d.classList.add('hasrx');
+      rx = `<div class="rx" data-tip="${esc(JSON.stringify(rxs.map((r) => [r.key, r.by])))}">${rxs.map((r) => `<button class="rpill${r.me ? ' mine' : ''}" data-key="${esc(r.key)}"${r.mine ? ` data-mine="${esc(r.mine)}"` : ''}>${esc(r.key)}</button>`).join('')}${tot > 1 ? `<span class="rn">${tot}</span>` : ''}</div>`; }
     const acts = meta && meta.message_id && String(S.chat).startsWith('m4a:') ? `<div class="macts"><button data-act="react" title="React">${ico('smile')}</button><button data-act="reply" title="Reply">${ico('reply')}</button><button data-act="more" title="More">${ico('dots')}</button></div>` : '';
     const t = `<span class="ts" title="${esc(new Date(ts).toLocaleString())}">${fmtTime(ts).slice(0, 5)}</span>`;
     const label = group && !mine && from && from !== prevFrom ? `<div class="hdr"><button class="who nick" data-nick="${esc(from)}" style="color:${colorOf(from)}">${esc(from)}</button>${t}</div>` : '';
@@ -545,7 +548,7 @@ setTab('info');
 api('/api/config').then(async (c) => { S.chats = c.chats && c.chats.length ? c.chats : [{ label: 'general', target: 'room:general' }];
   if (c.m4a) { S.m4a = c.m4a; try { const d = await post('/api/s/m4a/rooms', {}); const rows = Array.isArray(d.result) ? d.result : d.result.rooms || [];
     const rooms = rows.map((r) => { const rid = r.room_id || r.id || r.room; const label = r.title || r.name || r.alias || rid; return { label, target: 'm4a:' + rid, kind: (c.m4a.groups || []).includes(label) || r.kind === 'group' || r.kind === 'channel' ? 'group' : 'dm' }; }).filter((r) => r.target !== 'm4a:undefined');
-    S.chats = [...rooms, ...S.chats.filter((x) => !String(x.target).startsWith('room:'))]; } catch (e) { toast('m4a: ' + e.message); } } }).catch(() => { S.chats = [{ label: 'general', target: 'room:general' }]; }).then(loadNodes).then(() => { openChat(S.chats[0].target); setTimeout(prefetch, 1500); setInterval(prefetch, 60000); }); setInterval(() => { if (S.chat && !S.panel) loadThread(); }, 10000); setInterval(loadNodes, 4000);
+    S.chats = [...rooms, ...S.chats.filter((x) => !String(x.target).startsWith('room:'))]; } catch (e) { toast('m4a: ' + e.message); } } }).catch(() => { S.chats = [{ label: 'general', target: 'room:general' }]; }).then(loadNodes).then(() => { openChat(S.chats[0].target); setTimeout(prefetch, 1500); setInterval(prefetch, 60000); }); let pollN = 0; setInterval(() => { pollN++; if (S.chat && !document.hidden && (String(S.chat).startsWith('m4a:') || pollN % 4 === 0)) loadThread(); }, 2500); setInterval(loadNodes, 4000);
 
 // ---- message actions: react / reply / more
 const EMO = ['👍', '👎', '❤️', '😂', '🎉', '😮', '😢', '🙏', '🔥', '👀', '✅', '🤔'];
@@ -556,12 +559,44 @@ function popAt(btn, html) {
 }
 document.addEventListener('mousedown', (e) => { const p = document.querySelector('#mpop'); if (p && !p.contains(e.target) && !e.target.closest('.macts')) p.remove(); });
 const msgOf = (id) => (S.mail[S.chat] || []).find((m) => m.message_id === id);
+// Reactions are optimistic: a pending overlay renders at once and is dropped when the server echo agrees
+// (or rolled back on error / after 30 s).
+S.prx = {};
+const myNick = () => S.m4a && S.m4a.nick;
+function rxOf(m) {
+  const out = (m.reactions || []).map((r) => { const by = (r.by || []).filter(Boolean); const me = !!r.mine || by.includes(myNick()); return { key: r.key, by, count: r.count || by.length, mine: r.mine || null, me }; });
+  for (const [k, p] of Object.entries(S.prx)) {
+    if (p.id !== m.message_id) continue;
+    if (Date.now() > p.until) { delete S.prx[k]; continue; }
+    let e = out.find((r) => r.key === p.key);
+    if (p.op === 'add') { if (e && e.me) { if (e.mine && p.thenDel) { p.op = 'del'; p.thenDel = false; unreact(e.mine, m.message_id, p.key); } else delete S.prx[k]; continue; }
+      if (!e) out.push(e = { key: p.key, by: [], count: 0, mine: null, me: false }); e.by = [...e.by, myNick()]; e.count++; e.me = true; }
+    else { if (!e || !e.me) { delete S.prx[k]; continue; } e.by = e.by.filter((n) => n !== myNick()); e.count--; e.me = false; e.mine = null; }
+  }
+  return out.filter((r) => r.count > 0);
+}
+function pend(id, key, op) { S.prx[id + '\u0000' + key] = { id, key, op, until: Date.now() + 30000 }; renderChat(); setTimeout(loadThread, 1200); }
+function unpend(id, key, msg) { delete S.prx[id + '\u0000' + key]; renderChat(); toast('Reaction: ' + msg); }
 async function react(id, key) {
-  try { await post('/api/s/m4a/react', { room: S.chat.slice(4), event: id, key }); loadThread(); } catch (e) { toast('Reaction: ' + e.message); }
+  const m = msgOf(id); const cur = m ? rxOf(m).find((r) => r.key === key) : null;
+  if (cur && cur.me) { if (cur.mine) unreact(cur.mine, id, key); else { const p = S.prx[id + '\u0000' + key]; if (p) p.thenDel = true; } return; }
+  pend(id, key, 'add');
+  try { await post('/api/s/m4a/react', { room: S.chat.slice(4), event: id, key }); loadThread(); } catch (e) { unpend(id, key, e.message); }
 }
-async function unreact(ev) {
-  try { await post('/api/s/m4a/redact', { room: S.chat.slice(4), event: ev }); loadThread(); } catch (e) { toast('Reaction: ' + e.message); }
+async function unreact(ev, id, key) {
+  if (id) pend(id, key, 'del');
+  try { await post('/api/s/m4a/redact', { room: S.chat.slice(4), event: ev }); loadThread(); } catch (e) { if (id) unpend(id, key, e.message); else toast('Reaction: ' + e.message); }
 }
+// hover popover: who reacted, per emoji
+document.addEventListener('mouseover', (e) => {
+  const rx = e.target.closest && e.target.closest('.rx'); let tip = document.querySelector('#rxtip');
+  if (!rx) { tip?.remove(); return; } if (tip && tip.dataset.for === rx.dataset.tip) return; tip?.remove();
+  let list = []; try { list = JSON.parse(rx.dataset.tip); } catch (_) {}
+  tip = document.createElement('div'); tip.id = 'rxtip'; tip.dataset.for = rx.dataset.tip;
+  tip.innerHTML = list.map(([k, by]) => `<div><span class="e">${esc(k)}</span><span>${esc(by.map((n) => n === myNick() ? 'You' : n).join(', '))}</span></div>`).join('');
+  document.body.appendChild(tip); const r = rx.getBoundingClientRect(); const w = tip.offsetWidth;
+  tip.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px'; tip.style.top = Math.max(8, r.top - tip.offsetHeight - 6) + 'px';
+});
 function setReply(m) {
   S.replyTo = m ? { chat: S.chat, id: m.message_id, from: m.from === OPERATOR ? 'You' : m.from, body: m.body } : null;
   let bar = $('#replybar'); if (!S.replyTo) { bar?.remove(); return; }
@@ -572,7 +607,7 @@ function setReply(m) {
 $('#chat').addEventListener('click', (e) => {
   const a = e.target.closest('.macts button'); const pill = e.target.closest('.rpill'); const rq = e.target.closest('.rq');
   if (rq) { const t = $('#chat').querySelector(`.msg[data-id="${CSS.escape(rq.dataset.goto)}"]`); if (t) { t.scrollIntoView({ block: 'center', behavior: 'smooth' }); t.classList.add('flash'); setTimeout(() => t.classList.remove('flash'), 1400); } return; }
-  if (pill) { const id = pill.closest('.msg').dataset.id; const mine = pill.dataset.mine; if (mine) unreact(mine); else react(id, pill.dataset.key); return; }
+  if (pill) { const id = pill.closest('.msg').dataset.id; document.querySelector('#rxtip')?.remove(); react(id, pill.dataset.key); return; }
   if (!a) return; const id = a.closest('.msg').dataset.id; const m = msgOf(id); if (!m) return;
   if (a.dataset.act === 'reply') setReply(m);
   else if (a.dataset.act === 'react') { const p = popAt(a, `<div class="emos">${EMO.map((k) => `<button data-k="${k}">${k}</button>`).join('')}</div>`); if (!p) return; p.onclick = (ev) => { const b = ev.target.closest('[data-k]'); if (b) { p.remove(); react(id, b.dataset.k); } }; }
