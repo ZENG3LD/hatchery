@@ -270,3 +270,6 @@ body.rail #acctmenu{left:12px}
 #pbody .log div{overflow-wrap:anywhere}
 #bcanvas{max-width:100%}
 #box{border:1px solid #353535}#box:focus-within{border-color:#404040}
+/* round 9: rail = no search, + above the account avatar */
+body.rail #searchbtn{display:none}
+body.rail #chats{order:2}body.rail .sidetop{order:3;padding:8px 0 0}body.rail .sidebottom{order:4}
