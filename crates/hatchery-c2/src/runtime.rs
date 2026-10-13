@@ -607,11 +607,17 @@ struct Spawner {
     ingress: mpsc::Sender<Attempt>,
     status: watch::Receiver<Arc<StatusResponse>>,
     hub: OperatorHub,
+    /// A2: when true, nodes use the opaque restreamer only — no g4a relay worker.
+    opaque_restreamer: bool,
 }
 
 impl Spawner {
     /// Create the relay worker for a runtime-enrolled node, once.
     fn spawn_enrolled(&self, node_id: &NodeId, shutdown: &watch::Receiver<bool>, tasks: &mut JoinSet<io::Result<()>>) {
+        if self.opaque_restreamer {
+            tracing::info!(%node_id, "A2 opaque restreamer: skip g4a relay worker");
+            return;
+        }
         if self.relay_senders.snapshot().contains_key(node_id) {
             return;
         }
@@ -697,6 +703,11 @@ async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch:
         tasks.spawn(accept_call_home(node_listen, Arc::clone(&call_home_routes), static_ids, enroll_service.clone(), shutdown.clone()));
     }
     // A2 restreamer: opaque node uplink + core drain (C2 never dials core).
+    // When enabled, g4a node_relay_workers are not started: spawn/inventory are
+    // parsed only on the node and in core via node_controller.
+    let opaque_restreamer = config.restreamer_node_listen.is_some()
+        && config.restreamer_drain_listen.is_some()
+        && config.restreamer_core_token.is_some();
     if let (Some(node_listen), Some(drain_listen), Some(core_token)) = (
         config.restreamer_node_listen,
         config.restreamer_drain_listen,
@@ -725,8 +736,14 @@ async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch:
         tracing::info!(%node_listen, %drain_listen, "A2 restreamer listening");
     }
     tasks.spawn(inventory_owner(config.timings.fresh_for, ingress_rx, status_tx, shutdown.clone()));
-    for (node, commands, releases, force_disconnect, call_home) in relay_receivers {
-        tasks.spawn(node_relay_worker(node, config.timings, commands, releases, force_disconnect, call_home, ingress_tx.clone(), status_rx.clone(), hub.clone(), shutdown.clone()));
+    if opaque_restreamer {
+        tracing::info!("A2 opaque restreamer: g4a node relays disabled");
+        // Drop command channels so any accidental send fails closed.
+        drop(relay_receivers);
+    } else {
+        for (node, commands, releases, force_disconnect, call_home) in relay_receivers {
+            tasks.spawn(node_relay_worker(node, config.timings, commands, releases, force_disconnect, call_home, ingress_tx.clone(), status_rx.clone(), hub.clone(), shutdown.clone()));
+        }
     }
     let spawner = Spawner {
         timings: config.timings,
@@ -735,6 +752,7 @@ async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch:
         ingress: ingress_tx.clone(),
         status: status_rx.clone(),
         hub: hub.clone(),
+        opaque_restreamer,
     };
     drop(ingress_tx);
     tasks.spawn(http_server(listener, config.api_token.clone(), config.timings.http_io_deadline, status_rx.clone(), enroll_service.clone(), shutdown.clone()));
@@ -4627,5 +4645,46 @@ mod control_tunnel_listen_tests {
         let config = config().with_control_tunnel_listen(ok).unwrap();
         assert_eq!(config.control_tunnel_listen, Some(ok));
         assert!(!config.control_endpoint.is_empty());
+    }
+}
+
+
+#[cfg(test)]
+mod opaque_restreamer_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn with_restreamer_config_starts_without_g4a_control_listener() {
+        // Waiting node: no dial-out. With restreamer, no g4a relay worker either.
+        let node = C2NodeConfig::new(
+            NodeId::new("n1").unwrap(),
+            "accept",
+            "safe-token",
+        ).unwrap();
+        let node_up = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+        let drain = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap();
+        let sock = std::env::temp_dir().join(format!("c2-opaque-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&sock);
+        let config = C2Config::new("127.0.0.1:0".parse().unwrap(), "opaque-token-01234567", vec![node])
+            .unwrap()
+            .with_control_endpoint(sock.to_string_lossy())
+            .unwrap()
+            .with_restreamer(node_up, drain, "drain-token-0123456789ab")
+            .unwrap()
+            .with_timings(C2Timings {
+                attempt_deadline: Duration::from_millis(50),
+                ..C2Timings::default()
+            });
+        let running = C2Running::start(config).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert!(!sock.exists(), "C2 must not bind the legacy operator control socket");
+        let client = crate::restreamer::DrainClient::new(drain, "drain-token-0123456789ab");
+        let mut session = client.connect().await.expect("drain connect");
+        session.open("n1", 1, hatchery_c2_protocol::ChannelKind::G4aControl).await.unwrap();
+        session.resume(0).await.unwrap();
+        running.shutdown_handle().shutdown();
+        let _ = running.wait().await;
+        let _ = std::fs::remove_file(&sock);
     }
 }

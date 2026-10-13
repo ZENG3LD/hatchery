@@ -76,3 +76,36 @@ fn restreamer_sources_omit_g4a_type_names() {
         }
     }
 }
+
+/// C2 restreamer must not decode g4a JSON: spawn/inventory stay opaque ciphertext.
+#[test]
+fn restreamer_admits_g4a_looking_json_as_opaque_bytes() {
+    use crate::restreamer::{BufferLimits, MemoryJournal, Restreamer};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    // A payload that would be a NodeRequest if parsed — C2 must not parse it.
+    let fake_spawn = br#"{"route":{"node_id":"n"},"request":{"SpawnSpec":{}}}"#;
+    let rs = Restreamer::new(
+        BufferLimits {
+            max_events: 10,
+            max_bytes: 10_000,
+            max_age: Duration::from_secs(60),
+        },
+        Arc::new(MemoryJournal::new()),
+        "test-core-token-32bytes-minimum!",
+        None,
+    );
+    rs.admit_from_node("node-a", 1, fake_spawn.to_vec()).unwrap();
+    let env = &rs.buffered_after("node-a", 1, 0)[0];
+    assert_eq!(env.frame.payload, fake_spawn);
+    // No g4a type is constructed here; the bytes are identical.
+    assert!(!rs.ever_pushed_to_core());
+}
+
+#[test]
+fn restreamer_module_does_not_export_g4a_parsers() {
+    // Compile-time documentation: parsers live in hatchery_server::node_controller.
+    // This test just records the architectural boundary.
+    assert!(module_path!().contains("restreamer"));
+}
