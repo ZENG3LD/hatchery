@@ -111,7 +111,7 @@ async function loadThread1(id) {
 }
 
 // @mentions in already-escaped html become clickable nicks.
-const linkify = (html) => html.replace(/(^|[\s(>])@([a-z0-9][a-z0-9._-]{1,63})/gi, (m, pre, n) => `${pre}<button class="mention nick" data-nick="${n}" style="color:${colorOf(n)}">@${n}</button>`);
+const linkify = (html) => html.replace(/(^|[\s(>])(https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"])/g, (m, pre, u) => `${pre}<a class="lnk" href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`).replace(/(^|[\s(>])@([a-z0-9][a-z0-9._-]{1,63})/gi, (m, pre, n) => `${pre}<button class="mention nick" data-nick="${n}">@${n}</button>`);
 // profile card
 function profile(nick) {
   document.querySelector('#pcard')?.remove();
@@ -133,7 +133,7 @@ function profile(nick) {
   };
 }
 document.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('.nick'); if (b) { e.preventDefault(); profile(b.dataset.nick); } });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelector('#pcard')?.remove(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { document.querySelector('#pcard')?.remove(); document.querySelector('#mpop')?.remove(); } });
 
 function renderChat() {
   const items = []; const group = isGroup(S.chat);
@@ -519,9 +519,9 @@ api('/api/config').then(async (c) => { S.chats = c.chats && c.chats.length ? c.c
 // ---- message actions: react / reply / more
 const EMO = ['👍', '👎', '❤️', '😂', '🎉', '😮', '😢', '🙏', '🔥', '👀', '✅', '🤔'];
 function popAt(btn, html) {
-  document.querySelector('#mpop')?.remove(); const p = document.createElement('div'); p.id = 'mpop'; p.className = 'pop mpop'; p.innerHTML = html; document.body.appendChild(p);
+  const old = document.querySelector('#mpop'); if (old) { old.remove(); if (old._btn === btn) return null; } const p = document.createElement('div'); p.id = 'mpop'; p.className = 'pop mpop'; p.innerHTML = html; document.body.appendChild(p);
   const r = btn.getBoundingClientRect(); const w = p.offsetWidth, h = p.offsetHeight;
-  p.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px'; p.style.top = (r.top - h - 6 > 8 ? r.top - h - 6 : r.bottom + 6) + 'px'; return p;
+  p.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px'; p.style.top = (r.top - h - 6 > 8 ? r.top - h - 6 : r.bottom + 6) + 'px'; p._btn = btn; return p;
 }
 document.addEventListener('mousedown', (e) => { const p = document.querySelector('#mpop'); if (p && !p.contains(e.target) && !e.target.closest('.macts')) p.remove(); });
 const msgOf = (id) => (S.mail[S.chat] || []).find((m) => m.message_id === id);
@@ -541,7 +541,7 @@ $('#chat').addEventListener('click', (e) => {
   if (pill) { const id = pill.closest('.msg').dataset.id; react(id, pill.dataset.key); return; }
   if (!a) return; const id = a.closest('.msg').dataset.id; const m = msgOf(id); if (!m) return;
   if (a.dataset.act === 'reply') setReply(m);
-  else if (a.dataset.act === 'react') { const p = popAt(a, `<div class="emos">${EMO.map((k) => `<button data-k="${k}">${k}</button>`).join('')}</div>`); p.onclick = (ev) => { const b = ev.target.closest('[data-k]'); if (b) { p.remove(); react(id, b.dataset.k); } }; }
+  else if (a.dataset.act === 'react') { const p = popAt(a, `<div class="emos">${EMO.map((k) => `<button data-k="${k}">${k}</button>`).join('')}</div>`); if (!p) return; p.onclick = (ev) => { const b = ev.target.closest('[data-k]'); if (b) { p.remove(); react(id, b.dataset.k); } }; }
   else { const p = popAt(a, `<button data-c="text"><span class="ic">${ico('copy')}</span>Copy</button><button data-c="id"><span class="ic">${ico('hash')}</span>Copy message ID</button>`);
-    p.onclick = (ev) => { const b = ev.target.closest('[data-c]'); if (!b) return; p.remove(); navigator.clipboard?.writeText(b.dataset.c === 'id' ? id : m.body); toast(b.dataset.c === 'id' ? 'Message ID copied' : 'Copied'); }; }
+    if (!p) return; p.onclick = (ev) => { const b = ev.target.closest('[data-c]'); if (!b) return; p.remove(); navigator.clipboard?.writeText(b.dataset.c === 'id' ? id : m.body); toast(b.dataset.c === 'id' ? 'Message ID copied' : 'Copied'); }; }
 });
