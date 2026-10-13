@@ -133,6 +133,12 @@ pub struct EnrollmentResponse {
     pub c2_wg_endpoint: Option<String>,
     /// `ip:port` of the call-home listener inside the tunnel.
     pub c2_call_home: Option<String>,
+    /// A2 nested crypto: C2 outer-layer public key (base64). Node seals with both upstream keys.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_c2_public_key: Option<String>,
+    /// A2 nested crypto: HQ recipient public key relayed by C2 (base64). No HQ name/address.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upstream_recipient_public_key: Option<String>,
 }
 
 /// Bytes a node signs to authenticate to C2 over `material`.

@@ -67,6 +67,8 @@ pub struct HqWgClientConfig {
     pub hq_tunnel_address: IpAddr,
     pub c2_tunnel_address: IpAddr,
     pub control_port: u16,
+    /// A2: port of the C2 restreamer drain listener on the tunnel IP.
+    pub drain_port: u16,
     pub peers: Vec<HqWgPeer>,
 }
 
@@ -83,6 +85,9 @@ impl HqWgClientConfig {
         }
         if self.control_port == 0 {
             return Err(HqWgClientError::ControlPort);
+        }
+        if self.drain_port == 0 {
+            return Err(HqWgClientError::DrainPort);
         }
         if self.hq_tunnel_address.is_unspecified()
             || self.c2_tunnel_address.is_unspecified()
@@ -116,6 +121,12 @@ impl HqWgClientConfig {
     pub fn control_addr(&self) -> Result<SocketAddr, HqWgClientError> {
         self.validate()?;
         Ok(SocketAddr::new(self.c2_tunnel_address, self.control_port))
+    }
+
+    /// `c2_tunnel_ip:drain_port` — core dials the restreamer drain over WG.
+    pub fn drain_addr(&self) -> Result<SocketAddr, HqWgClientError> {
+        self.validate()?;
+        Ok(SocketAddr::new(self.c2_tunnel_address, self.drain_port))
     }
 }
 
@@ -158,6 +169,8 @@ pub enum HqWgClientError {
     TunnelAddress,
     #[error("HQ WireGuard control port must be nonzero")]
     ControlPort,
+    #[error("HQ WireGuard drain port must be nonzero")]
+    DrainPort,
     #[error("HQ WireGuard peer public key is empty")]
     PeerKey,
     #[error("kernel wireguard interface was not created: {0}")]
@@ -284,6 +297,7 @@ mod tests {
             hq_tunnel_address: "10.88.1.3".parse().unwrap(),
             c2_tunnel_address: "10.88.1.2".parse().unwrap(),
             control_port: 27441,
+            drain_port: 19002,
             peers: vec![HqWgPeer {
                 public_key: "pyjbO05QwAyerdhvLEogM9JRv8P8Im52v2b3P1KHfwM=".to_owned(),
                 endpoint: Some("192.168.78.2:51820".parse().unwrap()),
@@ -338,5 +352,11 @@ mod tests {
                 "allowed-ips must be only 10.88.1.2/32"
             );
         }
+    }
+
+    #[test]
+    fn drain_addr_is_tunnel_port() {
+        let cfg = sample();
+        assert_eq!(cfg.drain_addr().unwrap().to_string(), "10.88.1.2:19002");
     }
 }

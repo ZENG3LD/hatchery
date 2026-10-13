@@ -97,7 +97,9 @@ fn start_config(dir: &Dir, ports: &Ports, provisioner: Arc<Recording>, with_toke
         c2_wg_public_key: Some("c2-public-key-placeholder".into()),
         c2_wg_endpoint: Some("c2.example:51890".into()),
         c2_call_home: Some(ports.call_home.to_string()),
-    };
+            upstream_c2_public_key: None,
+            upstream_recipient_public_key: None,
+        };
     C2Config::new(ports.api, API_TOKEN, nodes)
         .unwrap()
         .with_control_endpoint(dir.p("c2.sock").to_string_lossy().into_owned())

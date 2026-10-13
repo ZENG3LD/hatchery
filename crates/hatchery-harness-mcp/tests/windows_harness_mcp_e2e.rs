@@ -1,3 +1,6 @@
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Uses restream g4a bridge + core NodeOperatorMesh (A2); C2 is opaque restreamer only.
+
 #![cfg(windows)]
 
 use std::{
@@ -10,8 +13,6 @@ use std::{
     time::{Duration, Instant as StdInstant, SystemTime, UNIX_EPOCH},
 };
 
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::C2Client;
 use hatchery_harness_engine::HarnessMutationV1;
 use hatchery_harness_client::{
     HarnessOperatorClient, HarnessOperatorCredential, HarnessReadClient,
@@ -615,16 +616,6 @@ fn replace_h3b_run_generation(
     mutation
 }
 
-async fn wait_online(client: &C2Client, node_id: &NodeId) {
-    timeout(Duration::from_secs(10), async {
-        loop {
-            if client.status().await.is_ok_and(|status| {
-                status.nodes[node_id].transport == hatchery_c2::protocol::NodeTransportState::Online
-            }) { return; }
-            sleep(Duration::from_millis(20)).await;
-        }
-    }).await.expect("fixture node did not become online");
-}
 
 async fn wait_runtime(adapter: &HarnessC2Adapter, route: &hatchery_c2::protocol::NodeRoute) {
     timeout(Duration::from_secs(10), async {
@@ -1077,23 +1068,17 @@ async fn production_host_and_real_mcp_child_enforce_durable_grant_filtered_reads
     let node_shutdown = server.shutdown_handle();
     let node_task = tokio::spawn(server.run());
 
-    let timings = C2Timings {
-        poll_interval: Duration::from_millis(20),
-        fresh_for: Duration::from_secs(2),
-        attempt_deadline: Duration::from_secs(2),
-        transient_backoffs: [Duration::from_millis(20); 5],
-        parked_backoff: Duration::from_millis(100),
-        http_io_deadline: Duration::from_secs(1),
-    };
-    let config = C2Config::new(
-        "127.0.0.1:0".parse().unwrap(),
-        c2_token,
-        vec![C2NodeConfig::new(node_id.clone(), node_endpoint, node_token).unwrap()],
-    ).unwrap().with_control_endpoint(control_endpoint.clone()).unwrap().with_timings(timings);
-    let running = C2Running::start(config).await.unwrap();
-    let c2_shutdown = running.shutdown_handle();
-    let http = C2Client::new(running.api_addr(), c2_token).unwrap().with_deadline(Duration::from_secs(1));
-    wait_online(&http, &node_id).await;
+
+    let _rig = hatchery_node::restream_test_rig::RestreamRig::start(
+        hatchery_node::restream_test_rig::RestreamRigConfig {
+            node_id: node_id.clone(),
+            local_endpoint: node_endpoint.clone(),
+            local_token: node_token.to_owned(),
+            control_endpoint: control_endpoint.clone(),
+            operator_token: c2_token.to_owned(),
+        },
+    )
+    .await;
 
     let (adapter, events) = connect_harness(&control_endpoint, c2_token).await;
     let route = adapter.exact_route(&node_id).unwrap();
@@ -1417,8 +1402,7 @@ async fn production_host_and_real_mcp_child_enforce_durable_grant_filtered_reads
 
     node_shutdown.request_shutdown().await.unwrap();
     timeout(Duration::from_secs(5), node_task).await.expect("Node did not stop").unwrap().unwrap();
-    c2_shutdown.shutdown();
-    timeout(Duration::from_secs(5), running.wait()).await.expect("C2 did not stop").unwrap();
+    drop(_rig);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1496,26 +1480,17 @@ async fn operator_schedule_next_h3b_is_exact_replay_restart_generation_and_revok
     let node_shutdown = server.shutdown_handle();
     let node_task = tokio::spawn(server.run());
 
-    let timings = C2Timings {
-        poll_interval: Duration::from_millis(20),
-        fresh_for: Duration::from_secs(2),
-        attempt_deadline: Duration::from_secs(2),
-        transient_backoffs: [Duration::from_millis(20); 5],
-        parked_backoff: Duration::from_millis(100),
-        http_io_deadline: Duration::from_secs(1),
-    };
-    let config = C2Config::new(
-        "127.0.0.1:0".parse().unwrap(),
-        c2_token,
-        vec![C2NodeConfig::new(node_id.clone(), node_endpoint, node_token).unwrap()],
-    ).unwrap()
-        .with_control_endpoint(control_endpoint.clone()).unwrap()
-        .with_timings(timings);
-    let running = C2Running::start(config).await.unwrap();
-    let c2_shutdown = running.shutdown_handle();
-    let http = C2Client::new(running.api_addr(), c2_token).unwrap()
-        .with_deadline(Duration::from_secs(1));
-    wait_online(&http, &node_id).await;
+
+    let _rig = hatchery_node::restream_test_rig::RestreamRig::start(
+        hatchery_node::restream_test_rig::RestreamRigConfig {
+            node_id: node_id.clone(),
+            local_endpoint: node_endpoint.clone(),
+            local_token: node_token.to_owned(),
+            control_endpoint: control_endpoint.clone(),
+            operator_token: c2_token.to_owned(),
+        },
+    )
+    .await;
 
     let (adapter, events) = connect_harness(&control_endpoint, c2_token).await;
     let route = adapter.exact_route(&node_id).unwrap();
@@ -1784,11 +1759,7 @@ async fn operator_schedule_next_h3b_is_exact_replay_restart_generation_and_revok
     node_shutdown.request_shutdown().await.unwrap();
     timeout(Duration::from_secs(5), node_task)
         .await.expect("H3B ScheduleNext Node did not stop").unwrap().unwrap();
-    c2_shutdown.shutdown();
-    timeout(Duration::from_secs(5), running.wait())
-        .await.expect("H3B ScheduleNext C2 did not stop").unwrap();
-    drop(node_shutdown);
-    drop(c2_shutdown);
+    drop(_rig);
     drop(http);
 
     let mut privacy_scan = vec![databases.root.clone()];

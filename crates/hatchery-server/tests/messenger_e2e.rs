@@ -1,10 +1,11 @@
 #![cfg(all(unix, feature = "m4a"))]
 //! P6 end to end: real C2 + two enrolled nodes (member, trusted) and a neutral one. The server
 //! provisions from C2 (P2), the messenger and task manager read the ledger, and every node call
-//! goes node -> signed -> C2 (policy) -> server control API (ledger re-check).
+//! goes node -> signed -> C2 (policy) -> in-process NodeCallSink on core (A2: no C2→core push).
 
-use hatchery_c2::enroll_service::EnrollConfig;
+use hatchery_c2::enroll_service::{EnrollConfig, HttpReply, NodeCallSink};
 use hatchery_c2::{C2Config, C2Running};
+use hatchery_enroll::call::ForwardedCall;
 use hatchery_enroll::{NodeIdentity, NodeKind};
 use hatchery_node::enroll_client::node_call;
 use hatchery_server::hub::Hub;
@@ -85,6 +86,21 @@ async fn set_status(api: &str, id: &str, status: &str) {
     assert_eq!(s, 200);
 }
 
+
+/// Adapter from C2's in-process sink trait to the production core sink.
+struct HubSink {
+    sink: Arc<hatchery_server::node_sink::HubNodeSink>,
+}
+
+#[async_trait::async_trait]
+impl NodeCallSink for HubSink {
+    async fn apply(&self, call: ForwardedCall) -> HttpReply {
+        let sink = Arc::clone(&self.sink);
+        let (status, body) = tokio::task::spawn_blocking(move || sink.apply(&call)).await.unwrap();
+        HttpReply { status, body: serde_json::to_vec(&body).unwrap_or_default() }
+    }
+}
+
 struct Rig {
     api: String,
     enroll_addr: SocketAddr,
@@ -116,11 +132,16 @@ async fn rig() -> Rig {
         Arc::new(tokio::task::spawn_blocking(move || Hub::open(&data).unwrap()).await.unwrap())
     };
     let listener = control::bind(control_addr).await.unwrap();
-    tokio::spawn(control::serve_with_hub(listener, Supervisor::new(Vec::new()), Some(CONTROL.to_owned()), Some(hub)));
+    tokio::spawn(control::serve_with_hub(
+        listener,
+        Supervisor::new(Vec::new()),
+        Some(CONTROL.to_owned()),
+        Some(Arc::clone(&hub)),
+    ));
 
     let mut enroll_cfg = EnrollConfig::new(enroll_addr);
     enroll_cfg.registry_path = Some(dir.path().join("registry.json"));
-    enroll_cfg.server_upstream = Some((control_addr, CONTROL.to_owned()));
+    enroll_cfg.node_call_sink = Some(Arc::new(HubSink { sink: Arc::new(hatchery_server::node_sink::HubNodeSink::new(hub)) }));
     let c2 = C2Running::start(
         C2Config::new(api.parse().unwrap(), OPERATOR, Vec::new())
             .unwrap()
@@ -243,7 +264,7 @@ async fn mail_tasks_status_and_revocation_end_to_end() {
     .await
     .unwrap();
 
-    // Replay of a signed call is refused (same bytes twice).
+    // Replay of a signed call is refused on C2 (same bytes twice) before the sink runs.
     {
         use hatchery_enroll::call::SignedCall;
         let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;

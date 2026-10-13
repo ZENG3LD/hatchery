@@ -1,4 +1,5 @@
-use hatchery_server::{build_subservices, control, ServerConfig, Supervisor};
+use hatchery_server::control::HubHandle;
+use hatchery_server::{build_subservices, control, mesh_runtime, ServerConfig, Supervisor};
 
 #[tokio::main]
 async fn main() {
@@ -11,7 +12,9 @@ async fn main() {
     if std::env::args().skip(1).any(|a| a == "--help" || a == "-h") {
         println!(
             "hatchery-server: configure with HATCHERY_SERVER_DATA_DIR (required), HATCHERY_SERVER_CONFIG (optional TOML), \
-             HATCHERY_SERVER_CONTROL_LISTEN (loopback), HATCHERY_SERVER_CONTROL_TOKEN (bearer for start/stop)"
+             HATCHERY_SERVER_CONTROL_LISTEN (loopback), HATCHERY_SERVER_CONTROL_TOKEN (bearer for start/stop)\n\
+             optional core mesh: HATCHERY_CORE_DRAIN_ADDR, HATCHERY_CORE_OPERATOR_LISTEN, HATCHERY_CORE_NODE_IDS;\n\
+             tokens from HATCHERY_CORE_DRAIN_TOKEN and GATE4AGENT_CORE_OPERATOR_TOKEN (var names overridable)"
         );
         return;
     }
@@ -24,10 +27,41 @@ async fn main() {
         .await
         .unwrap_or_else(|error| fail(&format!("control listener: {error}")));
     tracing::info!("hatchery-server control listening (loopback)");
-    #[cfg(feature = "m4a")]
-    let hub = if config.m4a_enabled && config.provision_c2_addr.is_some() {
+
+    let hub: HubHandle = open_hub(&config).await;
+
+    let mesh = match mesh_runtime::MeshConfig::from_env(&config.data_dir) {
+        Ok(Some(mesh_cfg)) => {
+            let m4a_handler = m4a_drain_handler(&hub);
+            Some(mesh_runtime::MeshRuntime::start_with_m4a(mesh_cfg, m4a_handler))
+        }
+        Ok(None) => None,
+        Err(error) => fail(&format!("core mesh config: {error}")),
+    };
+
+    let serving = tokio::spawn(control::serve_with_hub(
+        listener,
+        supervisor.clone(),
+        config.control_token.clone(),
+        hub,
+    ));
+    shutdown_signal().await;
+    tracing::info!("shutting down");
+    if let Some(mesh) = &mesh {
+        mesh.shutdown();
+    }
+    supervisor.stop_all();
+    serving.abort();
+}
+
+#[cfg(feature = "m4a")]
+async fn open_hub(config: &ServerConfig) -> HubHandle {
+    if config.m4a_enabled && config.provision_c2_addr.is_some() {
         let dir = config.data_dir.clone();
-        match tokio::task::spawn_blocking(move || hatchery_server::hub::Hub::open(&dir)).await.expect("hub open task") {
+        match tokio::task::spawn_blocking(move || hatchery_server::hub::Hub::open(&dir))
+            .await
+            .expect("hub open task")
+        {
             Ok(hub) => Some(std::sync::Arc::new(hub)),
             Err(error) => {
                 tracing::error!(%error, "messenger and tasks not started");
@@ -36,14 +70,25 @@ async fn main() {
         }
     } else {
         None
-    };
-    #[cfg(not(feature = "m4a"))]
-    let hub = None;
-    let serving = tokio::spawn(control::serve_with_hub(listener, supervisor.clone(), config.control_token.clone(), hub));
-    shutdown_signal().await;
-    tracing::info!("shutting down");
-    supervisor.stop_all();
-    serving.abort();
+    }
+}
+
+#[cfg(not(feature = "m4a"))]
+async fn open_hub(_config: &ServerConfig) -> HubHandle {
+    None
+}
+
+#[cfg(feature = "m4a")]
+fn m4a_drain_handler(hub: &HubHandle) -> Option<hatchery_server::drain_consumer::CoreHandler> {
+    hub.as_ref().map(|h| {
+        std::sync::Arc::new(hatchery_server::node_sink::HubNodeSink::new(std::sync::Arc::clone(h)))
+            .handler()
+    })
+}
+
+#[cfg(not(feature = "m4a"))]
+fn m4a_drain_handler(_hub: &HubHandle) -> Option<hatchery_server::drain_consumer::CoreHandler> {
+    None
 }
 
 fn fail(message: &str) -> ! {

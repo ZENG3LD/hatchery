@@ -16,11 +16,20 @@ mod runtime;
 mod reconnect;
 #[cfg(unix)]
 mod hq_wg;
+mod drain;
+pub use drain::{DrainClient, DrainError, DrainSession};
 
 #[cfg(any(windows, unix))]
+/// Dial the **core** operator control socket (A2). Same wire as the former C2
+/// control endpoint; the socket now lives on hatchery-server, not on C2.
+pub use runtime::connect_local as connect_core_operator;
+#[cfg(any(windows, unix))]
+/// Dial a reconnecting core operator control socket (A2).
+pub use reconnect::connect_local_reconnecting as connect_core_operator_reconnecting;
+#[cfg(any(windows, unix))]
 pub use runtime::{
-    connect_local, C2ConnectionLossReason, C2ControlError, C2ControlHandle, C2EventReceiver,
-    C2PendingRequest,
+    connect_local, connect_tunnel_tcp, C2ConnectionLossReason, C2ControlError, C2ControlHandle,
+    C2EventReceiver, C2PendingRequest,
 };
 #[cfg(any(windows, unix))]
 pub use reconnect::{
@@ -31,8 +40,6 @@ pub use reconnect::{
 pub use hq_wg::{
     bring_up_hq_wireguard, HqWgAllowedIp, HqWgClientConfig, HqWgClientError, HqWgPeer,
 };
-#[cfg(any(windows, unix))]
-pub use runtime::connect_tunnel_tcp;
 
 const MAX_RESPONSE_HEADERS: usize = 16 * 1024;
 

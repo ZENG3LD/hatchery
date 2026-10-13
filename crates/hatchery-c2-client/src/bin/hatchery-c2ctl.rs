@@ -1,7 +1,9 @@
+//! A2: `--core-control` dials hatchery-server operator control (not C2).
+//! `--c2-control` remains as a deprecated alias for the same socket.
 use std::collections::BTreeSet;
 use std::time::Duration;
 
-use hatchery_c2_client::{connect_local, C2ControlHandle};
+use hatchery_c2_client::{connect_core_operator, C2ControlHandle};
 use hatchery_c2_protocol::{
     C2NodeResponse, C2NodeSnapshot, C2SessionSnapshot, C2SessionStatus, NodeRoute,
     NodeTransportState, RoutedNodeResponse,
@@ -12,6 +14,8 @@ use thiserror::Error;
 use tokio::time::{sleep, timeout};
 
 const C2_TOKEN_ENV: &str = "GATE4AGENT_C2_TOKEN";
+/// Preferred A2 name; falls back to GATE4AGENT_C2_TOKEN.
+const CORE_TOKEN_ENV: &str = "GATE4AGENT_CORE_OPERATOR_TOKEN";
 const CONNECT_DEADLINE: Duration = Duration::from_secs(10);
 const SEED_DEADLINE: Duration = Duration::from_secs(100);
 const ONLINE_DEADLINE: Duration = Duration::from_secs(15);
@@ -102,7 +106,7 @@ enum SeedError {
 
 fn usage() -> &'static str {
     "usage: hatchery-c2ctl seed-vendor-pty --c2-control ENDPOINT --node NODE_ID --workspace WORKSPACE_ID --provider PROVIDER_ID [--provider ...]\n\
-     token env: GATE4AGENT_C2_TOKEN"
+     token env: GATE4AGENT_CORE_OPERATOR_TOKEN (or GATE4AGENT_C2_TOKEN)"
 }
 
 fn required_value(args: &[String], index: &mut usize, flag: &str) -> Result<String, String> {
@@ -139,7 +143,7 @@ fn parse_args_from(
     let mut index = 2;
     while index < args.len() {
         match args[index].as_str() {
-            "--c2-control" => {
+            "--core-control" | "--c2-control" => {
                 if control_endpoint.is_some() {
                     return Err("--c2-control can be specified only once".to_owned());
                 }
@@ -180,16 +184,22 @@ fn parse_args_from(
         index += 1;
     }
 
-    let control_endpoint = control_endpoint.ok_or_else(|| "seed-vendor-pty requires --c2-control".to_owned())?;
+    let control_endpoint = control_endpoint.ok_or_else(|| "seed-vendor-pty requires --core-control (or --c2-control)".to_owned())?;
     let node_id = node_id.ok_or_else(|| "seed-vendor-pty requires --node".to_owned())?;
     let workspace_id = workspace_id.ok_or_else(|| "seed-vendor-pty requires --workspace".to_owned())?;
     if providers.is_empty() {
         return Err("seed-vendor-pty requires at least one --provider".to_owned());
     }
-    let token = read_secret(C2_TOKEN_ENV)?;
-    if token.is_empty() {
-        return Err(format!("{C2_TOKEN_ENV} must not be empty"));
-    }
+    let token = match std::env::var(CORE_TOKEN_ENV) {
+        Ok(t) if !t.is_empty() => t,
+        _ => {
+            let token = read_secret(C2_TOKEN_ENV)?;
+            if token.is_empty() {
+                return Err(format!("{CORE_TOKEN_ENV} or {C2_TOKEN_ENV} must not be empty"));
+            }
+            token
+        }
+    };
 
     Ok(ParseOutcome::Run(SeedOptions {
         control_endpoint,
@@ -460,7 +470,7 @@ async fn seed_connected(
 async fn run_seed(mut options: SeedOptions) -> Result<Vec<SeededSession>, SeedError> {
     let (control, mut events) = timeout(
         CONNECT_DEADLINE,
-        connect_local(&options.control_endpoint, &options.token),
+        connect_core_operator(&options.control_endpoint, &options.token),
     )
         .await
         .map_err(|_| SeedError::Connect)?

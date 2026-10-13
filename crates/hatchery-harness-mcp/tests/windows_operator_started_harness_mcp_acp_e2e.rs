@@ -1,3 +1,6 @@
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Uses restream g4a bridge + core NodeOperatorMesh (A2); C2 is opaque restreamer only.
+
 #![cfg(windows)]
 
 //! Drives the OPERATOR-STARTED derived `-harness-mcp` launch-plan sibling
@@ -74,8 +77,6 @@ use std::{
     time::{Duration, Instant as StdInstant, SystemTime, UNIX_EPOCH},
 };
 
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::C2Client;
 use hatchery_harness_client::{
     HarnessOperatorClient, HarnessOperatorCredential, HarnessOperatorMutationOutcomeV1,
     HarnessReplaceTaskExecutionSpecRequestV2, HarnessReviewedTaskLaunchSelectionV1,
@@ -172,18 +173,6 @@ fn authority(marker: char, now: u64) -> HarnessOperatorAuthorityV1 {
     }
 }
 
-async fn wait_online(client: &C2Client, node_id: &NodeId) {
-    timeout(Duration::from_secs(10), async {
-        loop {
-            if client.status().await.is_ok_and(|status| {
-                status.nodes.get(node_id).is_some_and(|node| {
-                    node.transport == hatchery_c2::protocol::NodeTransportState::Online
-                })
-            }) { return; }
-            sleep(Duration::from_millis(20)).await;
-        }
-    }).await.expect("fixture Node did not become online through C2");
-}
 
 async fn connect_harness_adapter(
     endpoint: &str,
@@ -286,26 +275,17 @@ async fn operator_started_derived_acp_harness_mcp_plan_mints_self_grant_and_arms
     let node_shutdown = server.shutdown_handle();
     let node_task = tokio::spawn(server.run());
 
-    let timings = C2Timings {
-        poll_interval: Duration::from_millis(20),
-        fresh_for: Duration::from_secs(2),
-        attempt_deadline: Duration::from_secs(2),
-        transient_backoffs: [Duration::from_millis(20); 5],
-        parked_backoff: Duration::from_millis(100),
-        http_io_deadline: Duration::from_secs(1),
-    };
-    let config = C2Config::new(
-        "127.0.0.1:0".parse().unwrap(),
-        c2_token,
-        vec![C2NodeConfig::new(node_id.clone(), node_endpoint, node_token).unwrap()],
-    ).unwrap()
-        .with_control_endpoint(control_endpoint.clone()).unwrap()
-        .with_timings(timings);
-    let running = C2Running::start(config).await.unwrap();
-    let c2_shutdown = running.shutdown_handle();
-    let http = C2Client::new(running.api_addr(), c2_token).unwrap()
-        .with_deadline(Duration::from_secs(1));
-    wait_online(&http, &node_id).await;
+
+    let _rig = hatchery_node::restream_test_rig::RestreamRig::start(
+        hatchery_node::restream_test_rig::RestreamRigConfig {
+            node_id: node_id.clone(),
+            local_endpoint: node_endpoint.clone(),
+            local_token: node_token.to_owned(),
+            control_endpoint: control_endpoint.clone(),
+            operator_token: c2_token.to_owned(),
+        },
+    )
+    .await;
 
     let (adapter, events) = connect_harness_adapter(&control_endpoint, c2_token).await;
     let catalogs = HarnessRuntimeCatalogs::new(
@@ -439,8 +419,7 @@ async fn operator_started_derived_acp_harness_mcp_plan_mints_self_grant_and_arms
         let _ = host_task.await;
         let _ = node_shutdown.request_shutdown().await;
         let _ = timeout(Duration::from_secs(5), node_task).await;
-        c2_shutdown.shutdown();
-        let _ = timeout(Duration::from_secs(5), running.wait()).await;
+        drop(_rig);
         let (operation_detail, run_detail) = match HarnessService::open(&fixture.harness) {
             Ok(harness) => (
                 harness.engine().operation(&dispatch.dispatch.operation_id).cloned(),
@@ -611,6 +590,5 @@ async fn operator_started_derived_acp_harness_mcp_plan_mints_self_grant_and_arms
     std::env::set_current_dir(original_working_directory).unwrap();
     node_shutdown.request_shutdown().await.unwrap();
     timeout(Duration::from_secs(5), node_task).await.expect("Node did not stop").unwrap().unwrap();
-    c2_shutdown.shutdown();
-    timeout(Duration::from_secs(5), running.wait()).await.expect("C2 did not stop").unwrap();
+    drop(_rig);
 }

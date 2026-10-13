@@ -1,3 +1,6 @@
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Uses restream g4a bridge + core NodeOperatorMesh (A2); C2 is opaque restreamer only.
+
 #![cfg(windows)]
 
 use std::{
@@ -9,8 +12,6 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::C2Client;
 use hatchery_harness_api::{
     HarnessOperatorCredential, HarnessOperatorMutationOutcomeV1,
     HarnessReplaceTaskExecutionSpecRequestV2, HarnessReviewedTaskLaunchSelectionV1,
@@ -185,19 +186,6 @@ async fn connect_harness_adapter(
     }).await.expect("C2 did not release its sole Harness operator")
 }
 
-async fn wait_online(client: &C2Client, node_id: &NodeId) {
-    timeout(Duration::from_secs(10), async {
-        loop {
-            if client.status().await.ok().and_then(|status| status.nodes.get(node_id)
-                .map(|node| node.transport == hatchery_c2_protocol::NodeTransportState::Online))
-                == Some(true)
-            {
-                break;
-            }
-            sleep(Duration::from_millis(20)).await;
-        }
-    }).await.expect("Node did not become online through C2");
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn schedule_next_replay_and_harness_restart_do_not_resend() {
@@ -241,22 +229,17 @@ async fn schedule_next_replay_and_harness_restart_do_not_resend() {
     let node_shutdown = node.shutdown_handle();
     let node_task = tokio::spawn(node.run());
 
-    let timings = C2Timings {
-        poll_interval: Duration::from_millis(20),
-        fresh_for: Duration::from_secs(2),
-        attempt_deadline: Duration::from_secs(2),
-        transient_backoffs: [Duration::from_millis(20); 5],
-        parked_backoff: Duration::from_millis(100),
-        http_io_deadline: Duration::from_secs(1),
-    };
-    let c2 = C2Running::start(C2Config::new(
-        "127.0.0.1:0".parse().unwrap(),
-        c2_token,
-        vec![C2NodeConfig::new(node_id.clone(), node_endpoint, node_token).unwrap()],
-    ).unwrap().with_control_endpoint(control_endpoint.clone()).unwrap().with_timings(timings)).await.unwrap();
-    let c2_client = C2Client::new(c2.api_addr(), c2_token).unwrap()
-        .with_deadline(Duration::from_secs(1));
-    wait_online(&c2_client, &node_id).await;
+    let _rig = hatchery_node::restream_test_rig::RestreamRig::start(
+        hatchery_node::restream_test_rig::RestreamRigConfig {
+            node_id: node_id.clone(),
+            local_endpoint: node_endpoint.clone(),
+            local_token: node_token.to_owned(),
+            control_endpoint: control_endpoint.clone(),
+            operator_token: c2_token.to_owned(),
+        },
+    )
+    .await;
+
 
     let task_id = HarnessTaskId::new(format!("htask_{}", "1".repeat(24))).unwrap();
     let body = "durable schedule-next fixture body";
@@ -374,9 +357,7 @@ async fn schedule_next_replay_and_harness_restart_do_not_resend() {
     assert_private_bytes_absent(&fixture.root, &[
         c2_token, node_token, operator_secret.as_str(), workspace.to_string_lossy().as_ref(),
     ]);
-    let c2_shutdown = c2.shutdown_handle();
-    c2_shutdown.shutdown();
-    timeout(Duration::from_secs(5), c2.wait()).await.unwrap().unwrap();
+    drop(_rig);
     node_shutdown.request_shutdown().await.unwrap();
     timeout(Duration::from_secs(10), node_task).await.unwrap().unwrap().unwrap();
 }
@@ -437,22 +418,17 @@ async fn derived_launch_plan_starts_a_task_with_zero_launch_plan_json_args() {
     let node_shutdown = node.shutdown_handle();
     let node_task = tokio::spawn(node.run());
 
-    let timings = C2Timings {
-        poll_interval: Duration::from_millis(20),
-        fresh_for: Duration::from_secs(2),
-        attempt_deadline: Duration::from_secs(2),
-        transient_backoffs: [Duration::from_millis(20); 5],
-        parked_backoff: Duration::from_millis(100),
-        http_io_deadline: Duration::from_secs(1),
-    };
-    let c2 = C2Running::start(C2Config::new(
-        "127.0.0.1:0".parse().unwrap(),
-        c2_token,
-        vec![C2NodeConfig::new(node_id.clone(), node_endpoint, node_token).unwrap()],
-    ).unwrap().with_control_endpoint(control_endpoint.clone()).unwrap().with_timings(timings)).await.unwrap();
-    let c2_client = C2Client::new(c2.api_addr(), c2_token).unwrap()
-        .with_deadline(Duration::from_secs(1));
-    wait_online(&c2_client, &node_id).await;
+    let _rig = hatchery_node::restream_test_rig::RestreamRig::start(
+        hatchery_node::restream_test_rig::RestreamRigConfig {
+            node_id: node_id.clone(),
+            local_endpoint: node_endpoint.clone(),
+            local_token: node_token.to_owned(),
+            control_endpoint: control_endpoint.clone(),
+            operator_token: c2_token.to_owned(),
+        },
+    )
+    .await;
+
 
     let catalogs = HarnessRuntimeCatalogs::new(
         HarnessLaunchCatalog::default(),
@@ -579,9 +555,7 @@ async fn derived_launch_plan_starts_a_task_with_zero_launch_plan_json_args() {
     assert_private_bytes_absent(&fixture.root, &[
         c2_token, node_token, operator_secret.as_str(), workspace.to_string_lossy().as_ref(),
     ]);
-    let c2_shutdown = c2.shutdown_handle();
-    c2_shutdown.shutdown();
-    timeout(Duration::from_secs(5), c2.wait()).await.unwrap().unwrap();
+    drop(_rig);
     node_shutdown.request_shutdown().await.unwrap();
     timeout(Duration::from_secs(10), node_task).await.unwrap().unwrap().unwrap();
 }

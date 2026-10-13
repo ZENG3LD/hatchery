@@ -1,5 +1,5 @@
 use hatchery_c2_client::{
-    connect_local_reconnecting, C2ControlError, C2LinkState, C2PendingRequest,
+    connect_core_operator_reconnecting, C2ControlError, C2LinkState, C2PendingRequest,
     C2ReconnectingEventReceiver, C2ReconnectingHandle,
 };
 use hatchery_c2_protocol::{
@@ -238,19 +238,12 @@ fn resolve_exact_route(
 }
 
 impl HarnessC2Adapter {
-    /// Connects the harness as the authenticated C2 operator.
+    /// Connects the harness as the authenticated **core** operator (A2).
     ///
-    /// **Dial-only (HQ mesh role):** this always *dials* the C2 control
-    /// endpoint via `connect_local_reconnecting`. Hatchery (HQ) is never a
-    /// mesh/C2 accept-peer and never waits for C2 to dial HQ. Same-LAN /
-    /// local pipe-or-socket today; remote stable underlay later — still HQ
-    /// dials. See docs `hq-dials-c2-mesh-role-inventory-2026-10-02.md` and
-    /// owner doctrine in `oss-perimeter-mesh-roles-and-versioning` §1 /
-    /// `mesh-connectivity-daemon-design` §1.5. Role lock types:
-    /// [`crate::mesh_role::MeshParticipantRole::HqClientAdmin`] /
-    /// [`crate::mesh_role::MeshDialCapability::DialOnly`] (stub trait
-    /// [`crate::mesh_role::MeshUnderlayDial`]; tip-5 Linux UDP+AEAD path in
-    /// [`crate::mesh_underlay`] — still no full WireGuard daemon; HQ never accept).
+    /// **Dial-only (HQ mesh role):** dials hatchery-server's operator control
+    /// socket via `connect_core_operator_reconnecting`. C2 is an opaque
+    /// restreamer and has no operator control socket. HQ never waits for C2
+    /// to dial HQ.
     ///
     /// The returned adapter deliberately exposes no generic request handle. Its
     /// command surface is restricted to inventory reads, typed ContextPack
@@ -260,7 +253,7 @@ impl HarnessC2Adapter {
         endpoint: impl Into<String>,
         token: impl Into<String>,
     ) -> Result<(Self, HarnessC2EventReceiver), HarnessC2Error> {
-        let (control, events) = connect_local_reconnecting(endpoint, token)
+        let (control, events) = connect_core_operator_reconnecting(endpoint, token)
             .await
             .map_err(HarnessC2Error::Connect)?;
         Ok((Self { control }, HarnessC2EventReceiver { inner: events }))

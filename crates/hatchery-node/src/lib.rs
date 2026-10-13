@@ -38,6 +38,11 @@ pub(crate) use gate4agent_node_core::kit_wireguard;
 mod network_allowlist_catalog;
 pub(crate) use gate4agent_node_core::platform;
 pub mod enroll_client;
+pub mod uplink_journal;
+pub mod restream_session;
+pub mod restream_g4a_bridge;
+#[cfg(feature = "restream-rig")]
+pub mod restream_test_rig;
 pub mod m4a_accounts;
 pub mod door;
 pub mod wake_pipeline;

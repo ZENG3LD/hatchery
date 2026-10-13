@@ -1,11 +1,13 @@
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Uses restream g4a bridge + core NodeOperatorMesh (A2); C2 is opaque restreamer only.
+
 #![cfg(windows)]
 
 use hatchery_c2::protocol::{
     C2ManagedSessionRecord, C2NodeEvent, C2NodeResponse, C2NodeSnapshot, C2SessionStatus,
     NodeId, NodeRoute, NodeTransportState,
 };
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::{connect_local, C2Client, C2ControlHandle};
+use hatchery_c2_client::{connect_core_operator, C2ControlHandle};
 use hatchery_node::protocol::{
     AdapterId, CapabilityId, ManagedSessionState, ManagedWorktreeLeaseState,
     ManagedWorktreeRetention, ManagedWorktreeSpawnRequest, NodeRequest, SessionAddress,
@@ -537,26 +539,6 @@ fn node_config(
         .with_history(history)
 }
 
-async fn wait_online(client: &C2Client, node_id: &NodeId) -> NodeRoute {
-    timeout(Duration::from_secs(15), async {
-        loop {
-            if let Ok(status) = client.status().await {
-                if status.nodes[node_id].transport == NodeTransportState::Online {
-                    return NodeRoute {
-                        node_id: node_id.clone(),
-                        expected_incarnation_id: status.nodes[node_id]
-                            .cursor
-                            .expect("online Codex node has no cursor")
-                            .incarnation_id,
-                    };
-                }
-            }
-            sleep(Duration::from_millis(25)).await;
-        }
-    })
-    .await
-    .expect("Codex node did not become online through C2")
-}
 
 async fn wait_relay_ready(control: &C2ControlHandle, route: &NodeRoute) {
     timeout(Duration::from_secs(15), async {
@@ -678,27 +660,21 @@ async fn discover_newest_history(
 }
 
 async fn wait_inventory_name(
-    client: &C2Client,
-    node_id: &NodeId,
+    control: &C2ControlHandle,
+    route: &NodeRoute,
     record_id: &hatchery_node::protocol::SessionRecordId,
     source_workspace_id: &WorkspaceId,
     expected_name: &str,
 ) {
     timeout(Duration::from_secs(10), async {
         loop {
-            if client.status().await.is_ok_and(|status| {
-                status.nodes[node_id]
-                    .inventory
-                    .as_ref()
-                    .is_some_and(|inventory| {
-                        inventory.managed_sessions.iter().any(|record| {
-                            &record.record_id == record_id
-                                && record.display_name == expected_name
-                                && record.provider_identity_present
-                                && record.state == ManagedSessionState::Dormant
-                                && &record.workspace_id == source_workspace_id
-                        })
-                    })
+            let snap = snapshot(control, route).await;
+            if snap.session_records.iter().any(|record| {
+                &record.record_id == record_id
+                    && record.display_name == expected_name
+                    && record.provider_identity_present
+                    && record.state == ManagedSessionState::Dormant
+                    && &record.workspace_id == source_workspace_id
             }) {
                 return;
             }
@@ -1164,28 +1140,19 @@ async fn windows_live_codex_semantically_consumes_context_pack_and_c2_renames_in
     let node_shutdown = server.shutdown_handle();
     let node_task = tokio::spawn(server.run());
 
-    let c2_config = C2Config::new(
-        "127.0.0.1:0".parse().unwrap(),
-        c2_token,
-        vec![C2NodeConfig::new(node_id.clone(), &node_endpoint, node_token).unwrap()],
+    let _rig = hatchery_node::restream_test_rig::RestreamRig::start(
+        hatchery_node::restream_test_rig::RestreamRigConfig {
+            node_id: node_id.clone(),
+            local_endpoint: node_endpoint.clone(),
+            local_token: node_token.to_owned(),
+            control_endpoint: control_endpoint.clone(),
+            operator_token: c2_token.to_owned(),
+        },
     )
-    .unwrap()
-    .with_control_endpoint(&control_endpoint)
-    .unwrap()
-    .with_timings(C2Timings {
-        poll_interval: Duration::from_millis(25),
-        fresh_for: Duration::from_secs(2),
-        attempt_deadline: Duration::from_secs(2),
-        transient_backoffs: [Duration::from_millis(25); 5],
-        parked_backoff: Duration::from_millis(100),
-        http_io_deadline: Duration::from_secs(1),
-    });
-    let running = C2Running::start(c2_config).await.unwrap();
-    let http = C2Client::new(running.api_addr(), c2_token)
-        .unwrap()
-        .with_deadline(Duration::from_secs(1));
-    let route = wait_online(&http, &node_id).await;
-    let (control, mut events) = connect_local(&control_endpoint, c2_token).await.unwrap();
+    .await;
+
+    let route = _rig.route();
+    let (control, mut events) = connect_core_operator(&control_endpoint, c2_token).await.unwrap();
     wait_relay_ready(&control, &route).await;
 
     let record_events = Arc::new(Mutex::new(Vec::new()));
@@ -1262,8 +1229,8 @@ async fn windows_live_codex_semantically_consumes_context_pack_and_c2_renames_in
                 && record.provider_identity_present
                 && record.workspace_id == source_workspace_id));
     wait_inventory_name(
-        &http,
-        &node_id,
+        &control,
+        &route,
         &stable_record_id,
         &source_workspace_id,
         &human_name,
@@ -1589,12 +1556,7 @@ async fn windows_live_codex_semantically_consumes_context_pack_and_c2_renames_in
     .await
     .expect("C2 did not relay the renamed SessionRecordUpserted event");
 
-    let c2_shutdown = running.shutdown_handle();
-    c2_shutdown.shutdown();
-    timeout(Duration::from_secs(10), running.wait())
-        .await
-        .expect("C2 shutdown timed out")
-        .expect("C2 shutdown failed");
+    drop(_rig);
     drop(control);
     timeout(Duration::from_secs(5), event_collector)
         .await

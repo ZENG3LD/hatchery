@@ -1,11 +1,13 @@
+//! A2: dials core operator control (`connect_core_operator`), not C2.
+//! Uses restream g4a bridge + core NodeOperatorMesh (A2); C2 is opaque restreamer only.
+
 #![cfg(windows)]
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use hatchery_c2::{C2Config, C2NodeConfig, C2Running, C2Timings};
-use hatchery_c2_client::{connect_local, C2Client};
+use hatchery_c2_client::{connect_core_operator};
 use hatchery_c2_protocol::C2NodeResponse;
 use hatchery_harness_delivery::{
     compile_reviewed_delivery_bundle_v2, ReviewedDeliverySourceV2,
@@ -84,20 +86,6 @@ fn assert_private_bytes_absent(path: &Path, forbidden: &[&str]) {
     }
 }
 
-async fn wait_online(client: &C2Client, node_id: &NodeId) {
-    timeout(Duration::from_secs(10), async {
-        loop {
-            let status = client.status().await.unwrap();
-            if status.nodes.get(node_id).is_some_and(|node| {
-                node.transport == hatchery_c2::protocol::NodeTransportState::Online
-                    && node.cursor.is_some()
-            }) {
-                break;
-            }
-            sleep(Duration::from_millis(25)).await;
-        }
-    }).await.expect("fixture Node did not become online through C2");
-}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn windows_c2_delivery_wire_rejects_invalid_chunks_and_abort_publishes_nothing() {
@@ -200,27 +188,19 @@ async fn windows_c2_delivery_wire_rejects_invalid_chunks_and_abort_publishes_not
     let node_shutdown = server.shutdown_handle();
     let node_task = tokio::spawn(server.run());
 
-    let c2 = C2Running::start(
-        C2Config::new(
-            "127.0.0.1:0".parse().unwrap(),
-            c2_token,
-            vec![C2NodeConfig::new(node_id.clone(), node_endpoint, node_token).unwrap()],
-        ).unwrap()
-        .with_control_endpoint(control_endpoint.clone()).unwrap()
-        .with_timings(C2Timings {
-            poll_interval: Duration::from_millis(20),
-            fresh_for: Duration::from_secs(2),
-            attempt_deadline: Duration::from_secs(2),
-            transient_backoffs: [Duration::from_millis(20); 5],
-            parked_backoff: Duration::from_millis(100),
-            http_io_deadline: Duration::from_secs(1),
-        }),
-    ).await.unwrap();
-    let http = C2Client::new(c2.api_addr(), c2_token).unwrap()
-        .with_deadline(Duration::from_secs(1));
-    wait_online(&http, &node_id).await;
+    let _rig = hatchery_node::restream_test_rig::RestreamRig::start(
+        hatchery_node::restream_test_rig::RestreamRigConfig {
+            node_id: node_id.clone(),
+            local_endpoint: node_endpoint.clone(),
+            local_token: node_token.to_owned(),
+            control_endpoint: control_endpoint.clone(),
+            operator_token: c2_token.to_owned(),
+        },
+    )
+    .await;
 
-    let (control, mut events) = connect_local(&control_endpoint, c2_token).await.unwrap();
+
+    let (control, mut events) = connect_core_operator(&control_endpoint, c2_token).await.unwrap();
     let event_drain = tokio::spawn(async move {
         while events.recv().await.is_some() {}
     });
@@ -330,9 +310,7 @@ async fn windows_c2_delivery_wire_rejects_invalid_chunks_and_abort_publishes_not
     event_drain.abort();
     let _ = event_drain.await;
 
-    let c2_shutdown = c2.shutdown_handle();
-    c2_shutdown.shutdown();
-    timeout(Duration::from_secs(5), c2.wait()).await.unwrap().unwrap();
+    drop(_rig);
     node_shutdown.request_shutdown().await.unwrap();
     timeout(Duration::from_secs(10), node_task).await.unwrap().unwrap().unwrap();
     drop(node_shutdown);

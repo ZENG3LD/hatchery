@@ -445,6 +445,17 @@ checksum = "f079e83a288787bcd14a6aea84cee5c87a67c5a3e660c30f557a3d24761b3527"
 
 [[package]]
 name = "chacha20"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3613f74bd2eac03dad61bd53dbe620703d4371614fe0bc3b9f04dd36fe4e818"
+dependencies = [
+ "cfg-if",
+ "cipher",
+ "cpufeatures 0.2.17",
+]
+
+[[package]]
+name = "chacha20"
 version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
@@ -452,6 +463,19 @@ dependencies = [
  "cfg-if",
  "cpufeatures 0.3.1",
  "rand_core 0.10.1",
+]
+
+[[package]]
+name = "chacha20poly1305"
+version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10cd79432192d1c0f4e1a0fef9527696cc039165d729fb41b3f4f4f354c2dc35"
+dependencies = [
+ "aead",
+ "chacha20 0.9.1",
+ "cipher",
+ "poly1305",
+ "zeroize",
 ]
 
 [[package]]
@@ -482,6 +506,7 @@ checksum = "773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad"
 dependencies = [
  "crypto-common",
  "inout",
+ "zeroize",
 ]
 
 [[package]]
@@ -1805,6 +1830,8 @@ dependencies = [
 name = "hatchery-c2"
 version = "0.2.3"
 dependencies = [
+ "async-trait",
+ "chacha20poly1305",
  "gate4agent-node-protocol",
  "gate4agent-node-wire",
  "gate4agent-types",
@@ -1815,10 +1842,12 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "snow",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "x25519-dalek",
 ]
 
 [[package]]
@@ -1840,11 +1869,16 @@ dependencies = [
 name = "hatchery-c2-protocol"
 version = "0.2.3"
 dependencies = [
+ "chacha20poly1305",
  "gate4agent-build-stamp",
  "gate4agent-node-protocol",
  "gate4agent-types",
+ "getrandom 0.2.17",
  "serde",
  "serde_json",
+ "sha2",
+ "snow",
+ "x25519-dalek",
 ]
 
 [[package]]
@@ -2037,7 +2071,9 @@ dependencies = [
  "hatchery-build",
  "hatchery-c2",
  "hatchery-c2-client",
+ "hatchery-c2-protocol",
  "hatchery-enroll",
+ "hatchery-server",
  "kimi-session-restore",
  "libc",
  "mail4agent",
@@ -2045,6 +2081,7 @@ dependencies = [
  "ring",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -2117,7 +2154,13 @@ dependencies = [
 name = "hatchery-server"
 version = "0.2.3"
 dependencies = [
+ "async-trait",
+ "gate4agent-node-protocol",
+ "gate4agent-node-wire",
+ "gate4agent-types",
  "hatchery-c2",
+ "hatchery-c2-client",
+ "hatchery-c2-protocol",
  "hatchery-enroll",
  "hatchery-harness-mcp",
  "hatchery-node",
@@ -3352,6 +3395,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "poly1305"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8159bd90725d2df49889a078b54f4f79e87f1f8a8444194cdca81d38f5393abf"
+dependencies = [
+ "cpufeatures 0.2.17",
+ "opaque-debug",
+ "universal-hash",
+]
+
+[[package]]
 name = "polycool"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3587,7 +3641,7 @@ version = "0.10.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65c9fb96cbc91e3478eaae79a69fcd3f1ae4ad052e471fe6732fff548984b4af"
 dependencies = [
- "chacha20",
+ "chacha20 0.10.2",
  "getrandom 0.4.2",
  "rand_core 0.10.1",
 ]
@@ -4264,6 +4318,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "snow"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "599b506ccc4aff8cf7844bc42cf783009a434c1e26c964432560fb6d6ad02d82"
+dependencies = [
+ "aes-gcm",
+ "blake2",
+ "chacha20poly1305",
+ "curve25519-dalek",
+ "getrandom 0.3.4",
+ "ring",
+ "rustc_version",
+ "sha2",
+ "subtle",
 ]
 
 [[package]]
