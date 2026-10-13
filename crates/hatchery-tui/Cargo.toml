@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-tui"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 license = "MIT"
 description = "Terminal client for hatchery: both hatchery-tui and hatchery-tui-light speak only the harness operator wire -- light hosts hatchery-harness-light in-process over c2 instead of a durable task kernel"
@@ -19,11 +19,11 @@ hatchery-arcade-engine = { version = "0.1.0", path = "../hatchery-arcade/engine"
 hatchery-arcade-pet-bastion = { version = "0.1.0", path = "../hatchery-arcade/games/pet-bastion" }
 hatchery-arcade-pet-bastion-render = { version = "0.1.0", path = "../hatchery-arcade/games/pet-bastion-render" }
 gate4agent-build-stamp = { version = "0.5.2" }
-hatchery-c2-client = { version = "0.2.3", path = "../hatchery-c2-client" }
-hatchery-c2-protocol = { version = "0.2.3", path = "../hatchery-c2-protocol" }
-hatchery-harness-client = { version = "0.2.3", path = "../hatchery-harness-client" }
-hatchery-harness-light = { version = "0.2.3", path = "../hatchery-harness-light" }
-hatchery-harness-protocol = { version = "0.2.3", path = "../hatchery-harness-protocol" }
+hatchery-c2-client = { version = "0.2.4", path = "../hatchery-c2-client" }
+hatchery-c2-protocol = { version = "0.2.4", path = "../hatchery-c2-protocol" }
+hatchery-harness-client = { version = "0.2.4", path = "../hatchery-harness-client" }
+hatchery-harness-light = { version = "0.2.4", path = "../hatchery-harness-light" }
+hatchery-harness-protocol = { version = "0.2.4", path = "../hatchery-harness-protocol" }
 gate4agent-node-protocol = { version = "0.5.2" }
 # `local_hmac_sha256`/`proofs_match`: the same constant-time credential-
 # digest primitives `hatchery-harness-service`'s own operator-credential
@@ -31,10 +31,10 @@ gate4agent-node-protocol = { version = "0.5.2" }
 # follows that exact precedent instead of hand-rolling a second comparison
 # scheme. In-tree sibling crate, no new external dependency.
 gate4agent-node-wire = { version = "0.5.2" }
-hatchery-observation-api = { version = "0.2.3", path = "../hatchery-observation-api" }
-hatchery-observation-engine = { version = "0.2.3", path = "../hatchery-observation-engine" }
-hatchery-observation-protocol = { version = "0.2.3", path = "../hatchery-observation-protocol" }
-hatchery-observation-service = { version = "0.2.3", path = "../hatchery-observation-service" }
+hatchery-observation-api = { version = "0.2.4", path = "../hatchery-observation-api" }
+hatchery-observation-engine = { version = "0.2.4", path = "../hatchery-observation-engine" }
+hatchery-observation-protocol = { version = "0.2.4", path = "../hatchery-observation-protocol" }
+hatchery-observation-service = { version = "0.2.4", path = "../hatchery-observation-service" }
 gate4agent-types = { version = "0.5.2" }
 icy_sixel = "0.6"
 # `control_plane`'s wire frame: line-delimited JSON, the same idiom

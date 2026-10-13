@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-c2-protocol"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 repository = "https://github.com/ZENG3LD/hatchery"
 description = "Stable, serde-only inventory and control wire contract for C2 relays and clients"
