@@ -53,6 +53,7 @@ const REQUEST_DEADLINE: Duration = Duration::from_secs(60);
 pub struct NodeOperatorMesh {
     inner: Arc<Mutex<BTreeMap<String, OperatorLink>>>,
     cursors: Arc<Mutex<BTreeMap<String, hatchery_core::NodeCursor>>>,
+    machines: Arc<Mutex<BTreeMap<String, hatchery_core::MachineEnvironment>>>,
     topology: watch::Sender<Arc<StatusResponse>>,
     /// Fan-out of node-initiated g4a events (PTY frames, etc.) to every operator client.
     events: broadcast::Sender<hatchery_core::RoutedNodeEvent>,
@@ -71,6 +72,7 @@ impl NodeOperatorMesh {
         Self {
             inner: Arc::new(Mutex::new(BTreeMap::new())),
             cursors: Arc::new(Mutex::new(BTreeMap::new())),
+            machines: Arc::new(Mutex::new(BTreeMap::new())),
             topology,
             events,
         }
@@ -91,6 +93,7 @@ impl NodeOperatorMesh {
     pub fn unregister(&self, node_id: &str) {
         self.inner.lock().expect("mesh").remove(node_id);
         self.cursors.lock().expect("cursors").remove(node_id);
+        self.machines.lock().expect("machines").remove(node_id);
         self.publish_topology();
     }
 
@@ -101,6 +104,11 @@ impl NodeOperatorMesh {
     /// Publish the node's incarnation (from Snapshot / bridge hello) into operator topology.
     pub fn set_cursor(&self, node_id: &str, cursor: hatchery_core::NodeCursor) {
         self.cursors.lock().expect("cursors").insert(node_id.to_owned(), cursor);
+        self.publish_topology();
+    }
+
+    pub fn set_machine(&self, node_id: &str, machine: hatchery_core::MachineEnvironment) {
+        self.machines.lock().expect("machines").insert(node_id.to_owned(), machine);
         self.publish_topology();
     }
 
@@ -124,6 +132,7 @@ impl NodeOperatorMesh {
     fn publish_topology(&self) {
         let ids: Vec<String> = self.inner.lock().expect("mesh").keys().cloned().collect();
         let cursors = self.cursors.lock().expect("cursors").clone();
+        let machines = self.machines.lock().expect("machines").clone();
         let mut nodes = BTreeMap::new();
         for id in &ids {
             let node_id = NodeId::new(id.clone()).expect("registered ids are valid");
@@ -136,6 +145,7 @@ impl NodeOperatorMesh {
                     freshness: NodeFreshness::Fresh,
                     cursor: cursors.get(id).cloned(),
                     inventory: None,
+                    machine: machines.get(id).cloned(),
                     last_attempt_unix_ms: None,
                     last_success_unix_ms: Some(unix_ms()),
                     consecutive_failures: 0,
@@ -352,6 +362,11 @@ async fn dispatch_request(mesh: &NodeOperatorMesh, envelope: C2RequestEnvelope) 
                     sequence: 0,
                 },
             );
+            if let Ok(hatchery_core::C2NodeResponse::Snapshot { snapshot, .. }) = &response.response {
+                if let Some(machine) = snapshot.machine.clone() {
+                    mesh.set_machine(&node_id, machine);
+                }
+            }
             C2ReplyEnvelope {
                 request_id: envelope.request_id,
                 result: Ok(response),

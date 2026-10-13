@@ -193,9 +193,12 @@ async fn handle_control(
 
     *incarnation_id = client.hello().incarnation_id;
 
-    let mapped = response
+    let mut mapped = response
         .map(|r| C2NodeResponse::from_node_response_with_control_detail(&r))
         .map_err(|f| C2NodeFailure::from(&f));
+    if let Ok(C2NodeResponse::Snapshot { snapshot, .. }) = &mut mapped {
+        snapshot.machine = Some(crate::collect_machine_environment());
+    }
     send_reply(
         session,
         op_id,

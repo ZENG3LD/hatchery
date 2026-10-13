@@ -763,7 +763,7 @@ fn initial_enrolled_node() -> ObservedNode {
     ObservedNode {
         endpoint: "call-home".to_owned(), transport_label: "call-home".to_owned(),
         transport: NodeTransportState::Offline, freshness: NodeFreshness::Unavailable,
-        cursor: None, inventory: None, last_attempt_unix_ms: None, last_success_unix_ms: None,
+        cursor: None, inventory: None, machine: None, last_attempt_unix_ms: None, last_success_unix_ms: None,
         consecutive_failures: 0, last_error: None, gaps: Vec::new(), gaps_truncated: 0,
     }
 }
@@ -772,7 +772,7 @@ fn initial_observed_node(node: &C2NodeConfig) -> ObservedNode {
     ObservedNode {
         endpoint: node.endpoint.clone(), transport_label: node.transport_label().to_owned(),
         transport: NodeTransportState::Offline, freshness: NodeFreshness::Unavailable,
-        cursor: None, inventory: None, last_attempt_unix_ms: None, last_success_unix_ms: None,
+        cursor: None, inventory: None, machine: None, last_attempt_unix_ms: None, last_success_unix_ms: None,
         consecutive_failures: 0, last_error: None, gaps: Vec::new(), gaps_truncated: 0,
     }
 }

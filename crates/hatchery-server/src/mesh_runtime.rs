@@ -182,6 +182,11 @@ async fn bootstrap_cursor(
                         sequence: 0,
                     },
                 );
+                if let Ok(hatchery_core::C2NodeResponse::Snapshot { snapshot, .. }) = &routed.response {
+                    if let Some(machine) = snapshot.machine.clone() {
+                        mesh.set_machine(&node_id, machine);
+                    }
+                }
                 tracing::info!(
                     %node_id,
                     incarnation = %routed.incarnation_id,

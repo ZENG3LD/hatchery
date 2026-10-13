@@ -614,7 +614,8 @@ mod tests {
             agent_progress: Vec::new(),
             managed_worktrees: Vec::new(),
             launch_inventory: None,
-        }
+
+        machine: None,}
     }
 
     #[test]

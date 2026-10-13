@@ -673,6 +673,7 @@ mod tests {
                 relay_route: C2RelayRoute::default(),
                 transport: NodeTransportState::Online,
                 current_incarnation_id: None,
+                machine: None,
                 provider_contracts: Vec::new(),
                 provider_adapter_contracts: Vec::new(),
                 provider_runtime_statuses: Default::default(),
@@ -690,7 +691,8 @@ mod tests {
             agent_progress: Vec::new(),
             managed_worktrees: Vec::new(),
             launch_inventory: None,
-        }
+
+        machine: None,}
     }
 
     fn canned_reply(envelope: &C2RequestEnvelope, tag: &str) -> C2ReplyEnvelope {

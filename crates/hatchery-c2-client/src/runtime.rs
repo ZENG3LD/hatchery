@@ -3823,7 +3823,8 @@ mod tests {
                         agent_progress: Vec::new(),
                         managed_worktrees: Vec::new(),
                         launch_inventory: None,
-                    },
+
+                    machine: None,},
                     events: vec![hatchery_core::C2NodeEventEnvelope {
                         sequence,
                         event: terminal_node_event(sequence),
@@ -5173,7 +5174,8 @@ mod tests {
                             session_records: Vec::new(),
                             managed_worktrees: Vec::new(),
                             launch_inventory: None,
-                        },
+
+                        machine: None,},
                     }),
                 }),
             },
@@ -5750,6 +5752,7 @@ mod tests {
             relay_route: hatchery_core::C2RelayRoute::LocalIpc,
             transport: NodeTransportState::Offline,
             current_incarnation_id: Some(NodeIncarnationId::from_bytes([8; 16])),
+            machine: None,
             provider_contracts: Vec::new(),
             provider_adapter_contracts: Vec::new(),
             provider_runtime_statuses: old_runtime_status,
@@ -5766,6 +5769,7 @@ mod tests {
                 relay_route: hatchery_core::C2RelayRoute::LocalIpc,
                 transport: NodeTransportState::Online,
                 current_incarnation_id: Some(incarnation_id),
+                machine: None,
                 provider_contracts: Vec::new(),
                 provider_adapter_contracts: Vec::new(),
                 provider_runtime_statuses: hatchery_core::ProviderRuntimeStatuses::new([

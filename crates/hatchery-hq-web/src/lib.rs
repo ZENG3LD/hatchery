@@ -299,9 +299,16 @@ async fn api_nodes(State(s): State<Shared>) -> Response {
     for n in enrolled.as_ref().and_then(|v| v["nodes"].as_array()).cloned().unwrap_or_default() {
         let id = n["node_id"].as_str().unwrap_or_default().to_owned();
         seen.insert(id.clone());
+        let machine = core_topo.as_ref().and_then(|st| {
+            st["nodes"].as_array()?.iter().find_map(|n| {
+                let nid = n["node_id"].as_str().or_else(|| n.get("id").and_then(|x| x.as_str()))?;
+                (nid == id).then(|| n.get("machine").cloned()).flatten()
+            })
+        });
         out.push(json!({
             "node_id": id, "kind": n["kind"], "status": n["status"], "tunnel_ip": n["tunnel_ip"],
             "grants": n["grants"], "online": live(&id) == "online", "transport": live(&id), "enrolled": true,
+            "machine": machine,
         }));
     }
     if let Some(nodes) = status.as_ref().and_then(|st| st["nodes"].as_object()) {
