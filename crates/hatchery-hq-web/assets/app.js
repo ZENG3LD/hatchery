@@ -97,7 +97,7 @@ async function loadThread1(id) {
     if (String(id).startsWith('m4a:')) {
       const d = await post('/api/s/m4a/read', { room: id.slice(4), limit: 100 }); const rows = Array.isArray(d.result) ? d.result : d.result.messages || d.result.rows || [];
       const me = S.m4a.nick; const own = (f) => f === me || String(f).startsWith('@' + me + ':');
-      S.mail[id] = rows.filter((r) => r.body || r.kind === 'undecryptable').map((r) => ({ from: own(r.from) ? OPERATOR : String(r.from || '?').replace(/^@([^:]+):.*$/, '$1'), body: r.kind === 'undecryptable' ? '[cannot decrypt yet]' : r.body, created_at_ms: r.ts, message_id: r.event_id, failed: String(r.state || '').startsWith('failed'), enc: r.kind === 'undecryptable' })).filter((m, i, a) => !m.message_id || a.findIndex((x) => x.message_id === m.message_id) === i).sort((a, b) => a.created_at_ms - b.created_at_ms);
+      S.mail[id] = rows.filter((r) => (r.body || r.kind === 'undecryptable') && !String(r.state || '').startsWith('failed') && !(r.kind && !['text', 'notice', 'emote', 'undecryptable'].includes(r.kind) && own(r.from))).map((r) => ({ from: own(r.from) ? OPERATOR : String(r.from || '?').replace(/^@([^:]+):.*$/, '$1'), body: r.kind === 'undecryptable' ? '[cannot decrypt yet]' : r.body, created_at_ms: r.ts, message_id: r.event_id, failed: String(r.state || '').startsWith('failed'), enc: r.kind === 'undecryptable', sys: !!(r.kind && !['text', 'notice', 'emote', 'undecryptable'].includes(r.kind)) })).filter((m, i, a) => !m.message_id || a.findIndex((x) => x.message_id === m.message_id) === i).sort((a, b) => a.created_at_ms - b.created_at_ms);
       saveCache(); if (S.chat === id) renderChat(); renderSidebar(); return;
     }
     if (isGroup(id)) { const d = await post('/api/s/mail/inbox'); msgs = d.messages.filter((m) => m.to === id); }
@@ -109,6 +109,31 @@ async function loadThread1(id) {
   } catch (_) { S.mail[id] = S.mail[id] || []; }
   if (S.chat === id) renderChat(); renderSidebar();
 }
+
+// @mentions in already-escaped html become clickable nicks.
+const linkify = (html) => html.replace(/(^|[\s(>])@([a-z0-9][a-z0-9._-]{1,63})/gi, (m, pre, n) => `${pre}<button class="mention nick" data-nick="${n}">@${n}</button>`);
+// profile card
+function profile(nick) {
+  document.querySelector('#pcard')?.remove();
+  const me = S.m4a && nick === S.m4a.nick; const node = S.nodes.find((n) => n.node_id === nick);
+  const known = (S.profiles || {})[nick] || {};
+  const kind = me ? (S.me && S.me.kind) || 'human' : known.kind || 'agent';
+  const role = me ? (S.me && S.me.role) || '' : known.role || '';
+  const d = document.createElement('div'); d.id = 'pcard';
+  d.innerHTML = `<div class="pc">${avatar(nick, 'big')}<b>${esc(nick)}</b><span class="sub">@${esc(nick)}:message.sarl</span>
+    <div class="tags"><span>${esc(kind)}</span>${role ? `<span>${esc(role)}</span>` : ''}${node ? `<span>node ${esc(node.node_id)}</span>` : ''}</div>
+    <div class="acts">${me ? '' : '<button class="pbtn" id="pcmsg">Message</button>'}<button class="pbtn" id="pccopy">Copy nick</button></div></div>`;
+  d.onclick = (e) => { if (e.target === d) d.remove(); }; document.body.appendChild(d);
+  $('#pccopy').onclick = () => { navigator.clipboard?.writeText('@' + nick); toast('Copied @' + nick); };
+  const pm = $('#pcmsg'); if (pm) pm.onclick = async () => {
+    d.remove(); const dm = (S.chats || []).find((c) => c.kind === 'dm' && c.label === nick);
+    if (dm) { openChat(dm.target); return; }
+    try { const r = await post('/api/s/m4a/dm', { room: nick }); const rid = r.result && r.result.room; if (!rid) throw new Error('no room');
+      S.chats.unshift({ label: nick, target: 'm4a:' + rid, kind: 'dm' }); openChat('m4a:' + rid); } catch (e) { toast('DM: ' + e.message); }
+  };
+}
+document.addEventListener('click', (e) => { const b = e.target.closest && e.target.closest('.nick'); if (b) { e.preventDefault(); profile(b.dataset.nick); } });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelector('#pcard')?.remove(); });
 
 function renderChat() {
   const items = []; const group = isGroup(S.chat);
@@ -125,9 +150,10 @@ function renderChat() {
   let prevFrom = null;
   const bubble = (mine, from, html, ts, extra = '') => {
     const d = document.createElement('div'); d.className = 'msg ' + (mine ? 'me' : 'them') + extra;
-    const label = group && !mine && from && from !== prevFrom ? `<div class="who" style="color:${colorOf(from)}">${esc(from)}</div>` : '';
+    const t = `<span class="ts" title="${esc(new Date(ts).toLocaleString())}">${fmtTime(ts).slice(0, 5)}</span>`;
+    const label = group && !mine && from && from !== prevFrom ? `<div class="hdr"><button class="who nick" data-nick="${esc(from)}" style="color:${colorOf(from)}">${esc(from)}</button>${t}</div>` : '';
     if (label) d.classList.add('first');
-    d.innerHTML = `${label}${html}<span class="ts" title="${esc(new Date(ts).toLocaleString())}">${fmtTime(ts).slice(0, 5)}</span>`;
+    d.innerHTML = label ? `${label}${linkify(html)}` : `${t.replace('class="ts"', 'class="ts in"')}${linkify(html)}`;
     prevFrom = mine ? OPERATOR : from; box.appendChild(d);
   };
   for (let k = 0; k < items.length; k++) {
@@ -136,6 +162,7 @@ function renderChat() {
       let n = 1; while (k + 1 < items.length && items[k + 1].kind === 'mail' && items[k + 1].m.enc) { k++; n++; }
       const d = document.createElement('div'); d.className = 'sys encrun'; d.textContent = n === 1 ? '1 older encrypted message' : `${n} older encrypted messages`; d.title = 'Sent before this device joined; the keys were not shared with it'; box.appendChild(d); prevFrom = null; continue;
     }
+    if (it.kind === 'mail' && it.m.sys) { const d = document.createElement('div'); d.className = 'sys'; d.textContent = it.m.body; box.appendChild(d); prevFrom = null; continue; }
     if (it.kind === 'mail') {
       const m = it.m; const mine = m.from === OPERATOR;
       bubble(mine, m.from, `${m.subject && m.subject !== '-' ? `<b>${esc(m.subject)}</b><br>` : ''}${esc(m.body)}`, m.created_at_ms, m.failed ? ' failed' : '');

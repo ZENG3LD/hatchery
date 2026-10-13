@@ -632,6 +632,13 @@ pub struct M4a {
     pub groups: Vec<String>,
 }
 
+impl M4a {
+    /// Server name of the operator's account (`HATCHERY_HQ_M4A_SERVER`, default `message.sarl`).
+    pub fn nick_server(&self) -> String {
+        std::env::var("HATCHERY_HQ_M4A_SERVER").ok().filter(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')).unwrap_or_else(|| "message.sarl".into())
+    }
+}
+
 /// A room argument for the CLI: a room id, alias or nick. Never starts with `-`.
 pub fn m4a_room_ok(room: &str) -> bool {
     !room.is_empty() && room.len() <= 255 && !room.starts_with('-') && room.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'!' | b'#' | b'@' | b':' | b'.' | b'_' | b'-' | b'='))
@@ -646,10 +653,15 @@ async fn api_m4a(s: &Shared, op: &str, body: &[u8]) -> Response {
     let mut stdin = None;
     match op {
         "rooms" => args.push("rooms".into()),
-        "read" | "send" if !m4a_room_ok(&room) => return err(StatusCode::BAD_REQUEST, "bad room"),
+        "read" | "send" | "dm" if !m4a_room_ok(&room) => return err(StatusCode::BAD_REQUEST, "bad room"),
         "read" => {
             let n = req.get("limit").and_then(Value::as_u64).unwrap_or(50).clamp(1, 200);
             args.extend(["read".into(), room, "-n".into(), n.to_string()]);
+        }
+        "dm" if !room.starts_with('!') && !room.starts_with('#') && !room.contains(':') => {
+            // A 1:1 room with that nick, created silently (an invite, no message).
+            let server = m.nick_server();
+            args.extend(["create".into(), room.clone(), "--invite".into(), format!("@{room}:{server}")]);
         }
         "send" => {
             let text = req.get("text").and_then(Value::as_str).unwrap_or_default();
