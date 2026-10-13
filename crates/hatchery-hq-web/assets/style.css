@@ -295,3 +295,4 @@ body.rail #chats{order:2}body.rail .sidetop{order:3;padding:8px 0 0}body.rail .s
 .msg:hover .ts{opacity:1}
 .msg.me{background:#116dd2;color:#fff}.msg.pending{opacity:.6}.msg.failed{background:#5a1f1f}
 #input,#box #input{max-height:176px}
+#input,#box #input{max-height:118px}

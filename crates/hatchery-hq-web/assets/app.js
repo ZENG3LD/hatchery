@@ -154,8 +154,8 @@ $('#micbtn').onclick = () => {
   r.onresult = (e) => { $('#input').value = base + [...e.results].map((x) => x[0].transcript).join(''); autosize(); };
   r.onend = () => { S.rec = null; $('#micbtn').classList.remove('rec'); }; r.start();
 };
-const autosize = () => { const i = $('#input'); const max = 176; i.style.height = 'auto'; const h = Math.min(i.scrollHeight, max); i.style.height = h + 'px'; i.classList.toggle('scroll', i.scrollHeight > max); };
-$('#input').oninput = autosize;
+const autosize = () => { const i = $('#input'); const max = 118; i.style.height = 'auto'; const h = Math.min(i.scrollHeight, max); i.style.height = h + 'px'; i.classList.toggle('scroll', i.scrollHeight > max); };
+$('#input').oninput = autosize; ['keyup', 'cut', 'paste', 'change', 'focus'].forEach((ev) => $('#input').addEventListener(ev, () => setTimeout(autosize, 0)));
 $('#input').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
 $('#sendbtn').onclick = send;
 
