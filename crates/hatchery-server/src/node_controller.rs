@@ -109,6 +109,84 @@ impl DrainWorker {
     }
 }
 
+/// Operator control routed through core (A2): core sends g4a requests down a node's
+/// control stream and correlates replies. C2 relays the bytes without parsing them.
+///
+/// Wire (inner plaintext): `{"op_id": u64, "g4a": <frame>}` both ways. Messages without
+/// `op_id` are node-initiated events and go to the events channel.
+#[derive(Clone)]
+pub struct OperatorLink {
+    tx: tokio::sync::mpsc::Sender<Vec<u8>>,
+    pending: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<u64, tokio::sync::oneshot::Sender<G4aMessage>>>>,
+    next: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    events: Option<tokio::sync::mpsc::UnboundedSender<G4aMessage>>,
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum OperatorError {
+    #[error("node control stream closed")]
+    Closed,
+    #[error("node did not answer in time")]
+    Timeout,
+    #[error("request does not serialize")]
+    Encode,
+}
+
+impl OperatorLink {
+    /// Returns the link and the outbound queue to hand to `DrainConsumer::with_outbound`.
+    pub fn new(events: Option<tokio::sync::mpsc::UnboundedSender<G4aMessage>>) -> (Self, tokio::sync::mpsc::Receiver<Vec<u8>>) {
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+        (Self { tx, pending: Default::default(), next: std::sync::Arc::new(1.into()), events }, rx)
+    }
+
+    /// Send one g4a request (e.g. a `RoutedNodeRequest`) and wait for its reply.
+    pub async fn request<T: serde::Serialize>(&self, frame: &T, timeout: std::time::Duration) -> Result<G4aMessage, OperatorError> {
+        let op_id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let g4a = serde_json::to_value(frame).map_err(|_| OperatorError::Encode)?;
+        let bytes = serde_json::to_vec(&serde_json::json!({ "op_id": op_id, "g4a": g4a })).map_err(|_| OperatorError::Encode)?;
+        let (done, wait) = tokio::sync::oneshot::channel();
+        self.pending.lock().expect("pending").insert(op_id, done);
+        if self.tx.send(bytes).await.is_err() {
+            self.pending.lock().expect("pending").remove(&op_id);
+            return Err(OperatorError::Closed);
+        }
+        match tokio::time::timeout(timeout, wait).await {
+            Ok(Ok(msg)) => Ok(msg),
+            Ok(Err(_)) => Err(OperatorError::Closed),
+            Err(_) => {
+                self.pending.lock().expect("pending").remove(&op_id);
+                Err(OperatorError::Timeout)
+            }
+        }
+    }
+
+    /// Drain handler for the node's g4a control channel: parses g4a on core only.
+    pub fn handler(self) -> crate::drain_consumer::CoreHandler {
+        std::sync::Arc::new(move |_node: &str, kind: ChannelKind, plain: &[u8]| {
+            if !is_g4a_channel(kind) {
+                return None;
+            }
+            let Ok(v) = serde_json::from_slice::<Value>(plain) else { return None };
+            let g4a = v.get("g4a").cloned().unwrap_or(Value::Null);
+            let Ok(bytes) = serde_json::to_vec(&g4a) else { return None };
+            let Ok(msg) = parse_g4a_payload(&bytes) else { return None };
+            match v.get("op_id").and_then(Value::as_u64) {
+                Some(id) => {
+                    if let Some(done) = self.pending.lock().expect("pending").remove(&id) {
+                        let _ = done.send(msg);
+                    }
+                }
+                None => {
+                    if let Some(ev) = &self.events {
+                        let _ = ev.send(msg);
+                    }
+                }
+            }
+            None
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

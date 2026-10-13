@@ -32,11 +32,19 @@ pub struct DrainConsumer {
     handler: CoreHandler,
     last_acked: u64,
     transport: Option<NoiseTransport>,
+    /// Core-initiated messages (operator control). Sent once the node's handshake landed.
+    outbound: Option<tokio::sync::mpsc::Receiver<Vec<u8>>>,
 }
 
 impl DrainConsumer {
     pub fn new(client: DrainClient, recipient: HqRecipientSecret, stream: NodeStream, handler: CoreHandler) -> Self {
-        Self { client, recipient, stream, handler, last_acked: 0, transport: None }
+        Self { client, recipient, stream, handler, last_acked: 0, transport: None, outbound: None }
+    }
+
+    /// Attach a queue of core-initiated plaintexts (see `node_controller::OperatorLink`).
+    pub fn with_outbound(mut self, rx: tokio::sync::mpsc::Receiver<Vec<u8>>) -> Self {
+        self.outbound = Some(rx);
+        self
     }
 
     pub fn last_acked(&self) -> u64 {
@@ -70,8 +78,21 @@ impl DrainConsumer {
             if *shutdown.borrow() {
                 return Ok(());
             }
+            let ready = self.transport.is_some();
             let env = tokio::select! {
                 env = s.recv_envelope(Duration::from_millis(250)) => env.map_err(|e| e.to_string())?,
+                Some(plain) = async {
+                    match self.outbound.as_mut() {
+                        Some(rx) if ready => rx.recv().await,
+                        _ => std::future::pending().await,
+                    }
+                } => {
+                    let ct = self.transport.as_mut().expect("transport").encrypt(&plain).map_err(|e| e.to_string())?;
+                    s.send_data(self.stream.channel_id, encode_inner(InnerKind::Transport, &ct))
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    continue;
+                }
                 _ = shutdown.changed() => return Ok(()),
             };
             let Some(env) = env else { continue };

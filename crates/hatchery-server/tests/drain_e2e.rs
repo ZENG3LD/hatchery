@@ -192,3 +192,50 @@ mod mail_and_tasks {
         let _ = edge.stop.send(true);
     }
 }
+
+/// Operator control goes core -> drain -> C2 -> node and back; g4a is parsed on core only.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn operator_control_routes_through_core_node_controller() {
+    use hatchery_server::node_controller::{G4aMessage, OperatorLink};
+    use serde_json::{json, Value};
+
+    let recipient = HqRecipientSecret::generate();
+    let edge = edge(&recipient).await;
+    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (link, outbound) = OperatorLink::new(Some(events_tx));
+    let (stop, rx) = watch::channel(false);
+    let consumer = DrainConsumer::new(
+        DrainClient::new(edge.drain, CORE_TOKEN),
+        recipient.clone(),
+        NodeStream { node_id: "node-a".into(), channel_id: 7, kind: ChannelKind::G4aControl },
+        link.clone().handler(),
+    )
+    .with_outbound(outbound);
+    tokio::spawn(consumer.run(rx));
+
+    let mut s = NodeSession::connect(edge.node, "node-a", 7, ChannelKind::G4aControl, edge.keys, None, Duration::from_secs(5))
+        .await
+        .unwrap();
+    // Fake node: answers each control request with the same op_id, and emits one event.
+    let node = tokio::spawn(async move {
+        s.send(&serde_json::to_vec(&json!({"g4a": {"kind": "event", "n": 1}})).unwrap()).await.unwrap();
+        for _ in 0..2 {
+            let req: Value = serde_json::from_slice(&s.recv(Duration::from_secs(5)).await.unwrap()).unwrap();
+            let reply = json!({"op_id": req["op_id"], "g4a": {"answered": req["g4a"]["verb"]}});
+            s.send(&serde_json::to_vec(&reply).unwrap()).await.unwrap();
+        }
+        s
+    });
+
+    for verb in ["inventory", "attach"] {
+        let msg = link.request(&json!({"verb": verb}), Duration::from_secs(5)).await.unwrap();
+        let G4aMessage::Json(v) = msg else { panic!("unexpected typed frame") };
+        assert_eq!(v["answered"], verb);
+    }
+    let ev = tokio::time::timeout(Duration::from_secs(5), events_rx.recv()).await.unwrap().unwrap();
+    assert!(matches!(ev, G4aMessage::Json(ref v) if v["n"] == 1));
+    let _node = node.await.unwrap();
+    assert!(!edge.rs.ever_pushed_to_core());
+    let _ = stop.send(true);
+    let _ = edge.stop.send(true);
+}
