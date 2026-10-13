@@ -287,7 +287,7 @@ mod target_tests {
 
     #[test]
     fn https_and_plain_targets_parse_and_http_is_refused() {
-        assert!(matches!(EnrollTarget::parse("https://enroll.hatchery.fyi"), Ok(EnrollTarget::Https(u)) if u == "https://enroll.hatchery.fyi"));
+        assert!(matches!(EnrollTarget::parse("https://enroll.node.example"), Ok(EnrollTarget::Https(u)) if u == "https://enroll.node.example"));
         assert!(matches!(EnrollTarget::parse("https://enroll.example:8443/"), Ok(EnrollTarget::Https(u)) if u == "https://enroll.example:8443"));
         assert!(matches!(EnrollTarget::parse("127.0.0.1:18421"), Ok(EnrollTarget::Plain(_))));
         assert!(EnrollTarget::parse("http://enroll.example").is_err());

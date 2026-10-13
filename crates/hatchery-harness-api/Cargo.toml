@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-harness-api"
-version = "0.2.5"
+version = "0.2.6"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
@@ -12,7 +12,7 @@ name = "hatchery_harness_api"
 
 [dependencies]
 gate4agent-build-stamp = { version = "0.5.2" }
-hatchery-harness-protocol = { version = "0.2.5", path = "../hatchery-harness-protocol" }
+hatchery-harness-protocol = { version = "0.2.6", path = "../hatchery-harness-protocol" }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 

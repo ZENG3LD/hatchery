@@ -20,7 +20,11 @@ chown -R 0:0 /opt/bin 2>/dev/null; chmod -R a+rX /opt/bin; chmod 0755 /opt /opt/
 chmod -R a+rX /lib/x86_64-linux-gnu /lib64 /usr/lib 2> /dev/null
 NODE=/opt/bin/gate4agent-node
 ST=/var/lib/hatchery
+: "${HATCHERY_ENROLL_ADDR:?set HATCHERY_ENROLL_ADDR (host:port of the C2 enroll listener) in the guest env file}"
+: "${HATCHERY_NODE_ID:?set HATCHERY_NODE_ID in the guest env file}"
 GATEWAY=${HATCHERY_UNDERLAY_PROBE:-10.0.2.2}
+INTERNET_PROBE=${HATCHERY_INTERNET_PROBE:?set HATCHERY_INTERNET_PROBE to a public IP the guest must NOT reach (isolation probe)}
+DNS_PROBE=${HATCHERY_DNS_PROBE:?set HATCHERY_DNS_PROBE to a public DNS resolver IP the guest must NOT reach}
 chmod 0700 "$ST" /run/hatchery
 chown 1000:1000 /home/agent /tmp/ws
 mkdir -p /home/node /var/lib/hatchery-net
@@ -117,7 +121,7 @@ check agent_cannot_open_underlay_tcp 1 $AS nc -w 2 "$GATEWAY" "$ENROLL_PORT"
 # Kill-switch: the underlay is closed to everything but the tunnel's own UDP.
 check root_underlay_ping_dropped 1 ping -c1 -W2 "$GATEWAY"
 check root_underlay_tcp_dropped 1 nc -w 2 "$GATEWAY" "$ENROLL_PORT"
-check root_internet_dropped 1 nc -w 2 1.1.1.1 443
+check root_internet_dropped 1 nc -w 2 "$INTERNET_PROBE" 443
 # Remote build (optional): HATCHERY_GUEST_BUILD="RECIPE SIGNER_PUBLIC_KEY BUILD_ENDPOINT". The guest
 # holds no signing key and no build-host credential; it asks C2 as the unprivileged node user.
 # The first request is expected to be refused (neutral); the operator then raises the status and
@@ -148,8 +152,8 @@ ip link del hatch0 2> /dev/null
 sleep 2
 check vpn_down_underlay_ping_dropped 1 ping -c1 -W2 "$GATEWAY"
 check vpn_down_underlay_tcp_dropped 1 nc -w 2 "$GATEWAY" "$ENROLL_PORT"
-check vpn_down_internet_dropped 1 nc -w 2 1.1.1.1 443
-check vpn_down_dns_dropped 1 nc -u -w 2 -z 8.8.8.8 53
+check vpn_down_internet_dropped 1 nc -w 2 "$INTERNET_PROBE" 443
+check vpn_down_dns_dropped 1 nc -u -w 2 -z "$DNS_PROBE" 53
 after=$(nft list chain inet hatchery_killswitch output 2>/dev/null | sed -n 's/.*counter packets \([0-9]*\).*/\1/p')
 say "P4_COUNTER dropped_packets_before=${before:-?} after=${after:-?}"
 say "P4_SELFTEST_DONE"
