@@ -14,6 +14,8 @@ pub mod hub;
 pub mod node_controller;
 pub mod drain_consumer;
 #[cfg(feature = "m4a")]
+pub mod node_sink;
+#[cfg(feature = "m4a")]
 pub mod messenger;
 #[cfg(feature = "m4a")]
 pub mod provision;

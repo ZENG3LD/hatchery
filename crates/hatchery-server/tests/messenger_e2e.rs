@@ -87,27 +87,17 @@ async fn set_status(api: &str, id: &str, status: &str) {
 }
 
 
+/// Adapter from C2's in-process sink trait to the production core sink.
 struct HubSink {
-    hub: Arc<Hub>,
+    sink: Arc<hatchery_server::node_sink::HubNodeSink>,
 }
 
 #[async_trait::async_trait]
 impl NodeCallSink for HubSink {
     async fn apply(&self, call: ForwardedCall) -> HttpReply {
-        let hub = Arc::clone(&self.hub);
-        let result = tokio::task::spawn_blocking(move || hub.node_call(&call.node_id, &call.op, &call.payload))
-            .await
-            .unwrap();
-        match result {
-            Ok(value) => HttpReply {
-                status: 200,
-                body: serde_json::to_vec(&value).unwrap_or_default(),
-            },
-            Err(err) => HttpReply {
-                status: err.status,
-                body: serde_json::to_vec(&serde_json::json!({ "error": err.message })).unwrap_or_default(),
-            },
-        }
+        let sink = Arc::clone(&self.sink);
+        let (status, body) = tokio::task::spawn_blocking(move || sink.apply(&call)).await.unwrap();
+        HttpReply { status, body: serde_json::to_vec(&body).unwrap_or_default() }
     }
 }
 
@@ -151,7 +141,7 @@ async fn rig() -> Rig {
 
     let mut enroll_cfg = EnrollConfig::new(enroll_addr);
     enroll_cfg.registry_path = Some(dir.path().join("registry.json"));
-    enroll_cfg.node_call_sink = Some(Arc::new(HubSink { hub }));
+    enroll_cfg.node_call_sink = Some(Arc::new(HubSink { sink: Arc::new(hatchery_server::node_sink::HubNodeSink::new(hub)) }));
     let c2 = C2Running::start(
         C2Config::new(api.parse().unwrap(), OPERATOR, Vec::new())
             .unwrap()

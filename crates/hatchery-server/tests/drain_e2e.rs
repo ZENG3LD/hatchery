@@ -108,3 +108,87 @@ async fn noise_handshake_runs_as_data_frames_end_to_end() {
     let _ = stop.send(true);
     let _ = edge.stop.send(true);
 }
+
+#[cfg(feature = "m4a")]
+mod mail_and_tasks {
+    use super::*;
+    use hatchery_server::hub::Hub;
+    use hatchery_server::node_sink::HubNodeSink;
+    use serde_json::{json, Value};
+
+    fn write_ledger(dir: &std::path::Path) {
+        let entry = |id: &str, status: &str, caps: &[&str]| {
+            json!({
+                "node_id": id, "status": status, "kind": null,
+                "m4a_key_id": null, "m4a_public_key": null,
+                "mailbox": if status == "neutral" { Value::Null } else { json!(id) },
+                "grants": { "mailbox": status != "neutral", "rooms": ["general"], "capabilities": caps },
+                "updated_at_ms": 1
+            })
+        };
+        let ledger = json!({ "nodes": {
+            "alpha": entry("alpha", "member", &["mail"]),
+            "beta": entry("beta", "trusted", &["mail", "tasks"]),
+            "gamma": entry("gamma", "neutral", &[]),
+        }});
+        std::fs::create_dir_all(dir.join("provision")).unwrap();
+        std::fs::write(dir.join("provision/ledger.json"), serde_json::to_vec(&ledger).unwrap()).unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn mail_and_tasks_round_trip_over_tcp_drain() {
+        let dir = tempfile::tempdir().unwrap();
+        write_ledger(dir.path());
+        let hub = {
+            let d = dir.path().to_owned();
+            Arc::new(tokio::task::spawn_blocking(move || Hub::open(&d).unwrap()).await.unwrap())
+        };
+        let handler = Arc::new(HubNodeSink::new(Arc::clone(&hub))).handler();
+        let recipient = HqRecipientSecret::generate();
+        let edge = edge(&recipient).await;
+        let stops: Vec<_> = ["alpha", "beta", "gamma"]
+            .into_iter()
+            .map(|id| consume(&edge, &recipient, id, 1, Arc::clone(&handler)))
+            .collect();
+        let t = Duration::from_secs(5);
+        let mut alpha = node(&edge, "alpha", 1).await;
+        let mut beta = node(&edge, "beta", 1).await;
+        let mut gamma = node(&edge, "gamma", 1).await;
+
+        // Mail alpha -> beta; the sender is the stream's node, not the payload.
+        let sent = alpha
+            .call("mail.send", &json!({"to":"beta","subject":"s","body":"over the drain","from":"beta"}), t)
+            .await
+            .unwrap();
+        assert!(sent["message_id"].is_string());
+        let inbox = beta.call("mail.inbox", &json!({}), t).await.unwrap();
+        let msgs = inbox["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0]["from"], "alpha");
+        assert_eq!(msgs[0]["body"], "over the drain");
+        beta.call("mail.ack", &json!({"message_id": msgs[0]["id"].clone()}), t).await.ok();
+
+        // Neutral node is refused by core's own ledger check.
+        assert!(gamma.call("mail.inbox", &json!({}), t).await.unwrap_err().contains("refused"));
+
+        // Tasks: assigned via the operator side of the hub, read and closed by the node.
+        let h = Arc::clone(&hub);
+        let task = tokio::task::spawn_blocking(move || {
+            h.operator_call("POST", "/v1/tasks", &json!({"title":"via drain","assignee":"beta"})).unwrap()
+        })
+        .await
+        .unwrap();
+        let id = task["task"]["id"].as_i64().unwrap();
+        let mine = beta.call("task.list", &json!({}), t).await.unwrap();
+        assert_eq!(mine["tasks"][0]["title"], "via drain");
+        assert!(alpha.call("task.list", &json!({}), t).await.is_err(), "member holds no tasks");
+        beta.call("task.update", &json!({"id": id, "status": "done"}), t).await.unwrap();
+        assert!(beta.call("task.list", &json!({}), t).await.unwrap()["tasks"].as_array().unwrap().is_empty());
+
+        assert!(!edge.rs.ever_pushed_to_core());
+        for s in stops {
+            let _ = s.send(true);
+        }
+        let _ = edge.stop.send(true);
+    }
+}
