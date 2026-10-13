@@ -286,3 +286,12 @@ body.rail #chats{order:2}body.rail .sidetop{order:3;padding:8px 0 0}body.rail .s
 #input.scroll{overflow-y:auto}
 #box #input{flex:none;width:100%}#box #input.scroll{overflow-y:auto}
 .hchev{margin-left:-10px}#headbtn:hover .hchev{margin-left:0}
+
+/* round 11: bubbles — no headers, hover time, group nick colours */
+.msg{position:relative}.msg.them+.msg.them:not(.first),.msg.me+.msg.me{margin-top:-6px}
+.msg .who{font-size:12.5px;font-weight:600;margin-bottom:2px}
+.msg .ts{position:absolute;bottom:6px;font-size:11px;color:#7a7a7a;opacity:0;transition:opacity .12s;white-space:nowrap;pointer-events:none;margin:0}
+.msg.them .ts{left:calc(100% + 8px)}.msg.me .ts{right:calc(100% + 8px)}
+.msg:hover .ts{opacity:1}
+.msg.me{background:#116dd2;color:#fff}.msg.pending{opacity:.6}.msg.failed{background:#5a1f1f}
+#input,#box #input{max-height:176px}

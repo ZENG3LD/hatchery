@@ -87,32 +87,41 @@ async function loadThread() {
   } catch (_) { S.mail[S.chat] = S.mail[S.chat] || []; }
   renderChat(); renderSidebar();
 }
+const isGroup = (id) => id === '*' || String(id).startsWith('room:');
 function renderChat() {
-  const items = [];
-  for (const m of S.mail[S.chat] || []) items.push({ ts: m.created_at_ms, kind: 'mail', m });
+  const items = []; const group = isGroup(S.chat);
+  const mail = S.mail[S.chat] || [];
+  // reconcile: drop optimistic own messages once the server copy is present
+  if (S.local[S.chat]) S.local[S.chat] = S.local[S.chat].filter((l) => !l.pending || !mail.some((m) => m.from === OPERATOR && m.body === l.text && m.created_at_ms >= l.ts - 60000));
+  for (const m of mail) items.push({ ts: m.created_at_ms, kind: 'mail', m });
   for (const l of S.local[S.chat] || []) items.push({ ts: l.ts, kind: 'local', l });
   if (S.chat !== '*' && S.events[S.chat]) for (const e of S.events[S.chat].values()) if (e.kind === 'answer' || e.kind === 'prompt_needed') items.push({ ts: e.at, kind: 'ev', e });
-    items.sort((a, b) => a.ts - b.ts);
+  items.sort((a, b) => a.ts - b.ts);
   const box = $('#chat'); const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 600;
   box.innerHTML = '';
   if (!items.length) box.innerHTML = `<div class="hello">${avatar(S.chat, 'big')}<b>${esc(chatName(S.chat))}</b></div>`;
+  let prevFrom = null;
+  const bubble = (mine, from, html, ts, extra = '') => {
+    const d = document.createElement('div'); d.className = 'msg ' + (mine ? 'me' : 'them') + extra;
+    const label = group && !mine && from && from !== prevFrom ? `<div class="who" style="color:${colorOf(from)}">${esc(from)}</div>` : '';
+    if (label) d.classList.add('first');
+    d.innerHTML = `${label}${html}<span class="ts" title="${esc(new Date(ts).toLocaleString())}">${fmtTime(ts).slice(0, 5)}</span>`;
+    prevFrom = mine ? OPERATOR : from; box.appendChild(d);
+  };
   for (const it of items) {
     if (it.kind === 'mail') {
       const m = it.m; const mine = m.from === OPERATOR;
-      const d = document.createElement('div'); d.className = 'msg ' + (mine ? 'me' : 'them');
-      d.innerHTML = `${mine ? '' : `<div class="who">${esc(m.from)}${S.chat === '*' ? ' → ' + esc(m.to) : ''}</div>`}${m.subject && m.subject !== '-' ? `<b>${esc(m.subject)}</b><br>` : ''}${esc(m.body)}<div class="ts">${fmtTime(m.created_at_ms)}</div>`;
-      box.appendChild(d);
+      bubble(mine, m.from, `${m.subject && m.subject !== '-' ? `<b>${esc(m.subject)}</b><br>` : ''}${esc(m.body)}`, m.created_at_ms);
     } else if (it.kind === 'ev') {
-      const e = it.e; const d = document.createElement('div');
-      if (e.kind === 'answer') { d.className = 'msg them'; d.innerHTML = `<div class="who">${esc(S.sessionProv || e.provider)} · ${esc(S.chat)}</div>${esc(e.text)}<div class="ts">${fmtTime(e.at)} · ${e.confidence}</div>`; }
-      else { d.className = 'card attn'; d.innerHTML = `<b>${esc(e.provider)} needs input</b> · ${esc(e.prompt)}<br>${esc(e.text)}${e.options.length ? '<br><span class="sub">' + e.options.map(esc).join('<br>') + '</span>' : ''}`; }
-      box.appendChild(d);
+      const e = it.e;
+      if (e.kind === 'answer') bubble(false, S.chat, esc(e.text), e.at);
+      else { const d = document.createElement('div'); d.className = 'card attn'; d.innerHTML = `<b>${esc(e.provider)} needs input</b> · ${esc(e.prompt)}<br>${esc(e.text)}${e.options.length ? '<br><span class="sub">' + e.options.map(esc).join('<br>') + '</span>' : ''}`; box.appendChild(d); prevFrom = null; }
     } else {
       const l = it.l;
-      if (l.answer) { const d = document.createElement('div'); d.className = 'msg them'; d.innerHTML = `<div class="who">${esc(S.sessionProv || 'agent')} · ${esc(S.chat)}</div>${esc(l.text)}<div class="ts">${fmtTime(l.ts)}</div>`; box.appendChild(d); }
-      else if (l.sys) { const d = document.createElement('div'); d.className = 'sys'; d.textContent = l.text; box.appendChild(d); }
-      else if (l.card) { const d = document.createElement('div'); d.className = 'card'; d.innerHTML = l.card; box.appendChild(d); }
-      else { const d = document.createElement('div'); d.className = 'msg me'; d.innerHTML = `${l.tag ? `<div class="who" style="color:#bcd6ff">${esc(l.tag)}</div>` : ''}${esc(l.text)}<div class="ts">${fmtTime(l.ts)}</div>`; box.appendChild(d); }
+      if (l.answer) bubble(false, S.chat, esc(l.text), l.ts);
+      else if (l.sys) { const d = document.createElement('div'); d.className = 'sys'; d.textContent = l.text; box.appendChild(d); prevFrom = null; }
+      else if (l.card) { const d = document.createElement('div'); d.className = 'card'; d.innerHTML = l.card; box.appendChild(d); prevFrom = null; }
+      else bubble(true, OPERATOR, esc(l.text), l.ts, l.pending ? ' pending' : l.failed ? ' failed' : '');
     }
   }
   if ((S.working[S.chat] && S.working[S.chat] > Date.now()) || ['working'].includes(S.agentState[S.chat]) && S.session && S.sessionNode === S.chat) {
@@ -124,7 +133,11 @@ function renderChip() {}
 async function send() {
   const text = $('#input').value.trim(); if (!text) return; $('#input').value = ''; autosize();
   try {
-    if (S.chat === '*') { await post('/api/s/mail/send', { to: 'room:general', subject: '-', body: text }); await loadThread(); return; }
+    if (S.chat === '*' || isGroup(S.chat)) {
+      const to = S.chat === '*' ? 'room:general' : S.chat; const l = { ts: Date.now(), text, pending: true }; (S.local[S.chat] ||= []).push(l); renderChat(); $('#chat').scrollTop = 1e9;
+      try { await post('/api/s/mail/send', { to, subject: '-', body: text }); l.pending = false; l.sent = true; } catch (e) { l.pending = false; l.failed = true; renderChat(); toast('Not sent: ' + e.message); return; }
+      renderChat(); await loadThread(); return;
+    }
     if (S.target === 'agent' && S.session) {
       addLocal(S.chat, { text, tag: `to agent (${S.sessionProv})` });
       tsend({ t: 'prompt', text }); S.promptAt = Date.now(); S.working[S.chat] = Date.now() + 30000; setTimeout(renderChat, 25100); renderChat();
@@ -141,7 +154,7 @@ $('#micbtn').onclick = () => {
   r.onresult = (e) => { $('#input').value = base + [...e.results].map((x) => x[0].transcript).join(''); autosize(); };
   r.onend = () => { S.rec = null; $('#micbtn').classList.remove('rec'); }; r.start();
 };
-const autosize = () => { const i = $('#input'); const max = Math.round(innerHeight * 0.45); i.style.height = 'auto'; const h = Math.min(i.scrollHeight, max); i.style.height = h + 'px'; i.classList.toggle('scroll', i.scrollHeight > max); };
+const autosize = () => { const i = $('#input'); const max = 176; i.style.height = 'auto'; const h = Math.min(i.scrollHeight, max); i.style.height = h + 'px'; i.classList.toggle('scroll', i.scrollHeight > max); };
 $('#input').oninput = autosize;
 $('#input').onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } };
 $('#sendbtn').onclick = send;
