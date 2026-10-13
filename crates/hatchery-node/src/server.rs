@@ -177,7 +177,9 @@ use gate4agent_node_wire::{
     AuthDirection, OwnerOnlyLocalListener,
 };
 use gate4agent_types::{
-    AdapterBinding, AdapterFamily, AgentId, AgentInstanceId, AgentSpec, ApprovalLevel,
+    AdapterBinding, AdapterFamily, AgentAdapterCapabilities, AgentCapabilities, AgentId,
+    AgentInstanceId, AgentReadinessSpec, AgentSpec, AgentTransportCapabilities, ApprovalLevel,
+    DetectionSpec, InitialPromptMode, LaunchSpec, ProcessMatcher, PromptSpec, SpecVerification,
     CommandEnvelope, CommandId,
     validate_candidate_id, ControlCommand, ControlEvent, ControlEventKind,
     HistoryCandidateSummary, HistoryOperation, HistoryQuery, HistorySessionRecord,
@@ -2801,12 +2803,53 @@ async fn wait_for_ctrl_signal() -> Result<(), NodeServerError> {
 /// A provider dropped from the fleet by this rule is removed outright, not
 /// carried dark: no catalog entry, no adapter, no dead code claiming support
 /// for something nobody can verify runs.
+/// Host interactive shell for HQ terminal attach (no provider CLI, no network).
+fn shell_host_spec() -> AgentSpec {
+    AgentSpec {
+        id: AgentId::new("shell").expect("shell agent id"),
+        revision: "hatchery:shell-pty-1".to_owned(),
+        display_name: "Host shell".to_owned(),
+        detection: DetectionSpec {
+            command: "bash".to_owned(),
+            aliases: vec!["sh".to_owned(), "shell".to_owned()],
+            required_commands: Vec::new(),
+            unsupported_platforms: Vec::new(),
+        },
+        launch: LaunchSpec {
+            // Absolute path so admission does not depend on PATH.
+            program: "/bin/bash".to_owned(),
+            fixed_args: vec!["-i".to_owned()],
+        },
+        expected_processes: vec![ProcessMatcher::Exact {
+            name: "bash".to_owned(),
+        }],
+        prompt: PromptSpec {
+            initial: InitialPromptMode::None,
+            native_draft: None,
+        },
+        readiness: AgentReadinessSpec::default(),
+        capabilities: AgentCapabilities {
+            agent_commands: None,
+            transports: AgentTransportCapabilities {
+                pty: true,
+                pty_adapter: None,
+                pipe: None,
+                acp: None,
+            },
+            adapters: AgentAdapterCapabilities::default(),
+        },
+        verification: SpecVerification::Gate4AgentVerified,
+    }
+}
+
 fn active_registry() -> Result<AgentRegistry, NodeServerError> {
-    let specs = builtin_registry()
-        .iter()
-        .filter(|spec| matches!(spec.id.as_str(), "claude" | "codex" | "grok" | "kimi"))
-        .cloned()
-        .collect::<Vec<_>>();
+    let mut specs = vec![shell_host_spec()];
+    specs.extend(
+        builtin_registry()
+            .iter()
+            .filter(|spec| matches!(spec.id.as_str(), "claude" | "codex" | "grok" | "kimi"))
+            .cloned(),
+    );
     AgentRegistry::new(specs).map_err(|error| NodeServerError::Registry(error.to_string()))
 }
 
@@ -16032,10 +16075,23 @@ async fn process_request_inner(shared: &NodeShared, connection_id: u64, role: Cl
             if let Some(prompt) = initial_prompt.as_deref() {
                 validate_node_text("spawn initial prompt", prompt)?;
             }
-            let session = shared
-                .spawn_session(workspace_id, provider, mode, terminal_size, initial_prompt)
-                .await?;
-            Ok(NodeResponse::SpawnAccepted { session })
+            match shared
+                .spawn_session(workspace_id.clone(), provider.clone(), mode, terminal_size, initial_prompt)
+                .await
+            {
+                Ok(session) => Ok(NodeResponse::SpawnAccepted { session }),
+                Err(err) => {
+                    tracing::warn!(
+                        %provider,
+                        %workspace_id,
+                        ?mode,
+                        code = ?err.code,
+                        message = %err.message,
+                        "session spawn refused"
+                    );
+                    Err(err)
+                }
+            }
         }
         NodeRequest::SpawnSpec { spec } => {
             shared.require_controller(connection_id, role)?;

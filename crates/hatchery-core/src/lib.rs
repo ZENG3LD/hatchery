@@ -362,7 +362,16 @@ impl From<&NodeFailure> for C2NodeFailure {
             NodeFailureCode::StaleGeneration => "stale session generation",
             NodeFailureCode::BackendBusy => "node backend busy",
             NodeFailureCode::BackendDisconnected => "node backend disconnected",
-            NodeFailureCode::BackendOperationFailed => "node backend operation failed",
+            // Allow a small set of fixed, non-sensitive diagnostics through so HQ
+            // can show "launcher unavailable" instead of a opaque bucket.
+            NodeFailureCode::BackendOperationFailed => {
+                match failure.message.as_str() {
+                    "provider launcher is unavailable" => "provider launcher is unavailable",
+                    "provider runtime probe task failed" => "provider runtime probe task failed",
+                    "session environment overlay is invalid" => "session environment overlay is invalid",
+                    _ => "node backend operation failed",
+                }
+            }
             NodeFailureCode::ShuttingDown => "node shutting down",
         };
         Self { code: failure.code, message: message.to_owned() }
