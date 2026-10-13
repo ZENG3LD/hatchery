@@ -1869,11 +1869,16 @@ dependencies = [
 name = "hatchery-c2-protocol"
 version = "0.2.3"
 dependencies = [
+ "chacha20poly1305",
  "gate4agent-build-stamp",
  "gate4agent-node-protocol",
  "gate4agent-types",
+ "getrandom 0.2.17",
  "serde",
  "serde_json",
+ "sha2",
+ "snow",
+ "x25519-dalek",
 ]
 
 [[package]]
