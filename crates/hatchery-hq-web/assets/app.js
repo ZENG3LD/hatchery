@@ -235,7 +235,7 @@ function menu(items, anchorLeft) {
 document.addEventListener('click', (e) => { if (!e.target.closest('#menu') && !e.target.closest('#addbtn') && !e.target.closest('#plusbtn')) $('#menu').hidden = true; if (!e.target.closest('#acctmenu')) $('#acctmenu').hidden = true; });
 $('#addbtn').onclick = () => menu([
   ['Open terminal for this agent', () => { if (!isGroup(S.chat)) setMode('pty'); else toast('Open an agent chat first'); }],
-  ['Create a task…', () => { openPanel('computer'); }],
+  ['Create a task…', () => { openPanel('tasks'); }],
   ['Issue enrollment code', issueCode],
   ['Open browser stream…', () => openPanel('computer')],
 ]);
@@ -260,6 +260,12 @@ const LUC = {
   copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
   hash: '<path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/>',
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+  term: '<path d="m7 11 2-2-2-2M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/>',
+  check: '<path d="M3 5h.01M3 12h.01M3 19h.01M8 5h13M8 12h13M8 19h13"/>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  server: '<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01M6 18h.01"/>',
 };
 const ico = (k, sz = 16) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${LUC[k]}</svg>`;
 $('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); m.hidden = !m.hidden; if (m.hidden) return; m.className = 'pop amenu2'; m.innerHTML = '';
@@ -331,8 +337,8 @@ async function renderStatus() {
 }
 
 // ---- right panel: chat info + all status / control
-const TABS = [['info', 'Info'], ['status', 'Status'], ['library', 'Library'], ['computer', 'Computer']];
-function renderPanelHead() { if (!S.chat) return; $('#panelav').innerHTML = avatar(S.chat, 'big'); $('#panelname').textContent = chatName(S.chat); $('#panelsub').textContent = ''; }
+const TABS = [['info', 'Overview', 'info'], ['terminal', 'Terminal', 'term'], ['browser', 'Browser', 'globe'], ['tasks', 'Tasks', 'check'], ['library', 'Files', 'folder'], ['status', 'Fleet', 'server']];
+function renderPanelHead() { if (!S.chat) return; $('#panelav').innerHTML = avatar(S.chat, 'mid'); $('#panelname').textContent = chatName(S.chat); $('#panelsub').textContent = ''; }
 function openPanel(tab) { S.panel = true; $('#panel').classList.add('open'); syncHead(); renderPanelHead(); setTab(tab || S.tab); }
 function closePanel() { S.panel = false; $('#panel').classList.remove('open'); syncHead(); }
 // The pill lives inside the main pane (overflow hidden). On panel open/close it holds its old screen
@@ -355,7 +361,7 @@ function syncHead() {
 }
 // draggable separators; widths persist in localStorage
 function setW(v, px) { document.documentElement.style.setProperty(v, px + 'px'); }
-setW('--sw', +localStorage.getItem('hq.sw') || 258); setW('--pw', +localStorage.getItem('hq.pw') || 258);
+setW('--sw', +localStorage.getItem('hq.sw') || 258); setW('--pw', Math.max(320, +localStorage.getItem('hq.pw') || 360));
 function dragger(el, v, key, min, max, fromRight) {
   el.onpointerdown = (e) => {
     e.preventDefault(); el.setPointerCapture(e.pointerId); el.classList.add('drag'); document.body.classList.add('dragging');
@@ -371,19 +377,25 @@ $('#rzl').onpointerdown = (e) => {
   el.onpointermove = (ev) => { const x = ev.clientX; if (x < 140) { setRail(true); return; } setRail(false); const w = Math.round(Math.max(200, Math.min(Math.min(440, innerWidth * 0.35), x))); setW('--sw', w); localStorage.setItem('hq.sw', w); };
   el.onpointerup = () => { el.onpointermove = null; el.classList.remove('drag'); document.body.classList.remove('dragging'); };
 };
-dragger($('#rzr'), '--pw', 'hq.pw', 240, () => Math.min(640, innerWidth * 0.4), true);
+dragger($('#rzr'), '--pw', 'hq.pw', 320, () => Math.min(640, innerWidth * 0.4), true);
 function setTab(tab) {
+  if (tab === 'computer') tab = 'browser';
   if (!TABS.some(([id]) => id === tab)) tab = 'info';
   S.tab = tab; $('#ptabs').innerHTML = '';
-  for (const [id, label] of TABS) { const b = document.createElement('button'); b.textContent = label; b.className = id === tab ? 'on' : ''; b.onclick = () => setTab(id); $('#ptabs').appendChild(b); }
+  for (const [id, label, ic] of TABS) { const b = document.createElement('button'); b.innerHTML = `${ico(ic, 15)}<span class="l">${esc(label)}</span>`; b.title = label; b.setAttribute('role', 'tab'); b.className = id === tab ? 'on' : ''; b.onclick = () => setTab(id); $('#ptabs').appendChild(b); }
   document.querySelectorAll('.ptab').forEach((t) => t.classList.toggle('on', t.id === 'p-' + tab));
-  if (tab === 'info') renderInfo(); if (tab === 'status') renderStatus(); if (tab === 'computer') renderTasksTab(); if (tab === 'library') renderLibraryTab();
+  $('#pbody').scrollTop = 0;
+  if (tab === 'info') renderInfo(); if (tab === 'status') renderStatus(); if (tab === 'tasks') renderTasksTab(); if (tab === 'library') renderLibraryTab(); if (tab === 'terminal') renderTermTab();
 }
+const sec = (title, body, right = '') => `<section class="psec"><div class="sech"><span>${esc(title)}</span>${right}</div>${body}</section>`;
 function renderInfo() {
   const root = $('#p-info'); const agent = S.chat && !isGroup(S.chat); const n = S.nodes.find((x) => x.node_id === S.chat);
-  let h = `<div class="pcard">${agent ? `<div class="kv"><span>Session</span><span>${S.session && S.sessionNode === S.chat ? esc(S.sessionProv) + ' · live' : 'not running'}</span></div>` : '<div class="kv"><span>Room</span><span>room:general</span></div>'}${n ? `<div class="kv"><span>Node</span><span>${esc(n.node_id)} · ${n.online ? 'online' : 'offline'}</span></div>` : ''}</div>`;
-  if (agent) h += `<div class="pcard"><h4>View</h4><div class="tog" id="vtog"><button data-m="chat" class="${S.mode === 'chat' ? 'on' : ''}">Chat</button><button data-m="pty" class="${S.mode === 'pty' ? 'on' : ''}">Terminal</button></div></div>`;
-  root.innerHTML = h + '<div id="p-activity"></div>';
+  const live = S.session && S.sessionNode === S.chat;
+  let kv = agent ? `<div class="kv"><span>Session</span><span>${live ? esc(S.sessionProv) + ' · live' : 'not running'}</span></div>` : `<div class="kv"><span>Room</span><span class="ell">${esc(chatName(S.chat))}</span></div>`;
+  if (n) kv += `<div class="kv"><span>Node</span><span><span class="dot ${n.online ? 'ok' : ''}"></span> ${n.online ? 'online' : 'offline'}</span></div>`;
+  let h = sec('Details', `<div class="pcard">${kv}</div>`);
+  if (agent) h += sec('View', `<div class="tog" id="vtog"><button data-m="chat" class="${S.mode === 'chat' ? 'on' : ''}">Chat</button><button data-m="pty" class="${S.mode === 'pty' ? 'on' : ''}">Terminal</button></div>`);
+  root.innerHTML = h + '<div id="p-activity" class="secs"></div>';
   root.querySelectorAll('#vtog button').forEach((b) => (b.onclick = () => { setMode(b.dataset.m); renderInfo(); }));
   if (agent) renderActivity();
 }
@@ -416,7 +428,7 @@ $('#tspawn').onclick = () => {
     if (d.type === 'events') onEvents(node, d.events);
     if (d.type === 'frame') {
       const bytes = Uint8Array.from(atob(d.ansi), (c) => c.charCodeAt(0));
-      window.lastFrameText = d.text; term.reset(); term.write(bytes); S.lastAnsi = bytes; if (mini) { mini.reset(); mini.write(bytes); }
+      window.lastFrameText = d.text; term.reset(); term.write(bytes); S.lastAnsi = bytes; if (mini) { mini.reset(); mini.write(bytes); $('#tempty').hidden = true; }
       S.lastFrame = Date.now();
     }
   };
@@ -424,6 +436,23 @@ $('#tspawn').onclick = () => {
 };
 $('#tstop').onclick = () => tsend({ t: 'stop' });
 term.onData((data) => tsend({ t: 'data', data }));
+
+// ---- panel terminal tab: a read-only live preview of the agent PTY, scaled to the panel width
+function renderTermTab() {
+  const sel = $('#tprov2'); if (!sel.options.length) { sel.innerHTML = $('#tprov').innerHTML; sel.onchange = () => { $('#tprov').selectedIndex = sel.selectedIndex; }; }
+  sel.selectedIndex = $('#tprov').selectedIndex;
+  $('#tstate').textContent = S.session ? `${S.sessionProv} on ${S.sessionNode}` : 'no session';
+  if (!mini) { mini = new Terminal({ rows: ROWS, cols: COLS, fontSize: 13, disableStdin: true, cursorBlink: false, fontFamily: 'ui-monospace,Menlo,Consolas,monospace', theme: { background: '#000000' } }); mini.open($('#tmini')); if (S.lastAnsi && S.lastAnsi.length) mini.write(S.lastAnsi); new ResizeObserver(fitMini).observe($('#tminihost')); }
+  $('#tempty').hidden = !!(S.lastAnsi && S.lastAnsi.length); fitMini();
+}
+function fitMini() {
+  const host = $('#tminihost'), inner = $('#tmini'); if (!host || !inner.firstChild) return;
+  inner.style.transform = ''; const w = inner.scrollWidth || 1, h = inner.scrollHeight || 1; const k = Math.min(1, host.clientWidth / w);
+  inner.style.transform = `scale(${k})`; host.style.height = Math.round(h * k) + 'px';
+}
+$('#tspawn2').onclick = () => { $('#tprov').selectedIndex = $('#tprov2').selectedIndex; $('#tspawn').click(); setTimeout(renderTermTab, 600); };
+$('#tstop2').onclick = () => { $('#tstop').click(); setTimeout(renderTermTab, 600); };
+$('#tfull').onclick = () => { if (S.chat && !isGroup(S.chat)) setMode('pty'); else toast('Open an agent chat first'); };
 
 // ---- event layer: the browser reads ONLY typed session events from the server (no screen parsing here)
 function refreshAvatars() { renderSidebar(); if (S.chat) $('#headav').innerHTML = avatar(S.chat, 'mid'); renderChat(); }
@@ -447,15 +476,16 @@ function diffHtml(t) { return t.split('\n').map((l) => `<span class="${l.startsW
 function renderActivity() {
   const root = $('#p-activity'); const node = !S.chat || isGroup(S.chat) ? S.sessionNode : S.chat; const evs = node && S.events[node] ? [...S.events[node].values()] : [];
   const st = node ? S.agentState[node] || 'idle' : 'idle';
-  let h = `<div class="sub" style="margin-bottom:8px">Agent activity${node ? ' on ' + esc(node) : ''} · state <b>${esc(st)}</b> <span class="tagh">from the session event layer</span></div>`;
+  let h = '<section class="psec"><div class="sech"><span>Activity</span><span class="pill">' + esc(st) + '</span></div>';
   h += evs.filter((e) => ['thought', 'action', 'diff', 'prompt_needed'].includes(e.kind)).slice(-14).reverse().map((e) => {
     if (e.kind === 'thought') return `<div class="wd thought"><div class="k">💭 Thought ${confTag(e)}</div><div class="b">${esc(e.text)}</div></div>`;
     if (e.kind === 'action') return `<div class="wd tool"><div class="k">⚙ Action · ${esc(e.status)} ${confTag(e)}</div><div class="b">${esc(e.name)}(${esc(e.args)})</div>${e.result ? `<div class="r">⎿ ${esc(e.result)}</div>` : ''}</div>`;
     if (e.kind === 'diff') return `<div class="wd diff"><div class="k">± Git diff · ${esc(e.files.join(', '))} ${confTag(e)}</div><pre>${diffHtml(e.patch)}</pre></div>`;
     return `<div class="wd attn"><div class="k">⚠ Needs input · ${esc(e.prompt)} ${confTag(e)}</div><div class="b">${esc(e.text)}</div>${e.options.length ? `<div class="r">${e.options.map(esc).join('<br>')}</div>` : ''}</div>`;
-  }).join('') || '<div class="wd"><div class="b sub">No agent activity yet. Start an agent from the Terminal tab, then talk to it in the chat.</div></div>';
-  const mail = (S.mail[S.chat] || []).slice(-3);
-  h += `<div class="wd"><div class="k">✉ Messenger <span class="tagh">mail with ${esc(chatName(S.chat))}</span></div>` + (mail.map((m) => `<div style="margin:4px 0"><span class="sub">${esc(m.from === OPERATOR ? 'you' : m.from)}:</span> ${esc(m.body)}</div>`).join('') || '<div class="sub">no mail yet</div>') + '</div>';
+  }).join('') || '<div class="pcard empty sub">No agent activity yet. Start a session in the Terminal tab.</div>';
+  h += '</section>';
+  const mail = (S.mail[S.chat] || []).filter((m) => !m.sys).slice(-3);
+  h += sec('Recent messages', `<div class="pcard">${mail.map((m) => `<div class="rm"><span class="sub">${esc(m.from === OPERATOR ? 'You' : m.from)}</span><span class="ell2">${esc(m.body)}</span></div>`).join('') || '<div class="sub">No messages yet</div>'}</div>`);
   root.innerHTML = h;
 }
 

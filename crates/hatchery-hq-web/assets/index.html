@@ -33,21 +33,28 @@
  </main>
  <div class="rz" id="rzr"></div>
  <aside id="panel">
-  <div class="paneltop"><button class="round" id="closepanel" title="Close">✕</button></div>
-  <div class="panelhead"><div id="panelav"></div><div id="panelname"></div><div id="panelsub" class="sub"></div></div>
-  <div id="ptabs"></div>
+  <div class="phead"><div id="panelav"></div><div class="pht"><div id="panelname"></div><div id="panelsub" class="sub"></div></div><button class="round" id="closepanel" title="Close">✕</button></div>
+  <div id="ptabs" role="tablist"></div>
   <div id="pbody">
    <div class="ptab" id="p-info"></div>
-   <div class="ptab" id="p-status"></div>
-   <div class="ptab" id="p-library"></div>
-   <div class="ptab" id="p-computer">
-    <div class="pcard"><h4>Browser</h4>
-    <div class="row"><input id="bsess" placeholder="Browser session id"><button class="btn" id="bopen">Open</button></div>
-    <div class="row"><input id="burl" value="https://example.org/"><button class="btn" id="bnav">Go</button></div>
-    <div class="row"><input id="btext" placeholder="Type…"><button class="btn" id="btype">Type</button><button class="btn" id="benter">Enter</button><button class="btn" id="bup">▲</button><button class="btn" id="bdown">▼</button></div>
-    <canvas id="bcanvas" width="800" height="500"></canvas><div class="sub" id="binfo"></div></div>
-    <div id="p-tasks"></div>
+   <div class="ptab" id="p-terminal">
+    <section class="psec"><div class="sech"><span>Agent terminal</span><span class="sub" id="tstate">no session</span></div>
+     <div class="pcard"><div class="row"><select id="tprov2"></select><button class="btn blue" id="tspawn2">Start</button><button class="btn" id="tstop2">Stop</button></div>
+      <div class="tmini" id="tminihost"><div class="inner" id="tmini"></div><div class="tempty sub" id="tempty">No output yet. Open an agent chat and start a session.</div></div>
+      <div class="row end"><button class="btn" id="tfull">Open full terminal</button></div></div></section>
    </div>
+   <div class="ptab" id="p-browser">
+    <section class="psec"><div class="sech"><span>Browser stream</span><span class="sub" id="binfo"></span></div>
+     <div class="pcard">
+      <div class="row"><input id="bsess" placeholder="Browser session id"><button class="btn" id="bopen">Connect</button></div>
+      <div class="row"><input id="burl" value="https://example.org/"><button class="btn" id="bnav">Go</button></div>
+      <div class="frame"><canvas id="bcanvas" width="800" height="500"></canvas></div>
+      <div class="row ctl"><input id="btext" placeholder="Type into page…"><button class="btn" id="btype">Type</button><button class="ibtn" id="benter" title="Enter">⏎</button><button class="ibtn" id="bup" title="Scroll up">▲</button><button class="ibtn" id="bdown" title="Scroll down">▼</button></div>
+     </div></section>
+   </div>
+   <div class="ptab" id="p-tasks"></div>
+   <div class="ptab" id="p-library"></div>
+   <div class="ptab" id="p-status"></div>
   </div>
  </aside>
 </div>

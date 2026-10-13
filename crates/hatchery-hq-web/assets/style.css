@@ -360,3 +360,46 @@ body.rail #chats{order:2}body.rail .sidetop{order:3;padding:8px 0 0}body.rail .s
 .macts{top:50%;transform:translateY(-50%);background:none;border:0;box-shadow:none;padding:0}
 .msg.them .macts{right:auto;left:100%;padding-left:6px}.msg.me .macts{left:auto;right:100%;padding-right:6px}
 .macts button{color:#9a9a9a}.macts button:hover{background:#242424;color:#fff}
+
+/* round 19: right panel, Grok Bot style: compact header, icon tabs, sections of cards, no horizontal overflow */
+#panel{display:flex;flex-direction:column}#panel>*{min-width:0}
+.phead{display:flex;align-items:center;gap:10px;padding:12px 12px 10px 16px;flex:none;min-width:0}
+.phead #panelav{flex:none;display:flex}.pht{flex:1;min-width:0}
+#panelname{font-size:15px;font-weight:650;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#panelsub:empty{display:none}
+#ptabs{display:flex;gap:2px;padding:0 10px 10px;justify-content:flex-start;overflow:hidden;flex:none;border-bottom:1px solid #1d1d1d}
+#ptabs button{display:flex;align-items:center;gap:6px;height:30px;padding:0 9px;border-radius:9px;color:#8a8a8a;font-size:12.5px;font-weight:550;flex:none}
+#ptabs button .l{display:none}#ptabs button.on .l{display:inline}
+#ptabs button:hover{background:#1b1b1b;color:#e6e6e6}#ptabs button.on{background:#222;color:#f2f2f2}
+#pbody{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:14px 14px 24px}
+.ptab.on{display:flex;flex-direction:column;gap:16px;min-width:0}
+.secs{display:flex;flex-direction:column;gap:16px}
+.psec{display:flex;flex-direction:column;gap:8px;min-width:0}
+.sech{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;font-weight:600;color:#9a9a9a;padding:0 2px;min-width:0}
+.sech .sub{font-weight:400;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
+.sech .pill{font-weight:500;font-size:11px;background:#1f1f1f;border-radius:999px;padding:2px 8px;color:#bdbdbd}
+#panel .pcard{margin:0;padding:10px 12px;border-radius:14px;min-width:0;overflow:hidden}
+#panel .pcard.empty{font-size:12.5px}
+#panel .row{display:flex;gap:6px;margin:0 0 8px;min-width:0;align-items:center}
+#panel .row:last-child{margin-bottom:0}#panel .row.end{justify-content:flex-end;margin-top:8px}
+#panel .row input,#panel .row select{flex:1;min-width:0;height:32px;background:#171717;border:1px solid #2a2a2a;border-radius:9px;padding:0 10px;color:var(--txt);font-size:13px}
+#panel .btn{height:32px;padding:0 12px;border-radius:9px;font-size:12.5px;flex:none}
+.ibtn{flex:none;width:32px;height:32px;display:grid;place-items:center;border-radius:9px;background:#262626;color:var(--txt);font-size:12px}.ibtn:hover{background:#2e2e2e}
+.frame{width:100%;aspect-ratio:16/10;background:#000;border-radius:10px;overflow:hidden;margin:2px 0 8px}
+#bcanvas{width:100%;height:100%;object-fit:contain;margin:0;border:0;border-radius:0;display:block}
+.tmini{background:#000;border-radius:10px;overflow:hidden;position:relative;min-height:120px;margin-top:2px}
+.tmini .inner{transform-origin:0 0;width:max-content}.tmini .xterm{padding:6px}
+.tempty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:16px;font-size:12.5px}.tempty[hidden]{display:none}
+#panel .kv{padding:7px 0;border-bottom:1px solid #262626}#panel .kv:last-child{border:0}.kv>span:last-child{min-width:0;text-align:right}
+.ell{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;display:inline-block;vertical-align:bottom}
+.rm{display:flex;flex-direction:column;gap:1px;padding:6px 0;border-bottom:1px solid #262626;font-size:13px;min-width:0}.rm:last-child{border:0}.rm .sub{font-size:11.5px}
+.ell2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}
+#panel .wd{margin:0 0 6px;border-radius:12px}#panel .wd:last-child{margin-bottom:0}
+#panel pre{max-width:100%;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;background:#171717;border-radius:10px;padding:10px;font-size:11.5px;margin:0}
+#p-status h3{font-size:12px;font-weight:600;color:#9a9a9a;margin:4px 2px -8px}
+#p-status .stgrid{gap:8px;margin:0}#p-status .ncard{margin:0;border-radius:14px}
+.lib{grid-template-columns:repeat(auto-fill,minmax(120px,1fr))}
+#p-tasks .pcard .row b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#panel .btn{color:#e6e6e6;background:#262626;border:0}#panel .btn:hover{background:#2e2e2e}#panel .btn.blue{background:#116dd2;color:#fff}
+#panel .tog{background:#1f1f1f;border:0}
+#p-status h3{text-transform:none;letter-spacing:0}#p-status .stgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr))!important}#p-status .stat{padding:10px 12px;border-radius:14px;min-width:0}#p-status .stat .v{font-size:15px}
