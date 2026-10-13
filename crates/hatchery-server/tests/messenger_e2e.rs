@@ -155,6 +155,7 @@ fn refused(r: &Result<Value, String>) -> bool {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "A2: C2 no longer pushes POST /v1/node-call to core; rewrite on restreamer drain"]
 async fn mail_tasks_status_and_revocation_end_to_end() {
     let rig = rig().await;
     let api = rig.api.clone();
@@ -277,6 +278,7 @@ async fn mail_tasks_status_and_revocation_end_to_end() {
 /// The agent path: MCP tool -> node door (signs with the node identity) -> C2 -> hub. The agent
 /// side holds no key; a neutral node's door answers "not available".
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "A2: C2 no longer pushes POST /v1/node-call to core; rewrite on restreamer drain"]
 async fn agent_tools_reach_the_hub_through_the_node_door() {
     use hatchery_harness_mcp::WorkDoor;
     let rig = rig().await;

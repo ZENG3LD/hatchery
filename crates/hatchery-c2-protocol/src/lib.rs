@@ -67,6 +67,9 @@ pub use gate4agent_node_protocol::{
 pub use gate4agent_build_stamp::BUILD_STAMP;
 mod control_detail;
 pub use control_detail::control_telemetry_detail;
+
+mod multiplex;
+pub use multiplex::*;
 use gate4agent_node_protocol::{
     AgentStreamChunkV1, ManagedSessionRecord, ManagedSessionState, SessionHistorySummaryV1,
     NodeSnapshot, SessionAddress, SessionMode, SessionRecordId, WorkspaceId,

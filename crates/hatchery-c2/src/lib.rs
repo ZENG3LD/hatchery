@@ -19,3 +19,7 @@ pub mod enrollment;
 /// Runtime side of enrollment (listener, operator endpoints, peer provisioning, signed call-home).
 #[cfg(any(windows, unix))]
 pub mod enroll_service;
+
+/// Byte restreamer (A2): opaque multiplex, core drain, nested crypto.
+#[cfg(any(windows, unix))]
+pub mod restreamer;

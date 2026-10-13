@@ -167,6 +167,12 @@ pub struct C2Config {
     /// Node enrollment (one-time code, neutral status, runtime node add). `None` keeps the
     /// fixed `--node` set and token authentication only.
     pub enrollment: Option<crate::enroll_service::EnrollConfig>,
+    /// A2 restreamer: node multiplex uplink listen. Requires `restreamer_drain_listen`.
+    pub restreamer_node_listen: Option<SocketAddr>,
+    /// A2 restreamer: core drain listen (C2 never dials core).
+    pub restreamer_drain_listen: Option<SocketAddr>,
+    /// Bearer core presents on the drain stream. Never logged.
+    restreamer_core_token: Option<String>,
 }
 
 impl C2Config {
@@ -209,7 +215,36 @@ impl C2Config {
             node_listen: None,
             timings: C2Timings::default(),
             enrollment: None,
+            restreamer_node_listen: None,
+            restreamer_drain_listen: None,
+            restreamer_core_token: None,
         })
+    }
+
+    /// Enable the A2 byte restreamer (node uplink + core drain). C2 never dials core.
+    pub fn with_restreamer(
+        mut self,
+        node_listen: SocketAddr,
+        drain_listen: SocketAddr,
+        core_token: impl Into<String>,
+    ) -> Result<Self, C2ConfigError> {
+        let core_token = core_token.into();
+        if core_token.len() < 16 {
+            return Err(C2ConfigError::RestreamerToken);
+        }
+        if node_listen == drain_listen {
+            return Err(C2ConfigError::RestreamerListenConflict);
+        }
+        if node_listen.port() == 0 || node_listen.ip().is_unspecified() {
+            return Err(C2ConfigError::NonLoopbackNodeListen(node_listen));
+        }
+        if drain_listen.port() == 0 || drain_listen.ip().is_unspecified() {
+            return Err(C2ConfigError::InvalidControlTunnel(drain_listen));
+        }
+        self.restreamer_node_listen = Some(node_listen);
+        self.restreamer_drain_listen = Some(drain_listen);
+        self.restreamer_core_token = Some(core_token);
+        Ok(self)
     }
 
     /// Binds the address nodes call in on.
@@ -377,6 +412,10 @@ pub enum C2ConfigError {
     InvalidControlEndpoint,
     #[error("enrollment needs a --node-listen address for the nodes to call home on")]
     EnrollmentWithoutListener,
+    #[error("restreamer core token must be at least 16 bytes")]
+    RestreamerToken,
+    #[error("restreamer node and drain listen addresses must differ")]
+    RestreamerListenConflict,
     #[error("C2 control endpoint must not equal a configured node endpoint")]
     ControlEndpointConflict,
     #[error("C2 control tunnel listen must be a concrete non-unspecified address with a nonzero port, not shared with another listener: {0}")]
@@ -670,6 +709,34 @@ async fn run_bound(config: C2Config, listener: TcpListener, mut shutdown: watch:
     }
     if let Some(node_listen) = config.node_listen {
         tasks.spawn(accept_call_home(node_listen, Arc::clone(&call_home_routes), static_ids, enroll_service.clone(), shutdown.clone()));
+    }
+    // A2 restreamer: opaque node uplink + core drain (C2 never dials core).
+    if let (Some(node_listen), Some(drain_listen), Some(core_token)) = (
+        config.restreamer_node_listen,
+        config.restreamer_drain_listen,
+        config.restreamer_core_token.clone(),
+    ) {
+        let journal = Arc::new(crate::restreamer::MemoryJournal::new());
+        let restreamer = crate::restreamer::Restreamer::new(
+            crate::restreamer::BufferLimits::default(),
+            journal,
+            core_token.clone(),
+            None,
+        );
+        let cfg = crate::restreamer::RestreamerConfig {
+            node_listen,
+            drain_listen,
+            buffer: crate::restreamer::BufferLimits::default(),
+            core_token,
+        };
+        let rs = restreamer.clone();
+        let sd = shutdown.clone();
+        tasks.spawn(async move {
+            crate::restreamer::serve(cfg, rs, sd)
+                .await
+                .map_err(|error| io::Error::other(error.to_string()))
+        });
+        tracing::info!(%node_listen, %drain_listen, "A2 restreamer listening");
     }
     tasks.spawn(inventory_owner(config.timings.fresh_for, ingress_rx, status_tx, shutdown.clone()));
     for (node, commands, releases, force_disconnect, call_home) in relay_receivers {

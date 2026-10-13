@@ -79,6 +79,10 @@ pub struct PublicInfo {
     pub c2_wg_public_key: Option<String>,
     pub c2_wg_endpoint: Option<String>,
     pub c2_call_home: Option<String>,
+    /// A2: outer-layer C2 public key (base64) handed to nodes at enrollment.
+    pub upstream_c2_public_key: Option<String>,
+    /// A2: HQ recipient public key (base64) relayed to nodes; C2 has no private half.
+    pub upstream_recipient_public_key: Option<String>,
 }
 
 #[derive(Clone)]
@@ -100,7 +104,8 @@ pub struct EnrollConfig {
     pub policy_path: Option<std::path::PathBuf>,
     /// Build host to forward admitted `POST /v1/build` requests to, and the bearer it expects.
     pub build_host: Option<(SocketAddr, String)>,
-    /// hatchery-server control API (mail, tasks) to forward admitted node calls to, and its bearer.
+    /// Deprecated (A2): previously the core address C2 pushed node-calls to.
+    /// Ignored — C2 never dials core; retained so old configs still parse.
     pub server_upstream: Option<(SocketAddr, String)>,
 }
 
@@ -272,6 +277,8 @@ impl EnrollService {
                         c2_wg_public_key: self.public.c2_wg_public_key.clone(),
                         c2_wg_endpoint: self.public.c2_wg_endpoint.clone(),
                         c2_call_home: self.public.c2_call_home.clone(),
+                        upstream_c2_public_key: self.public.upstream_c2_public_key.clone(),
+                        upstream_recipient_public_key: self.public.upstream_recipient_public_key.clone(),
                     },
                 )
             }
@@ -358,7 +365,7 @@ impl EnrollService {
     /// replay, signature, status policy for the operation's capability), then forwarded to the
     /// server's control API with a bearer only C2 holds. The server re-checks its own ledger.
     pub async fn handle_node_call(&self, body: &[u8], peer: IpAddr) -> HttpReply {
-        use hatchery_enroll::call::{capability_for, ForwardedCall, SignedCall, MAX_SKEW_MS};
+        use hatchery_enroll::call::{capability_for, SignedCall, MAX_SKEW_MS};
         let Ok(call) = serde_json::from_slice::<SignedCall>(body) else {
             return HttpReply::error(400, "malformed request");
         };
@@ -390,24 +397,17 @@ impl EnrollService {
             tracing::warn!(node_id = %call.node_id, op = %call.op, "node call refused: status does not hold the capability");
             return HttpReply::error(403, "refused");
         }
-        let Some((addr, bearer)) = &self.server_upstream else {
-            return HttpReply::error(503, "service unavailable");
-        };
-        let Ok(payload) = serde_json::from_str::<serde_json::Value>(&call.payload) else {
-            return HttpReply::error(400, "malformed payload");
-        };
-        let forward = ForwardedCall { node_id: call.node_id.clone(), op: call.op.clone(), payload };
-        let bytes = serde_json::to_vec(&forward).unwrap_or_default();
-        match hatchery_build::http::post(*addr, "/v1/node-call", Some(bearer), &bytes, Duration::from_secs(30)).await {
-            Ok((status, body)) => {
-                tracing::info!(node_id = %call.node_id, op = %call.op, status, "node call forwarded");
-                HttpReply { status, body }
-            }
-            Err(error) => {
-                tracing::warn!(node_id = %call.node_id, cause = %error, "server unreachable");
-                HttpReply::error(502, "service unavailable")
-            }
+        // A2: C2 is a byte restreamer. It must not push to core (no POST /v1/node-call).
+        // Admitted signed calls belong on the multiplex uplink; core drains them.
+        let _ = capability;
+        if self.server_upstream.is_some() {
+            tracing::warn!(
+                node_id = %call.node_id,
+                op = %call.op,
+                "node-call push to core is removed (A2); use restreamer uplink"
+            );
         }
+        HttpReply::error(410, "use restreamer uplink")
     }
 
     /// Operator endpoints under `/v1/enroll/...` (the caller has checked the bearer).
@@ -702,6 +702,41 @@ mod tls_only_tests {
         let c = code(&service);
         let body = request(&dir, "gamma", &c);
         assert_eq!(service.handle_enroll(&body, "203.0.113.9".parse().unwrap()).status, 200);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn node_call_no_longer_pushes_to_core() {
+        use hatchery_enroll::call::SignedCall;
+        let dir = std::env::temp_dir().join(format!("c2-no-push-{}", std::process::id()));
+        let mut config = EnrollConfig::new("127.0.0.1:0".parse().unwrap());
+        // Even if an old launch line still sets upstream, C2 must not dial it.
+        config.server_upstream = Some(("127.0.0.1:9".parse().unwrap(), "token-not-used-here!".into()));
+        let (service, _events) = EnrollService::start(&config).unwrap();
+        let identity = NodeIdentity::load_or_create(&dir).unwrap();
+        let c = code(&service);
+        let body = request(&dir, "delta", &c);
+        assert_eq!(service.handle_enroll(&body, "127.0.0.1".parse().unwrap()).status, 200);
+        service.handle_operator(
+            "POST",
+            "/v1/enroll/nodes/delta/status",
+            br#"{"status":"trusted"}"#,
+        );
+        let ts = unix_ms();
+        let payload = "{}".to_owned();
+        let msg = SignedCall::signing_bytes("delta", "mail.inbox", &payload, ts, "noncea21");
+        let signed = SignedCall {
+            node_id: "delta".into(),
+            op: "mail.inbox".into(),
+            payload,
+            ts_ms: ts,
+            nonce: "noncea21".into(),
+            signature: identity.sign_bytes(&msg),
+        };
+        let reply = service
+            .handle_node_call(&serde_json::to_vec(&signed).unwrap(), "127.0.0.1".parse().unwrap())
+            .await;
+        assert_eq!(reply.status, 410, "push path removed");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

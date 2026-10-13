@@ -16,6 +16,8 @@ mod runtime;
 mod reconnect;
 #[cfg(unix)]
 mod hq_wg;
+mod drain;
+pub use drain::{DrainClient, DrainError, DrainSession};
 
 #[cfg(any(windows, unix))]
 pub use runtime::{

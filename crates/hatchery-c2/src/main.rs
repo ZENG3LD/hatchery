@@ -27,6 +27,8 @@ async fn main() {
         .unwrap_or_else(|error| fail(&error.to_string()));
     let mut node_listen: Option<std::net::SocketAddr> = None;
     let mut control_tunnel: Option<std::net::SocketAddr> = None;
+    let mut restreamer_node_listen: Option<std::net::SocketAddr> = None;
+    let mut drain_listen: Option<std::net::SocketAddr> = None;
     let mut enroll = EnrollArgs::default();
     let mut node_args = Vec::new();
     let mut seen = BTreeSet::new();
@@ -59,8 +61,19 @@ async fn main() {
             // a code that arrives in the clear from elsewhere is burned and refused.
             "--enroll-tls-only" => enroll.tls_only = true,
             // Status -> capability policy (JSON). Also HATCHERY_POLICY_FILE.
-            "--server-upstream" => enroll.server_upstream = Some(required_value("--server-upstream", args.next()).parse()
-                .unwrap_or_else(|error| fail(&format!("--server-upstream is invalid: {error}")))),
+            "--server-upstream" => {
+                // A2: removed. Accept and ignore so old launch lines do not fail closed.
+                let _ = required_value("--server-upstream", args.next());
+                eprintln!("hatchery-c2: --server-upstream is removed (A2); C2 never pushes to core — use --drain-listen");
+            }
+            "--restreamer-node-listen" => {
+                restreamer_node_listen = Some(required_value("--restreamer-node-listen", args.next()).parse()
+                    .unwrap_or_else(|error| fail(&format!("--restreamer-node-listen is invalid: {error}"))));
+            }
+            "--drain-listen" => {
+                drain_listen = Some(required_value("--drain-listen", args.next()).parse()
+                    .unwrap_or_else(|error| fail(&format!("--drain-listen is invalid: {error}"))));
+            }
             "--build-host" => enroll.build_host = Some(required_value("--build-host", args.next()).parse()
                 .unwrap_or_else(|error| fail(&format!("--build-host is invalid: {error}")))),
             "--policy" => enroll.policy = Some(required_value("--policy", args.next()).into()),
@@ -87,7 +100,7 @@ async fn main() {
             }
             "--help" | "-h" => {
                 print_help();
-                println!("enrollment: --enroll-listen ADDR --enroll-registry FILE --enroll-pool C2_TUNNEL_IP/PREFIX [--enroll-wg-interface IF] [--enroll-wg-endpoint HOST:PORT] [--enroll-wg-public-key KEY] [--enroll-rate PER_MINUTE] [--enroll-open] [--enroll-tls-only] [--policy FILE] [--build-host ADDR (bearer in HATCHERY_BUILD_TOKEN)] [--server-upstream ADDR (bearer in HATCHERY_SERVER_CONTROL_TOKEN)]  (default: one-time operator code required; --enroll-open disables the code)");
+                println!("enrollment: --enroll-listen ADDR --enroll-registry FILE --enroll-pool C2_TUNNEL_IP/PREFIX [--enroll-wg-interface IF] [--enroll-wg-endpoint HOST:PORT] [--enroll-wg-public-key KEY] [--enroll-rate PER_MINUTE] [--enroll-open] [--enroll-tls-only] [--policy FILE] [--build-host ADDR (bearer in HATCHERY_BUILD_TOKEN)] [--drain-listen ADDR (core drain; bearer in HATCHERY_CORE_DRAIN_TOKEN)] [--restreamer-node-listen ADDR]  (default: one-time operator code required; --enroll-open disables the code; --server-upstream removed in A2)");
                 println!("API token: {C2_TOKEN_ENV}; node tokens: GATE4AGENT_NODE_TOKEN_<NORMALIZED_NODE_ID>");
                 return;
             }
@@ -120,6 +133,16 @@ async fn main() {
         .map(|config| match enroll.build(node_listen) {
             Some(enrollment) => config.with_enrollment(enrollment),
             None => config,
+        })
+        .and_then(|config| match (restreamer_node_listen, drain_listen) {
+            (Some(node), Some(drain)) => {
+                let token = std::env::var("HATCHERY_CORE_DRAIN_TOKEN")
+                    .unwrap_or_else(|_| fail("HATCHERY_CORE_DRAIN_TOKEN is required with --drain-listen"));
+                std::env::remove_var("HATCHERY_CORE_DRAIN_TOKEN");
+                config.with_restreamer(node, drain, token)
+            }
+            (None, None) => Ok(config),
+            _ => fail("--restreamer-node-listen and --drain-listen must be set together"),
         })
         .and_then(|config| config.validate_call_home().map(|()| config))
         .unwrap_or_else(|error| fail(&error.to_string()));
@@ -259,6 +282,8 @@ impl EnrollArgs {
             c2_wg_endpoint: self.wg_endpoint.clone(),
             c2_wg_public_key: self.wg_public_key.clone(),
             c2_call_home: node_listen.map(|addr| addr.to_string()),
+            upstream_c2_public_key: None,
+            upstream_recipient_public_key: None,
         };
         if let Some(interface) = &self.wg_interface {
             if public.c2_wg_public_key.is_none() {
@@ -277,11 +302,8 @@ impl EnrollArgs {
             let token = std::env::var("HATCHERY_BUILD_TOKEN").unwrap_or_else(|_| fail("HATCHERY_BUILD_TOKEN is required with --build-host"));
             config.build_host = Some((addr, token));
         }
-        if let Some(addr) = self.server_upstream {
-            // hatchery-server control bearer; only C2 holds it (never a node).
-            let token = std::env::var("HATCHERY_SERVER_CONTROL_TOKEN").unwrap_or_else(|_| fail("HATCHERY_SERVER_CONTROL_TOKEN is required with --server-upstream"));
-            config.server_upstream = Some((addr, token));
-        }
+        // A2: server_upstream push removed; field left unset.
+        let _ = self.server_upstream;
         Some(config)
     }
 }

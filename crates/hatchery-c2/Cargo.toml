@@ -3,7 +3,7 @@ name = "hatchery-c2"
 version = "0.2.3"
 edition = "2021"
 repository = "https://github.com/ZENG3LD/hatchery"
-description = "Relay daemon that aggregates node state/events and routes commands down to attached nodes"
+description = "Edge restreamer and relay: opaque multiplex drain for core, plus legacy node control during A2 migration"
 license = "MIT"
 
 [lib]
@@ -26,6 +26,8 @@ hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.3" }
 hatchery-build = { path = "../hatchery-build", version = "0.2.3" }
 sha2 = "0.10"
 getrandom = "0.2"
+x25519-dalek = { version = "2", default-features = false, features = ["static_secrets"] }
+chacha20poly1305 = "0.10"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
