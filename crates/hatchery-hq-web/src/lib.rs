@@ -653,7 +653,22 @@ async fn api_m4a(s: &Shared, op: &str, body: &[u8]) -> Response {
     let mut stdin = None;
     match op {
         "rooms" => args.push("rooms".into()),
-        "read" | "send" | "dm" | "react" if !m4a_room_ok(&room) => return err(StatusCode::BAD_REQUEST, "bad room"),
+        "profile" => {
+            let nick = req.get("nick").and_then(Value::as_str).unwrap_or_default();
+            if nick.is_empty() || nick.len() > 64 || !nick.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')) || nick.starts_with('-') {
+                return err(StatusCode::BAD_REQUEST, "bad nick");
+            }
+            let url = format!("https://{}/product/v1/profile/{nick}", m.nick_server());
+            let out = tokio::process::Command::new("/usr/bin/curl").args(["-sf", "--max-time", "10", &url]).env_clear().kill_on_drop(true).output().await;
+            return match out {
+                Ok(o) if o.status.success() => match serde_json::from_slice::<Value>(&o.stdout) {
+                    Ok(v) => json_reply(200, json!({ "ok": true, "result": { "nick": v.get("nick"), "kind": v.get("kind"), "role": v.get("role") } }).to_string().into_bytes()),
+                    Err(_) => err(StatusCode::BAD_GATEWAY, "bad profile"),
+                },
+                _ => err(StatusCode::NOT_FOUND, "no profile"),
+            };
+        }
+        "read" | "send" | "dm" | "react" | "redact" if !m4a_room_ok(&room) => return err(StatusCode::BAD_REQUEST, "bad room"),
         "read" => {
             let n = req.get("limit").and_then(Value::as_u64).unwrap_or(50).clamp(1, 200);
             args.extend(["read".into(), room, "-n".into(), n.to_string()]);
@@ -670,6 +685,13 @@ async fn api_m4a(s: &Shared, op: &str, body: &[u8]) -> Response {
                 return err(StatusCode::BAD_REQUEST, "bad reaction");
             }
             args.extend(["react".into(), room, ev.to_owned(), key.to_owned()]);
+        }
+        "redact" => {
+            let ev = req.get("event").and_then(Value::as_str).unwrap_or_default();
+            if !(ev.starts_with('$') && m4a_room_ok(ev)) {
+                return err(StatusCode::BAD_REQUEST, "bad event");
+            }
+            args.extend(["redact".into(), room, ev.to_owned()]);
         }
         "send" => {
             let text = req.get("text").and_then(Value::as_str).unwrap_or_default();

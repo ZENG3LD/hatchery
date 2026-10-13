@@ -97,7 +97,7 @@ async function loadThread1(id) {
     if (String(id).startsWith('m4a:')) {
       const d = await post('/api/s/m4a/read', { room: id.slice(4), limit: 100 }); const rows = Array.isArray(d.result) ? d.result : d.result.messages || d.result.rows || [];
       const me = S.m4a.nick; const own = (f) => f === me || String(f).startsWith('@' + me + ':');
-      S.mail[id] = rows.filter((r) => (r.body || r.kind === 'undecryptable') && !String(r.state || '').startsWith('failed') && !(r.kind && !['text', 'notice', 'emote', 'undecryptable'].includes(r.kind) && own(r.from))).map((r) => ({ from: own(r.from) ? OPERATOR : String(r.from || '?').replace(/^@([^:]+):.*$/, '$1'), body: r.kind === 'undecryptable' ? '[cannot decrypt yet]' : (r.reply_to ? String(r.body).replace(/^(>.*\n)+\n?/, '') : r.body), reply_to: r.reply_to || null, reactions: r.reactions || [], created_at_ms: r.ts, message_id: r.event_id, failed: String(r.state || '').startsWith('failed'), enc: r.kind === 'undecryptable', sys: !!(r.kind && !['text', 'notice', 'emote', 'undecryptable'].includes(r.kind)) })).filter((m, i, a) => !m.message_id || a.findIndex((x) => x.message_id === m.message_id) === i).sort((a, b) => a.created_at_ms - b.created_at_ms);
+      S.mail[id] = rows.filter((r) => (r.body || r.kind === 'undecryptable') && !String(r.state || '').startsWith('failed') && (r.kind === 'member' ? !own(r.subject) : !(r.kind && !['text', 'notice', 'emote', 'undecryptable'].includes(r.kind) && own(r.from)))).map((r) => ({ from: own(r.from) ? OPERATOR : String(r.from || '?').replace(/^@([^:]+):.*$/, '$1'), body: r.kind === 'undecryptable' ? '[cannot decrypt yet]' : (r.reply_to ? String(r.body).replace(/^(>.*\n)+\n?/, '') : r.body), reply_to: r.reply_to || null, reactions: r.reactions || [], created_at_ms: r.ts, message_id: r.event_id, failed: String(r.state || '').startsWith('failed'), enc: r.kind === 'undecryptable', sys: !!(r.kind && !['text', 'notice', 'emote', 'undecryptable'].includes(r.kind)) })).filter((m, i, a) => !m.message_id || a.findIndex((x) => x.message_id === m.message_id) === i).sort((a, b) => a.created_at_ms - b.created_at_ms);
       saveCache(); if (S.chat === id) renderChat(); renderSidebar(); return;
     }
     if (isGroup(id)) { const d = await post('/api/s/mail/inbox'); msgs = d.messages.filter((m) => m.to === id); }
@@ -124,6 +124,7 @@ function profile(nick) {
     <div class="tags"><span>${esc(kind)}</span>${role ? `<span>${esc(role)}</span>` : ''}${node ? `<span>node ${esc(node.node_id)}</span>` : ''}</div>
     <div class="acts">${me ? '' : '<button class="pbtn" id="pcmsg">Message</button>'}<button class="pbtn" id="pccopy">Copy nick</button></div></div>`;
   d.onclick = (e) => { if (e.target === d) d.remove(); }; document.body.appendChild(d);
+  if (!me) post('/api/s/m4a/profile', { nick }).then((r) => { const p = r.result || {}; (S.profiles = S.profiles || {})[nick] = p; const t = d.querySelector('.tags'); if (t && p.kind) t.innerHTML = `<span>${esc(p.kind)}</span>${p.role ? `<span>${esc(p.role)}</span>` : ''}${node ? `<span>node ${esc(node.node_id)}</span>` : ''}`; }).catch(() => {});
   $('#pccopy').onclick = () => { navigator.clipboard?.writeText('@' + nick); toast('Copied @' + nick); };
   const pm = $('#pcmsg'); if (pm) pm.onclick = async () => {
     d.remove(); const dm = (S.chats || []).find((c) => c.kind === 'dm' && c.label === nick);
@@ -153,7 +154,7 @@ function renderChat() {
     if (meta && meta.message_id) d.dataset.id = meta.message_id;
     let rq = '', rx = '';
     if (meta && meta.reply_to) { const o = mail.find((x) => x.message_id === meta.reply_to); rq = `<button class="rq" data-goto="${esc(meta.reply_to)}"><b style="color:${colorOf(o ? (o.from === OPERATOR ? 'me' : o.from) : '?')}">${esc(o ? (o.from === OPERATOR ? 'You' : o.from) : 'message')}</b><span>${esc(o ? String(o.body).slice(0, 90) : '…')}</span></button>`; }
-    if (meta && meta.reactions && meta.reactions.length) rx = `<div class="rx">${meta.reactions.map((r) => `<button class="rpill${(r.by || []).includes(S.m4a && S.m4a.nick) ? ' mine' : ''}" data-key="${esc(r.key)}" title="${esc((r.by || []).join(', '))}">${esc(r.key)} ${r.count}</button>`).join('')}</div>`;
+    if (meta && meta.reactions && meta.reactions.length) rx = `<div class="rx">${meta.reactions.map((r) => `<button class="rpill${r.mine || (r.by || []).includes(S.m4a && S.m4a.nick) ? ' mine' : ''}" data-key="${esc(r.key)}"${r.mine ? ` data-mine="${esc(r.mine)}"` : ''} title="${esc((r.by || []).join(', '))}">${esc(r.key)} ${r.count}</button>`).join('')}</div>`;
     const acts = meta && meta.message_id && String(S.chat).startsWith('m4a:') ? `<div class="macts"><button data-act="react" title="React">${ico('smile')}</button><button data-act="reply" title="Reply">${ico('reply')}</button><button data-act="more" title="More">${ico('dots')}</button></div>` : '';
     const t = `<span class="ts" title="${esc(new Date(ts).toLocaleString())}">${fmtTime(ts).slice(0, 5)}</span>`;
     const label = group && !mine && from && from !== prevFrom ? `<div class="hdr"><button class="who nick" data-nick="${esc(from)}" style="color:${colorOf(from)}">${esc(from)}</button>${t}</div>` : '';
@@ -528,6 +529,9 @@ const msgOf = (id) => (S.mail[S.chat] || []).find((m) => m.message_id === id);
 async function react(id, key) {
   try { await post('/api/s/m4a/react', { room: S.chat.slice(4), event: id, key }); loadThread(); } catch (e) { toast('Reaction: ' + e.message); }
 }
+async function unreact(ev) {
+  try { await post('/api/s/m4a/redact', { room: S.chat.slice(4), event: ev }); loadThread(); } catch (e) { toast('Reaction: ' + e.message); }
+}
 function setReply(m) {
   S.replyTo = m ? { chat: S.chat, id: m.message_id, from: m.from === OPERATOR ? 'You' : m.from, body: m.body } : null;
   let bar = $('#replybar'); if (!S.replyTo) { bar?.remove(); return; }
@@ -538,7 +542,7 @@ function setReply(m) {
 $('#chat').addEventListener('click', (e) => {
   const a = e.target.closest('.macts button'); const pill = e.target.closest('.rpill'); const rq = e.target.closest('.rq');
   if (rq) { const t = $('#chat').querySelector(`.msg[data-id="${CSS.escape(rq.dataset.goto)}"]`); if (t) { t.scrollIntoView({ block: 'center', behavior: 'smooth' }); t.classList.add('flash'); setTimeout(() => t.classList.remove('flash'), 1400); } return; }
-  if (pill) { const id = pill.closest('.msg').dataset.id; react(id, pill.dataset.key); return; }
+  if (pill) { const id = pill.closest('.msg').dataset.id; const mine = pill.dataset.mine; if (mine) unreact(mine); else react(id, pill.dataset.key); return; }
   if (!a) return; const id = a.closest('.msg').dataset.id; const m = msgOf(id); if (!m) return;
   if (a.dataset.act === 'reply') setReply(m);
   else if (a.dataset.act === 'react') { const p = popAt(a, `<div class="emos">${EMO.map((k) => `<button data-k="${k}">${k}</button>`).join('')}</div>`); if (!p) return; p.onclick = (ev) => { const b = ev.target.closest('[data-k]'); if (b) { p.remove(); react(id, b.dataset.k); } }; }
