@@ -97,7 +97,7 @@ async function loadThread1(id) {
     if (String(id).startsWith('m4a:')) {
       const d = await post('/api/s/m4a/read', { room: id.slice(4), limit: 100 }); const rows = Array.isArray(d.result) ? d.result : d.result.messages || d.result.rows || [];
       const me = S.m4a.nick; const own = (f) => f === me || String(f).startsWith('@' + me + ':');
-      S.mail[id] = rows.filter((r) => (r.body || r.kind === 'undecryptable') && !String(r.state || '').startsWith('failed') && !(r.kind && !['text', 'notice', 'emote', 'undecryptable'].includes(r.kind) && own(r.from))).map((r) => ({ from: own(r.from) ? OPERATOR : String(r.from || '?').replace(/^@([^:]+):.*$/, '$1'), body: r.kind === 'undecryptable' ? '[cannot decrypt yet]' : r.body, created_at_ms: r.ts, message_id: r.event_id, failed: String(r.state || '').startsWith('failed'), enc: r.kind === 'undecryptable', sys: !!(r.kind && !['text', 'notice', 'emote', 'undecryptable'].includes(r.kind)) })).filter((m, i, a) => !m.message_id || a.findIndex((x) => x.message_id === m.message_id) === i).sort((a, b) => a.created_at_ms - b.created_at_ms);
+      S.mail[id] = rows.filter((r) => (r.body || r.kind === 'undecryptable') && !String(r.state || '').startsWith('failed') && !(r.kind && !['text', 'notice', 'emote', 'undecryptable'].includes(r.kind) && own(r.from))).map((r) => ({ from: own(r.from) ? OPERATOR : String(r.from || '?').replace(/^@([^:]+):.*$/, '$1'), body: r.kind === 'undecryptable' ? '[cannot decrypt yet]' : (r.reply_to ? String(r.body).replace(/^(>.*\n)+\n?/, '') : r.body), reply_to: r.reply_to || null, reactions: r.reactions || [], created_at_ms: r.ts, message_id: r.event_id, failed: String(r.state || '').startsWith('failed'), enc: r.kind === 'undecryptable', sys: !!(r.kind && !['text', 'notice', 'emote', 'undecryptable'].includes(r.kind)) })).filter((m, i, a) => !m.message_id || a.findIndex((x) => x.message_id === m.message_id) === i).sort((a, b) => a.created_at_ms - b.created_at_ms);
       saveCache(); if (S.chat === id) renderChat(); renderSidebar(); return;
     }
     if (isGroup(id)) { const d = await post('/api/s/mail/inbox'); msgs = d.messages.filter((m) => m.to === id); }
@@ -148,12 +148,17 @@ function renderChat() {
   box.innerHTML = '';
   if (!items.length) box.innerHTML = `<div class="hello">${avatar(S.chat, 'big')}<b>${esc(chatName(S.chat))}</b></div>`;
   let prevFrom = null;
-  const bubble = (mine, from, html, ts, extra = '') => {
+  const bubble = (mine, from, html, ts, extra = '', meta = null) => {
     const d = document.createElement('div'); d.className = 'msg ' + (mine ? 'me' : 'them') + extra;
+    if (meta && meta.message_id) d.dataset.id = meta.message_id;
+    let rq = '', rx = '';
+    if (meta && meta.reply_to) { const o = mail.find((x) => x.message_id === meta.reply_to); rq = `<button class="rq" data-goto="${esc(meta.reply_to)}"><b style="color:${colorOf(o ? (o.from === OPERATOR ? 'me' : o.from) : '?')}">${esc(o ? (o.from === OPERATOR ? 'You' : o.from) : 'message')}</b><span>${esc(o ? String(o.body).slice(0, 90) : '…')}</span></button>`; }
+    if (meta && meta.reactions && meta.reactions.length) rx = `<div class="rx">${meta.reactions.map((r) => `<button class="rpill${(r.by || []).includes(S.m4a && S.m4a.nick) ? ' mine' : ''}" data-key="${esc(r.key)}" title="${esc((r.by || []).join(', '))}">${esc(r.key)} ${r.count}</button>`).join('')}</div>`;
+    const acts = meta && meta.message_id && String(S.chat).startsWith('m4a:') ? `<div class="macts"><button data-act="react" title="React">${ico('smile')}</button><button data-act="reply" title="Reply">${ico('reply')}</button><button data-act="more" title="More">${ico('dots')}</button></div>` : '';
     const t = `<span class="ts" title="${esc(new Date(ts).toLocaleString())}">${fmtTime(ts).slice(0, 5)}</span>`;
     const label = group && !mine && from && from !== prevFrom ? `<div class="hdr"><button class="who nick" data-nick="${esc(from)}" style="color:${colorOf(from)}">${esc(from)}</button>${t}</div>` : '';
     if (label) d.classList.add('first');
-    d.innerHTML = label ? `${label}${linkify(html)}` : `${t.replace('class="ts"', 'class="ts in"')}${linkify(html)}`;
+    d.innerHTML = (label ? `${label}${rq}${linkify(html)}` : `${t.replace('class="ts"', 'class="ts in"')}${rq}${linkify(html)}`) + rx + acts;
     prevFrom = mine ? OPERATOR : from; box.appendChild(d);
   };
   for (let k = 0; k < items.length; k++) {
@@ -165,7 +170,7 @@ function renderChat() {
     if (it.kind === 'mail' && it.m.sys) { const d = document.createElement('div'); d.className = 'sys'; d.textContent = it.m.body; box.appendChild(d); prevFrom = null; continue; }
     if (it.kind === 'mail') {
       const m = it.m; const mine = m.from === OPERATOR;
-      bubble(mine, m.from, `${m.subject && m.subject !== '-' ? `<b>${esc(m.subject)}</b><br>` : ''}${esc(m.body)}`, m.created_at_ms, m.failed ? ' failed' : '');
+      bubble(mine, m.from, `${m.subject && m.subject !== '-' ? `<b>${esc(m.subject)}</b><br>` : ''}${esc(m.body)}`, m.created_at_ms, m.failed ? ' failed' : '', m);
     } else if (it.kind === 'ev') {
       const e = it.e;
       if (e.kind === 'answer') bubble(false, S.chat, esc(e.text), e.at);
@@ -189,7 +194,7 @@ async function send() {
   try {
     if (!(S.target === 'agent' && S.session)) {
       const to = S.chat; const l = { ts: Date.now(), text, pending: true }; (S.local[S.chat] ||= []).push(l); renderChat(); $('#chat').scrollTop = 1e9;
-      try { if (String(to).startsWith('m4a:')) await post('/api/s/m4a/send', { room: to.slice(4), text }); else await post('/api/s/mail/send', { to, subject: '-', body: text }); l.pending = false; l.sent = true; } catch (e) { l.pending = false; l.failed = true; renderChat(); toast('Not sent: ' + e.message); return; }
+      try { if (String(to).startsWith('m4a:')) { const rt = S.replyTo && S.replyTo.chat === to ? S.replyTo.id : undefined; setReply(null); await post('/api/s/m4a/send', { room: to.slice(4), text, reply_to: rt }); } else await post('/api/s/mail/send', { to, subject: '-', body: text }); l.pending = false; l.sent = true; } catch (e) { l.pending = false; l.failed = true; renderChat(); toast('Not sent: ' + e.message); return; }
       renderChat(); await loadThread(); return;
     }
     if (S.target === 'agent' && S.session) {
@@ -248,6 +253,12 @@ const LUC = {
   userplus: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>',
   logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="m16 17 5-5-5-5M21 12H9"/>',
   chev: '<path d="m9 18 6-6-6-6"/>',
+  smile: '<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01M15 9h.01"/>',
+  reply: '<path d="m9 17-5-5 5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',
+  dots: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  copy: '<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+  hash: '<path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
 };
 const ico = (k, sz = 16) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${LUC[k]}</svg>`;
 $('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); m.hidden = !m.hidden; if (m.hidden) return; m.className = 'pop amenu2'; m.innerHTML = '';
@@ -504,3 +515,33 @@ api('/api/config').then(async (c) => { S.chats = c.chats && c.chats.length ? c.c
   if (c.m4a) { S.m4a = c.m4a; try { const d = await post('/api/s/m4a/rooms', {}); const rows = Array.isArray(d.result) ? d.result : d.result.rooms || [];
     const rooms = rows.map((r) => { const rid = r.room_id || r.id || r.room; const label = r.title || r.name || r.alias || rid; return { label, target: 'm4a:' + rid, kind: (c.m4a.groups || []).includes(label) || r.kind === 'group' || r.kind === 'channel' ? 'group' : 'dm' }; }).filter((r) => r.target !== 'm4a:undefined');
     S.chats = [...rooms, ...S.chats.filter((x) => !String(x.target).startsWith('room:'))]; } catch (e) { toast('m4a: ' + e.message); } } }).catch(() => { S.chats = [{ label: 'general', target: 'room:general' }]; }).then(loadNodes).then(() => { openChat(S.chats[0].target); setTimeout(prefetch, 1500); setInterval(prefetch, 60000); }); setInterval(() => { if (S.chat && !S.panel) loadThread(); }, 10000); setInterval(loadNodes, 4000);
+
+// ---- message actions: react / reply / more
+const EMO = ['👍', '👎', '❤️', '😂', '🎉', '😮', '😢', '🙏', '🔥', '👀', '✅', '🤔'];
+function popAt(btn, html) {
+  document.querySelector('#mpop')?.remove(); const p = document.createElement('div'); p.id = 'mpop'; p.className = 'pop mpop'; p.innerHTML = html; document.body.appendChild(p);
+  const r = btn.getBoundingClientRect(); const w = p.offsetWidth, h = p.offsetHeight;
+  p.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px'; p.style.top = (r.top - h - 6 > 8 ? r.top - h - 6 : r.bottom + 6) + 'px'; return p;
+}
+document.addEventListener('mousedown', (e) => { const p = document.querySelector('#mpop'); if (p && !p.contains(e.target) && !e.target.closest('.macts')) p.remove(); });
+const msgOf = (id) => (S.mail[S.chat] || []).find((m) => m.message_id === id);
+async function react(id, key) {
+  try { await post('/api/s/m4a/react', { room: S.chat.slice(4), event: id, key }); loadThread(); } catch (e) { toast('Reaction: ' + e.message); }
+}
+function setReply(m) {
+  S.replyTo = m ? { chat: S.chat, id: m.message_id, from: m.from === OPERATOR ? 'You' : m.from, body: m.body } : null;
+  let bar = $('#replybar'); if (!S.replyTo) { bar?.remove(); return; }
+  if (!bar) { bar = document.createElement('div'); bar.id = 'replybar'; $('#composer').insertBefore(bar, $('#box')); }
+  bar.innerHTML = `<span class="ri">${ico('reply')}</span><div class="rt"><b style="color:${colorOf(S.replyTo.from === 'You' ? 'me' : S.replyTo.from)}">${esc(S.replyTo.from)}</b><span>${esc(String(S.replyTo.body).slice(0, 140))}</span></div><button id="replyx" title="Cancel">${ico('x')}</button>`;
+  $('#replyx').onclick = () => setReply(null); $('#input').focus();
+}
+$('#chat').addEventListener('click', (e) => {
+  const a = e.target.closest('.macts button'); const pill = e.target.closest('.rpill'); const rq = e.target.closest('.rq');
+  if (rq) { const t = $('#chat').querySelector(`.msg[data-id="${CSS.escape(rq.dataset.goto)}"]`); if (t) { t.scrollIntoView({ block: 'center', behavior: 'smooth' }); t.classList.add('flash'); setTimeout(() => t.classList.remove('flash'), 1400); } return; }
+  if (pill) { const id = pill.closest('.msg').dataset.id; react(id, pill.dataset.key); return; }
+  if (!a) return; const id = a.closest('.msg').dataset.id; const m = msgOf(id); if (!m) return;
+  if (a.dataset.act === 'reply') setReply(m);
+  else if (a.dataset.act === 'react') { const p = popAt(a, `<div class="emos">${EMO.map((k) => `<button data-k="${k}">${k}</button>`).join('')}</div>`); p.onclick = (ev) => { const b = ev.target.closest('[data-k]'); if (b) { p.remove(); react(id, b.dataset.k); } }; }
+  else { const p = popAt(a, `<button data-c="text"><span class="ic">${ico('copy')}</span>Copy</button><button data-c="id"><span class="ic">${ico('hash')}</span>Copy message ID</button>`);
+    p.onclick = (ev) => { const b = ev.target.closest('[data-c]'); if (!b) return; p.remove(); navigator.clipboard?.writeText(b.dataset.c === 'id' ? id : m.body); toast(b.dataset.c === 'id' ? 'Message ID copied' : 'Copied'); }; }
+});

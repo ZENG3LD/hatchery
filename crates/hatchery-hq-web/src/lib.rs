@@ -641,7 +641,7 @@ impl M4a {
 
 /// A room argument for the CLI: a room id, alias or nick. Never starts with `-`.
 pub fn m4a_room_ok(room: &str) -> bool {
-    !room.is_empty() && room.len() <= 255 && !room.starts_with('-') && room.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'!' | b'#' | b'@' | b':' | b'.' | b'_' | b'-' | b'='))
+    !room.is_empty() && room.len() <= 255 && !room.starts_with('-') && room.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'!' | b'$' | b'#' | b'@' | b':' | b'.' | b'_' | b'-' | b'='))
 }
 
 /// `POST /api/s/m4a/{rooms|read|send}`: rooms list, a room timeline (own messages included), send.
@@ -653,7 +653,7 @@ async fn api_m4a(s: &Shared, op: &str, body: &[u8]) -> Response {
     let mut stdin = None;
     match op {
         "rooms" => args.push("rooms".into()),
-        "read" | "send" | "dm" if !m4a_room_ok(&room) => return err(StatusCode::BAD_REQUEST, "bad room"),
+        "read" | "send" | "dm" | "react" if !m4a_room_ok(&room) => return err(StatusCode::BAD_REQUEST, "bad room"),
         "read" => {
             let n = req.get("limit").and_then(Value::as_u64).unwrap_or(50).clamp(1, 200);
             args.extend(["read".into(), room, "-n".into(), n.to_string()]);
@@ -663,12 +663,24 @@ async fn api_m4a(s: &Shared, op: &str, body: &[u8]) -> Response {
             let server = m.nick_server();
             args.extend(["create".into(), room.clone(), "--invite".into(), format!("@{room}:{server}")]);
         }
+        "react" => {
+            let ev = req.get("event").and_then(Value::as_str).unwrap_or_default();
+            let key = req.get("key").and_then(Value::as_str).unwrap_or_default();
+            if !(ev.starts_with('$') && m4a_room_ok(ev)) || key.is_empty() || key.len() > 64 || key.starts_with('-') || key.chars().any(char::is_control) {
+                return err(StatusCode::BAD_REQUEST, "bad reaction");
+            }
+            args.extend(["react".into(), room, ev.to_owned(), key.to_owned()]);
+        }
         "send" => {
             let text = req.get("text").and_then(Value::as_str).unwrap_or_default();
             if text.trim().is_empty() || text.len() > 16_000 {
                 return err(StatusCode::BAD_REQUEST, "bad text");
             }
-            args.extend(["send".into(), room, "-".into()]);
+            match req.get("reply_to").and_then(Value::as_str) {
+                Some(ev) if m4a_room_ok(ev) && ev.starts_with('$') => args.extend(["reply".into(), room, ev.to_owned(), "-".into()]),
+                Some(_) => return err(StatusCode::BAD_REQUEST, "bad reply_to"),
+                None => args.extend(["send".into(), room, "-".into()]),
+            }
             stdin = Some(text.to_owned());
         }
         _ => return err(StatusCode::NOT_FOUND, "not found"),
