@@ -40,6 +40,7 @@ pub(crate) use gate4agent_node_core::platform;
 pub mod enroll_client;
 pub mod uplink_journal;
 pub mod restream_session;
+pub mod restream_g4a_bridge;
 pub mod m4a_accounts;
 pub mod door;
 pub mod wake_pipeline;

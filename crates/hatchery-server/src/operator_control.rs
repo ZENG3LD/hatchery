@@ -11,18 +11,37 @@ use hatchery_c2_protocol::{
     c2_auth_transcript, c2_bound_auth_transcript, ArchitectureId, BUILD_STAMP, C2AuthDirection,
     C2ClientAuthentication, C2ClientFrame, C2ClientHello, C2ControlCompatibilitySupport, C2Hello,
     C2RelayFailure, C2RelayFailureCode, C2ReplyEnvelope, C2RequestEnvelope, C2ServerChallenge,
-    C2ServerFrame, C2Topology, ClientCompatibilityOffer, HostDescriptor, NegotiatedC2ControlCompatibility,
-    NodeFreshness, NodeId, NodeTransportState, ObservedNode, OperatingSystemId, PathEncoding,
-    PathSemantics, PathStyle, RoutedNodeRequest, RoutedNodeResponse, StatusResponse, C2_API_VERSION,
-    C2_COMPATIBILITY_METADATA_CAPABILITY, MAX_C2_AUTH_FRAME_BYTES, MAX_C2_CLIENT_FRAME_BYTES,
-    MAX_C2_HELLO_FRAME_BYTES, MAX_C2_SERVER_FRAME_BYTES,
+    C2ServerFrame, C2Topology, CapabilityId, ClientCompatibilityOffer, HostDescriptor,
+    NegotiatedC2ControlCompatibility, NodeFreshness, NodeId, NodeTransportState, ObservedNode,
+    OperatingSystemId, PathEncoding, PathSemantics, PathStyle, RoutedNodeRequest, RoutedNodeResponse,
+    StatusResponse, C2_ACP_CONTROL_CAPABILITY, C2_AGENT_PROGRESS_SNAPSHOT_CAPABILITY,
+    C2_AGENT_STREAM_EVENTS_CAPABILITY, C2_API_VERSION, C2_CHILD_ENVIRONMENT_PROFILE_CAPABILITY,
+    C2_COMPATIBILITY_METADATA_CAPABILITY, C2_CONTROL_DETAIL_CAPABILITY,
+    C2_DELIVERY_BUNDLE_V2_STAGE_COMMIT_CAPABILITY, C2_GIT_READ_CAPABILITY,
+    C2_HARNESS_MCP_READ_PROXY_CAPABILITY, C2_HISTORY_CONTEXT_PACK_CAPABILITY,
+    C2_HOST_DIRECTORY_BROWSE_CAPABILITY, C2_MANAGED_WORKTREE_LIFECYCLE_CAPABILITY,
+    C2_MANAGED_WORKTREE_SPAWN_V2_CAPABILITY, C2_NATIVE_SESSION_CATALOG_CAPABILITY,
+    C2_NATIVE_SESSION_CATALOG_PAGING_CAPABILITY, C2_NATIVE_SESSION_INDEX_CAPABILITY,
+    C2_NATIVE_SESSION_PREVIEW_CAPABILITY, C2_OPAQUE_UNIX_PATH_CAPABILITY,
+    C2_PROVIDER_CONTRACT_MANIFEST_CAPABILITY, C2_PROVIDER_ID_OPEN_CAPABILITY,
+    C2_PROVIDER_RUNTIME_STATUS_CAPABILITY, C2_PROVIDER_SESSION_REFERENCE_INDEX_CAPABILITY,
+    C2_REPOSITORY_PATH_CAPABILITY, C2_SESSION_BUNDLE_MATERIALIZATION_CAPABILITY,
+    C2_SESSION_RECORD_CONTEXT_EXPORT_CAPABILITY, C2_SESSION_TASK_CORRELATION_CAPABILITY,
+    C2_SPAWN_PROFILE_REVISION_CAPABILITY, C2_SPAWN_SPEC_DEFAULTS_OVERRIDES_CAPABILITY,
+    C2_STANDALONE_WORKSPACE_LIFECYCLE_CAPABILITY, C2_TERMINAL_FRAME_EVENTS_CAPABILITY,
+    C2_WORKSPACE_ENTRY_CREATE_CAPABILITY, C2_WORKSPACE_FILE_READ_CAPABILITY,
+    C2_WORKSPACE_FILE_WRITE_CAPABILITY, C2_WORKTREE_SELECTION_CAPABILITY,
+    MAX_C2_AUTH_FRAME_BYTES, MAX_C2_CLIENT_FRAME_BYTES, MAX_C2_HELLO_FRAME_BYTES,
+    MAX_C2_SERVER_FRAME_BYTES,
 };
 use std::collections::BTreeMap;
 use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::{mpsc, watch, Semaphore};
+use tokio::sync::{watch, Semaphore};
+#[cfg(test)]
+use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::timeout;
 
@@ -308,8 +327,40 @@ fn negotiate(hello: &C2ClientHello) -> Result<NegotiatedC2ControlCompatibility, 
     let support = C2ControlCompatibilitySupport {
         build_stamp: BUILD_STAMP.to_owned(),
         capabilities: vec![
-            hatchery_c2_protocol::CapabilityId::new(C2_COMPATIBILITY_METADATA_CAPABILITY)
-                .map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_COMPATIBILITY_METADATA_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_OPAQUE_UNIX_PATH_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_REPOSITORY_PATH_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_WORKSPACE_FILE_READ_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_WORKSPACE_FILE_WRITE_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_WORKSPACE_ENTRY_CREATE_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_GIT_READ_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_PROVIDER_CONTRACT_MANIFEST_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_PROVIDER_RUNTIME_STATUS_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_PROVIDER_ID_OPEN_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_SPAWN_SPEC_DEFAULTS_OVERRIDES_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_SPAWN_PROFILE_REVISION_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_TERMINAL_FRAME_EVENTS_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_AGENT_STREAM_EVENTS_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_WORKTREE_SELECTION_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_MANAGED_WORKTREE_LIFECYCLE_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_MANAGED_WORKTREE_SPAWN_V2_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_CHILD_ENVIRONMENT_PROFILE_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_SESSION_BUNDLE_MATERIALIZATION_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_HISTORY_CONTEXT_PACK_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_SESSION_RECORD_CONTEXT_EXPORT_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_NATIVE_SESSION_CATALOG_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_NATIVE_SESSION_CATALOG_PAGING_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_NATIVE_SESSION_INDEX_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_NATIVE_SESSION_PREVIEW_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_HOST_DIRECTORY_BROWSE_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_STANDALONE_WORKSPACE_LIFECYCLE_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_PROVIDER_SESSION_REFERENCE_INDEX_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_AGENT_PROGRESS_SNAPSHOT_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_SESSION_TASK_CORRELATION_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_CONTROL_DETAIL_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_DELIVERY_BUNDLE_V2_STAGE_COMMIT_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_HARNESS_MCP_READ_PROXY_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
+            CapabilityId::new(C2_ACP_CONTROL_CAPABILITY).map_err(|e| FrameError::Io(io::Error::other(e.to_string())))?,
         ],
         host: HostDescriptor {
             operating_system: OperatingSystemId::new(std::env::consts::OS)

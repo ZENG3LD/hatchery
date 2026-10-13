@@ -1,5 +1,5 @@
 //! A2: dials core operator control (`connect_core_operator`), not C2.
-//! Full spawn/inventory suites stay ignored until the node restream g4a bridge lands.
+//! Node restream g4a bridge is available; this suite still needs a vendor PTY launcher.
 
 #![cfg(any(windows, unix))]
 
@@ -391,8 +391,8 @@ async fn wait_renderable_frame(
     .expect("renderable terminal frame did not reach C2")
 }
 
-#[ignore = "A2: needs node restream g4a bridge"]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "A2: needs rewrite onto restream g4a bridge"]
 #[ignore = "requires an explicitly selected installed vendor PTY launcher"]
 async fn real_node_c2_snapshot_renders_vendor_terminal_and_reaps_process() {
     let (agent_id, provider, launcher, version) = required_live_inputs();
