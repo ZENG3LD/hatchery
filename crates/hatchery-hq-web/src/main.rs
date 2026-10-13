@@ -6,6 +6,7 @@
 //!   HATCHERY_HQ_SERVER            hatchery-server control address (optional: mail and tasks)
 //!   HATCHERY_SERVER_CONTROL_TOKEN hatchery-server control bearer (optional)
 //!   HATCHERY_HQ_BASE_PATH         asset prefix behind a reverse proxy, e.g. /app (optional)
+//!   HATCHERY_HQ_M4A_CLI / _AS / _SOCK / _GROUPS  the operator's m4a account via a local client daemon (optional)
 //!   HATCHERY_HQ_CHATS             sidebar chats: label=node-id or label=room:NAME, comma separated (optional)
 //!   HATCHERY_HQ_STATE_DIR         directory for the operator's sent-message journal (optional)
 

@@ -43,6 +43,9 @@ pub struct Config {
     /// Where the operator's own sent messages are journaled so a chat keeps its full history
     /// across reloads (the mailbox inbox only holds received mail). Unset: no journal.
     pub state_dir: Option<std::path::PathBuf>,
+    /// The operator's own m4a account, reached through a local m4a client daemon (which alone holds
+    /// the keys). `None` disables the m4a chats.
+    pub m4a: Option<M4a>,
 }
 
 /// `label=target,label2=room:x` → pairs; blank or malformed items are skipped.
@@ -77,6 +80,10 @@ impl Config {
             base_path: normalize_base_path(var("HATCHERY_HQ_BASE_PATH").as_deref().unwrap_or(""))?,
             chats: parse_chats(var("HATCHERY_HQ_CHATS").as_deref().unwrap_or("")),
             state_dir: var("HATCHERY_HQ_STATE_DIR").map(Into::into),
+            m4a: match (var("HATCHERY_HQ_M4A_CLI"), var("HATCHERY_HQ_M4A_AS"), var("HATCHERY_HQ_M4A_SOCK")) {
+                (Some(cli), Some(nick), Some(sock)) => Some(M4a { cli: cli.into(), nick, sock: sock.into(), groups: var("HATCHERY_HQ_M4A_GROUPS").unwrap_or_default().split(',').map(|g| g.trim().to_owned()).filter(|g| !g.is_empty()).collect() }),
+                _ => None,
+            },
         })
     }
 }
@@ -195,7 +202,7 @@ fn safe_rest(rest: &str) -> bool {
 // ---------------------------------------------------------------------------------- handlers
 
 async fn api_config(State(s): State<Shared>) -> Response {
-    json_reply(200, json!({ "server": s.config.server.is_some(), "version": env!("CARGO_PKG_VERSION"), "chats": s.config.chats.iter().map(|(l, t)| json!({"label": l, "target": t})).collect::<Vec<_>>() }).to_string().into_bytes())
+    json_reply(200, json!({ "server": s.config.server.is_some(), "version": env!("CARGO_PKG_VERSION"), "m4a": s.config.m4a.as_ref().map(|m| json!({"nick": m.nick, "groups": m.groups})), "chats": s.config.chats.iter().map(|(l, t)| json!({"label": l, "target": t})).collect::<Vec<_>>() }).to_string().into_bytes())
 }
 
 /// Allowlisted pass-through to the C2 operator API (`/v1/enroll/...`).
@@ -212,6 +219,9 @@ async fn api_c2(State(s): State<Shared>, Path(rest): Path<String>, method: Metho
 
 /// Allowlisted pass-through to the hatchery-server control API (mail and tasks only).
 async fn api_server(State(s): State<Shared>, Path(rest): Path<String>, method: Method, body: axum::body::Bytes) -> Response {
+    if let Some(op) = rest.strip_prefix("m4a/") {
+        return api_m4a(&s, op, &body).await;
+    }
     let (Some(addr), Some(token)) = (s.config.server, s.config.server_token.as_deref()) else {
         return err(StatusCode::SERVICE_UNAVAILABLE, "server API is not configured");
     };
@@ -608,5 +618,78 @@ mod chat_tests {
         assert_eq!(team[0]["from"], OPERATOR_ID);
         assert_eq!(read_sent(Some(dir.path()), "node-1").len(), 1);
         assert!(read_sent(None, "node-1").is_empty());
+    }
+}
+
+/// The operator's m4a account as seen by HQ: the `m4a-agent` CLI, the nick, and the socket of the
+/// local client daemon that holds the account's keys. HQ never reads the keys.
+#[derive(Clone, Debug)]
+pub struct M4a {
+    pub cli: std::path::PathBuf,
+    pub nick: String,
+    pub sock: std::path::PathBuf,
+    /// Room titles shown as groups; everything else is drawn as a 1:1 chat.
+    pub groups: Vec<String>,
+}
+
+/// A room argument for the CLI: a room id, alias or nick. Never starts with `-`.
+pub fn m4a_room_ok(room: &str) -> bool {
+    !room.is_empty() && room.len() <= 255 && !room.starts_with('-') && room.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'!' | b'#' | b'@' | b':' | b'.' | b'_' | b'-' | b'='))
+}
+
+/// `POST /api/s/m4a/{rooms|read|send}`: rooms list, a room timeline (own messages included), send.
+async fn api_m4a(s: &Shared, op: &str, body: &[u8]) -> Response {
+    let Some(m) = s.config.m4a.clone() else { return err(StatusCode::SERVICE_UNAVAILABLE, "m4a is not configured") };
+    let req: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+    let room = req.get("room").and_then(Value::as_str).unwrap_or_default().to_owned();
+    let mut args: Vec<String> = vec!["mail".into(), "--as".into(), m.nick.clone(), "--json".into()];
+    let mut stdin = None;
+    match op {
+        "rooms" => args.push("rooms".into()),
+        "read" | "send" if !m4a_room_ok(&room) => return err(StatusCode::BAD_REQUEST, "bad room"),
+        "read" => {
+            let n = req.get("limit").and_then(Value::as_u64).unwrap_or(50).clamp(1, 200);
+            args.extend(["read".into(), room, "-n".into(), n.to_string()]);
+        }
+        "send" => {
+            let text = req.get("text").and_then(Value::as_str).unwrap_or_default();
+            if text.trim().is_empty() || text.len() > 16_000 {
+                return err(StatusCode::BAD_REQUEST, "bad text");
+            }
+            args.extend(["send".into(), room, "-".into()]);
+            stdin = Some(text.to_owned());
+        }
+        _ => return err(StatusCode::NOT_FOUND, "not found"),
+    }
+    let mut cmd = tokio::process::Command::new(&m.cli);
+    cmd.args(&args).env_clear().env("M4A_SEND_SOCK", &m.sock).env("M4A_STORE_ROOT", m.sock.parent().unwrap_or(std::path::Path::new("/"))).env("PATH", "/usr/bin:/bin").stdin(if stdin.is_some() { std::process::Stdio::piped() } else { std::process::Stdio::null() }).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
+    let run = async {
+        let mut child = cmd.spawn().map_err(|e| format!("m4a client: {e}"))?;
+        if let (Some(text), Some(mut w)) = (stdin, child.stdin.take()) {
+            w.write_all(text.as_bytes()).await.map_err(|e| e.to_string())?;
+        }
+        child.wait_with_output().await.map_err(|e| e.to_string())
+    };
+    match tokio::time::timeout(Duration::from_secs(60), run).await {
+        Ok(Ok(out)) if out.status.success() => {
+            let v: Value = serde_json::from_slice(&out.stdout).unwrap_or_else(|_| json!({ "text": String::from_utf8_lossy(&out.stdout) }));
+            json_reply(200, json!({ "ok": true, "result": v }).to_string().into_bytes())
+        }
+        Ok(Ok(out)) => err(StatusCode::BAD_GATEWAY, String::from_utf8_lossy(&out.stderr).trim().trim_start_matches("m4a: ")),
+        Ok(Err(e)) => err(StatusCode::BAD_GATEWAY, &e),
+        Err(_) => err(StatusCode::GATEWAY_TIMEOUT, "m4a client timed out"),
+    }
+}
+
+#[cfg(test)]
+mod m4a_tests {
+    #[test]
+    fn room_args_are_safe() {
+        assert!(super::m4a_room_ok("!abc:message.sarl"));
+        assert!(super::m4a_room_ok("#open-talk"));
+        assert!(super::m4a_room_ok("hatcheryweb"));
+        assert!(!super::m4a_room_ok("--as"));
+        assert!(!super::m4a_room_ok("a b"));
+        assert!(!super::m4a_room_ok(""));
     }
 }

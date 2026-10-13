@@ -36,7 +36,8 @@ const SHAPES = [
 function hashOf(name) { let h = 2166136261; for (const c of String(name)) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return h; }
 // Avatar "critter": shape + colour derived from the id; state class animates it, .look follows the cursor.
 const FAMILY = { dm: [0, 5], group: [3, 4], agent: [1, 2, 6] };
-const kindOf = (id) => (id === '*' || String(id).startsWith('room:') ? 'group' : S.session && S.sessionNode === id ? 'agent' : 'dm');
+const chatKind = (id) => ((S.chats || []).find((x) => x.target === id) || {}).kind;
+const kindOf = (id) => (chatKind(id) ? chatKind(id) : id === '*' || String(id).startsWith('room:') ? 'group' : S.session && S.sessionNode === id ? 'agent' : 'dm');
 function avatar(name, cls = '', online, force, fam) {
   const h = hashOf(name); const c = colorOf(name); const f = FAMILY[fam || kindOf(name)] || FAMILY.dm; const shape = SHAPES[f[(h >>> 8) % f.length]]; const st = force || avatarState(name);
   const extra = st === 'thinking' ? '<g class="tdots"><circle cx="50" cy="8" r="2.4"/><circle cx="56" cy="3" r="1.8"/></g>' : st === 'attention' ? '<circle class="ring" cx="32" cy="32" r="30" fill="none" stroke="#e0a63a" stroke-width="2.5"/>' : '';
@@ -59,7 +60,7 @@ const addLocal = (chat, item) => { (S.local[chat] ||= []).push({ ts: Date.now(),
 const logEv = (text) => { S.log.push({ ts: Date.now(), text }); if (S.log.length > 300) S.log.shift(); if (S.panel && S.tab === 'status') renderStatus(); };
 const visibleNodes = () => S.nodes.filter((n) => n.status !== 'revoked');
 
-const isGroup = (id) => id === '*' || String(id).startsWith('room:');
+const isGroup = (id) => chatKind(id) ? chatKind(id) === 'group' : id === '*' || String(id).startsWith('room:');
 // ---- sidebar: only chats (groups, DMs, agent sessions); kind is shown by creature shape only
 function renderSidebar() {
   const q = $('#search').value.toLowerCase(); const match = (n) => !q || n.toLowerCase().includes(q);
@@ -85,6 +86,12 @@ async function loadThread() {
   const id = S.chat; if (!id) return;
   try {
     let msgs;
+    if (String(id).startsWith('m4a:')) {
+      const d = await post('/api/s/m4a/read', { room: id.slice(4), limit: 100 }); const rows = Array.isArray(d.result) ? d.result : d.result.messages || d.result.rows || [];
+      const me = S.m4a.nick; const own = (f) => f === me || String(f).startsWith('@' + me + ':');
+      S.mail[id] = rows.filter((r) => r.body || r.kind === 'undecryptable').map((r) => ({ from: own(r.from) ? OPERATOR : String(r.from || '?').replace(/^@([^:]+):.*$/, '$1'), body: r.kind === 'undecryptable' ? '[cannot decrypt yet]' : r.body, created_at_ms: r.ts, message_id: r.event_id, failed: String(r.state || '').startsWith('failed') })).sort((a, b) => a.created_at_ms - b.created_at_ms);
+      if (S.chat === id) renderChat(); renderSidebar(); return;
+    }
     if (isGroup(id)) { const d = await post('/api/s/mail/inbox'); msgs = d.messages.filter((m) => m.to === id); }
     else { const d = await post('/api/s/mail/thread', { node: id }); msgs = d.messages; }
     let sent = []; try { sent = (await post('/api/s/mail/sent', { to: id })).messages; } catch (_) {}
@@ -99,7 +106,7 @@ function renderChat() {
   const items = []; const group = isGroup(S.chat);
   const mail = S.mail[S.chat] || [];
   // reconcile: drop optimistic own messages once the server copy is present
-  if (S.local[S.chat]) S.local[S.chat] = S.local[S.chat].filter((l) => !l.pending || !mail.some((m) => m.from === OPERATOR && m.body === l.text && m.created_at_ms >= l.ts - 60000));
+  if (S.local[S.chat]) S.local[S.chat] = S.local[S.chat].filter((l) => !(l.pending || l.sent || l.failed) || !mail.some((m) => m.from === OPERATOR && m.body === l.text && m.created_at_ms >= l.ts - 60000));
   for (const m of mail) items.push({ ts: m.created_at_ms, kind: 'mail', m });
   for (const l of S.local[S.chat] || []) items.push({ ts: l.ts, kind: 'local', l });
   if (S.chat !== '*' && S.events[S.chat]) for (const e of S.events[S.chat].values()) if (e.kind === 'answer' || e.kind === 'prompt_needed') items.push({ ts: e.at, kind: 'ev', e });
@@ -118,7 +125,7 @@ function renderChat() {
   for (const it of items) {
     if (it.kind === 'mail') {
       const m = it.m; const mine = m.from === OPERATOR;
-      bubble(mine, m.from, `${m.subject && m.subject !== '-' ? `<b>${esc(m.subject)}</b><br>` : ''}${esc(m.body)}`, m.created_at_ms);
+      bubble(mine, m.from, `${m.subject && m.subject !== '-' ? `<b>${esc(m.subject)}</b><br>` : ''}${esc(m.body)}`, m.created_at_ms, m.failed ? ' failed' : '');
     } else if (it.kind === 'ev') {
       const e = it.e;
       if (e.kind === 'answer') bubble(false, S.chat, esc(e.text), e.at);
@@ -142,7 +149,7 @@ async function send() {
   try {
     if (!(S.target === 'agent' && S.session)) {
       const to = S.chat; const l = { ts: Date.now(), text, pending: true }; (S.local[S.chat] ||= []).push(l); renderChat(); $('#chat').scrollTop = 1e9;
-      try { await post('/api/s/mail/send', { to, subject: '-', body: text }); l.pending = false; l.sent = true; } catch (e) { l.pending = false; l.failed = true; renderChat(); toast('Not sent: ' + e.message); return; }
+      try { if (String(to).startsWith('m4a:')) await post('/api/s/m4a/send', { room: to.slice(4), text }); else await post('/api/s/mail/send', { to, subject: '-', body: text }); l.pending = false; l.sent = true; } catch (e) { l.pending = false; l.failed = true; renderChat(); toast('Not sent: ' + e.message); return; }
       renderChat(); await loadThread(); return;
     }
     if (S.target === 'agent' && S.session) {
@@ -439,4 +446,7 @@ es.onmessage = (m) => {
   }
 };
 setTab('info');
-api('/api/config').then((c) => { S.chats = c.chats && c.chats.length ? c.chats : [{ label: 'general', target: 'room:general' }]; }).catch(() => { S.chats = [{ label: 'general', target: 'room:general' }]; }).then(loadNodes).then(() => openChat(S.chats[0].target)); setInterval(() => { if (S.chat && !S.panel) loadThread(); }, 10000); setInterval(loadNodes, 4000);
+api('/api/config').then(async (c) => { S.chats = c.chats && c.chats.length ? c.chats : [{ label: 'general', target: 'room:general' }];
+  if (c.m4a) { S.m4a = c.m4a; try { const d = await post('/api/s/m4a/rooms', {}); const rows = Array.isArray(d.result) ? d.result : d.result.rooms || [];
+    const rooms = rows.map((r) => { const rid = r.room_id || r.id || r.room; const label = r.title || r.name || r.alias || rid; return { label, target: 'm4a:' + rid, kind: (c.m4a.groups || []).includes(label) || r.kind === 'group' || r.kind === 'channel' ? 'group' : 'dm' }; }).filter((r) => r.target !== 'm4a:undefined');
+    S.chats = [...rooms, ...S.chats.filter((x) => !String(x.target).startsWith('room:'))]; } catch (e) { toast('m4a: ' + e.message); } } }).catch(() => { S.chats = [{ label: 'general', target: 'room:general' }]; }).then(loadNodes).then(() => openChat(S.chats[0].target)); setInterval(() => { if (S.chat && !S.panel) loadThread(); }, 10000); setInterval(loadNodes, 4000);
