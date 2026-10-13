@@ -200,11 +200,20 @@ async fn run_session(
 
     let mut tick = tokio::time::interval(CAPTURE_EVERY);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut last_hash: u64 = 0;
     loop {
         tokio::select! {
             _ = &mut stop_rx => break,
             _ = tick.tick() => {
                 if let Ok((bytes, w, h, url, title)) = capture_frame(&page).await {
+                    let hash = {
+                        use std::hash::{Hash, Hasher};
+                        let mut hsh = std::collections::hash_map::DefaultHasher::new();
+                        bytes.hash(&mut hsh);
+                        hsh.finish()
+                    };
+                    if hash == last_hash { continue; }
+                    last_hash = hash;
                     let _ = event_tx.send(BrowserStreamEvent::Frame {
                         node_id: node_id.clone(),
                         session: session.clone(),
@@ -220,6 +229,9 @@ async fn run_session(
                 let Some(input) = input else { break };
                 if let Err(err) = apply_input(&page, &input).await {
                     tracing::warn!(%session, error = %err, "browser input failed");
+                } else {
+                    // Force a fresh frame after input so nav/click show up promptly.
+                    last_hash = 0;
                 }
             }
         }
@@ -313,9 +325,11 @@ async fn apply_input(page: &StealthPage, input: &BrowserInput) -> Result<(), Str
             }
         }
         BrowserInput::Navigate { url } => {
-            let _ = tokio::time::timeout(Duration::from_secs(40), page.goto(url))
-                .await
-                .map_err(|_| "navigate timed out".to_string())?;
+            match tokio::time::timeout(Duration::from_secs(40), page.goto(url)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => return Err(e.to_string()),
+                Err(_) => return Err("navigate timed out".into()),
+            }
         }
     }
     Ok(())

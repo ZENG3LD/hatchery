@@ -751,10 +751,20 @@ async fn browser_session(mut socket: WebSocket, s: Shared, q: BrowserQuery) -> R
                 match wire {
                     Ok(bytes) => {
                         tracing::info!(op = %cmd["t"], bytes = bytes.len(), "browser input from web HQ");
-                        let _ = socket.send(Message::text(json!({ "type": "sent", "op": cmd["t"], "bytes": bytes.len() }).to_string())).await;
-                        if let Err(e) = send_input(&control, &session, &node, bytes).await {
-                            let _ = socket.send(Message::text(json!({ "type": "error", "text": e }).to_string())).await;
-                        }
+                        // Do not await the node RPC inside this select arm: a long navigate
+                        // would stall frame delivery to the web client.
+                        let control_i = control.clone();
+                        let session_i = session.clone();
+                        let node_i = node.clone();
+                        let op = cmd["t"].as_str().unwrap_or("input").to_owned();
+                        let op_log = op.clone();
+                        let n = bytes.len();
+                        tokio::spawn(async move {
+                            if let Err(e) = send_input(&control_i, &session_i, &node_i, bytes).await {
+                                tracing::warn!(op = %op_log, error = %e, "browser input RPC failed");
+                            }
+                        });
+                        let _ = socket.send(Message::text(json!({ "type": "sent", "op": op, "bytes": n }).to_string())).await;
                     }
                     Err(e) => {
                         let _ = socket.send(Message::text(json!({ "type": "error", "text": e }).to_string())).await;
