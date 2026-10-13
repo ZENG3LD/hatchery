@@ -1838,6 +1838,7 @@ dependencies = [
  "getrandom 0.2.17",
  "hatchery-build",
  "hatchery-c2-protocol",
+ "hatchery-core",
  "hatchery-enroll",
  "serde",
  "serde_json",
@@ -1879,6 +1880,48 @@ dependencies = [
  "sha2",
  "snow",
  "x25519-dalek",
+]
+
+[[package]]
+name = "hatchery-core"
+version = "0.2.4"
+dependencies = [
+ "hatchery-c2-protocol",
+ "tempfile",
+]
+
+[[package]]
+name = "hatchery-e2e"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "gate4agent-node-protocol",
+ "gate4agent-node-wire",
+ "gate4agent-testkit",
+ "gate4agent-types",
+ "hatchery-build",
+ "hatchery-c2",
+ "hatchery-c2-client",
+ "hatchery-c2-protocol",
+ "hatchery-core",
+ "hatchery-enroll",
+ "hatchery-harness-client",
+ "hatchery-harness-engine",
+ "hatchery-harness-light",
+ "hatchery-harness-mcp",
+ "hatchery-harness-protocol",
+ "hatchery-harness-service",
+ "hatchery-node",
+ "hatchery-observation-service",
+ "hatchery-server",
+ "ring",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tracing-subscriber",
+ "vt100",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2069,11 +2112,9 @@ dependencies = [
  "gate4agent-wake",
  "grok-session-restore",
  "hatchery-build",
- "hatchery-c2",
- "hatchery-c2-client",
  "hatchery-c2-protocol",
+ "hatchery-core",
  "hatchery-enroll",
- "hatchery-server",
  "kimi-session-restore",
  "libc",
  "mail4agent",
@@ -2162,8 +2203,6 @@ dependencies = [
  "hatchery-c2-client",
  "hatchery-c2-protocol",
  "hatchery-enroll",
- "hatchery-harness-mcp",
- "hatchery-node",
  "m4a-agent",
  "mail4agent-api",
  "mail4agent-core",

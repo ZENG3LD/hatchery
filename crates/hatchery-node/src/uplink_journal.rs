@@ -3,7 +3,7 @@
 //! The node appends opaque payloads locally. When C2 asks for a gap range over
 //! the multiplex uplink, this module serves `JournalReply` from disk.
 
-use hatchery_c2::restreamer::FileJournal;
+use hatchery_core::FileJournal;
 use hatchery_c2_protocol::{
     ChannelKind, Frame, FrameError, FrameType, OpenPayload,
 };

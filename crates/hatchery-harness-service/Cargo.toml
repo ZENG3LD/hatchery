@@ -40,7 +40,7 @@ ring = "=0.17.14"
 [dev-dependencies]
 hatchery-c2 = { version = "0.2.4", path = "../hatchery-c2" }
 hatchery-harness-client = { version = "0.2.4", path = "../hatchery-harness-client" }
-hatchery-node = { version = "0.2.4", path = "../hatchery-node", features = ["fixture", "restream-rig"] }
+hatchery-node = { version = "0.2.4", path = "../hatchery-node", features = ["fixture"] }
 ring = "=0.17.14"
 
 [target.'cfg(windows)'.dev-dependencies]

@@ -14,6 +14,7 @@ name = "hatchery-c2"
 path = "src/main.rs"
 
 [dependencies]
+hatchery-core = { path = "../hatchery-core", version = "0.2.4" }
 hatchery-c2-protocol = { path = "../hatchery-c2-protocol", version = "0.2.4", features = ["nested-crypto"] }
 gate4agent-node-protocol = { version = "0.5.2" }
 gate4agent-node-wire = { version = "0.5.2" }

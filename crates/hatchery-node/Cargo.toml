@@ -18,9 +18,7 @@ path = "src/main.rs"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.4" }
 hatchery-c2-protocol = { path = "../hatchery-c2-protocol", version = "0.2.4", features = ["nested-crypto"] }
-hatchery-c2 = { path = "../hatchery-c2", version = "0.2.4" }
-hatchery-server = { path = "../hatchery-server", version = "0.2.4", optional = true }
-hatchery-c2-client = { path = "../hatchery-c2-client", version = "0.2.4", optional = true }
+hatchery-core = { path = "../hatchery-core", version = "0.2.4" }
 hatchery-build = { path = "../hatchery-build", version = "0.2.4" }
 base64 = "0.22"
 # Standard kit cores, all from crates.io: dig2browser 0.5 (browser machine and
@@ -87,7 +85,6 @@ wireguard = ["gate4agent-node-core/wireguard"]
 # the memory4agent dependency; no code is gated on it yet.
 memory = []
 fixture = ["dep:gate4agent-testkit", "gate4agent-node-wire/fixture"]
-restream-rig = ["dep:hatchery-server", "dep:hatchery-c2-client"]
 # Cheap dig2browser-station named-pipe path reachability probe + node-local
 # exclusive BrowserStationLease. The dig2browser crate dep itself is feature `d2b`.
 # Feature off keeps browser_profile_id stub echo.
@@ -96,15 +93,28 @@ dig2-station-probe = []
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
-# C2 <-> node integration tests (tests/c2_*.rs): C2 and the node are equal peers.
-hatchery-c2 = { path = "../hatchery-c2", version = "0.2.4" }
-hatchery-c2-client = { path = "../hatchery-c2-client", version = "0.2.4" }
 vt100 = "0.16"
 
 [[test]]
-name = "restream_g4a_bridge_e2e"
-required-features = ["restream-rig"]
+name = "windows_fixture_local_node_snapshot_reconnect_controller_lease"
+required-features = ["fixture"]
 
 [[test]]
-name = "c2_real_node_c2_terminal_screen_e2e"
-required-features = ["restream-rig", "fixture"]
+name = "unix_workspace_file_read_e2e"
+required-features = ["fixture"]
+
+[[test]]
+name = "windows_workspace_file_read_e2e"
+required-features = ["fixture"]
+
+[[test]]
+name = "unix_fixture_local_node_e2e"
+required-features = ["fixture"]
+
+[[test]]
+name = "windows_context_pack_worktree_bundle_e2e"
+required-features = ["fixture"]
+
+[[test]]
+name = "windows_fixture_runtime_policy_e2e"
+required-features = ["fixture"]

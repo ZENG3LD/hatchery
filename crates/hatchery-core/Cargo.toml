@@ -1,0 +1,16 @@
+[package]
+name = "hatchery-core"
+version = "0.2.4"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/ZENG3LD/hatchery"
+description = "Shared hatchery types and utilities for node, edge and core: replay buffer, node journal, restream wire and nested-crypto key types"
+
+[lib]
+name = "hatchery_core"
+
+[dependencies]
+hatchery-c2-protocol = { path = "../hatchery-c2-protocol", version = "0.2.4", features = ["nested-crypto"] }
+
+[dev-dependencies]
+tempfile = "3"
