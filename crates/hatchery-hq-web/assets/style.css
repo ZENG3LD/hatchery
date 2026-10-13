@@ -416,3 +416,4 @@ body.rail #chats{order:2}body.rail .sidetop{order:3;padding:8px 0 0}body.rail .s
 #rxtip{position:fixed;z-index:60;background:#1f1f1f;border:1px solid #2c2c2c;border-radius:10px;padding:6px 10px;font-size:12.5px;box-shadow:0 6px 24px #0008;max-width:280px;pointer-events:none}
 #rxtip div{display:flex;gap:8px;padding:2px 0}#rxtip .e{flex:none}
 .msg.them .rx{right:auto;left:calc(100% + 6px);top:-6px}.msg.me .rx{left:auto;right:calc(100% + 6px);top:-6px}.msg.hasrx{margin-top:8px!important}
+.msg.them .rx,.msg.me .rx{top:-22px}.msg.hasrx{margin-top:24px!important}
