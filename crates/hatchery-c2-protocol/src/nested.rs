@@ -118,6 +118,11 @@ impl HqRecipientSecret {
     pub fn public_bytes(&self) -> PublicKeyBytes {
         PublicKeyBytes(self.public)
     }
+
+    /// Seed used to derive this key (persist on core only; never send to C2 or nodes).
+    pub fn seed_bytes(&self) -> [u8; 32] {
+        self.private
+    }
 }
 
 /// Node-side Noise initiator (knows HQ static public key).
