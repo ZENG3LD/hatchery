@@ -260,3 +260,13 @@ body.rail #search{display:none}
 body.rail #chats{padding:6px 10px}body.rail .chatitem{justify-content:center;padding:7px 0}body.rail .chatitem .t{display:none}
 body.rail .sidebottom{justify-content:center;padding:12px 0}
 body.rail #acctmenu{left:12px}
+/* round 8: narrow-safe status cards, composer border */
+.ncard{background:#1f1f1f;border-radius:12px;padding:10px 12px;margin-bottom:8px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.ncard .nh{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}.ncard .nh b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ncard select{width:100%}
+#pbody *{max-width:100%}#pbody pre{white-space:pre-wrap;word-break:break-word}
+#pbody .stgrid{grid-template-columns:1fr!important}
+#pbody .row>input{flex:1 1 120px}
+#pbody .log div{overflow-wrap:anywhere}
+#bcanvas{max-width:100%}
+#box{border:1px solid #353535}#box:focus-within{border-color:#404040}
