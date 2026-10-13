@@ -810,34 +810,37 @@ fn install_missing_provider_clis() -> Result<(), String> {
             ));
         }
     }
-    // Fallback: inline check + npm for claude/codex only.
-    for (name, npm_pkg) in [
-        ("claude", Some("@anthropic-ai/claude-code")),
-        ("codex", Some("@openai/codex")),
-        ("kimi", None),
-        ("grok", None),
+    // Fallback: inline check + npm for claude/codex. kimi/grok are optional:
+    // warn when missing rather than failing node startup (owner can provision later).
+    for (name, aliases, npm_pkg) in [
+        ("claude", &["claude"][..], Some("@anthropic-ai/claude-code")),
+        ("codex", &["codex"][..], Some("@openai/codex")),
+        ("kimi", &["kimi", "kimi-cli"][..], None),
+        ("grok", &["grok"][..], None),
     ] {
-        let present = Command::new("sh")
-            .args(["-c", &format!("command -v {name}")])
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false);
+        let present = aliases.iter().any(|alias| {
+            Command::new("sh")
+                .args(["-c", &format!("command -v {alias}")])
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false)
+        });
         if present {
             tracing::info!(provider = name, "provider CLI already present");
             continue;
         }
         let Some(pkg) = npm_pkg else {
-            return Err(format!(
-                "install-provider-clis: {name} is missing and has no default package download; set PROVIDER_CLI_INSTALL"
-            ));
+            tracing::warn!(
+                provider = name,
+                "provider CLI missing; continuing without it (no default package)"
+            );
+            continue;
         };
         tracing::info!(provider = name, package = pkg, "downloading missing provider CLI");
-        let status = Command::new("npm")
-            .args(["install", "-g", pkg])
-            .status()
-            .map_err(|error| format!("npm install -g {pkg}: {error}"))?;
-        if !status.success() {
-            return Err(format!("npm install -g {pkg} failed: {status}"));
+        match Command::new("npm").args(["install", "-g", pkg]).status() {
+            Ok(status) if status.success() => {}
+            Ok(status) => tracing::warn!(provider = name, %status, "npm install -g failed; continuing"),
+            Err(error) => tracing::warn!(provider = name, %error, "npm install -g failed; continuing"),
         }
     }
     Ok(())
