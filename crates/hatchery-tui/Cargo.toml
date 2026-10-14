@@ -3,7 +3,7 @@ name = "hatchery-tui"
 version = "0.2.13"
 edition = "2021"
 license = "MIT"
-description = "Terminal client for hatchery: both hatchery-tui and hatchery-tui-light speak only the harness operator wire -- light hosts hatchery-harness-light in-process over c2 instead of a durable task kernel"
+description = "hq-edge terminal client for hatchery: a thin wrapper over the hq-core/hq-web API (`hatchery-tui hq`) plus the legacy operator TUI"
 repository = "https://github.com/ZENG3LD/hatchery"
 readme = "../../README.md"
 
@@ -15,14 +15,13 @@ crossterm = "0.28"
 # `src/pet_arcade.rs`'s own module doc comment for the full integration.
 # Paths are in-tree hatchery-arcade (NOT a gate4agent sibling). Package
 # ids are hatchery-arcade-* (renamed from former gate4agent-arcade-*).
-hatchery-arcade-engine = { version = "0.1.4", path = "../hatchery-arcade/engine", default-features = false, features = ["render"] }
-hatchery-arcade-pet-bastion = { version = "0.1.4", path = "../hatchery-arcade/games/pet-bastion" }
-hatchery-arcade-pet-bastion-render = { version = "0.1.4", path = "../hatchery-arcade/games/pet-bastion-render" }
+hatchery-arcade-engine = { version = "0.1.4", path = "../hatchery-arcade/engine", default-features = false, features = ["render"], optional = true }
+hatchery-arcade-pet-bastion = { version = "0.1.4", path = "../hatchery-arcade/games/pet-bastion", optional = true }
+hatchery-arcade-pet-bastion-render = { version = "0.1.4", path = "../hatchery-arcade/games/pet-bastion-render", optional = true }
 gate4agent-build-stamp = { version = "0.5.2" }
 hatchery-c2-client = { version = "0.2.13", path = "../hatchery-c2-client" }
 hatchery-core = { path = "../hatchery-core", version = "0.2.13" }
 hatchery-harness-client = { version = "0.2.13", path = "../hatchery-harness-client" }
-hatchery-harness-light = { version = "0.2.13", path = "../hatchery-harness-light" }
 hatchery-harness-protocol = { version = "0.2.13", path = "../hatchery-harness-protocol" }
 gate4agent-node-protocol = { version = "0.5.2" }
 # `local_hmac_sha256`/`proofs_match`: the same constant-time credential-
@@ -60,6 +59,13 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
+[features]
+# The full local TUI (legacy operator UI with the Pet Bastion arcade overlay). Off by default:
+# the default build is the hq-edge wrapper (`hatchery-tui hq ...`). Local edge only; built on the
+# user's machine, never deployed to a server.
+default = []
+arcade = ["dep:hatchery-arcade-engine", "dep:hatchery-arcade-pet-bastion", "dep:hatchery-arcade-pet-bastion-render"]
+
 [lib]
 name = "hatchery_tui"
 path = "src/lib.rs"
@@ -68,7 +74,4 @@ path = "src/lib.rs"
 name = "hatchery-tui"
 path = "src/main.rs"
 
-[[bin]]
-name = "hatchery-tui-light"
-path = "src/bin/hatchery-tui-light.rs"
 

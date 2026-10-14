@@ -1943,7 +1943,6 @@ dependencies = [
  "hatchery-enroll",
  "hatchery-harness-client",
  "hatchery-harness-engine",
- "hatchery-harness-light",
  "hatchery-harness-mcp",
  "hatchery-harness-protocol",
  "hatchery-harness-service",
@@ -2013,28 +2012,6 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.21",
-]
-
-[[package]]
-name = "hatchery-harness-light"
-version = "0.2.13"
-dependencies = [
- "gate4agent-node-protocol",
- "gate4agent-node-wire",
- "gate4agent-types",
- "hatchery-c2",
- "hatchery-c2-client",
- "hatchery-core",
- "hatchery-harness-api",
- "hatchery-harness-client",
- "hatchery-harness-service",
- "hatchery-node",
- "hatchery-observation-api",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2288,7 +2265,6 @@ dependencies = [
  "hatchery-c2-client",
  "hatchery-core",
  "hatchery-harness-client",
- "hatchery-harness-light",
  "hatchery-harness-protocol",
  "hatchery-observation-api",
  "hatchery-observation-engine",

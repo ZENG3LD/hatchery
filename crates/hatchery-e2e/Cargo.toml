@@ -30,7 +30,6 @@ hatchery-harness-client = { path = "../hatchery-harness-client" }
 hatchery-harness-engine = { path = "../hatchery-harness-engine" }
 hatchery-harness-protocol = { path = "../hatchery-harness-protocol" }
 hatchery-harness-service = { path = "../hatchery-harness-service" }
-hatchery-harness-light = { path = "../hatchery-harness-light" }
 hatchery-harness-mcp = { path = "../hatchery-harness-mcp" }
 hatchery-observation-service = { path = "../hatchery-observation-service" }
 gate4agent-testkit = { version = "0.5.2" }

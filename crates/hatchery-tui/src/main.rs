@@ -1,18 +1,28 @@
+#[cfg(feature = "arcade")]
 use std::net::SocketAddr;
+#[cfg(feature = "arcade")]
 use std::str::FromStr;
 
+#[cfg(feature = "arcade")]
 use hatchery_harness_client::HarnessOperatorCredential;
+#[cfg(feature = "arcade")]
 use hatchery_harness_protocol::HarnessSelectorV1;
+#[cfg(feature = "arcade")]
 use hatchery_tui::control_plane::{ControlPlaneCredential, ControlPlaneEndpoint};
+#[cfg(feature = "arcade")]
 use hatchery_tui::{HarnessOperatorEndpoint, PtyColorMode, RunOptions};
 
+#[cfg(feature = "arcade")]
 const HARNESS_OPERATOR_TOKEN_ENV: &str = "GATE4AGENT_HARNESS_OPERATOR_TOKEN";
+#[cfg(feature = "arcade")]
 const HARNESS_LAUNCH_PLAN_ID_ENV: &str = "GATE4AGENT_HARNESS_LAUNCH_PLAN_ID";
 /// Only read when `--control-plane` is given -- see `control_plane`'s own
 /// module doc comment for why the endpoint stays entirely off (no socket,
 /// no thread, no env read) otherwise.
+#[cfg(feature = "arcade")]
 const CONTROL_PLANE_TOKEN_ENV: &str = "GATE4AGENT_TUI_CONTROL_TOKEN";
 
+#[cfg(feature = "arcade")]
 fn value(args: &[String], index: &mut usize, flag: &str) -> Result<String, String> {
     *index += 1;
     args.get(*index)
@@ -20,6 +30,7 @@ fn value(args: &[String], index: &mut usize, flag: &str) -> Result<String, Strin
         .ok_or_else(|| format!("{flag} requires a value"))
 }
 
+#[cfg(feature = "arcade")]
 fn parse_args_from(
     args: &[String],
     mut read_secret: impl FnMut(&str) -> Result<String, String>,
@@ -92,6 +103,7 @@ fn parse_args_from(
     })
 }
 
+#[cfg(feature = "arcade")]
 fn parse_control_plane_bind(value: &str) -> Result<SocketAddr, String> {
     let endpoint = value.parse::<SocketAddr>()
         .map_err(|_| "--control-plane must be an IP socket address".to_owned())?;
@@ -101,6 +113,7 @@ fn parse_control_plane_bind(value: &str) -> Result<SocketAddr, String> {
     Ok(endpoint)
 }
 
+#[cfg(feature = "arcade")]
 fn parse_harness_operator_endpoint(value: &str) -> Result<SocketAddr, String> {
     let endpoint = value.parse::<SocketAddr>()
         .map_err(|_| "--harness-operator must be an IP socket address".to_owned())?;
@@ -110,6 +123,7 @@ fn parse_harness_operator_endpoint(value: &str) -> Result<SocketAddr, String> {
     Ok(endpoint)
 }
 
+#[cfg(feature = "arcade")]
 fn parse_args() -> Result<RunOptions, String> {
     let args = std::env::args().collect::<Vec<_>>();
     let mut options = parse_args_from(&args, |name| {
@@ -128,6 +142,7 @@ fn parse_args() -> Result<RunOptions, String> {
 
 #[tokio::main]
 async fn main() {
+    #[cfg(feature = "arcade")]
     hatchery_tui::diagnostics::install_panic_hook();
     // `hq ...`: hq-edge wrapper over the new hq-core API (tasks, sessions, routing, signals).
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -141,6 +156,13 @@ async fn main() {
         }
         return;
     }
+    #[cfg(not(feature = "arcade"))]
+    {
+        eprintln!("usage: hatchery-tui hq <tasks|sessions|signals|routing|...>\n(the full local TUI with the arcade needs `--features arcade`)");
+        std::process::exit(if argv.is_empty() { 0 } else { 2 });
+    }
+    #[cfg(feature = "arcade")]
+    {
     let options = match parse_args() {
         Ok(options) => options,
         Err(message) => {
@@ -155,8 +177,10 @@ async fn main() {
         eprintln!("hatchery-tui: {error}");
         std::process::exit(1);
     }
+    }
 }
 
+#[cfg(feature = "arcade")]
 #[cfg(test)]
 mod tests {
     use super::*;
