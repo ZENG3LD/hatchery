@@ -1,6 +1,6 @@
 //! Web HQ: a loopback server for the operator's browser. The browser talks only to this server;
 //! the C2 operator token and the server control token live in this process's environment and are
-//! never sent to the page. Requests are checked for a loopback Host and a same-origin Origin
+//! never sent to the page. Requests are checked for an allowed Host (loopback, plus optional public hosts) and a same-origin Origin
 //! (DNS-rebinding and cross-site protection).
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -46,6 +46,10 @@ pub struct Config {
     /// The operator's own m4a account, reached through a local m4a client daemon (which alone holds
     /// the keys). `None` disables the m4a chats.
     pub m4a: Option<M4a>,
+    /// Extra `Host` values the request guard accepts (in addition to loopback). Used when an
+    /// opaque L4 proxy forwards without rewriting Host — e.g. the operator WG VIP on the edge.
+    /// From `HATCHERY_HQ_PUBLIC_HOSTS=host:port,...`.
+    pub public_hosts: Vec<String>,
 }
 
 /// `label=target,label2=room:x` → pairs; blank or malformed items are skipped.
@@ -88,6 +92,12 @@ impl Config {
                 (Some(cli), Some(nick), Some(sock)) => Some(M4a { cli: cli.into(), nick, sock: sock.into(), groups: var("HATCHERY_HQ_M4A_GROUPS").unwrap_or_default().split(',').map(|g| g.trim().to_owned()).filter(|g| !g.is_empty()).collect() }),
                 _ => None,
             },
+            public_hosts: var("HATCHERY_HQ_PUBLIC_HOSTS")
+                .unwrap_or_default()
+                .split(',')
+                .map(|s| s.trim().to_owned())
+                .filter(|s| !s.is_empty() && s.len() <= 253)
+                .collect(),
         })
     }
 }
@@ -170,14 +180,20 @@ fn asset(content_type: &'static str, body: &'static [u8]) -> Response {
     ([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, "no-store")], body).into_response()
 }
 
-/// Loopback Host only; any Origin must be this very origin.
+/// Loopback Host (plus optional HATCHERY_HQ_PUBLIC_HOSTS); any Origin must be this very origin.
 async fn guard(State(state): State<Shared>, request: Request, next: Next) -> Response {
     let headers = request.headers();
     let port = state.config.listen.port();
+    let mut allowed = vec![
+        format!("127.0.0.1:{port}"),
+        format!("localhost:{port}"),
+        format!("[::1]:{port}"),
+    ];
+    allowed.extend(state.config.public_hosts.iter().cloned());
     let host_ok = headers
         .get(header::HOST)
         .and_then(|h| h.to_str().ok())
-        .is_some_and(|h| [format!("127.0.0.1:{port}"), format!("localhost:{port}"), format!("[::1]:{port}")].iter().any(|ok| ok == h));
+        .is_some_and(|h| allowed.iter().any(|ok| ok == h));
     if !host_ok {
         return (StatusCode::FORBIDDEN, "bad host").into_response();
     }

@@ -9,6 +9,8 @@
 //!   HATCHERY_HQ_M4A_CLI / _AS / _SOCK / _GROUPS  the operator's m4a account via a local client daemon (optional)
 //!   HATCHERY_HQ_CHATS             sidebar chats: label=node-id or label=room:NAME, comma separated (optional)
 //!   HATCHERY_HQ_STATE_DIR         directory for the operator's sent-message journal (optional)
+//!   HATCHERY_HQ_PUBLIC_HOSTS      extra Host values allowed by the guard (comma-separated host:port),
+//!                                 for an opaque reverse proxy that does not rewrite Host (optional)
 
 #[tokio::main]
 async fn main() {
