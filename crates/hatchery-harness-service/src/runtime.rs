@@ -14349,7 +14349,7 @@ mod tests {
             managed_worktrees_truncated: false,
             launch_inventory: None,
 
-        machine: None,}
+        }
     }
 
     fn sample_runtime_node_inventory(screen_state: PtyScreenState) -> HarnessRuntimeNodeInventoryV1 {

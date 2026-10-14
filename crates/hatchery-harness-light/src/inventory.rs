@@ -410,7 +410,7 @@ mod tests {
                 retired_count: 0,
                 launch_inventory: None,
 
-            machine: None,},
+            },
         }
     }
 

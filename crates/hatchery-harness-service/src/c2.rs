@@ -6480,6 +6480,7 @@ mod tests {
             provider_contracts: Vec::new(),
             provider_adapter_contracts: Vec::new(),
             provider_runtime_statuses: Default::default(),
+            machine: None,
         }
     }
 

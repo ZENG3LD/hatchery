@@ -8571,7 +8571,7 @@ mod tests {
             retired_count: 0,
             launch_inventory: None,
 
-        machine: None,}
+        }
     }
 
     /// Regression for `ed4fa61`: the producer (`SlimNodeInventory::
@@ -8652,7 +8652,7 @@ mod tests {
                             profile_id: "env-a".to_owned(),
                             profile_revision: "env-rev-1".to_owned(),
 
-                        machine: None,}),
+                        }),
                     }]),
                     bundles: Some(vec![HarnessRuntimeBundleReceiptV1 {
                         id: "bundle-a".to_owned(),
@@ -11054,7 +11054,7 @@ mod tests {
                 retired_count: 0,
                 launch_inventory: None,
 
-            machine: None,},
+            },
         }
     }
 
