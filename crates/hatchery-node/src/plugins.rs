@@ -349,6 +349,15 @@ pub fn sync_into_home(root: &Path, trusted: &[VerifyingKey], home: &Path) -> (us
             let path = home.join(rel);
             if sha256_file(&path).ok().as_deref() == Some(hash.as_str()) {
                 let _ = std::fs::remove_file(&path);
+                // Drop directories the plugin left empty, below `<provider dir>/<kind>`
+                // (e.g. `.claude/skills/x`); remove_dir refuses non-empty ones.
+                let mut dir = std::path::Path::new(rel).parent();
+                while let Some(d) = dir.filter(|d| d.components().count() > 2) {
+                    if std::fs::remove_dir(home.join(d)).is_err() {
+                        break;
+                    }
+                    dir = d.parent();
+                }
             }
         }
     }
@@ -393,6 +402,8 @@ mod sync_tests {
         let (placed, _) = sync_into_home(&root, &trusted, &home);
         assert_eq!(placed, 0);
         assert!(!home.join(".claude/skills/review/SKILL.md").exists());
+        assert!(!home.join(".claude/skills/review").exists());
+        assert!(home.join(".claude/skills/mine").exists());
         assert_eq!(std::fs::read(home.join(".claude/skills/mine/SKILL.md")).unwrap(), b"user");
     }
 

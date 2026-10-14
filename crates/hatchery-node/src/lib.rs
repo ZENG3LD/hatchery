@@ -99,6 +99,7 @@ pub use network_allowlist_catalog::{
 };
 #[cfg(feature = "fixture")]
 pub use server::SpawnManagedWorktreeV2FailureProbe;
+pub use server::node_wake::{NodeLetter, NodeWake};
 pub use server::{
     default_node_endpoint, default_state_path, NodeServer, NodeServerConfig, NodeServerError,
     NodeShutdownHandle, WorkspaceConfig,

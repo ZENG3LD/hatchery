@@ -271,6 +271,23 @@ impl MailSeen {
         Self { path, ids }
     }
 
+    /// Remember a letter as handled.
+    pub fn mark(&mut self, id: &str) {
+        if let Some(ids) = self.ids.as_mut() {
+            ids.insert(id.to_owned());
+            self.save();
+        }
+    }
+
+    /// Whether the first-tick baseline has been taken.
+    pub fn primed(&self) -> bool {
+        self.ids.is_some()
+    }
+
+    pub fn seen(&self, id: &str) -> bool {
+        self.ids.as_ref().is_some_and(|s| s.contains(id))
+    }
+
     fn save(&self) {
         if let Some(ids) = &self.ids {
             let tmp = self.path.with_extension("tmp");
@@ -300,6 +317,43 @@ pub fn letter_room(to: &str, from: &str) -> (String, String) {
 
 /// One node-mail tick over a `mail.inbox` reply: every new message goes to `policy.node_mail_to`
 /// through the pipeline. The first tick only records what is already there.
+/// Session nick named by a core wake letter (`subject = "wake <nick>"`).
+pub fn wake_nick(subject: &str) -> Option<&str> {
+    let nick = subject.strip_prefix("wake ")?.trim();
+    (!nick.is_empty() && !nick.contains(char::is_whitespace) && nick.len() <= 128).then_some(nick)
+}
+
+/// A core wake letter for one of this node's live sessions (not a routine/spawn nick).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionLetter {
+    pub message_id: String,
+    pub nick: String,
+    pub from: String,
+    pub body: String,
+}
+
+/// Unseen wake letters that name a nick without a routine or spawn profile: these go to the
+/// node's live session with that nick (letter wake), not to `node_mail_to`.
+pub fn session_letters(policy: &WakePolicy, seen: &MailSeen, inbox: &Value) -> Vec<SessionLetter> {
+    if !seen.primed() {
+        return Vec::new();
+    }
+    let messages = inbox.get("messages").and_then(Value::as_array).cloned().unwrap_or_default();
+    messages
+        .iter()
+        .filter_map(|m| {
+            let s = |k: &str| m.get(k).and_then(Value::as_str).unwrap_or_default().to_owned();
+            let id = s("message_id");
+            let subject = s("subject");
+            let nick = wake_nick(&subject)?;
+            if id.is_empty() || seen.seen(&id) || policy.routines.contains_key(nick) || policy.spawn_profiles.contains_key(nick) {
+                return None;
+            }
+            Some(SessionLetter { message_id: id, nick: nick.to_owned(), from: s("from"), body: s("body") })
+        })
+        .collect()
+}
+
 pub fn node_mail_tick(policy: &WakePolicy, seen: &mut MailSeen, inbox: &Value, door_hint: Option<&str>) -> Vec<MailOutcome> {
     let messages = inbox.get("messages").and_then(Value::as_array).cloned().unwrap_or_default();
     let ids = |m: &Value| m.get("message_id").and_then(Value::as_str).map(str::to_owned);
@@ -308,7 +362,6 @@ pub fn node_mail_tick(policy: &WakePolicy, seen: &mut MailSeen, inbox: &Value, d
         seen.save();
         return Vec::new();
     }
-    let Some(to) = policy.node_mail_to.clone() else { return Vec::new() };
     let mut out = Vec::new();
     for m in &messages {
         let Some(id) = ids(m) else { continue };
@@ -317,10 +370,21 @@ pub fn node_mail_tick(policy: &WakePolicy, seen: &mut MailSeen, inbox: &Value, d
         }
         let s = |k: &str| m.get(k).and_then(Value::as_str).unwrap_or_default().to_owned();
         let (from, subject, addressed) = (s("from"), s("subject"), s("to"));
+        // A core wake letter names its session; a routine nick takes it here, any other nick
+        // is a live session (see `session_letters`). Plain mail goes to `node_mail_to`.
+        let to = match wake_nick(&subject) {
+            Some(nick) if policy.routines.contains_key(nick) || policy.spawn_profiles.contains_key(nick) => nick.to_owned(),
+            Some(_) => continue,
+            None => match policy.node_mail_to.clone() {
+                Some(to) => to,
+                None => continue,
+            },
+        };
         // Keep the conversation the letter belongs to: a room letter stays in its room (and is
         // answered there); a direct letter is a 1:1 chat with the sender.
         let (room, reply_to) = letter_room(&addressed, &from);
         let result = match route(policy, &to, SessionShape::None) {
+            Route::Spawn(profile) => launch_spawn_profile(&profile).map(|()| 202),
             Route::Routine(target) => {
                 let reply = door_hint.map(|door| {
                     let req = json!({"op": "mail.send", "payload": {"to": reply_to, "subject": format!("re: {subject}"), "body": "..."}});
@@ -353,6 +417,29 @@ pub fn node_mail_tick(policy: &WakePolicy, seen: &mut MailSeen, inbox: &Value, d
 #[cfg(test)]
 mod wake_line_tests {
     use super::*;
+
+    #[test]
+    fn wake_letters_route_by_nick() {
+        assert_eq!(wake_nick("wake s-1"), Some("s-1"));
+        assert_eq!(wake_nick("wake a b"), None);
+        assert_eq!(wake_nick("hello"), None);
+        let dir = tempfile::tempdir().unwrap();
+        let mut seen = MailSeen::load(dir.path().join("seen.json"));
+        let policy: WakePolicy = serde_json::from_str("{}").unwrap();
+        let inbox = json!({"messages": [
+            {"message_id": "m1", "from": "hatchery.operator", "to": "n", "subject": "wake s-1", "body": "b"},
+            {"message_id": "m2", "from": "x", "to": "n", "subject": "plain", "body": "b"}
+        ]});
+        // First tick only takes the baseline.
+        assert!(session_letters(&policy, &seen, &inbox).is_empty());
+        node_mail_tick(&policy, &mut seen, &json!({"messages": []}), None);
+        let l = session_letters(&policy, &seen, &inbox);
+        assert_eq!(l.iter().map(|l| l.nick.as_str()).collect::<Vec<_>>(), ["s-1"]);
+        // No node_mail_to and the wake letter is a session's: the tick leaves both alone.
+        assert!(node_mail_tick(&policy, &mut seen, &inbox, None).is_empty());
+        seen.mark("m1");
+        assert!(session_letters(&policy, &seen, &inbox).is_empty());
+    }
 
     #[test]
     fn wake_line_carries_no_body_and_no_controls() {

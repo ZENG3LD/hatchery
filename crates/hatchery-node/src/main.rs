@@ -693,13 +693,13 @@ async fn main() {
         let wake = hatchery_node::m4a_accounts::M4aSessionAccounts::from_env()
             .and_then(|a| a.wake_token().map_err(|e| tracing::warn!(error = %e, "letter wake off")).ok())
             .and_then(|token| server.wake_handle(token, std::sync::Arc::clone(&policy)));
-        if policy.node_mail_to.is_some() {
+        if policy.node_mail_to.is_some() || wake.is_some() {
             let seen = enroll_state
                 .clone()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("node-mail-seen.json");
             let door_hint = format!("http://{listen}/door");
-            tokio::spawn(node_mail_wake(calls.clone(), std::sync::Arc::clone(&policy), seen, door_hint));
+            tokio::spawn(node_mail_wake(calls.clone(), std::sync::Arc::clone(&policy), seen, door_hint, wake.clone()));
         }
         // Short session signals (limit / login / ready) to core over the node-call channel.
         let (sig_tx, mut sig_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1273,6 +1273,7 @@ async fn node_mail_wake(
     policy: std::sync::Arc<hatchery_node::wake_pipeline::WakePolicy>,
     seen_path: PathBuf,
     door_hint: String,
+    wake: Option<hatchery_node::NodeWake>,
 ) {
     let seen = std::sync::Arc::new(std::sync::Mutex::new(hatchery_node::wake_pipeline::MailSeen::load(seen_path)));
     tracing::info!("node-mail wake on");
@@ -1284,6 +1285,28 @@ async fn node_mail_wake(
                 if failing {
                     tracing::info!("node-mail wake: inbox reachable again");
                     failing = false;
+                }
+                // Core wake letters naming a live session go to that session (letter wake).
+                let letters = {
+                    let seen = seen.lock().unwrap_or_else(|p| p.into_inner());
+                    hatchery_node::wake_pipeline::session_letters(&policy, &seen, &inbox)
+                };
+                for l in letters {
+                    let result = match &wake {
+                        Some(w) => w
+                            .wake(hatchery_node::NodeLetter { nick: l.nick.clone(), from: l.from, event_id: l.message_id.clone(), body: l.body })
+                            .await
+                            .map(|_| ()),
+                        None => Err("letter wake is off on this node".to_owned()),
+                    };
+                    seen.lock().unwrap_or_else(|p| p.into_inner()).mark(&l.message_id);
+                    match result {
+                        Ok(()) => {
+                            tracing::info!(message_id = %l.message_id, nick = %l.nick, "wake letter delivered to session");
+                            let _ = calls.call("mail.ack", &serde_json::json!({"message_id": l.message_id})).await;
+                        }
+                        Err(why) => tracing::warn!(message_id = %l.message_id, nick = %l.nick, reason = %why, "wake letter not delivered; stays in the inbox"),
+                    }
                 }
                 let (policy, seen, hint) = (std::sync::Arc::clone(&policy), std::sync::Arc::clone(&seen), door_hint.clone());
                 let outcomes = tokio::task::spawn_blocking(move || {
