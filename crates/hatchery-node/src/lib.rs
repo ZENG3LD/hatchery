@@ -152,7 +152,8 @@ mod kit_manifest {
         let m4a = feature_array(features, "m4a");
         assert_eq!(m4a, ["dep:mail4agent"]);
         let d2b = feature_array(features, "d2b");
-        assert_eq!(d2b, ["dep:dig2browser"]);
+        // The browser stream (websocket + frame encoding) rides with dig2browser.
+        assert_eq!(d2b, ["dep:dig2browser", "dep:tokio-tungstenite", "dep:futures-util", "dep:image"]);
         let wg = feature_array(features, "wireguard");
         assert_eq!(wg, ["gate4agent-node-core/wireguard"]);
         let code = manifest

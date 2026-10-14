@@ -17783,7 +17783,8 @@ mod agent_stream_blocked_tests {
                 .iter()
                 .map(|contract| contract.provider.as_str())
                 .collect::<Vec<_>>(),
-            vec!["claude", "codex", "grok", "kimi"],
+            // `shell` is the plain PTY provider (operator terminals and smoke tests).
+            vec!["shell", "claude", "codex", "grok", "kimi"],
         );
         assert!(adapters.iter().all(|contract| {
             !matches!(contract.family, AdapterFamily::Hook | AdapterFamily::ManagedHook)

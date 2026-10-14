@@ -1412,8 +1412,9 @@ mod tests {
     }
 
     fn run_git(root: &Path, arguments: &[&str]) {
+        // Test repos ignore the host's hooks (a global hooksPath may refuse test identities).
         let output = std::process::Command::new("git")
-            .arg("-C").arg(root).args(arguments).output().unwrap();
+            .arg("-C").arg(root).args(["-c", "core.hooksPath=/dev/null"]).args(arguments).output().unwrap();
         assert!(
             output.status.success(),
             "git {:?} failed: {}",
