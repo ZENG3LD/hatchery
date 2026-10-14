@@ -98,3 +98,8 @@ Typical env on core for hq-web:
 
 The operator opens `http://<edge-wg-op-vip>:18500/app/` after bringing up their WG peer.
 Core has no public subdomain. Keep tokens in `EnvironmentFile=` only.
+
+## Alpine/musl builds
+
+Static binaries: `deploy/build/build-musl.sh [-e env] pkg[:bin]...`.
+Uses `rust:alpine` (no Ubuntu). Output in `$OUT_DIR` (default `./dist-musl`).

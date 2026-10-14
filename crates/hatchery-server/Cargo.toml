@@ -36,6 +36,11 @@ gate4agent-node-protocol = { version = "0.5.2" }
 gate4agent-node-wire = { version = "0.5.2" }
 gate4agent-types = { version = "0.5.2" }
 
+# musl/Alpine builds: Alpine ships no static libdbus, so build it from source
+# (pulled transitively via m4a-agent -> keyring).
+[target.'cfg(target_env = "musl")'.dependencies]
+libdbus-sys = { version = "0.2", features = ["vendored"] }
+
 [features]
 # Full kit by default: there is no light mode.
 default = ["kit"]

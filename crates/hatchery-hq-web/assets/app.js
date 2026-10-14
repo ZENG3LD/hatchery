@@ -68,17 +68,68 @@ const visibleNodes = () => S.nodes.filter((n) => n.status !== 'revoked');
 const isGroup = (id) => chatKind(id) ? chatKind(id) === 'group' : id === '*' || String(id).startsWith('room:');
 // ---- sidebar: sessions only (m4a chats and PTY/agent sessions), each its own entry; no nodes here
 const allSessions = () => Object.entries(S.sessions).flatMap(([node, arr]) => arr.map((s) => ({ node, s })));
+// Sidebar layout (local only): pins, order, sections, hidden, unread, renames.
+const SB = (() => { try { return Object.assign({ pins: [], order: [], sections: {}, hidden: [], unread: [], names: {} }, JSON.parse(localStorage.getItem('hq.sidebar') || '{}')); } catch (_) { return { pins: [], order: [], sections: {}, hidden: [], unread: [], names: {} }; } })();
+const sbSave = () => { try { localStorage.setItem('hq.sidebar', JSON.stringify(SB)); } catch (_) {} };
+const sbToggle = (k, id, on) => { SB[k] = SB[k].filter((x) => x !== id); if (on) SB[k].unshift(id); sbSave(); renderSidebar(); };
 function renderSidebar() {
   const q = $('#search').value.toLowerCase(); const match = (n) => !q || n.toLowerCase().includes(q);
   const root = $('#chats'); root.innerHTML = '';
   const last = (id) => { const m = S.mail[id] || []; const l = m[m.length - 1]; return l ? l.body : ''; };
-  const item = (id, name, preview, active, onclick) => { if (!match(name)) return; const b = document.createElement('button'); b.className = 'chatitem' + (active ? ' on' : ''); b.title = name; b.innerHTML = avatar(id) + `<div class="t"><div class="n">${esc(name)}</div><div class="p">${esc(preview)}</div></div>`; b.onclick = () => { onclick(); document.body.classList.remove('sideopen'); }; root.appendChild(b); };
+  const rows = [];
   for (const { node, s: x } of allSessions().reverse()) {
     if (x.kind === 'browser') continue; // a browser is not a chat: it lives in its session's panel
-    item('pty:' + x.id, x.label || sessLabel(node, x), x.state === 'starting' ? 'starting…' : x.ended ? 'ended' : x._ws ? 'live' : 'reconnecting…', S.view === 'pty' && S.ptySession === x, () => openPty(node, x));
+    rows.push({ id: 'pty:' + x.id, copy: sessLabel(node, x), name: x.label || sessLabel(node, x), preview: x.state === 'starting' ? 'starting…' : x.ended ? 'ended' : x._ws ? 'live' : 'reconnecting…', active: S.view === 'pty' && S.ptySession === x, open: () => openPty(node, x), del: () => { stopSession(x); const a = S.sessions[node] || []; const i = a.indexOf(x); if (i >= 0) a.splice(i, 1); } });
   }
-  for (const c of S.chats || []) item(c.target, c.label, last(c.target) || '', S.view === 'chat' && S.chat === c.target, () => openChat(c.target));
+  for (const c of S.chats || []) rows.push({ id: c.target, copy: c.target, name: c.label, preview: last(c.target) || '', active: S.view === 'chat' && S.chat === c.target, open: () => openChat(c.target), del: null });
+  const rank = (r) => { const i = SB.order.indexOf(r.id); return i < 0 ? -1 : i; };
+  rows.sort((a, b) => { const pa = SB.pins.indexOf(a.id), pb = SB.pins.indexOf(b.id); if ((pa >= 0) !== (pb >= 0)) return pa >= 0 ? -1 : 1; if (pa >= 0) return pa - pb; return rank(a) - rank(b); });
+  const groups = new Map([['', []]]);
+  let hiddenN = 0;
+  for (const r of rows) { if (SB.hidden.includes(r.id)) { hiddenN++; continue; } r.name = SB.names[r.id] || r.name; if (!match(r.name)) continue; const sec = SB.pins.includes(r.id) ? '' : (SB.sections[r.id] || ''); if (!groups.has(sec)) groups.set(sec, []); groups.get(sec).push(r); }
+  for (const [sec, list] of groups) {
+    if (sec && list.length) { const h = document.createElement('div'); h.className = 'sbsec'; h.textContent = sec; root.appendChild(h); }
+    for (const r of list) {
+      const b = document.createElement('button'); b.className = 'chatitem' + (r.active ? ' on' : '') + (SB.unread.includes(r.id) ? ' unread' : ''); b.draggable = true; b.dataset.sid = r.id;
+      b.innerHTML = avatar(r.id) + `<div class="t"><div class="n">${SB.pins.includes(r.id) ? '<span class="pin">📌</span>' : ''}${esc(r.name)}</div><div class="p">${esc(r.preview)}</div></div>`;
+      b.onclick = () => { if (SB.unread.includes(r.id)) sbToggle('unread', r.id, false); r.open(); document.body.classList.remove('sideopen'); };
+      b.oncontextmenu = (e) => { e.preventDefault(); sbMenu(e.clientX, e.clientY, r); };
+      b.ondragstart = (e) => { e.dataTransfer.setData('text/plain', r.id); e.dataTransfer.effectAllowed = 'move'; };
+      b.ondragover = (e) => { e.preventDefault(); b.classList.add('dragover'); };
+      b.ondragleave = () => b.classList.remove('dragover');
+      b.ondrop = (e) => { e.preventDefault(); const from = e.dataTransfer.getData('text/plain'); if (from && from !== r.id) sbMove(from, r.id, rows); };
+      root.appendChild(b);
+    }
+  }
+  if (hiddenN) { const h = document.createElement('button'); h.className = 'sbhidden'; h.textContent = `Скрытые (${hiddenN}) — показать`; h.onclick = () => { SB.hidden = []; sbSave(); renderSidebar(); }; root.appendChild(h); }
 }
+function sbMove(from, to, rows) {
+  const ids = rows.map((r) => r.id); const cur = ids.filter((i) => i !== from); cur.splice(cur.indexOf(to), 0, from);
+  if (SB.pins.includes(to) !== SB.pins.includes(from)) { if (SB.pins.includes(to)) SB.pins.push(from); else SB.pins = SB.pins.filter((x) => x !== from); }
+  SB.pins = cur.filter((i) => SB.pins.includes(i)); SB.order = cur; if (SB.sections[to]) SB.sections[from] = SB.sections[to]; else delete SB.sections[from];
+  sbSave(); renderSidebar();
+}
+function sbMenu(x, y, r) {
+  document.querySelector('#sbmenu')?.remove();
+  const m = document.createElement('div'); m.id = 'sbmenu';
+  const pinned = SB.pins.includes(r.id), unread = SB.unread.includes(r.id);
+  const items = [['pin', pinned ? 'Открепить' : 'Закрепить'], ['section', 'Переместить в новый раздел'], ['unread', unread ? 'Отметить как прочитанное' : 'Отметить как непрочитанное'], ['rename', 'Переименовать'], ['copy', 'Копировать ID беседы'], ['hide', 'Скрыть из боковой панели'], ['del', 'Удалить']];
+  m.innerHTML = items.map(([k, l]) => `<button data-m="${k}"${k === 'del' ? ' class="red"' : ''}>${esc(l)}</button>`).join('');
+  document.body.appendChild(m);
+  const R = m.getBoundingClientRect(); m.style.left = Math.min(x, innerWidth - R.width - 8) + 'px'; m.style.top = Math.min(y, innerHeight - R.height - 8) + 'px';
+  const close = () => { m.remove(); document.removeEventListener('mousedown', out, true); };
+  const out = (e) => { if (!m.contains(e.target)) close(); }; setTimeout(() => document.addEventListener('mousedown', out, true), 0);
+  m.onclick = async (e) => { const k = e.target.dataset.m; if (!k) return; close();
+    if (k === 'pin') sbToggle('pins', r.id, !pinned);
+    else if (k === 'unread') sbToggle('unread', r.id, !unread);
+    else if (k === 'hide') sbToggle('hidden', r.id, true);
+    else if (k === 'section') { const n = prompt('Название раздела', SB.sections[r.id] || ''); if (n === null) return; if (n.trim()) SB.sections[r.id] = n.trim(); else delete SB.sections[r.id]; SB.pins = SB.pins.filter((i) => i !== r.id); sbSave(); renderSidebar(); }
+    else if (k === 'rename') { const n = prompt('Новое имя', r.name); if (n === null) return; if (n.trim()) SB.names[r.id] = n.trim(); else delete SB.names[r.id]; sbSave(); renderSidebar(); }
+    else if (k === 'copy') { try { await navigator.clipboard.writeText(r.copy); } catch (_) {} }
+    else if (k === 'del') { if (!confirm(`Удалить «${r.name}»?` + (r.del ? ' Сессия будет остановлена.' : ''))) return; if (r.del) r.del(); else SB.hidden.unshift(r.id); ['pins', 'unread', 'order'].forEach((f) => (SB[f] = SB[f].filter((i) => i !== r.id))); sbSave(); renderSidebar(); }
+  };
+}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelector('#sbmenu')?.remove(); });
 
 // ---- center view switching: chat | node | pty
 function showView(v) {
