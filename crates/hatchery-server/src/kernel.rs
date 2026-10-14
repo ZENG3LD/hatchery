@@ -84,6 +84,58 @@ impl Kernel {
 mod tests {
     use super::*;
 
+    fn auth(hex: char, now: u64) -> Value {
+        json!({
+            "operation_id": format!("hop_{}", hex.to_string().repeat(24)),
+            "idempotency_ref": format!("hidem_{}", hex.to_string().repeat(24)),
+            "actor_id": "operator",
+            "now_unix_ms": now,
+        })
+    }
+
+    fn task<'a>(snap: &'a Value, id: &str) -> &'a Value {
+        snap["engine"]["tasks"].as_array().unwrap().iter().find(|t| t["task_id"] == id).expect("task in snapshot")
+    }
+
+    #[test]
+    fn task_create_move_cancel_over_the_api() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut k = Kernel::open(dir.path()).unwrap();
+        let id = format!("htask_{}", "b".repeat(24));
+        let create = json!({
+            "authority": auth('1', 10), "task_id": id, "title": "Port the kernel",
+            "body": "hq-core owns tasks", "parent_task_id": null, "dependencies": [], "initial_state": "backlog",
+        });
+        k.call("POST", &["tasks"], &create).unwrap();
+        // Same operation replays idempotently.
+        k.call("POST", &["tasks"], &create).unwrap();
+        let snap = k.call("GET", &["snapshot"], &Value::Null).unwrap();
+        assert_eq!(task(&snap, &id)["state"], "backlog");
+        let rev = task(&snap, &id)["revision"].clone();
+
+        k.call("POST", &["tasks", "move"], &json!({
+            "authority": auth('2', 20), "task_id": id, "expected_revision": rev, "state": "ready",
+        })).unwrap();
+        let snap = k.call("GET", &["snapshot"], &Value::Null).unwrap();
+        assert_eq!(task(&snap, &id)["state"], "ready");
+        let rev2 = task(&snap, &id)["revision"].clone();
+        assert_ne!(rev, rev2);
+
+        // Stale revision is refused.
+        let stale = k.call("POST", &["tasks", "cancel"], &json!({
+            "authority": auth('3', 30), "task_id": id, "expected_revision": rev,
+        }));
+        assert_eq!(stale.unwrap_err().status, 409);
+        k.call("POST", &["tasks", "cancel"], &json!({
+            "authority": auth('4', 40), "task_id": id, "expected_revision": rev2,
+        })).unwrap();
+        drop(k);
+        // Durable across reopen.
+        let mut k = Kernel::open(dir.path()).unwrap();
+        let snap = k.call("GET", &["snapshot"], &Value::Null).unwrap();
+        assert_eq!(task(&snap, &id)["state"], "cancelled");
+    }
+
     #[test]
     fn opens_empty_kernel_and_reads_snapshot() {
         let dir = tempfile::tempdir().unwrap();
