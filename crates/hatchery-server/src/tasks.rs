@@ -154,6 +154,11 @@ impl TaskStore {
                session_id TEXT PRIMARY KEY, node_id TEXT NOT NULL, provider TEXT NOT NULL,
                workspace_id TEXT, role TEXT, state TEXT NOT NULL,
                created_at_ms INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS signals (
+               id INTEGER PRIMARY KEY AUTOINCREMENT, node_id TEXT NOT NULL, workspace_id TEXT NOT NULL,
+               instance_id INTEGER NOT NULL, provider TEXT NOT NULL, kind TEXT NOT NULL, hint TEXT,
+               at_ms INTEGER NOT NULL);
+             CREATE INDEX IF NOT EXISTS signals_node ON signals(node_id, id);
              CREATE TABLE IF NOT EXISTS ops (
                op_id TEXT PRIMARY KEY, result TEXT NOT NULL, at_ms INTEGER NOT NULL);",
         )
@@ -417,6 +422,64 @@ impl TaskStore {
     }
 }
 
+#[derive(Clone, Debug, Serialize, Eq, PartialEq)]
+pub struct SessionSignal {
+    pub id: i64,
+    pub node_id: String,
+    pub workspace_id: String,
+    pub instance_id: i64,
+    pub provider: String,
+    /// `limit` | `login_required` | `ready`
+    pub kind: String,
+    pub hint: Option<String>,
+    pub at_ms: u64,
+}
+
+pub const SIGNAL_KINDS: &[&str] = &["limit", "login_required", "ready"];
+const MAX_SIGNALS: i64 = 5000;
+
+impl TaskStore {
+    /// Record a short session signal from a node (state changes only; bounded table).
+    pub fn add_signal(&self, node_id: &str, workspace_id: &str, instance_id: i64, provider: &str, kind: &str, hint: Option<&str>) -> Result<Result<SessionSignal, Refused>, ServerError> {
+        if !SIGNAL_KINDS.contains(&kind) {
+            return Ok(Err(Refused::Invalid("unknown signal kind")));
+        }
+        let hint = hint.map(|h| h.chars().filter(|c| !c.is_control()).take(160).collect::<String>());
+        self.conn
+            .execute(
+                "INSERT INTO signals (node_id,workspace_id,instance_id,provider,kind,hint,at_ms) VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                params![node_id, workspace_id, instance_id, provider, kind, hint, unix_ms()],
+            )
+            .map_err(db)?;
+        let id = self.conn.last_insert_rowid();
+        self.conn.execute("DELETE FROM signals WHERE id <= ?1", params![id - MAX_SIGNALS]).map_err(db)?;
+        Ok(Ok(self.signals(None, Some(id - 1), 1)?.remove(0)))
+    }
+
+    /// Signals after `after_id` (oldest first), optionally for one node.
+    pub fn signals(&self, node: Option<&str>, after_id: Option<i64>, limit: i64) -> Result<Vec<SessionSignal>, ServerError> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id,node_id,workspace_id,instance_id,provider,kind,hint,at_ms FROM signals WHERE (?1 IS NULL OR node_id=?1) AND id>?2 ORDER BY id LIMIT ?3")
+            .map_err(db)?;
+        let rows = stmt
+            .query_map(params![node, after_id.unwrap_or(0), limit.clamp(1, 500)], |r| {
+                Ok(SessionSignal {
+                    id: r.get(0)?,
+                    node_id: r.get(1)?,
+                    workspace_id: r.get(2)?,
+                    instance_id: r.get(3)?,
+                    provider: r.get(4)?,
+                    kind: r.get(5)?,
+                    hint: r.get(6)?,
+                    at_ms: r.get::<_, i64>(7)? as u64,
+                })
+            })
+            .map_err(db)?;
+        rows.collect::<Result<_, _>>().map_err(db)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -498,6 +561,17 @@ mod tests {
         assert_eq!((r.status.as_str(), r.closed_by.as_deref()), ("failed", Some("operator")));
         assert_eq!(s.get(t.id).unwrap().unwrap().status, "failed");
         assert_eq!(s.runs(t.id).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn signals_store_and_page() {
+        let s = TaskStore::in_memory().unwrap();
+        assert_eq!(s.add_signal("a", "w", 1, "claude", "bogus", None).unwrap().unwrap_err(), Refused::Invalid("unknown signal kind"));
+        let x = s.add_signal("a", "w", 1, "claude", "limit", Some("resets 3pm\x1b")).unwrap().unwrap();
+        assert_eq!(x.hint.as_deref(), Some("resets 3pm"));
+        s.add_signal("b", "w", 2, "codex", "ready", None).unwrap().unwrap();
+        assert_eq!(s.signals(Some("a"), None, 10).unwrap().len(), 1);
+        assert_eq!(s.signals(None, Some(x.id), 10).unwrap()[0].node_id, "b");
     }
 
     #[test]

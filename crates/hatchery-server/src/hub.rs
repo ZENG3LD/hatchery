@@ -132,8 +132,22 @@ impl Hub {
                 let changed = self.tasks.lock().expect("tasks").set_status(id, status, Some(node_id)).map_err(|e| HubError::new(500, e.to_string()))?;
                 if changed { Ok(json!({ "ok": true })) } else { Err(HubError::new(403, "refused")) }
             }
+            // Short limit / login / ready signal read off a session screen by the node.
+            "task.session_signal" => {
+                let instance = payload.get("instance_id").and_then(Value::as_i64).ok_or_else(|| HubError::new(400, "missing field: instance_id"))?;
+                let sig = self
+                    .tasks
+                    .lock()
+                    .expect("tasks")
+                    .add_signal(node_id, str_field(payload, "workspace_id")?, instance, str_field(payload, "provider")?, str_field(payload, "kind")?, opt_str(payload, "hint"))
+                    .map_err(int)?
+                    .map_err(refused)?;
+                tracing::info!(node = node_id, provider = %sig.provider, kind = %sig.kind, "session signal");
+                Ok(json!({ "signal_id": sig.id }))
+            }
             // The run's own session closes it (decision 8); the run must live on this node.
-            "run.close" => {
+            // `task.close_run` is the door-facing name; `run.close` is kept as an alias.
+            "task.close_run" | "run.close" => {
                 let run_id = payload.get("run_id").and_then(Value::as_i64).ok_or_else(|| HubError::new(400, "missing field: run_id"))?;
                 let tasks = self.tasks.lock().expect("tasks");
                 let run = tasks.run(run_id).map_err(int)?.ok_or_else(|| HubError::new(404, "not found"))?;
@@ -221,6 +235,12 @@ impl Hub {
                     .map_err(int)?
                     .map_err(refused)?;
                 Ok(json!({ "run": run }))
+            }
+            ("GET", ["v1", "signals"]) => {
+                let after = query_param(query, "after").and_then(|v| v.parse().ok());
+                let limit = query_param(query, "limit").and_then(|v| v.parse().ok()).unwrap_or(100);
+                let signals = self.tasks.lock().expect("tasks").signals(query_param(query, "node"), after, limit).map_err(int)?;
+                Ok(json!({ "signals": signals }))
             }
             ("GET", ["v1", "sessions"]) => {
                 let sessions = self.tasks.lock().expect("tasks").sessions(query_param(query, "node")).map_err(int)?;

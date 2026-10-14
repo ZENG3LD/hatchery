@@ -667,6 +667,29 @@ async fn main() {
             let door_hint = format!("http://{listen}/door");
             tokio::spawn(node_mail_wake(calls.clone(), std::sync::Arc::clone(&policy), seen, door_hint));
         }
+        // Short session signals (limit / login / ready) to core over the node-call channel.
+        let (sig_tx, mut sig_rx) = tokio::sync::mpsc::unbounded_channel();
+        hatchery_node::session_signals::set_sink(sig_tx);
+        let sig_calls = calls.clone();
+        tokio::spawn(async move {
+            while let Some(out) = sig_rx.recv().await {
+                let hint = match &out.signal {
+                    hatchery_node::session_signals::Signal::Limit { hint } => Some(hint.clone()),
+                    _ => None,
+                };
+                let payload = serde_json::json!({
+                    "workspace_id": out.workspace,
+                    "instance_id": out.instance,
+                    "provider": out.provider,
+                    "kind": out.signal.kind(),
+                    "hint": hint,
+                });
+                match sig_calls.call("task.session_signal", &payload).await {
+                    Ok(_) => tracing::info!(provider = %out.provider, kind = out.signal.kind(), "session signal sent"),
+                    Err(e) => tracing::warn!(error = ?e, kind = out.signal.kind(), "session signal not delivered"),
+                }
+            }
+        });
         tokio::spawn(hatchery_node::door::serve(listener, calls, wake));
     } else if door_listen.is_some() || door_c2.is_some() {
         fail("--door-listen and --door-c2 need each other and --enrolled");

@@ -84,6 +84,7 @@ impl NodeWake {
         let wake = WakeLetter { body: &letter.body, from_nick: &letter.from, event_id: &letter.event_id, room: None };
         match plan_hosted_wake(&sessions, &letter.nick, &wake) {
             HostedWake::Submit { nick, prompt } => {
+                let prompt = if self.policy.deliver_body { prompt } else { crate::wake_pipeline::wake_line(&letter.from, &letter.event_id) };
                 let address = addresses.get(&nick).cloned().ok_or("session vanished")?;
                 let agent = self.shared.validate_address(&address).map_err(|_| "session is not live".to_owned())?;
                 let refused = |e: NodeFailure| {

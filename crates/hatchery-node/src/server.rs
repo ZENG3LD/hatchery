@@ -11001,6 +11001,12 @@ impl NodeShared {
                     return None;
                 }
                 let frame = session.terminal_frame.clone()?;
+                crate::session_signals::feed(
+                    binding.workspace_id.as_str(),
+                    session.instance_id.0,
+                    session.agent_id.as_str(),
+                    &frame.contents,
+                );
                 Some((
                     SessionAddress {
                         workspace_id: binding.workspace_id.clone(),

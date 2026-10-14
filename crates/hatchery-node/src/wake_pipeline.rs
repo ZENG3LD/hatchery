@@ -72,6 +72,17 @@ pub struct WakePolicy {
     /// host action is off.
     #[serde(default)]
     pub node_mail_to: Option<String>,
+    /// Put the letter text into the session turn. Off by default: a live session gets only a
+    /// short wake line naming the sender and event, and reads the letter itself through m4a
+    /// (task data travels only via m4a; the wake is a signal).
+    #[serde(default)]
+    pub deliver_body: bool,
+}
+
+/// The wake line a live session gets instead of the letter text.
+pub fn wake_line(from: &str, event_id: &str) -> String {
+    let safe = |s: &str| s.chars().filter(|c| !c.is_control()).take(80).collect::<String>();
+    format!("[m4a] New letter from {} (event {}). Read it from your m4a inbox and act on it.", safe(from), safe(event_id))
 }
 
 impl WakePolicy {
@@ -340,6 +351,19 @@ pub fn node_mail_tick(policy: &WakePolicy, seen: &mut MailSeen, inbox: &Value, d
 }
 
 #[cfg(test)]
+mod wake_line_tests {
+    use super::*;
+
+    #[test]
+    fn wake_line_carries_no_body_and_no_controls() {
+        let l = wake_line("ops\n\x1b[2J", "ev-1");
+        assert!(l.contains("ops") && l.contains("ev-1") && !l.contains('\n') && !l.contains('\x1b'));
+        let p: WakePolicy = serde_json::from_str("{}").unwrap();
+        assert!(!p.deliver_body);
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -359,6 +383,7 @@ mod tests {
                 SpawnProfile { provider: "kimi".into(), command: vec!["true".into()], cwd: None },
             )].into(),
             node_mail_to: Some("web-bot".into()),
+            deliver_body: false,
         }
     }
 
