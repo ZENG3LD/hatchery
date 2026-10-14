@@ -49,9 +49,8 @@ range; dig2browser is told the base URL so "Open" lands on the right port.
 
 ## Candidate crates (survey)
 
-Checked on this box under `/workspace/tesserax-maint` and dig2browser; GitHub
-API listing for `ZENG3LD` was not available from this agent (SCM not
-connected). Findings:
+Checked on this box under the local `tesserax-maint` checkout (ZENG3LD's own
+lightweight server primitives) and dig2browser. Findings:
 
 ### Prefer as a dependency: `tesserax-http` (+ `tesserax`)
 
@@ -88,10 +87,23 @@ connected). Findings:
 | **B. Tiny in-tree `hatchery-local-http`** (axum + tower-http `ServeDir` only) | Minimal deps, OSS-agnostic story stays simple | Duplicates what tesserax-http already does well |
 | **C. Shell out to `python -m http.server` / caddy** | Fast to prototype | Breaks the "Rust servers shipped with d2b" goal; weaker lifecycle/isolation |
 
-**Recommendation:** start with **A** for `kind=static` (and a documented
-`kind=http` that launches a user binary with a fixed env/`PORT`). Fall back
-to **B** only if the tesserax feature cut is too heavy for the node binary
-budget. Avoid **C** except as a temporary spike.
+**Decision: A — depend on `tesserax-http` (ZENG3LD's own lightweight server
+primitives).** `kind=static` uses `with_static_dir`; `kind=http` launches a
+user binary with a fixed `PORT` env. Option B remains a fallback only if the
+feature cut is too heavy for the node binary budget. Avoid C except as a spike.
+
+### Current usage in m4a / hatchery / g4a (read-only survey)
+
+On this box, `Cargo.toml` / `Cargo.lock` under hatchery, mail4agent, and
+gate4agent were scanned for `tesserax`:
+
+- **hatchery:** not a dependency today.
+- **mail4agent:** uses `tesserax-store` (and related pins) for product/example
+  surfaces — not `tesserax-http` yet.
+- **gate4agent / g4a:** not a dependency today.
+
+So the session-local pool would be the first hatchery/node consumer of
+`tesserax-http`; mail4agent already trusts the tesserax family via store.
 
 ## Lifecycle sketch
 
