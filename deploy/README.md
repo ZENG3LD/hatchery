@@ -7,15 +7,24 @@ environment files outside the units (`EnvironmentFile=`), readable only by the s
 
 ## Roles
 
-- **Edge (public host): `hatchery-c2` only.** C2 is a restreamer, not part of the server.
-  Nodes connect to it; it holds no keys of core, makes no decisions, and does not parse the
-  g4a protocol. It sees envelopes (event number, recipient, opaque bytes) and keeps a bounded
-  replay buffer. A reverse proxy (for example Caddy) may serve a static landing page.
-  Enrollment is plain TCP on a dedicated port at `enroll.<your-domain>` (DNS only, not proxied).
-- **Core (private host): `hatchery-server`** (registry, rights and crypto, tasks, vault,
-  provisioning, policy, harness). Core has no public listener.
-- **HQ web / TUI** is a client of core. It runs on the operator's own machine and keeps only
-  UI state.
+- **Edge (public host): `hatchery-c2` only.** C2 is an opaque byte restreamer for node (g4a)
+  and messenger (m4a) traffic, not part of the server. Nodes connect to it; it holds no keys
+  of core, makes no decisions, and does not parse the g4a protocol. It sees envelopes (event
+  number, recipient, opaque bytes) and keeps a bounded replay buffer. A reverse proxy (for
+  example Caddy) terminates public TLS, may serve a static landing page, and forwards the
+  operator HQ site to core (see "Plane split"). Enrollment uses `enroll.<your-domain>`.
+  **The edge stays light:** no keys of core, no backups (not even encrypted), no HQ web, no
+  operator messenger client. Treat it as the most exposed host.
+- **Core (private host, no public listener):**
+  - `hatchery-server` (registry, rights and crypto, tasks filtered by role, vault,
+    provisioning, policy, harness);
+  - `hatchery-hq-web` (operator web UI, listens on loopback);
+  - the operator's messenger client (an m4a client daemon holding the operator identity,
+    reached by hq-web through a local socket);
+  - the m4a messenger server.
+  Agent memory is not kept on core; it lives on the node.
+- **Operator device:** only a browser. The operator never runs WireGuard or any agent on it.
+- **Backups** live on core or on a separate operator box, never on the edge.
 
 ## Direction of traffic: core drains C2
 
@@ -50,8 +59,9 @@ and drains it:
    and point it at the C2 drain address on the tunnel.
 4. Nodes: see `crates/hatchery-node/deploy/node/README.md`; they enroll at
    `enroll.<your-domain>` and only ever talk to C2.
-5. Operator: run HQ locally and reach core through SSH port or socket forwards. Tokens stay in
-   the HQ process environment, never in files in the repo.
+5. Core: install `hatchery-hq-web` on loopback and the operator m4a client next to it.
+   On the edge, add a reverse-proxy site that authenticates the operator and forwards to the
+   operator stream (see "Plane split"). Tokens stay in `EnvironmentFile=`, never in the repo.
 
 ## Environment variables
 
@@ -80,26 +90,51 @@ Landing pages, if wanted, live in `site/` and can be served by the edge reverse 
 `HATCHERY_HQ_M4A_SERVER`, `HATCHERY_HQ_C2_API`, `HATCHERY_HQ_C2_CONTROL` (hq-web) and `HATCHERY_ENROLL_ADDR` (node `enroll`/`call`/`build` when `--c2-enroll` is absent) are read at runtime first; if unset, a value present in the environment of `cargo build` is used (`option_env!`). Keep your values in a private env file outside the repo and source it before building. Tokens and keys are never baked; crates.io builds contain no values.
 
 
-## Operator WireGuard path (HQ on core)
+## Plane split: data plane and control plane
 
-HQ web runs on core (loopback). The operator device joins a dedicated WireGuard
-interface on the edge (`wg-op`); the edge only forwards opaque TCP to core over the
-existing core↔edge tunnel. Nodes stay on their own WG interface and only talk to C2.
+Two separate streams pass through the same edge, each on its own WireGuard interface between
+edge and core:
 
-Typical env on core for hq-web:
+- **Data plane:** nodes ↔ C2 ↔ core drain (above).
+- **Control plane:** operator → core. The edge does not interpret this traffic; it forwards
+  opaque TCP from a loopback listener to hq-web on core over its own tunnel.
 
-| Variable | Meaning |
-|---|---|
-| `HATCHERY_HQ_LISTEN` | `127.0.0.1:18500` |
-| `HATCHERY_HQ_C2_API` | C2 API via the core→edge tunnel address |
-| `HATCHERY_HQ_C2_CONTROL` | core operator control socket on the same host |
-| `HATCHERY_HQ_SERVER` | local hatchery-server control |
-| `HATCHERY_HQ_PUBLIC_HOSTS` | edge operator VIP `host:port` (Host header the opaque proxy does not rewrite) |
+Public path for the operator:
 
-The operator opens `http://<edge-wg-op-vip>:18500/app/` after bringing up their WG peer.
-Core has no public subdomain. Keep tokens in `EnvironmentFile=` only.
+```
+browser ──HTTPS──> edge reverse proxy (TLS + passkey / auth gate)
+                   └─> loopback opaque TCP forwarder on edge (e.g. 127.0.0.1:18500)
+                       └─> WireGuard (control-plane interface) ──> core hatchery-hq-web
+```
 
-## Alpine/musl builds
+Core has no public subdomain and no public listener. The operator never joins WireGuard from
+their own device. Terminating the inner node↔core Noise layer on the edge is not supported.
 
-Static binaries: `deploy/build/build-musl.sh [-e env] pkg[:bin]...`.
-Uses `rust:alpine` (no Ubuntu). Output in `$OUT_DIR` (default `./dist-musl`).
+Links opened from a node's PTY must not open in the operator's own browser: HQ opens them in
+the node's own browser, restreamed into HQ, so the operator's browser never fetches them.
+
+### Environment for hq-web (core)
+
+| Variable | Required | Meaning |
+|---|---|---|
+| `HATCHERY_HQ_LISTEN` | no | listen address, loopback (e.g. `127.0.0.1:18500`) |
+| `HATCHERY_HQ_BASE_PATH` | no | asset prefix behind a reverse proxy, e.g. `/app` |
+| `HATCHERY_HQ_PUBLIC_HOSTS` | no | Host header values accepted from the edge proxy (`host[:port]`, comma separated) |
+| `HATCHERY_HQ_C2_API` | yes | C2 API address via the core→edge tunnel |
+| `HATCHERY_HQ_C2_CONTROL` | yes | core operator control socket on the same host |
+| `HATCHERY_HQ_C2_TOKEN` (or `GATE4AGENT_C2_TOKEN`) | yes | C2 operator token; env file only |
+| `HATCHERY_HQ_SERVER` | no | local hatchery-server control endpoint |
+| `HATCHERY_HQ_BIDI` | no | port of the bidirectional relay, if used |
+| `HATCHERY_HQ_LIBRARY` | no | path to the session library |
+| `HATCHERY_HQ_STATE_DIR` | no | directory for the operator's sent-message journal |
+| `HATCHERY_HQ_CHATS` | no | sidebar chats: `label=node-id` or `label=room:NAME`, comma separated |
+| `HATCHERY_HQ_M4A_SERVER` | for m4a | messenger server name; m4a profile and DM return 503 when unset |
+| `HATCHERY_HQ_M4A_CLI`, `HATCHERY_HQ_M4A_AS`, `HATCHERY_HQ_M4A_SOCK` | for m4a | operator m4a client binary, nick and local socket (all three or none) |
+| `HATCHERY_HQ_M4A_GROUPS` | no | group rooms shown in HQ, comma separated |
+
+## Builds: Alpine/musl only
+
+Static binaries are built with `deploy/build/build-musl.sh` inside `rust:alpine`; see
+`deploy/build/README.md`. The binaries run on any Linux host (edge, core, Alpine QEMU guests)
+regardless of glibc. Do not use Ubuntu-based builders. If a dependency fails under musl, fix it
+inside Alpine (static packages, vendored features) rather than switching distributions.

@@ -11,19 +11,16 @@
 #   --build-arg INSTALL_PROVIDER_CLIS=1 --build-arg PROVIDER_CLI_INSTALL='...'
 # The service unit (mode 1) does not install them.
 
-FROM rust:bookworm AS build
+FROM rust:alpine AS build
+RUN apk add --no-cache musl-dev pkgconf openssl-dev openssl-libs-static sqlite-dev sqlite-static perl make cmake clang git linux-headers
+ENV OPENSSL_STATIC=1 PKG_CONFIG_ALL_STATIC=1
 WORKDIR /src
 COPY hatchery /src/hatchery
 WORKDIR /src/hatchery
 RUN cargo build --locked --release -p hatchery-node
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        iproute2 \
-        wireguard-tools \
-        libssl3 \
-    && rm -rf /var/lib/apt/lists/*
+FROM alpine:3
+RUN apk add --no-cache ca-certificates iproute2 wireguard-tools bash curl
 COPY --from=build /src/hatchery/target/release/gate4agent-node /usr/local/bin/gate4agent-node
 COPY hatchery/crates/hatchery-node/deploy/node/install-provider-clis.sh /usr/local/sbin/install-provider-clis
 COPY hatchery/crates/hatchery-node/deploy/node/gate4agent-node.service /etc/systemd/system/gate4agent-node.service
