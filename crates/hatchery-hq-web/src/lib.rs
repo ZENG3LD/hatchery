@@ -615,6 +615,7 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     let started = std::time::Instant::now();
     let now_ms = move || started.elapsed().as_millis() as u64;
     let id_token = format!("\"instance_id\":{instance_id}");
+    let mut last_size: Option<(u16, u16)> = None;
     loop {
         tokio::select! {
             event = events.recv() => {
@@ -656,7 +657,16 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
                 let mut requests: Vec<NodeRequest> = match cmd["t"].as_str() {
                     Some("data") => cmd["data"].as_str().map(|d| chunks(d.as_bytes().to_vec())).unwrap_or_default(),
                     Some("prompt") => cmd["text"].as_str().map(|d| chunks(format!("{d}\r").into_bytes())).unwrap_or_default(),
-                    Some("resize") => vec![NodeRequest::Resize { session: session.clone(), size: TerminalSize { rows: cmd["rows"].as_u64().unwrap_or(30) as u16, columns: cmd["cols"].as_u64().unwrap_or(110) as u16 } }],
+                    Some("resize") => {
+                        // Clamp and dedupe: a fit oscillation in the client used to flood the
+                        // single operator control with Resize requests until it dropped.
+                        let rows = cmd["rows"].as_u64().unwrap_or(30).clamp(5, 300) as u16;
+                        let cols = cmd["cols"].as_u64().unwrap_or(110).clamp(20, 500) as u16;
+                        if last_size == Some((rows, cols)) { Vec::new() } else {
+                            last_size = Some((rows, cols));
+                            vec![NodeRequest::Resize { session: session.clone(), size: TerminalSize { rows, columns: cols } }]
+                        }
+                    }
                     Some("stop") => vec![NodeRequest::Stop { session: session.clone(), force: true }],
                     _ => Vec::new(),
                 };

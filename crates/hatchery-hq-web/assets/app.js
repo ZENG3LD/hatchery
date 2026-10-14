@@ -480,7 +480,12 @@ term.attachCustomKeyEventHandler((e) => {
 function refit() {
   if (S.view !== 'pty' || S.ptyLayout !== 'native') return;
   try { fit.fit(); } catch (_) { return; }
-  if (term.cols !== S.sentCols || term.rows !== S.sentRows) { S.sentCols = term.cols; S.sentRows = term.rows; tsend({ t: 'resize', cols: term.cols, rows: term.rows }); if (S.panel && S.tab === 'info') renderInfo(); }
+  if (term.cols < 20 || term.rows < 5) return;
+  if (term.cols !== S.sentCols || term.rows !== S.sentRows) {
+    // Throttle: at most one resize per 400ms; the last size wins.
+    const now = Date.now(); if (now - (S.lastResizeAt || 0) < 400) { clearTimeout(S.resizeT); S.resizeT = setTimeout(refit, 420); return; }
+    S.lastResizeAt = now; S.sentCols = term.cols; S.sentRows = term.rows; tsend({ t: 'resize', cols: term.cols, rows: term.rows }); if (S.panel && S.tab === 'info') renderInfo();
+  }
 }
 let fitT = 0; const refitSoon = () => { clearTimeout(fitT); fitT = setTimeout(refit, 60); };
 new ResizeObserver(refitSoon).observe($('.termwrap')); window.addEventListener('resize', refitSoon);
@@ -630,7 +635,6 @@ function reattachDialog(node) {
 }
 function stopSession(sess) { tsend({ t: 'stop' }, sess); }
 function openPty(node, sess) {
-  hideBrowserOverlay(false);
   $('#terminal').style.display = '';
   showView('pty'); S.sessionNode = node; S.ptySession = sess;
   const lbl = sess.label || sessLabel(node, sess);
@@ -724,38 +728,35 @@ function startBrowser(node, url) {
   const sess = { provider: 'browser', key: 'br-' + id, id, live: false, kind: 'browser', url: url || 'https://example.org/' };
   recordSession(node, sess); openBrowser(node, sess); renderSidebar();
 }
-function browserWin() {
-  let w = $('#bwin'); if (w) return w;
-  w = document.createElement('div'); w.id = 'bwin'; w.className = 'bwin';
-  w.innerHTML = `<div class="bwbar"><span class="bwgrip" title="Drag">⠿</span><input id="bwurl" placeholder="https://…"><span id="bwmeta" class="sub"></span><button class="ibtn" id="bwmin" title="Minimize">–</button><button class="ibtn" id="bwclose" title="Close (stop)">✕</button></div><canvas id="bwcanvas" tabindex="0"></canvas><div class="bwrz" title="Resize"></div>`;
+function browserDrawer() {
+  let w = $('#bdrawer'); if (w) return w;
+  w = document.createElement('div'); w.id = 'bdrawer'; w.className = 'bdrawer off';
+  w.innerHTML = `<div class="bdbar"><input id="bdurl" placeholder="https://…" title=""><button class="ibtn" id="bdsize" title="Expand">⤢</button><button class="ibtn" id="bdhide" title="Hide">›</button><button class="ibtn" id="bdclose" title="Close browser">✕</button></div><canvas id="bdcanvas" tabindex="0"></canvas>`;
   document.body.appendChild(w);
-  const saved = JSON.parse(localStorage.getItem('hq.bwin') || 'null');
-  if (saved) Object.assign(w.style, saved); else { w.style.top = '64px'; w.style.right = '24px'; w.style.width = '720px'; }
-  const save = () => localStorage.setItem('hq.bwin', JSON.stringify({ top: w.style.top, left: w.style.left, right: w.style.right, width: w.style.width }));
-  // Drag by title bar.
-  w.querySelector('.bwbar').addEventListener('pointerdown', (e) => {
-    if (e.target.closest('input,button')) return; const r = w.getBoundingClientRect(); const ox = e.clientX - r.left, oy = e.clientY - r.top;
-    const mv = (ev) => { w.style.left = Math.max(0, Math.min(innerWidth - 80, ev.clientX - ox)) + 'px'; w.style.top = Math.max(0, Math.min(innerHeight - 40, ev.clientY - oy)) + 'px'; w.style.right = 'auto'; };
-    const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); save(); };
-    addEventListener('pointermove', mv); addEventListener('pointerup', up);
-  });
-  // Resize by width; height follows the frame aspect.
-  w.querySelector('.bwrz').addEventListener('pointerdown', (e) => {
-    e.preventDefault(); const r = w.getBoundingClientRect(); const sx = e.clientX, sw = r.width;
-    if (w.style.right !== 'auto') { w.style.left = r.left + 'px'; w.style.right = 'auto'; }
-    const mv = (ev) => { w.style.width = Math.max(320, Math.min(innerWidth - 20, sw + ev.clientX - sx)) + 'px'; };
-    const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); save(); };
-    addEventListener('pointermove', mv); addEventListener('pointerup', up);
-  });
-  $('#bwmin').onclick = () => { w.classList.toggle('min'); };
+  const tab = document.createElement('button'); tab.id = 'bdtab'; tab.className = 'bdtab'; tab.textContent = '◧ Browser'; tab.hidden = true; document.body.appendChild(tab);
+  tab.onclick = () => showBrowserDrawer(true);
+  $('#bdhide').onclick = () => showBrowserDrawer(false);
+  $('#bdsize').onclick = () => setBrowserBig(!w.classList.contains('big'));
+  addEventListener('resize', () => fitBrowser());
   return w;
 }
-function hideBrowserOverlay(stop) { const w = $('#bwin'); if (w) w.hidden = true; if (stop && S.browserSession && S.browserSession._ws) { try { S.browserSession._ws.send(JSON.stringify({ t: 'stop' })); S.browserSession._ws.close(); } catch (_) {} } }
+// Mini: drawer width 400. Big: largest size that fits the center area at the frame's aspect.
+function fitBrowser() {
+  const w = $('#bdrawer'); if (!w) return; const s = S.browserSession || {}; const vw = s.vw || 1280, vh = s.vh || 720;
+  if (w.classList.contains('big')) { const aw = innerWidth - 120, ah = innerHeight - 64 - 24 - 32; w.style.width = Math.max(320, Math.min(aw, ah * vw / vh)) + 'px'; }
+  else w.style.width = Math.min(400, innerWidth * 0.92) + 'px';
+}
+function setBrowserBig(big) { const w = browserDrawer(); w.classList.toggle('big', big); $('#bdsize').textContent = big ? '⤡' : '⤢'; $('#bdsize').title = big ? 'Collapse to drawer' : 'Expand'; localStorage.setItem('hq.bbig', big ? '1' : ''); fitBrowser(); }
+function showBrowserDrawer(on) { const w = browserDrawer(); w.classList.toggle('off', !on); $('#bdtab').hidden = on || !S.browserSession; if (on) fitBrowser(); }
+function hideBrowserOverlay(stop) {
+  if (!$('#bdrawer')) return; showBrowserDrawer(false);
+  if (stop && S.browserSession) { const s = S.browserSession; if (s._ws) { try { s._ws.send(JSON.stringify({ t: 'stop' })); s._ws.close(); } catch (_) {} } S.browserSession = null; $('#bdtab').hidden = true; }
+}
 function openBrowser(node, sess) {
   S.browserSession = sess; S.browserNode = node;
-  const w = browserWin(); w.hidden = false; w.classList.remove('min');
-  const canvas = $('#bwcanvas'); const ctx = canvas.getContext('2d');
-  $('#bwurl').value = sess.url || '';
+  browserDrawer(); setBrowserBig(localStorage.getItem('hq.bbig') === '1'); showBrowserDrawer(true);
+  const canvas = $('#bdcanvas'); const ctx = canvas.getContext('2d');
+  $('#bdurl').value = sess.url || '';
   if (sess.lastBmp) { canvas.width = sess.lastBmp.width; canvas.height = sess.lastBmp.height; ctx.drawImage(sess.lastBmp, 0, 0); }
   const bsend = (o) => { const ws = S.browserSession && S.browserSession._ws; if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
   if (!sess._ws || sess._ws.readyState > 1) {
@@ -765,26 +766,31 @@ function openBrowser(node, sess) {
       if (typeof m.data === 'string') {
         const d = JSON.parse(m.data);
         if (d.type === 'spawned') { sess.key = d.session; sess.live = true; renderSidebar(); }
-        if (d.type === 'started' || d.type === 'frame_info') { if (d.url) { sess.url = d.url; if (S.browserSession === sess && document.activeElement !== $('#bwurl')) $('#bwurl').value = d.url; } if (S.browserSession === sess) $('#bwmeta').textContent = d.title || ''; }
+        if (d.type === 'frame_info' && d.w && d.h) { const ch = d.w !== sess.vw || d.h !== sess.vh; sess.vw = d.w; sess.vh = d.h; if (ch && S.browserSession === sess) fitBrowser(); }
+        if (d.type === 'started' || d.type === 'frame_info') { if (d.url) { sess.url = d.url; if (S.browserSession === sess && document.activeElement !== $('#bdurl')) { $('#bdurl').value = d.url; $('#bdurl').title = d.title || d.url; } } }
         if (d.type === 'error') toast('browser: ' + d.text);
         if (d.type === 'stopped') { sess.live = false; endSession(node, sess); }
         return;
       }
       const bmp = await createImageBitmap(m.data); sess.lastBmp = bmp;
       if (S.browserSession !== sess) return;
-      if (canvas.width !== bmp.width || canvas.height !== bmp.height) { canvas.width = bmp.width; canvas.height = bmp.height; }
-      ctx.drawImage(bmp, 0, 0); window.browserFrames = (window.browserFrames || 0) + 1;
+      // Draw at the frame's logical size so a downscaled JPEG still fills exactly.
+      const W = sess.vw || bmp.width, H = sess.vh || bmp.height;
+      if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+      ctx.drawImage(bmp, 0, 0, W, H); window.browserFrames = (window.browserFrames || 0) + 1;
     };
     ws.onclose = () => { if (sess._ws === ws) { sess._ws = null; if (!sess.live) dropSession(node, sess); else endSession(node, sess); } };
   }
-  // Input maps through the canvas's own scale: CSS size → frame pixels, any window size.
-  const pos = (e) => { const r = canvas.getBoundingClientRect(); return { x: Math.round((e.clientX - r.left) * canvas.width / Math.max(1, r.width)), y: Math.round((e.clientY - r.top) * canvas.height / Math.max(1, r.height)) }; };
-  canvas.onclick = (e) => { canvas.focus(); bsend({ t: 'click', ...pos(e), button: 'left' }); };
+  // Map CSS pixels → page viewport CSS pixels (frame logical size; DPR-independent).
+  const pos = (e) => { const r = canvas.getBoundingClientRect(); const s = S.browserSession || {}; const W = s.vw || canvas.width, H = s.vh || canvas.height;
+    return { x: Math.round(Math.max(0, Math.min(W - 1, (e.clientX - r.left) * W / Math.max(1, r.width)))), y: Math.round(Math.max(0, Math.min(H - 1, (e.clientY - r.top) * H / Math.max(1, r.height)))) }; };
+  canvas.onmousedown = (e) => { e.preventDefault(); canvas.focus(); };
+  canvas.onclick = (e) => { bsend({ t: 'click', ...pos(e), button: 'left' }); };
   canvas.oncontextmenu = (e) => { e.preventDefault(); bsend({ t: 'click', ...pos(e), button: 'right' }); };
   canvas.onwheel = (e) => { e.preventDefault(); bsend({ t: 'scroll', ...pos(e), dx: e.deltaX, dy: e.deltaY }); };
   canvas.onkeydown = (e) => { e.preventDefault(); if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) bsend({ t: 'text', text: e.key }); else bsend({ t: 'key', key: e.key }); };
-  $('#bwurl').onkeydown = (e) => { if (e.key === 'Enter') { let u = $('#bwurl').value.trim(); if (u && !/^https?:\/\//i.test(u)) u = 'https://' + u; sess.url = u; bsend({ t: 'nav', url: u }); canvas.focus(); } };
-  $('#bwclose').onclick = () => { hideBrowserOverlay(true); };
+  $('#bdurl').onkeydown = (e) => { if (e.key === 'Enter') { let u = $('#bdurl').value.trim(); if (u && !/^https?:\/\//i.test(u)) u = 'https://' + u; sess.url = u; bsend({ t: 'nav', url: u }); canvas.focus(); } };
+  $('#bdclose').onclick = () => hideBrowserOverlay(true);
   renderSidebar();
 }
 
@@ -867,3 +873,4 @@ $('#chat').addEventListener('click', (e) => {
   else { const p = popAt(a, `<button data-c="text"><span class="ic">${ico('copy')}</span>Copy</button><button data-c="id"><span class="ic">${ico('hash')}</span>Copy message ID</button>`);
     if (!p) return; p.onclick = (ev) => { const b = ev.target.closest('[data-c]'); if (!b) return; p.remove(); navigator.clipboard?.writeText(b.dataset.c === 'id' ? id : m.body); toast(b.dataset.c === 'id' ? 'Message ID copied' : 'Copied'); }; }
 });
+window.hq = { startSession, startBrowser, attachSession, hideBrowserOverlay, stopSession, S }; // test/console hook

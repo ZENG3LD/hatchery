@@ -305,6 +305,19 @@ where
     )).await.map_err(|_| FrameError::BodyTimedOut { length: 0 })??;
 
     let (mut reader, mut writer) = tokio::io::split(pipe);
+    // read_client_frame is not cancellation-safe: inside select! a busy event/browser
+    // branch could drop a half-read frame, desync the stream and close the operator
+    // connection. Read frames on their own task and hand complete ones over.
+    let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel(64);
+    let reader_task = tokio::spawn(async move {
+        loop {
+            let frame = read_client_frame(&mut reader, MAX_C2_CLIENT_FRAME_BYTES).await;
+            let stop = frame.is_err();
+            if frame_tx.send(frame).await.is_err() || stop {
+                break;
+            }
+        }
+    });
     let mut last_topology = C2Topology::from_status(status_rx.borrow().as_ref());
     tracing::info!(connection_id, "core operator control opened");
 
@@ -354,7 +367,8 @@ where
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
-            frame = read_client_frame(&mut reader, MAX_C2_CLIENT_FRAME_BYTES) => {
+            frame = frame_rx.recv() => {
+                let Some(frame) = frame else { break };
                 match frame {
                     Ok(C2ClientFrame::Request(envelope)) => {
                         let reply = dispatch_request(&mesh, envelope).await;
@@ -384,6 +398,7 @@ where
             }
         }
     }
+    reader_task.abort();
     Ok(())
 }
 

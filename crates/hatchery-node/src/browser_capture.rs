@@ -169,7 +169,9 @@ async fn run_session(
 ) -> Result<(), String> {
     std::fs::create_dir_all(&profile_dir).map_err(|e| e.to_string())?;
     let launch = LaunchConfig {
-        headless: true,
+        // Headful on Xvfb when a DISPLAY is present (less bot-detection); else headless.
+        headless: std::env::var("HATCHERY_D2B_HEADFUL").map(|v| v != "1").unwrap_or(true)
+            || std::env::var_os("DISPLAY").is_none(),
         window_size: (VIEW_W, VIEW_H),
         profile: BrowserProfile::Persistent(profile_dir),
         browser_pref: BrowserPreference::ChromeOnly,
@@ -189,6 +191,12 @@ async fn run_session(
         .map_err(|e| e.to_string())?;
     // Best-effort viewport.
     let _ = page.set_viewport(VIEW_W, VIEW_H, 1.0).await;
+    // Headful: Chrome opens its own new-tab page in front; a background tab never
+    // paints, so screenshots stall. Keep our page in front and the window focused.
+    let _ = page.cdp_call("Page.bringToFront", None).await;
+    let _ = page
+        .cdp_call("Emulation.setFocusEmulationEnabled", Some(json!({ "enabled": true })))
+        .await;
     if let Err(err) = tokio::time::timeout(Duration::from_secs(40), page.goto(&start_url)).await {
         tracing::warn!(%session, error = %err, "browser start navigation timed out");
     }
@@ -205,7 +213,7 @@ async fn run_session(
         tokio::select! {
             _ = &mut stop_rx => break,
             _ = tick.tick() => {
-                if let Ok((bytes, w, h, url, title)) = capture_frame(&page).await {
+                if let Ok(Ok((bytes, w, h, url, title))) = tokio::time::timeout(Duration::from_secs(5), capture_frame(&page)).await {
                     let hash = {
                         use std::hash::{Hash, Hasher};
                         let mut hsh = std::collections::hash_map::DefaultHasher::new();
@@ -241,23 +249,29 @@ async fn run_session(
 }
 
 async fn capture_frame(page: &StealthPage) -> Result<(Vec<u8>, u32, u32, String, String), String> {
-    // Prefer JPEG via CDP (matches the owner's screencast brief); fall back to PNG screenshot.
-    let jpeg = page
-        .cdp_call(
-            "Page.captureScreenshot",
-            Some(json!({ "format": "jpeg", "quality": 55 })),
-        )
-        .await;
-    let bytes = match jpeg {
-        Ok(v) => {
+    // JPEG via CDP, sized to fit one Noise transport message (64 KiB incl. envelope):
+    // step quality down, then scale, until under FRAME_BUDGET. Oversized frames used to
+    // kill the restream uplink ("noise: input error") on busy pages.
+    const FRAME_BUDGET: usize = 40 * 1024;
+    let mut bytes = Vec::new();
+    'fit: for scale in [1.0f64, 0.75, 0.5] {
+        for q in [60u32, 45, 32, 22, 14] {
+            let mut params = json!({ "format": "jpeg", "quality": q });
+            if scale < 1.0 {
+                params["clip"] = json!({ "x": 0, "y": 0, "width": VIEW_W, "height": VIEW_H, "scale": scale });
+            }
+            let v = page.cdp_call("Page.captureScreenshot", Some(params)).await.map_err(|e| e.to_string())?;
             let b64 = v.get("data").and_then(|x| x.as_str()).ok_or("no jpeg data")?;
             use base64::Engine;
-            base64::engine::general_purpose::STANDARD
-                .decode(b64)
-                .map_err(|e| e.to_string())?
+            bytes = base64::engine::general_purpose::STANDARD.decode(b64).map_err(|e| e.to_string())?;
+            if bytes.len() <= FRAME_BUDGET {
+                break 'fit;
+            }
         }
-        Err(_) => page.screenshot().await.map_err(|e| e.to_string())?,
-    };
+    }
+    if bytes.len() > FRAME_BUDGET {
+        return Err(format!("frame too large ({} bytes)", bytes.len()));
+    }
     let url = page
         .eval("location.href")
         .await
@@ -275,33 +289,32 @@ async fn capture_frame(page: &StealthPage) -> Result<(Vec<u8>, u32, u32, String,
 
 async fn apply_input(page: &StealthPage, input: &BrowserInput) -> Result<(), String> {
     match input {
-        BrowserInput::Click { x, y, button } => match button {
-            BrowserMouseButton::Left => page.click_at(*x, *y).await.map_err(|e| e.to_string())?,
-            BrowserMouseButton::Right => {
-                page.right_click_at(*x, *y).await.map_err(|e| e.to_string())?
-            }
-            BrowserMouseButton::Middle => {
-                // dig2browser has no middle-click helper; synthesize via CDP.
+        BrowserInput::Click { x, y, button } => {
+            // Raw CDP, viewport CSS pixels (DPR 1): move, press, release — a real
+            // trusted click that also reaches cross-origin iframes (e.g. Turnstile).
+            let b = match button {
+                BrowserMouseButton::Left => "left",
+                BrowserMouseButton::Right => "right",
+                BrowserMouseButton::Middle => "middle",
+            };
+            tracing::info!(x = *x, y = *y, button = b, "d2b click");
+            page.cdp_call(
+                "Input.dispatchMouseEvent",
+                Some(json!({ "type": "mouseMoved", "x": x, "y": y, "button": "none" })),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            for ty in ["mousePressed", "mouseReleased"] {
                 page.cdp_call(
                     "Input.dispatchMouseEvent",
-                    Some(json!({
-                        "type": "mousePressed", "x": x, "y": y,
-                        "button": "middle", "clickCount": 1
-                    })),
+                    Some(json!({ "type": ty, "x": x, "y": y, "button": b, "buttons": if ty == "mousePressed" { 1 } else { 0 }, "clickCount": 1 })),
                 )
                 .await
                 .map_err(|e| e.to_string())?;
-                page.cdp_call(
-                    "Input.dispatchMouseEvent",
-                    Some(json!({
-                        "type": "mouseReleased", "x": x, "y": y,
-                        "button": "middle", "clickCount": 1
-                    })),
-                )
-                .await
-                .map_err(|e| e.to_string())?;
+                tokio::time::sleep(Duration::from_millis(60)).await;
             }
-        },
+        }
         BrowserInput::Scroll { x, y, dx, dy } => {
             page.wheel(*x, *y, *dx, *dy)
                 .await
@@ -325,10 +338,21 @@ async fn apply_input(page: &StealthPage, input: &BrowserInput) -> Result<(), Str
             }
         }
         BrowserInput::Navigate { url } => {
-            match tokio::time::timeout(Duration::from_secs(40), page.goto(url)).await {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => return Err(e.to_string()),
-                Err(_) => return Err("navigate timed out".into()),
+            // Raw Page.navigate returns once the request commits; frames keep
+            // streaming while the page loads (goto blocked the loop on load).
+            tracing::info!(%url, "d2b navigate");
+            let _ = page.cdp_call("Page.bringToFront", None).await;
+            let r = tokio::time::timeout(
+                Duration::from_secs(20),
+                page.cdp_call("Page.navigate", Some(json!({ "url": url }))),
+            )
+            .await
+            .map_err(|_| "navigate timed out".to_string())?
+            .map_err(|e| e.to_string())?;
+            if let Some(err) = r.get("errorText").and_then(|v| v.as_str()) {
+                if !err.is_empty() {
+                    return Err(format!("navigate: {err}"));
+                }
             }
         }
     }

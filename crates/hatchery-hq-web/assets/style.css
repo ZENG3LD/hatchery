@@ -474,15 +474,27 @@ body.nodemode #composer{display:none}
 .bview .bbar input{flex:1;min-width:0}
 .bview #bcanvas2{flex:1;width:100%;height:100%;object-fit:contain;background:#000;cursor:crosshair}
 
-/* browser overlay window (frame-exact, draggable, resizable) */
-.bwin{position:fixed;z-index:60;background:#111;border:1px solid var(--line);border-radius:10px;box-shadow:0 18px 50px #000b;display:flex;flex-direction:column;overflow:hidden;min-width:320px}
-.bwin[hidden]{display:none}
-.bwbar{display:flex;align-items:center;gap:6px;padding:4px 6px;background:var(--el);cursor:move;user-select:none}
-.bwbar input{flex:1;min-width:0;height:24px;font-size:12px;padding:0 8px;border-radius:6px;cursor:text}
-.bwbar .sub{max-width:30%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:11px}
-.bwgrip{color:var(--sub);padding:0 2px}
-#bwcanvas{display:block;width:100%;height:auto;background:#fff;cursor:default;outline:none}
-.bwin.min #bwcanvas,.bwin.min .bwrz{display:none}
-.bwrz{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,#666 50%)}
+/* slim right-side session toolbar (top bar keeps only the session pill) */
+.ptybar{position:absolute;right:8px;top:50%;transform:translateY(-50%);z-index:20;display:flex;flex-direction:column;gap:6px;padding:6px;background:var(--el);border:1px solid var(--line);border-radius:12px;width:auto;height:auto}
+.ptybar .sbtn,.ptybar .tog button{display:flex;flex-direction:column;align-items:center;gap:1px;width:46px;padding:5px 0;border:0;border-radius:8px;background:transparent;color:var(--txt);font-size:15px;cursor:pointer}
+.ptybar small{font-size:9.5px;color:var(--sub)}
+.ptybar .sbtn:hover,.ptybar .tog button:hover{background:#ffffff14}
+.ptybar .tog{display:flex;flex-direction:column;gap:2px;padding:2px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:none}
+.ptybar .tog button.on{background:#ffffff1f}
+.ptybar .sbtn.blue{color:#5ea2ff}.ptybar .sbtn.red{color:#ff6b6b}
+.ptybar [hidden]{display:none}
+/* browser: right-side drawer (mini, fitted to frame) that can expand over the center */
+.bdrawer{position:fixed;z-index:60;top:64px;right:0;width:400px;max-width:92vw;background:#111;border:1px solid var(--line);border-right:0;border-radius:12px 0 0 12px;box-shadow:-14px 10px 44px #000a;display:flex;flex-direction:column;overflow:hidden;transform:translateX(0);transition:transform .2s cubic-bezier(.2,.8,.3,1),width .2s,top .2s,right .2s}
+.bdrawer.off{transform:translateX(calc(100% + 2px))}
+.bdrawer.big{top:64px;right:50%;transform:translateX(50%);border-right:1px solid var(--line);border-radius:12px}
+.bdrawer.big.off{transform:translateX(200%)}
+.bdbar{display:flex;align-items:center;gap:4px;padding:4px 6px;background:var(--el)}
+.bdbar input{flex:1;min-width:0;height:24px;font-size:12px;padding:0 8px;border-radius:6px}
+.bdbar .ibtn{width:26px;height:24px;font-size:13px}
+#bdcanvas{display:block;width:100%;height:auto;background:#fff;outline:none;cursor:default}
+.bdtab{position:fixed;z-index:59;right:0;top:120px;writing-mode:vertical-rl;padding:10px 5px;background:var(--el);border:1px solid var(--line);border-right:0;border-radius:8px 0 0 8px;font-size:12px;color:var(--txt);cursor:pointer}
+.bdtab[hidden]{display:none}
 /* right info panel as a hideable overlay over the center */
 #panel{position:fixed;top:0;right:0;bottom:0;z-index:40;box-shadow:-12px 0 40px #0008}
+#ptyview .termwrap{margin-right:66px}
+.ptybar .tog button{color:var(--txt);white-space:normal}
