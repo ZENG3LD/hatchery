@@ -367,6 +367,8 @@ mod tests {
             height: 600,
             url: "about:blank".into(),
             title: "t".into(),
+            trace: None,
+            region: None,
         };
         let v = serde_json::to_value(&ev).unwrap();
         let back: BrowserStreamEvent = serde_json::from_value(v).unwrap();

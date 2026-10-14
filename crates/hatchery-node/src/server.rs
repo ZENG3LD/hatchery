@@ -3707,9 +3707,12 @@ impl SpawnPreparer for NodeShared {
                     OsString::from("HATCHERY_NODE_DOOR"),
                     OsString::from(door.to_string()),
                 ));
-                // Same key shape as the session browser (`pty-{workspace}-{instance}`).
+                // Same key shape as HQ browser/draft ids:
+                // `pty-{incarnation}-{workspace}-{instance}` — never reuse a
+                // slot across node boots when the instance counter resets.
                 let session_key = format!(
-                    "pty-{}-{}",
+                    "pty-{}-{}-{}",
+                    self.incarnation_id,
                     address.workspace_id.as_str(),
                     address.session.instance_id.0
                 );
@@ -11033,6 +11036,10 @@ impl NodeShared {
                 continue;
             }
             if is_first_frame {
+                // First output also claims a provisional draft: a live PTY
+                // must not be reaped just because HQ's Resize/TerminalBytes
+                // is a few hundred ms late (browser fit throttle, remount).
+                self.sessionize_spawn(address.session.instance_id);
                 // This is the first PTY output this node has observed for
                 // this session -- a one-time event per spawn, not per-frame
                 // chatter (the watermark makes sure of that). A session that
@@ -27597,5 +27604,143 @@ mod tests {
         assert!(!root.join("src/late.rs").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
-
 }
+
+#[cfg(test)]
+mod provisional_spawn_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn shared() -> NodeShared {
+        let catalog = active_registry().unwrap();
+        let (handle, _runtime) = NativeRuntime::new(catalog, NativeRuntimeConfig::default());
+        let workspace = WorkspaceConfig::new(
+            WorkspaceId::new("primary").unwrap(),
+            std::env::current_dir().unwrap(),
+        )
+        .unwrap()
+        .with_worktree_service_mode(WorktreeServiceMode::Manual);
+        NodeShared::new(
+            handle,
+            "fixture-token".to_owned(),
+            NodeId::new("node-provisional-test").unwrap(),
+            vec![workspace],
+            vec![AgentId::new("claude").unwrap()],
+        )
+    }
+
+    /// Provisional draft map: sessionize by instance id only; 50 sequential
+    /// mark/claim cycles never collide, and a claimed draft is never reaped.
+    #[test]
+    fn provisional_spawn_keys_are_unique_and_sessionize_prevents_reap() {
+        let shared = shared();
+        let ws = WorkspaceId::new("primary").unwrap();
+        let mut ids = Vec::with_capacity(50);
+        for i in 1u64..=50 {
+            let id = AgentInstanceId(i);
+            ids.push(id);
+            let address = SessionAddress {
+                workspace_id: ws.clone(),
+                session: SessionKey {
+                    instance_id: id,
+                    generation: SessionGeneration(1),
+                },
+            };
+            shared.mark_spawn_provisional(address);
+        }
+        assert_eq!(
+            shared
+                .provisional_spawns
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .len(),
+            50
+        );
+        for id in ids.iter().step_by(2) {
+            shared.sessionize_spawn(*id);
+        }
+        assert_eq!(
+            shared
+                .provisional_spawns
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .len(),
+            25
+        );
+        assert!(shared.take_due_provisional_spawns().is_empty());
+        {
+            let mut map = shared
+                .provisional_spawns
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            let past = Instant::now() - Duration::from_secs(30);
+            for (_, (_, at)) in map.iter_mut() {
+                *at = past;
+            }
+        }
+        let due = shared.take_due_provisional_spawns();
+        assert_eq!(due.len(), 25);
+        let due_ids: std::collections::BTreeSet<_> =
+            due.iter().map(|a| a.session.instance_id.0).collect();
+        let expected: std::collections::BTreeSet<_> =
+            ids.iter().skip(1).step_by(2).map(|id| id.0).collect();
+        assert_eq!(due_ids, expected);
+        assert!(shared
+            .provisional_spawns
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_empty());
+    }
+
+    /// Twenty parallel provisional marks must each get their own instance key;
+    /// killing/sessionizing one id must not touch the others.
+    #[test]
+    fn provisional_spawn_parallel_marks_isolate_kills_by_instance_id() {
+        let shared = Arc::new(shared());
+        let ws = WorkspaceId::new("primary").unwrap();
+        let mut handles = Vec::new();
+        for i in 1u64..=20 {
+            let shared = Arc::clone(&shared);
+            let ws = ws.clone();
+            handles.push(std::thread::spawn(move || {
+                let id = AgentInstanceId(i);
+                let address = SessionAddress {
+                    workspace_id: ws,
+                    session: SessionKey {
+                        instance_id: id,
+                        generation: SessionGeneration(1),
+                    },
+                };
+                shared.mark_spawn_provisional(address);
+                id
+            }));
+        }
+        let mut ids = Vec::new();
+        for h in handles {
+            ids.push(h.join().unwrap());
+        }
+        ids.sort_by_key(|id| id.0);
+        assert_eq!(ids.len(), 20);
+        ids.dedup();
+        assert_eq!(ids.len(), 20, "parallel marks must not share instance keys");
+        assert_eq!(
+            shared
+                .provisional_spawns
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .len(),
+            20
+        );
+        shared.sessionize_spawn(AgentInstanceId(7));
+        let left: Vec<_> = shared
+            .provisional_spawns
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .keys()
+            .map(|id| id.0)
+            .collect();
+        assert!(!left.contains(&7));
+        assert_eq!(left.len(), 19);
+    }
+}
+

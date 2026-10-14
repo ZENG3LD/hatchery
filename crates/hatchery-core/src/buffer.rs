@@ -358,4 +358,55 @@ mod tests {
         assert_eq!(buf.len(), 1);
         assert_eq!(buf.events_after("n1", 1, 0)[0].payload, b"new");
     }
+
+    #[test]
+    fn reset_channel_credit_restores_after_exhaustion() {
+        let mut buf = ReplayBuffer::new(BufferLimits {
+            max_events: 64,
+            max_bytes: 64 * 1024,
+            max_age: Duration::from_secs(60),
+        })
+        .with_default_credit(2);
+        let now = Instant::now();
+        assert!(matches!(buf.enqueue("n1", 7, b"a".to_vec(), now), EnqueueOutcome::Accepted { .. }));
+        assert!(matches!(buf.enqueue("n1", 7, b"b".to_vec(), now), EnqueueOutcome::Accepted { .. }));
+        assert!(matches!(buf.enqueue("n1", 7, b"c".to_vec(), now), EnqueueOutcome::Backpressure));
+        assert_eq!(buf.credit(&StreamKey { node_id: "n1".into(), channel_id: 7 }), 0);
+        // Re-OPEN must restore credit; otherwise the node waits forever for WINDOW > 0.
+        buf.reset_channel_credit("n1", 7);
+        assert_eq!(buf.credit(&StreamKey { node_id: "n1".into(), channel_id: 7 }), 2);
+        assert!(matches!(buf.enqueue("n1", 7, b"d".to_vec(), now), EnqueueOutcome::Accepted { .. }));
+    }
+
+    /// Fifty independent channel credits: each OPEN-reset must isolate its own
+    /// stream so parallel PTY/mail channels never share a spent credit bucket.
+    #[test]
+    fn reset_channel_credit_is_per_channel_under_parallel_opens() {
+        let mut buf = ReplayBuffer::new(BufferLimits {
+            max_events: 256,
+            max_bytes: 256 * 1024,
+            max_age: Duration::from_secs(60),
+        })
+        .with_default_credit(4);
+        let now = Instant::now();
+        for ch in 1u32..=50 {
+            for _ in 0..4 {
+                assert!(matches!(
+                    buf.enqueue("box", ch, b"x".to_vec(), now),
+                    EnqueueOutcome::Accepted { .. }
+                ));
+            }
+            assert_eq!(buf.credit(&StreamKey { node_id: "box".into(), channel_id: ch }), 0);
+        }
+        for ch in 1u32..=50 {
+            buf.reset_channel_credit("box", ch);
+            assert_eq!(buf.credit(&StreamKey { node_id: "box".into(), channel_id: ch }), 4);
+        }
+        // One channel's reset must not revive another's spent credit without its own reset.
+        for _ in 0..4 {
+            let _ = buf.enqueue("box", 1, b"y".to_vec(), now);
+        }
+        assert_eq!(buf.credit(&StreamKey { node_id: "box".into(), channel_id: 1 }), 0);
+        assert_eq!(buf.credit(&StreamKey { node_id: "box".into(), channel_id: 2 }), 4);
+    }
 }

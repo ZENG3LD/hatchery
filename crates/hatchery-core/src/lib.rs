@@ -5224,7 +5224,6 @@ mod tests {
             managed_worktrees: Vec::new(),
             launch_inventory: Some(launch_inventory.clone()),
             agent_progress: Vec::new(),
-            machine: None,
         };
 
         let full = C2NodeSnapshot::from(&snapshot);

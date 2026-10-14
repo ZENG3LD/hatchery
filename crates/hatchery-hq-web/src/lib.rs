@@ -128,8 +128,9 @@ pub struct AppState {
     /// reads this instead of dialing core operator control on every poll,
     /// which is what caused a new operator connection every few seconds.
     /// `None` until `spawn_topology_watcher` establishes it; callers fall
-    /// back to a one-shot dial while it is unset.
-    pub topology: std::sync::OnceLock<hatchery_c2_client::C2ReconnectingHandle>,
+    /// back to a one-shot dial while it is unset. `RwLock` (not OnceLock) so
+    /// the watcher can replace a dead handle after the event stream ends.
+    pub topology: std::sync::RwLock<Option<hatchery_c2_client::C2ReconnectingHandle>>,
     /// Node events (terminal frames, controller changes, ...) fanned out from
     /// the single held operator control to every live terminal view. Core
     /// admits only one operator connection at a time, so all views must share
@@ -137,9 +138,11 @@ pub struct AppState {
     pub node_events: broadcast::Sender<std::sync::Arc<Value>>,
     /// Dig2browser frames / lifecycle from the held operator control.
     pub browser_events: broadcast::Sender<std::sync::Arc<hatchery_core::BrowserStreamEvent>>,
-    /// Draft PTY kill timers: key = "node/workspace/instance". A live term WS
-    /// cancels the entry; closing the last view arms a short reconnect grace
-    /// then Stop+browser-kill. Today every PTY is a draft (no provider session id).
+    /// Draft PTY kill timers: key = "node/incarnation/workspace/instance".
+    /// Incarnation is required so a kill armed before a node restart cannot
+    /// cancel or stop a new PTY that reused the same instance id counter.
+    /// A live term WS cancels the entry; closing the last view arms a short
+    /// reconnect grace then Stop+browser-kill. Today every PTY is a draft.
     pub draft_kills: std::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<()>>>,
 }
 
@@ -152,7 +155,7 @@ pub fn router(config: Config) -> (Router, Shared) {
     let (events, _) = broadcast::channel(256);
     let (node_events, _) = broadcast::channel(1024);
     let (browser_events, _) = broadcast::channel(256);
-    let state = Arc::new(AppState { config, events, topology: std::sync::OnceLock::new(), node_events, browser_events, draft_kills: std::sync::Mutex::new(std::collections::HashMap::new()) });
+    let state = Arc::new(AppState { config, events, topology: std::sync::RwLock::new(None), node_events, browser_events, draft_kills: std::sync::Mutex::new(std::collections::HashMap::new()) });
     let base = state.config.base_path.clone();
     let index: &'static str = Box::leak(index_html(&base).into_boxed_str());
     let mut app = Router::new()
@@ -300,7 +303,7 @@ async fn api_nodes(State(s): State<Shared>) -> Response {
     // Prefer the held, self-reconnecting operator control (no per-poll dial,
     // so no ~4s operator-connection churn on core). Fall back to a one-shot
     // dial only while the watcher has not established the held handle yet.
-    let core_topo = if let Some(handle) = s.topology.get() {
+    let core_topo = if let Some(handle) = s.topology.read().ok().and_then(|g| g.clone()) {
         serde_json::to_value(handle.current_topology().as_ref()).ok()
     } else {
         match tokio::time::timeout(
@@ -443,7 +446,7 @@ pub fn spawn_topology_watcher(state: Shared) {
             match dialed
             {
                 Ok((handle, mut events)) => {
-                    let _ = state.topology.set(handle);
+                    *state.topology.write().unwrap_or_else(|p| p.into_inner()) = Some(handle);
                     tracing::info!("HQ topology watcher: held operator control established");
                     let (regular, harness, browser) = events.split_all();
                     loop {
@@ -467,8 +470,9 @@ pub fn spawn_topology_watcher(state: Shared) {
                             }
                         }
                     }
-                    tracing::warn!("HQ topology watcher: event stream ended; supervisor retains the handle");
-                    std::future::pending::<()>().await;
+                    tracing::warn!("HQ topology watcher: event stream ended; clearing handle and redialing");
+                    *state.topology.write().unwrap_or_else(|p| p.into_inner()) = None;
+                    tokio::time::sleep(Duration::from_secs(1)).await;
                 }
                 Err(e) => {
                     tracing::warn!(error = %e, "HQ topology watcher: initial connect failed; retrying");
@@ -541,7 +545,7 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     use hatchery_core::{C2NodeResponse, NodeId, NodeRoute, NodeTransportState};
     let say = |kind: &str, text: String| json!({ "type": kind, "text": text }).to_string();
     let node = NodeId::new(q.node.clone()).map_err(|e| e.to_string())?;
-    let Some(control) = s.topology.get().cloned() else {
+    let Some(control) = s.topology.read().ok().and_then(|g| g.clone()) else {
         let _ = socket.send(Message::text(say("error", "operator control not ready yet".to_owned()))).await;
         return Err("operator control not ready".into());
     };
@@ -595,6 +599,13 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
         let session = match spawned.response {
             Ok(C2NodeResponse::SpawnAccepted { session }) => {
                 route.expected_incarnation_id = spawned.incarnation_id;
+                // Claim the draft on the node NOW (Resize sessionizes the
+                // provisional spawn). Do not wait for the browser fit/resize:
+                // a slow or remounting client used to lose the race with the
+                // node's 5s provisional reaper and the HQ 4s draft-kill timer.
+                let _ = control
+                    .request(route.clone(), NodeRequest::Resize { session: session.clone(), size })
+                    .await;
                 session
             }
             other => {
@@ -610,7 +621,15 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     let label = format!("{}/{}#{}", q.node, if provider_label.is_empty() { "session" } else { &provider_label }, instance_id);
     // Every PTY today is a *draft* (no provider conversation / session-id yet).
     // Claiming the draft key cancels any pending kill from a brief reload gap.
-    let draft_key = format!("{}/{}/{}", q.node, session.workspace_id.as_str(), instance_id);
+    // Key by incarnation+instance so post-restart counter reuse cannot collide
+    // with a pending draft-kill from a previous node boot.
+    let draft_key = format!(
+        "{}/{}/{}/{}",
+        q.node,
+        route.expected_incarnation_id,
+        session.workspace_id.as_str(),
+        instance_id
+    );
     cancel_draft_kill(&s, &draft_key);
     tracing::info!(node = %q.node, provider = %provider_label, %instance_id, attach = q.session.is_some(), "terminal draft ready from web HQ");
     if socket
@@ -799,8 +818,16 @@ fn schedule_draft_kill(
             _ = tokio::time::sleep(DRAFT_RECONNECT_GRACE) => {
                 if let Ok(mut map) = s.draft_kills.lock() { map.remove(&key); }
                 tracing::info!(%key, "draft reconnect grace elapsed; stopping PTY + browser");
+                // Incarnation in the browser session id: profile dirs are
+                // keyed by this string; without it, a post-restart draft-kill
+                // could stop/reuse pty-<ws>-<instance> from a prior boot.
+                let br = format!(
+                    "pty-{}-{}-{}",
+                    route.expected_incarnation_id,
+                    session.workspace_id.as_str(),
+                    session.session.instance_id.0
+                );
                 let _ = control.request(route, gate4agent_node_protocol::NodeRequest::Stop { session: session.clone(), force: true }).await;
-                let br = format!("pty-{}-{}", session.workspace_id.as_str(), session.session.instance_id.0);
                 let _ = control.browser_command(hatchery_core::BrowserClientCommand {
                     node_id: node,
                     op: hatchery_core::BrowserClientOp::Stop { session: br },
@@ -895,7 +922,7 @@ async fn api_sessions(State(s): State<Shared>, Query(q): Query<SessionsQuery>) -
     let Ok(node) = NodeId::new(q.node.clone()) else {
         return err(StatusCode::BAD_REQUEST, "bad node id");
     };
-    let Some(control) = s.topology.get().cloned() else {
+    let Some(control) = s.topology.read().ok().and_then(|g| g.clone()) else {
         return err(StatusCode::SERVICE_UNAVAILABLE, "operator control not ready");
     };
     let topo = control.current_topology();
@@ -982,7 +1009,7 @@ async fn browser_session(mut socket: WebSocket, s: Shared, q: BrowserQuery) -> R
     validate_browser_session_id(&session)?;
     let url = q.url.filter(|u| !u.trim().is_empty()).unwrap_or_else(|| "about:blank".into());
 
-    let control = s.topology.get().cloned().ok_or_else(|| "operator control not ready".to_string())?;
+    let control = s.topology.read().ok().and_then(|g| g.clone()).ok_or_else(|| "operator control not ready".to_string())?;
     let mut browser_rx = s.browser_events.subscribe();
 
     control
@@ -1380,8 +1407,8 @@ async fn api_local_server(State(s): State<Shared>, body_bytes: axum::body::Bytes
         Ok(b) => b,
         Err(e) => return (StatusCode::BAD_REQUEST, format!("bad json: {e}")).into_response(),
     };
-    let control = match s.topology.get() {
-        Some(c) => c.clone(),
+    let control = match s.topology.read().ok().and_then(|g| g.clone()) {
+        Some(c) => c,
         None => return (StatusCode::SERVICE_UNAVAILABLE, "operator control not ready").into_response(),
     };
     let op = match body.op.as_str() {
