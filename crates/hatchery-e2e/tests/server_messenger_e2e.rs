@@ -314,7 +314,7 @@ async fn agent_tools_reach_the_hub_through_the_node_door() {
     for n in [beta, gamma] {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        tokio::spawn(hatchery_node::door::serve(listener, rig.enroll_addr, Arc::new(n.identity), n.id.to_owned(), None));
+        tokio::spawn(hatchery_node::door::serve(listener, hatchery_node::uplink_calls::NodeCalls::new(n.id.to_owned(), None, Some((rig.enroll_addr, Arc::new(n.identity)))), None));
         doors.push(WorkDoor::new(addr).unwrap());
     }
     let (beta_door, gamma_door) = (doors.remove(0), doors.remove(0));

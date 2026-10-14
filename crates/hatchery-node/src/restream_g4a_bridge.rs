@@ -35,6 +35,7 @@ pub async fn run(
     keys: UpstreamKeys,
     journal: Option<Arc<UplinkJournal>>,
     browser_profile_root: Option<PathBuf>,
+    calls: Option<crate::uplink_calls::NodeCalls>,
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), String> {
     let local_endpoint = local_endpoint.into();
@@ -65,6 +66,28 @@ pub async fn run(
     let incarnation_id = hello.incarnation_id;
     let connection_id = hello.connection_id;
     tracing::info!(%node_id_str, connection_id, "restream g4a bridge up");
+    // Node calls (mail.*, task.*) open their own channel on this same uplink.
+    if let Some(c) = &calls {
+        c.set_uplink(Some(session.uplink())).await;
+    }
+    let result = run_loop(&mut client, &mut session, &node_id, incarnation_id, &local_endpoint, &local_token, browser_profile_root, &mut shutdown).await;
+    if let Some(c) = &calls {
+        c.set_uplink(None).await;
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_loop(
+    client: &mut LocalNodeClient,
+    session: &mut NodeSession,
+    node_id: &NodeId,
+    incarnation_id: NodeIncarnationId,
+    local_endpoint: &str,
+    local_token: &str,
+    browser_profile_root: PathBuf,
+    shutdown: &mut watch::Receiver<bool>,
+) -> Result<(), String> {
 
     // Requests run on their own local connection in a worker task. A request that
     // waits on the node (input settle, spawn readiness, snapshot) used to hold this

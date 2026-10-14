@@ -1,27 +1,24 @@
 //! Local door for agents on this node: mail and task operations without ever touching a key.
 //!
 //! The node holds its identity key; agents (other users, other processes) do not. This loopback
-//! listener accepts `POST /door {"op","payload"}` from them, signs the call with the node identity
-//! and forwards it to C2, which applies the status policy. A node that is neutral, suspended or
+//! listener accepts `POST /door {"op","payload"}` from them, forwards the call to core over the
+//! node's restreamer uplink (Noise to core; C2 sees opaque bytes), which applies the status policy. A node that is neutral, suspended or
 //! revoked simply gets "refused" back. The surface is exactly the `mail.*` and `task.*` operations.
 
 use hatchery_build::http;
 use hatchery_enroll::call::capability_for;
-use hatchery_enroll::NodeIdentity;
 use serde_json::{json, Value};
-use std::net::SocketAddr;
-use std::sync::Arc;
 use tokio::net::TcpListener;
 
 /// `session.wake` (handled here, never forwarded): `{"token","nick","from","event_id","body"}`,
 /// the letter event m4a's `M4A_LETTER_HOOK` emits plus the node's wake token.
-pub async fn serve(listener: TcpListener, c2_enroll: SocketAddr, identity: Arc<NodeIdentity>, node_id: String, wake: Option<crate::server::node_wake::NodeWake>) {
+pub async fn serve(listener: TcpListener, calls: crate::uplink_calls::NodeCalls, wake: Option<crate::server::node_wake::NodeWake>) {
     loop {
         let Ok((mut stream, peer)) = listener.accept().await else { continue };
         if !peer.ip().is_loopback() {
             continue;
         }
-        let (identity, node_id, wake) = (Arc::clone(&identity), node_id.clone(), wake.clone());
+        let (calls, wake) = (calls.clone(), wake.clone());
         tokio::spawn(async move {
             let Ok(Ok((method, path, _, body))) = tokio::time::timeout(std::time::Duration::from_secs(5), http::read_request(&mut stream, 64 * 1024)).await else {
                 let _ = http::respond(&mut stream, 400, br#"{"error":"bad request"}"#).await;
@@ -58,10 +55,13 @@ pub async fn serve(listener: TcpListener, c2_enroll: SocketAddr, identity: Arc<N
                 return;
             }
             let payload = request.get("payload").cloned().unwrap_or_else(|| json!({}));
-            let (status, reply) = match crate::enroll_client::node_call(c2_enroll, &identity, &node_id, op, &payload).await {
+            let (status, reply) = match calls.call(op, &payload).await {
                 Ok(value) => (200, value.to_string()),
-                Err(crate::enroll_client::EnrollClientError::Refused) => (403, json!({"error":"refused"}).to_string()),
-                Err(_) => (502, json!({"error":"unavailable"}).to_string()),
+                Err(crate::uplink_calls::CallError::Refused) => (403, json!({"error":"refused"}).to_string()),
+                Err(crate::uplink_calls::CallError::Unavailable(why)) => {
+                    tracing::warn!(%op, reason = %why, "door call unavailable");
+                    (502, json!({"error":"unavailable"}).to_string())
+                }
             };
             let _ = http::respond(&mut stream, status, reply.as_bytes()).await;
         });

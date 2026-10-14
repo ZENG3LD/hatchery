@@ -576,7 +576,17 @@ async fn main() {
             .unwrap_or_else(|error| fail(&error.to_string()));
     }
     let server = NodeServer::new(config).unwrap_or_else(|error| fail(&error.to_string()));
-    if let (Some(listen), Some(c2), Some(identity), Some(id)) = (door_listen, door_c2, call_home_identity_for_door.clone(), node_id_for_door.clone()) {
+    // Node calls (mail.*, task.*): over the restream uplink when there is one (the restream
+    // bridge publishes it), else the legacy signed HTTP call to C2.
+    let uplink_keys = restream_uplink_early.map(|_| resolve_upstream_keys(enroll_state.as_deref()).unwrap_or_else(|e| fail(&e)));
+    let node_calls = node_id_for_door.clone().map(|id| {
+        let legacy = match (door_c2, call_home_identity_for_door.clone()) {
+            (Some(c2), Some(identity)) => Some((c2, identity)),
+            _ => None,
+        };
+        hatchery_node::uplink_calls::NodeCalls::new(id, uplink_keys, legacy)
+    });
+    if let (Some(listen), Some(_c2), Some(_identity), Some(_id), Some(calls)) = (door_listen, door_c2, call_home_identity_for_door.clone(), node_id_for_door.clone(), node_calls.clone()) {
         if !listen.ip().is_loopback() {
             fail("--door-listen must be a loopback address");
         }
@@ -594,17 +604,17 @@ async fn main() {
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("node-mail-seen.json");
             let door_hint = format!("http://{listen}/door");
-            tokio::spawn(node_mail_wake(c2, std::sync::Arc::clone(&identity), id.clone(), std::sync::Arc::clone(&policy), seen, door_hint));
+            tokio::spawn(node_mail_wake(calls.clone(), std::sync::Arc::clone(&policy), seen, door_hint));
         }
-        tokio::spawn(hatchery_node::door::serve(listener, c2, identity, id, wake));
+        tokio::spawn(hatchery_node::door::serve(listener, calls, wake));
     } else if door_listen.is_some() || door_c2.is_some() {
         fail("--door-listen and --door-c2 need each other and --enrolled");
     }
     // A2: opaque restreamer uplink (g4a bridged to core over Noise). Optional.
     let restream_uplink = restream_uplink_early;
     if let Some(uplink) = restream_uplink {
-        let keys = resolve_upstream_keys(enroll_state.as_deref())
-            .unwrap_or_else(|e| fail(&e));
+        let keys = uplink_keys.unwrap_or_else(|| fail("upstream keys"));
+        let bridge_calls = node_calls.clone();
         let endpoint = endpoint_for_bridge;
         let node_id = node_id_for_bridge;
         let bridge_token = token_for_bridge;
@@ -627,6 +637,7 @@ async fn main() {
                     keys,
                     journal.clone(),
                     browser_root.clone(),
+                    bridge_calls.clone(),
                     stop_rx.clone(),
                 )
                 .await
@@ -1140,18 +1151,15 @@ impl PipeResolve for String {
 /// delivery through g4a). Polls every 10 s; a delivered letter is acked; nothing is logged but ids
 /// and statuses.
 async fn node_mail_wake(
-    c2: std::net::SocketAddr,
-    identity: std::sync::Arc<hatchery_enroll::NodeIdentity>,
-    node_id: String,
+    calls: hatchery_node::uplink_calls::NodeCalls,
     policy: std::sync::Arc<hatchery_node::wake_pipeline::WakePolicy>,
     seen_path: PathBuf,
     door_hint: String,
 ) {
-    use hatchery_node::enroll_client::node_call;
     let seen = std::sync::Arc::new(std::sync::Mutex::new(hatchery_node::wake_pipeline::MailSeen::load(seen_path)));
     tracing::info!("node-mail wake on");
     loop {
-        match node_call(c2, &identity, &node_id, "mail.inbox", &serde_json::json!({"limit": 256})).await {
+        match calls.call("mail.inbox", &serde_json::json!({"limit": 256})).await {
             Ok(inbox) => {
                 let (policy, seen, hint) = (std::sync::Arc::clone(&policy), std::sync::Arc::clone(&seen), door_hint.clone());
                 let outcomes = tokio::task::spawn_blocking(move || {
@@ -1164,13 +1172,13 @@ async fn node_mail_wake(
                     match &o.result {
                         Ok(status) => {
                             tracing::info!(message_id = %o.message_id, status, "node mail delivered");
-                            let _ = node_call(c2, &identity, &node_id, "mail.ack", &serde_json::json!({"message_id": o.message_id})).await;
+                            let _ = calls.call("mail.ack", &serde_json::json!({"message_id": o.message_id})).await;
                         }
                         Err(why) => tracing::warn!(message_id = %o.message_id, reason = %why, "node mail not delivered; stays in the inbox"),
                     }
                 }
             }
-            Err(_) => tracing::warn!("node-mail wake: inbox unavailable"),
+            Err(e) => tracing::warn!(reason = ?e, "node-mail wake: inbox unavailable"),
         }
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
     }

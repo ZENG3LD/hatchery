@@ -141,6 +141,8 @@ impl RestreamRig {
                 node_listen,
                 upstream,
                 None,
+                None,
+                None,
                 bridge_rx,
             )
             .await
