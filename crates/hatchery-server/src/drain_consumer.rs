@@ -131,7 +131,10 @@ impl DrainConsumer {
             Some((InnerKind::Transport, ct)) => {
                 let Some(transport) = self.transport.as_mut() else { return Ok(()) };
                 let Ok(plain) = transport.decrypt(ct) else {
-                    tracing::debug!("inner decrypt failed");
+                    // Desync (often after C2 dropped a frame under credit pressure).
+                    // Forget the session so the next Handshake1 can recover.
+                    tracing::warn!(node = %self.stream.node_id, channel = self.stream.channel_id, "inner decrypt failed; resetting Noise session");
+                    self.transport = None;
                     return Ok(());
                 };
                 let handler = Arc::clone(&self.handler);

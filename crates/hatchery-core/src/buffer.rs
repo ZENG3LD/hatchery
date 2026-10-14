@@ -102,6 +102,44 @@ impl ReplayBuffer {
         self.credits.get(key).copied().unwrap_or(self.default_credit)
     }
 
+    /// A fresh OPEN / Noise handshake must not be refused because an earlier
+    /// burst spent the stream's credit. Restore default credit and drop the
+    /// oldest buffered events on this stream until a small frame fits.
+    pub fn ensure_handshake_credit(&mut self, node_id: &str, channel_id: u32) {
+        let key = StreamKey {
+            node_id: node_id.to_owned(),
+            channel_id,
+        };
+        self.credits.insert(key.clone(), self.default_credit);
+        // Free capacity for ~2 KiB handshake if the global buffer is full.
+        const NEED: usize = 2048;
+        while self.events.len() >= self.limits.max_events
+            || self.total_bytes + NEED > self.limits.max_bytes
+        {
+            let Some(idx) = self
+                .events
+                .iter()
+                .position(|ev| ev.node_id == key.node_id && ev.channel_id == key.channel_id)
+            else {
+                break;
+            };
+            if let Some(ev) = self.events.remove(idx) {
+                self.total_bytes = self.total_bytes.saturating_sub(ev.payload.len());
+            } else {
+                break;
+            }
+        }
+    }
+
+    /// Reset credit when the node (re)OPENs a channel.
+    pub fn reset_channel_credit(&mut self, node_id: &str, channel_id: u32) {
+        let key = StreamKey {
+            node_id: node_id.to_owned(),
+            channel_id,
+        };
+        self.credits.insert(key, self.default_credit);
+    }
+
     /// Expire by age, then refuse if still over limits.
     fn trim_expired(&mut self, now: Instant) {
         while let Some(front) = self.events.front() {
