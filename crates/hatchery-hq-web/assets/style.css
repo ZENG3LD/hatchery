@@ -16,7 +16,7 @@ button{font:inherit;color:inherit;cursor:pointer;background:none;border:0;paddin
 .icon{width:32px;height:32px;flex:none;border-radius:9px;display:grid;place-items:center;color:var(--sub);font-size:16px;transition:background .12s,color .12s}
 .icon:hover{background:var(--hover);color:var(--txt)}.icon.on{background:var(--el2);color:var(--txt)}
 #search{margin:0 12px 8px;background:var(--el);border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:7px 11px;outline:0}
-#search:focus{border-color:#34343b}
+#search:focus{border-color:var(--dim)}
 #chats{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:4px 8px 8px}
 .sec{font-size:11px;font-weight:600;color:var(--dim);text-transform:uppercase;letter-spacing:.07em;padding:14px 10px 6px}
 .chatitem{display:flex;gap:10px;align-items:center;padding:7px 9px;border-radius:10px;width:100%;text-align:left;transition:background .12s}
@@ -169,8 +169,8 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 8px;b
 #sidetoggle{position:absolute;left:12px;top:0}
 #headbtn{display:flex;align-items:center;gap:8px;background:#232323e6;backdrop-filter:blur(10px);border:1px solid #303030;border-radius:22px;padding:5px 16px 5px 6px;font-weight:650;font-size:14px;box-shadow:0 4px 16px #0006}
 #headbtn:hover{background:#2a2a2ae6}
-#chat{padding-top:64px}
-#ptyview{padding-top:56px}
+#chat{padding-top:0}
+#ptyview{padding-top:0}
 .ptybar{border:0}
 #composer{padding:6px max(16px,calc((100% - 780px)/2)) 16px}
 #box{background:#1e1e1e;border:1px solid #333;border-radius:22px;padding:10px 10px 8px 14px;display:flex;flex-direction:column;gap:6px;transition:border-color .15s}
@@ -188,7 +188,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 8px;b
 #ptabs{justify-content:center;padding:0 12px 6px;flex:none}
 .tog{display:flex;background:var(--el);border:1px solid var(--line);border-radius:10px;padding:3px}.tog button{flex:1;border-radius:7px;padding:5px 12px;color:var(--sub);font-size:13px}.tog button.on{background:var(--el2);color:var(--txt)}
 .kv{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}.kv:last-child{border:0}.kv span:first-child{color:var(--sub)}
-@media (max-width:760px){#sidetoggle{display:grid}#chat{padding-top:60px}}
+@media (max-width:760px){#sidetoggle{display:grid}#chat{padding-top:0}}
 @media (max-width:760px){#side{box-shadow:none}body.sideopen #side{box-shadow:12px 0 40px #000a}}
 /* round 4: tones, docked panel, delayed pill, account menu, settings */
 :root{--side:#0f0f0f;--bg:#181818;--el:#212121;--el2:#2a2a2a;--hover:#1c1c1c;--line:#262626}
@@ -279,7 +279,7 @@ body.rail #chats{order:2}body.rail .sidetop{order:3;padding:8px 0 0}body.rail .s
 #headbtn:hover{background:#242424}
 #headav .av,#headav .gi{width:24px!important;height:24px!important}
 #headbtn:hover .hchev{margin-left:-4px}
-#chat{padding-top:60px}
+#chat{padding-top:0}
 
 ::-webkit-scrollbar-button{display:none;width:0;height:0}
 #input,#box #input{max-height:45vh;overflow-y:hidden;scrollbar-width:auto}
@@ -430,3 +430,87 @@ body.rail #chats{order:2}body.rail .sidetop{order:3;padding:8px 0 0}body.rail .s
 .rn{transition:opacity .15s}.rx:hover .rn{opacity:0;max-width:0;padding:0;overflow:hidden}
 .msg.them.hasrx>.ts.in{top:auto;bottom:8px}
 .msg.them .rx,.msg.me .rx{border-color:transparent}.msg .rx.mine,.msg .rx:has(.rpill.mine){border-color:#353535}
+
+/* round 22: nodes as environments (node view), node-driven PTY, chat has no PTY */
+#nodeview{display:none}
+#nodeview.on{display:block}
+body.nodemode #composer{display:none}
+.nodewrap{max-width:760px;margin:0 auto;padding:20px max(16px,calc((100% - 760px)/2)) 40px}
+.nhero{display:flex;align-items:center;gap:14px;margin-bottom:8px}
+.nhero h2{margin:0;font-size:20px}
+.nsec{margin-top:18px}
+.nsec>h3{font-size:13px;color:var(--sub);font-weight:600;margin:0 0 8px;text-transform:uppercase;letter-spacing:.05em}
+.srow2{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;border:1px solid var(--line);border-radius:999px;background:var(--el);font-size:13px}
+.chip:hover{background:var(--hover);border-color:var(--dim)}
+/* native PTY layout toggle (stub for chat-like view) */
+.ptybar .tog{display:flex;background:var(--el);border:1px solid var(--line);border-radius:9px;padding:3px}
+.ptybar .tog button{padding:4px 12px;border-radius:6px;color:var(--sub);font-size:13px}
+.ptybar .tog button.on{background:var(--el2);color:var(--txt)}
+.ptybar .grow{flex:1}
+.ptychat{flex:1;min-height:0;overflow:auto;padding:16px}
+.ptychat-stub{max-width:720px;margin:0 auto}
+.ptychat-screen{white-space:pre-wrap;background:var(--el);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:12px;font:13px/1.45 ui-monospace,Menlo,Consolas,monospace}
+
+/* round 23: full-center fitted PTY, Nodes modal */
+.termwrap{display:flex;flex-direction:column;overflow:hidden;padding:10px 12px 12px}
+#terminal{flex:1;min-height:0;width:auto;max-width:none;box-sizing:border-box}
+#terminal .xterm{height:100%}
+#terminal .xterm-viewport{overflow-y:hidden}
+.ptybar a.btn{text-decoration:none}
+#nodesdlg{position:fixed;inset:0;background:#000a;z-index:70;display:grid;place-items:center}
+.ndlg{width:min(720px,94vw);max-height:86vh;overflow:auto;background:var(--side);border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:0 20px 60px #000c}
+.ndh{display:flex;align-items:center;margin-bottom:10px}.ndh h2{margin:0;font-size:18px}.ndh .grow{flex:1}
+.ncard2{border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:10px;background:var(--el)}
+.nrow{display:flex;align-items:center;gap:10px}.nrow .grow{flex:1;min-width:0}
+.ncard2 details{margin-top:8px}.ncard2 summary{cursor:pointer;color:var(--sub);font-size:13px}
+.ncard2 details .pcard{margin-top:8px}
+.ptybar .tog button{white-space:nowrap}
+
+/* dig2browser full-center view (node-side; never opens in the operator browser) */
+.bview{position:absolute;inset:0;display:flex;flex-direction:column;background:#0b0d10;z-index:2}
+.bview .bbar{display:flex;gap:8px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--panel)}
+.bview .bbar input{flex:1;min-width:0}
+.bview #bcanvas2{flex:1;width:100%;height:100%;object-fit:contain;background:#000;cursor:crosshair}
+
+/* slim right-side session toolbar (top bar keeps only the session pill) */
+.ptybar{position:absolute;right:8px;top:50%;transform:translateY(-50%);z-index:20;display:flex;flex-direction:column;gap:6px;padding:6px;background:var(--el);border:1px solid var(--line);border-radius:12px;width:auto;height:auto}
+.ptybar .sbtn,.ptybar .tog button{display:flex;flex-direction:column;align-items:center;gap:1px;width:46px;padding:5px 0;border:0;border-radius:8px;background:transparent;color:var(--txt);font-size:15px;cursor:pointer}
+.ptybar small{font-size:9.5px;color:var(--sub)}
+.ptybar .sbtn:hover,.ptybar .tog button:hover{background:#ffffff14}
+.ptybar .tog{display:flex;flex-direction:column;gap:2px;padding:2px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:none}
+.ptybar .tog button.on{background:#ffffff1f}
+.ptybar .sbtn.blue{color:#5ea2ff}.ptybar .sbtn.red{color:#ff6b6b}
+.ptybar [hidden]{display:none}
+/* browser: right-side overlay drawer over content (not the info sidebar); mini fitted to frame, expandable */
+.bdrawer{position:fixed;z-index:60;top:64px;right:0;width:400px;max-width:92vw;max-height:calc(100vh - 72px);background:#111;border:1px solid var(--line);border-right:0;border-radius:12px 0 0 12px;box-shadow:-14px 10px 44px #000a;display:flex;flex-direction:column;overflow:hidden;transform:translateX(0);transition:transform .2s cubic-bezier(.2,.8,.3,1),width .2s,top .2s,right .2s}
+.bdrawer.off{transform:translateX(calc(100% + 2px))}
+.bdrawer.big{top:64px;right:50%;transform:translateX(50%);border-right:1px solid var(--line);border-radius:12px;max-height:calc(100vh - 72px)}
+.bdrawer.big.off{transform:translateX(200%)}
+.bdbar{display:flex;align-items:center;gap:4px;padding:4px 6px;background:var(--el);flex:none}
+.bdbar input{flex:1;min-width:0;height:24px;font-size:12px;padding:0 8px;border-radius:6px}
+.bdbar .ibtn{width:26px;height:24px;font-size:13px}
+#bdcanvas{display:block;width:100%;height:auto;max-height:calc(100vh - 140px);object-fit:contain;background:#fff;outline:none;cursor:default}
+.bdlat{padding:6px 8px;flex:none}
+.bdtab{position:fixed;z-index:59;right:0;top:120px;writing-mode:vertical-rl;padding:10px 5px;background:var(--el);border:1px solid var(--line);border-right:0;border-radius:8px 0 0 8px;font-size:12px;color:var(--txt);cursor:pointer}
+.bdtab[hidden]{display:none}
+/* right info panel as a hideable overlay over the center */
+#panel{position:fixed;top:0;right:0;bottom:0;z-index:40;box-shadow:-12px 0 40px #0008}
+.ptybar .tog button{color:var(--txt);white-space:normal}
+
+/* no floating controls beside the terminal: controls live in the info panel */
+#ptyview .ptybar{display:none!important}
+.cp-tog{display:inline-flex;margin-bottom:8px}.cp-row{flex-wrap:wrap;gap:6px}.btn.red{color:#ff6b6b}
+.fsess{margin:6px 0 4px}.fs-row{padding:3px 0}
+.cp-tog button{white-space:nowrap;padding:4px 14px}
+
+.bdrawer[hidden]{display:none}
+.bdbar #bdtitle{white-space:nowrap;font-size:11px;padding:0 4px}
+.plat{margin-top:8px;font-size:11px;line-height:1.4}
+.bdtab{display:none!important}
+
+/* session pill floats over the scene; scene reaches the top edge under it */
+#head{z-index:30}
+#ptyview,#chat,#body{padding-top:0!important}
+.termwrap{padding-top:0}

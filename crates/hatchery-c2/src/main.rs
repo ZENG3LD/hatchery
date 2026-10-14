@@ -283,8 +283,8 @@ impl EnrollArgs {
             c2_wg_endpoint: self.wg_endpoint.clone(),
             c2_wg_public_key: self.wg_public_key.clone(),
             c2_call_home: node_listen.map(|addr| addr.to_string()),
-            upstream_c2_public_key: None,
-            upstream_recipient_public_key: None,
+            upstream_c2_public_key: std::env::var("HATCHERY_RESTREAMER_C2_PUBLIC_B64").ok().filter(|s| !s.is_empty()),
+            upstream_recipient_public_key: std::env::var("HATCHERY_RESTREAMER_RECIPIENT_PUBLIC_B64").ok().filter(|s| !s.is_empty()),
         };
         if let Some(interface) = &self.wg_interface {
             if public.c2_wg_public_key.is_none() {

@@ -78,3 +78,23 @@ Landing pages, if wanted, live in `site/` and can be served by the edge reverse 
 ## Build-time defaults (operator builds only)
 
 `HATCHERY_HQ_M4A_SERVER`, `HATCHERY_HQ_C2_API`, `HATCHERY_HQ_C2_CONTROL` (hq-web) and `HATCHERY_ENROLL_ADDR` (node `enroll`/`call`/`build` when `--c2-enroll` is absent) are read at runtime first; if unset, a value present in the environment of `cargo build` is used (`option_env!`). Keep your values in a private env file outside the repo and source it before building. Tokens and keys are never baked; crates.io builds contain no values.
+
+
+## Operator WireGuard path (HQ on core)
+
+HQ web runs on core (loopback). The operator device joins a dedicated WireGuard
+interface on the edge (`wg-op`); the edge only forwards opaque TCP to core over the
+existing core↔edge tunnel. Nodes stay on their own WG interface and only talk to C2.
+
+Typical env on core for hq-web:
+
+| Variable | Meaning |
+|---|---|
+| `HATCHERY_HQ_LISTEN` | `127.0.0.1:18500` |
+| `HATCHERY_HQ_C2_API` | C2 API via the core→edge tunnel address |
+| `HATCHERY_HQ_C2_CONTROL` | core operator control socket on the same host |
+| `HATCHERY_HQ_SERVER` | local hatchery-server control |
+| `HATCHERY_HQ_PUBLIC_HOSTS` | edge operator VIP `host:port` (Host header the opaque proxy does not rewrite) |
+
+The operator opens `http://<edge-wg-op-vip>:18500/app/` after bringing up their WG peer.
+Core has no public subdomain. Keep tokens in `EnvironmentFile=` only.

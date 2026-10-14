@@ -9,11 +9,11 @@
 //! Secrets are read from named environment variables and scrubbed; never logged.
 
 use crate::drain_consumer::{DrainConsumer, NodeStream};
-use crate::node_controller::OperatorLink;
+use crate::node_controller::{G4aMessage, OperatorLink};
 use crate::operator_control::{serve_local, NodeOperatorMesh};
 use hatchery_c2_client::DrainClient;
 use hatchery_core::nested::HqRecipientSecret;
-use hatchery_core::ChannelKind;
+use hatchery_core::{BrowserStreamEvent, ChannelKind, NodeRequest, NodeRoute, NodeId, NodeCursor, RoutedNodeRequest};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use tokio::sync::{mpsc, watch};
@@ -148,6 +148,66 @@ pub struct MeshRuntime {
     stop: watch::Sender<bool>,
 }
 
+
+async fn bootstrap_cursor(
+    mesh: NodeOperatorMesh,
+    link: OperatorLink,
+    node_id: String,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    use hatchery_core::{NodeCursor, NodeId, NodeIncarnationId, NodeRequest, NodeRoute, RoutedNodeRequest};
+    use crate::node_controller::G4aMessage;
+    // Retry until Snapshot lands or shutdown.
+    for attempt in 1u32..=120 {
+        if *shutdown.borrow() {
+            return;
+        }
+        let Ok(nid) = NodeId::new(node_id.clone()) else { return };
+        let route = NodeRoute {
+            node_id: nid,
+            expected_incarnation_id: NodeIncarnationId::from_bytes([0; 16]),
+        };
+        let req = RoutedNodeRequest {
+            route,
+            request: NodeRequest::Snapshot,
+        };
+        match link.request(&req, std::time::Duration::from_secs(5)).await {
+            Ok(G4aMessage::Response(routed)) => {
+                // Any routed reply carries the live incarnation (ok Snapshot or
+                // a typed failure). That is enough for HQ Spawn cursors.
+                mesh.set_cursor(
+                    &node_id,
+                    NodeCursor {
+                        incarnation_id: routed.incarnation_id,
+                        sequence: 0,
+                    },
+                );
+                if let Ok(hatchery_core::C2NodeResponse::Snapshot { snapshot, .. }) = &routed.response {
+                    if let Some(machine) = snapshot.machine.clone() {
+                        mesh.set_machine(&node_id, machine);
+                    }
+                }
+                tracing::info!(
+                    %node_id,
+                    incarnation = %routed.incarnation_id,
+                    ok = routed.response.is_ok(),
+                    "core mesh cursor from Snapshot"
+                );
+                return;
+            }
+            Ok(_) => {}
+            Err(err) => {
+                tracing::debug!(%node_id, %attempt, error = %err, "cursor bootstrap waiting for drain session");
+            }
+        }
+        tokio::select! {
+            _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => {}
+            _ = shutdown.changed() => return,
+        }
+    }
+    tracing::warn!(%node_id, "core mesh cursor bootstrap gave up");
+}
+
 impl MeshRuntime {
     pub fn start(config: MeshConfig) -> Self {
         Self::start_with_m4a(config, None)
@@ -172,9 +232,26 @@ impl MeshRuntime {
         }));
 
         for node_id in &config.node_ids {
-            let (events_tx, _events_rx) = mpsc::unbounded_channel();
-            let (link, outbound) = OperatorLink::new(Some(events_tx));
+            let (events_tx, mut events_rx) = mpsc::unbounded_channel();
+            let (browser_tx, mut browser_rx) = mpsc::unbounded_channel::<BrowserStreamEvent>();
+            let (link, outbound) = OperatorLink::new_with_browser(Some(events_tx), Some(browser_tx));
             mesh.register(node_id, link.clone());
+            // Forward node-initiated g4a events (PTY frames, etc.) onto the
+            // operator broadcast bus so every HQ client sees live bytes.
+            let mesh_ev = mesh.clone();
+            tasks.push(tokio::spawn(async move {
+                while let Some(msg) = events_rx.recv().await {
+                    if let G4aMessage::Event(ev) = msg {
+                        mesh_ev.publish_event(ev);
+                    }
+                }
+            }));
+            let mesh_br = mesh.clone();
+            tasks.push(tokio::spawn(async move {
+                while let Some(ev) = browser_rx.recv().await {
+                    mesh_br.publish_browser(ev);
+                }
+            }));
             let consumer = DrainConsumer::new(
                 DrainClient::new(config.drain_addr, config.drain_token.clone()),
                 config.recipient.clone(),
@@ -183,12 +260,21 @@ impl MeshRuntime {
                     channel_id: G4A_CONTROL_CHANNEL,
                     kind: ChannelKind::G4aControl,
                 },
-                link.handler(),
+                link.clone().handler(),
             )
             .with_outbound(outbound);
             let sd = shutdown.clone();
             tasks.push(tokio::spawn(async move {
                 consumer.run(sd).await;
+            }));
+
+            // Learn incarnation once the Noise session is up so HQ Spawn has a cursor.
+            let mesh_boot = mesh.clone();
+            let link_boot = link.clone();
+            let boot_id = node_id.clone();
+            let sd = shutdown.clone();
+            tasks.push(tokio::spawn(async move {
+                bootstrap_cursor(mesh_boot, link_boot, boot_id, sd).await;
             }));
 
             if let Some(handler) = m4a_handler.clone() {

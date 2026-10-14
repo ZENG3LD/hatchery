@@ -71,6 +71,8 @@ impl DrainConsumer {
     }
 
     async fn session(&mut self, shutdown: &mut watch::Receiver<bool>) -> Result<(), String> {
+        // Prior Noise keys are invalid after a TCP reconnect; wait for a fresh msg1.
+        self.transport = None;
         let mut s = self.client.connect().await.map_err(|e| e.to_string())?;
         s.open(&self.stream.node_id, self.stream.channel_id, self.stream.kind).await.map_err(|e| e.to_string())?;
         s.resume(self.last_acked).await.map_err(|e| e.to_string())?;

@@ -409,7 +409,8 @@ mod tests {
                 managed_sessions_truncated: false,
                 retired_count: 0,
                 launch_inventory: None,
-            },
+
+            machine: None,},
         }
     }
 

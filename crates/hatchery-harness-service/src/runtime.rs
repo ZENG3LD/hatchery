@@ -14279,7 +14279,8 @@ mod tests {
                 agent_progress: Vec::new(),
                 managed_worktrees: Vec::new(),
                 launch_inventory: None,
-        }
+
+        machine: None,}
     }
 
     fn bound_session_address() -> SessionAddress {
@@ -14347,7 +14348,8 @@ mod tests {
             managed_worktree_count: 0,
             managed_worktrees_truncated: false,
             launch_inventory: None,
-        }
+
+        machine: None,}
     }
 
     fn sample_runtime_node_inventory(screen_state: PtyScreenState) -> HarnessRuntimeNodeInventoryV1 {

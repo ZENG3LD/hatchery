@@ -9,6 +9,8 @@
 //!   HATCHERY_HQ_M4A_CLI / _AS / _SOCK / _GROUPS  the operator's m4a account via a local client daemon (optional)
 //!   HATCHERY_HQ_CHATS             sidebar chats: label=node-id or label=room:NAME, comma separated (optional)
 //!   HATCHERY_HQ_STATE_DIR         directory for the operator's sent-message journal (optional)
+//!   HATCHERY_HQ_PUBLIC_HOSTS      extra Host values allowed by the guard (comma-separated host:port),
+//!                                 for an opaque reverse proxy that does not rewrite Host (optional)
 
 #[tokio::main]
 async fn main() {
@@ -21,11 +23,14 @@ async fn main() {
     });
     let listen = config.listen;
     let (app, state) = hatchery_hq_web::router(config);
-    hatchery_hq_web::spawn_mail_watcher(state);
+    hatchery_hq_web::spawn_mail_watcher(std::sync::Arc::clone(&state));
+    hatchery_hq_web::spawn_topology_watcher(state);
     let listener = tokio::net::TcpListener::bind(listen).await.unwrap_or_else(|e| {
         eprintln!("hatchery-hq-web: bind {listen}: {e}");
         std::process::exit(2)
     });
     tracing::info!("web HQ on http://{listen}/ (tokens stay on the server side)");
+    use axum::serve::ListenerExt;
+    let listener = listener.tap_io(|tcp| { let _ = tcp.set_nodelay(true); });
     let _ = axum::serve(listener, app).with_graceful_shutdown(async { let _ = tokio::signal::ctrl_c().await; }).await;
 }

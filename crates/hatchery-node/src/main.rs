@@ -169,6 +169,7 @@ async fn main() {
     let mut no_wg = false;
     let mut door_listen: Option<std::net::SocketAddr> = None;
     let mut door_c2: Option<std::net::SocketAddr> = None;
+    let mut restream_uplink: Option<std::net::SocketAddr> = None;
     let mut wake_policy_path: Option<PathBuf> = None;
     let mut kill_switch = std::env::var("HATCHERY_KILL_SWITCH").is_ok_and(|v| v == "1");
     let mut run_as: Option<String> = std::env::var("HATCHERY_RUN_AS").ok().filter(|v| !v.is_empty());
@@ -184,6 +185,8 @@ async fn main() {
             // Loopback door for agents: mail/task operations signed by this node and sent to C2.
             "--door-listen" => door_listen = Some(required_value("--door-listen", args.next()).parse().unwrap_or_else(|e| fail(&format!("--door-listen is invalid: {e}")))),
             "--door-c2" => door_c2 = Some(required_value("--door-c2", args.next()).pipe_resolve("--door-c2")),
+            "--restream-uplink" => restream_uplink = Some(required_value("--restream-uplink", args.next()).parse()
+                .unwrap_or_else(|e| fail(&format!("--restream-uplink is invalid: {e}")))),
             // Letter pipeline policy (deliver / terminal grant / routines / node mail), JSON.
             "--wake-policy" => wake_policy_path = Some(required_value("--wake-policy", args.next()).into()),
             // Egress is dropped unless it goes through the tunnel (fails closed).
@@ -445,6 +448,14 @@ async fn main() {
     }
     let node_id_for_door = Some(node_id.to_string());
     let state_path = default_state_path(&node_id).unwrap_or_else(|error| fail(&error.to_string()));
+    let endpoint_for_bridge = endpoint.clone();
+    let token_for_bridge = token.clone();
+    let node_id_for_bridge = node_id.to_string();
+    // Resolve restream uplink early so we can disable legacy call-home when the
+    // node-initiated bidirectional restreamer carries both read and write.
+    let restream_uplink_early = restream_uplink.or_else(|| {
+        std::env::var("HATCHERY_RESTREAM_UPLINK").ok().and_then(|v| v.parse().ok())
+    });
     let config = NodeServerConfig::new(endpoint, token, node_id, workspaces)
         .and_then(|config| config.with_state_path(&state_path))
         .and_then(|config| config.with_api_listen(api_listen))
@@ -452,9 +463,15 @@ async fn main() {
             Some(addr) => config.with_bridge_listen(addr),
             None => Ok(config),
         })
-        .and_then(|config| match call_home {
-            Some(relay) => config.with_call_home(relay),
-            None => Ok(config),
+        .and_then(|config| match (call_home, restream_uplink_early) {
+            // Restreamer is the long-lived duplex stream; skip call-home to stop
+            // the 5s auth-churn against a restreamer-only C2.
+            (Some(_), Some(_)) => {
+                tracing::info!("restream uplink configured; skipping legacy call-home");
+                Ok(config)
+            }
+            (Some(relay), None) => config.with_call_home(relay),
+            (None, _) => Ok(config),
         })
         .unwrap_or_else(|error| fail(&error.to_string()));
     let call_home_identity_for_door = call_home_identity.clone();
@@ -559,7 +576,17 @@ async fn main() {
             .unwrap_or_else(|error| fail(&error.to_string()));
     }
     let server = NodeServer::new(config).unwrap_or_else(|error| fail(&error.to_string()));
-    if let (Some(listen), Some(c2), Some(identity), Some(id)) = (door_listen, door_c2, call_home_identity_for_door.clone(), node_id_for_door.clone()) {
+    // Node calls (mail.*, task.*): over the restream uplink when there is one (the restream
+    // bridge publishes it), else the legacy signed HTTP call to C2.
+    let uplink_keys = restream_uplink_early.map(|_| resolve_upstream_keys(enroll_state.as_deref()).unwrap_or_else(|e| fail(&e)));
+    let node_calls = node_id_for_door.clone().map(|id| {
+        let legacy = match (door_c2, call_home_identity_for_door.clone()) {
+            (Some(c2), Some(identity)) => Some((c2, identity)),
+            _ => None,
+        };
+        hatchery_node::uplink_calls::NodeCalls::new(id, uplink_keys, legacy)
+    });
+    if let (Some(listen), Some(_c2), Some(_identity), Some(_id), Some(calls)) = (door_listen, door_c2, call_home_identity_for_door.clone(), node_id_for_door.clone(), node_calls.clone()) {
         if !listen.ip().is_loopback() {
             fail("--door-listen must be a loopback address");
         }
@@ -577,15 +604,102 @@ async fn main() {
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join("node-mail-seen.json");
             let door_hint = format!("http://{listen}/door");
-            tokio::spawn(node_mail_wake(c2, std::sync::Arc::clone(&identity), id.clone(), std::sync::Arc::clone(&policy), seen, door_hint));
+            tokio::spawn(node_mail_wake(calls.clone(), std::sync::Arc::clone(&policy), seen, door_hint));
         }
-        tokio::spawn(hatchery_node::door::serve(listener, c2, identity, id, wake));
+        tokio::spawn(hatchery_node::door::serve(listener, calls, wake));
     } else if door_listen.is_some() || door_c2.is_some() {
         fail("--door-listen and --door-c2 need each other and --enrolled");
+    }
+    // A2: opaque restreamer uplink (g4a bridged to core over Noise). Optional.
+    let restream_uplink = restream_uplink_early;
+    if let Some(uplink) = restream_uplink {
+        let keys = uplink_keys.unwrap_or_else(|| fail("upstream keys"));
+        let bridge_calls = node_calls.clone();
+        let endpoint = endpoint_for_bridge;
+        let node_id = node_id_for_bridge;
+        let bridge_token = token_for_bridge;
+        let journal = enroll_state.as_ref().map(|dir| {
+            let path = dir.join("uplink.journal");
+            std::sync::Arc::new(
+                hatchery_node::uplink_journal::UplinkJournal::open(node_id.clone(), &path)
+                    .unwrap_or_else(|e| fail(&format!("uplink journal: {e}"))),
+            )
+        });
+        let (stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+        let browser_root = enroll_state.as_ref().map(|d| d.join("browser-profiles"));
+        tokio::spawn(async move {
+            loop {
+                match hatchery_node::restream_g4a_bridge::run(
+                    endpoint.clone(),
+                    node_id.clone(),
+                    bridge_token.clone(),
+                    uplink,
+                    keys,
+                    journal.clone(),
+                    browser_root.clone(),
+                    bridge_calls.clone(),
+                    stop_rx.clone(),
+                )
+                .await
+                {
+                    Ok(()) => break,
+                    Err(err) => {
+                        tracing::warn!(error = %err, %uplink, "restream g4a bridge ended; retry in 3s");
+                        tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                        if *stop_rx.borrow() { break; }
+                    }
+                }
+            }
+        });
+        // Keep stop_tx alive for process lifetime.
+        std::mem::forget(stop_tx);
+        tracing::info!(%uplink, "restream g4a bridge starting");
     }
     if let Err(error) = server.run_until_ctrl_signal().await {
         fail(&error.to_string());
     }
+}
+
+fn resolve_upstream_keys(enroll_dir: Option<&std::path::Path>) -> Result<hatchery_node::restream_session::UpstreamKeys, String> {
+    use hatchery_node::restream_session::UpstreamKeys;
+    use hatchery_core::nested::PublicKeyBytes;
+    let from_b64 = |name: &str, v: &str| -> Result<PublicKeyBytes, String> {
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(v.trim())
+            .or_else(|_| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(v.trim()))
+            .map_err(|e| format!("{name}: {e}"))?;
+        if bytes.len() != 32 {
+            return Err(format!("{name}: expected 32 bytes, got {}", bytes.len()));
+        }
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&bytes);
+        Ok(PublicKeyBytes(out))
+    };
+    let mut c2 = std::env::var("HATCHERY_UPSTREAM_C2_PUBLIC_B64").ok().filter(|s| !s.is_empty());
+    let mut recip = std::env::var("HATCHERY_UPSTREAM_RECIPIENT_PUBLIC_B64").ok().filter(|s| !s.is_empty());
+    if c2.is_none() || recip.is_none() {
+        if let Some(dir) = enroll_dir {
+            let path = dir.join("enrollment.json");
+            if path.is_file() {
+                let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).map_err(|e| e.to_string())?)
+                    .map_err(|e| e.to_string())?;
+                let resp = v.get("response").unwrap_or(&v);
+                if c2.is_none() {
+                    c2 = resp.get("upstream_c2_public_key").and_then(|x| x.as_str()).map(str::to_owned);
+                }
+                if recip.is_none() {
+                    recip = resp.get("upstream_recipient_public_key").and_then(|x| x.as_str()).map(str::to_owned);
+                }
+            }
+        }
+    }
+    let c2 = c2.ok_or("upstream C2 public key missing (HATCHERY_UPSTREAM_C2_PUBLIC_B64 or enrollment.json)")?;
+    let recip = recip.ok_or("upstream recipient public key missing (HATCHERY_UPSTREAM_RECIPIENT_PUBLIC_B64 or enrollment.json)")?;
+    Ok(UpstreamKeys {
+        c2_public: from_b64("c2", &c2)?,
+        recipient_public: from_b64("recipient", &recip)?,
+    })
 }
 
 /// Stock CLI secret resolver. There is no secret product here: any
@@ -709,34 +823,37 @@ fn install_missing_provider_clis() -> Result<(), String> {
             ));
         }
     }
-    // Fallback: inline check + npm for claude/codex only.
-    for (name, npm_pkg) in [
-        ("claude", Some("@anthropic-ai/claude-code")),
-        ("codex", Some("@openai/codex")),
-        ("kimi", None),
-        ("grok", None),
+    // Fallback: inline check + npm for claude/codex. kimi/grok are optional:
+    // warn when missing rather than failing node startup (owner can provision later).
+    for (name, aliases, npm_pkg) in [
+        ("claude", &["claude"][..], Some("@anthropic-ai/claude-code")),
+        ("codex", &["codex"][..], Some("@openai/codex")),
+        ("kimi", &["kimi", "kimi-cli"][..], None),
+        ("grok", &["grok"][..], None),
     ] {
-        let present = Command::new("sh")
-            .args(["-c", &format!("command -v {name}")])
-            .status()
-            .map(|status| status.success())
-            .unwrap_or(false);
+        let present = aliases.iter().any(|alias| {
+            Command::new("sh")
+                .args(["-c", &format!("command -v {alias}")])
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false)
+        });
         if present {
             tracing::info!(provider = name, "provider CLI already present");
             continue;
         }
         let Some(pkg) = npm_pkg else {
-            return Err(format!(
-                "install-provider-clis: {name} is missing and has no default package download; set PROVIDER_CLI_INSTALL"
-            ));
+            tracing::warn!(
+                provider = name,
+                "provider CLI missing; continuing without it (no default package)"
+            );
+            continue;
         };
         tracing::info!(provider = name, package = pkg, "downloading missing provider CLI");
-        let status = Command::new("npm")
-            .args(["install", "-g", pkg])
-            .status()
-            .map_err(|error| format!("npm install -g {pkg}: {error}"))?;
-        if !status.success() {
-            return Err(format!("npm install -g {pkg} failed: {status}"));
+        match Command::new("npm").args(["install", "-g", pkg]).status() {
+            Ok(status) if status.success() => {}
+            Ok(status) => tracing::warn!(provider = name, %status, "npm install -g failed; continuing"),
+            Err(error) => tracing::warn!(provider = name, %error, "npm install -g failed; continuing"),
         }
     }
     Ok(())
@@ -1034,18 +1151,15 @@ impl PipeResolve for String {
 /// delivery through g4a). Polls every 10 s; a delivered letter is acked; nothing is logged but ids
 /// and statuses.
 async fn node_mail_wake(
-    c2: std::net::SocketAddr,
-    identity: std::sync::Arc<hatchery_enroll::NodeIdentity>,
-    node_id: String,
+    calls: hatchery_node::uplink_calls::NodeCalls,
     policy: std::sync::Arc<hatchery_node::wake_pipeline::WakePolicy>,
     seen_path: PathBuf,
     door_hint: String,
 ) {
-    use hatchery_node::enroll_client::node_call;
     let seen = std::sync::Arc::new(std::sync::Mutex::new(hatchery_node::wake_pipeline::MailSeen::load(seen_path)));
     tracing::info!("node-mail wake on");
     loop {
-        match node_call(c2, &identity, &node_id, "mail.inbox", &serde_json::json!({"limit": 256})).await {
+        match calls.call("mail.inbox", &serde_json::json!({"limit": 256})).await {
             Ok(inbox) => {
                 let (policy, seen, hint) = (std::sync::Arc::clone(&policy), std::sync::Arc::clone(&seen), door_hint.clone());
                 let outcomes = tokio::task::spawn_blocking(move || {
@@ -1058,13 +1172,13 @@ async fn node_mail_wake(
                     match &o.result {
                         Ok(status) => {
                             tracing::info!(message_id = %o.message_id, status, "node mail delivered");
-                            let _ = node_call(c2, &identity, &node_id, "mail.ack", &serde_json::json!({"message_id": o.message_id})).await;
+                            let _ = calls.call("mail.ack", &serde_json::json!({"message_id": o.message_id})).await;
                         }
                         Err(why) => tracing::warn!(message_id = %o.message_id, reason = %why, "node mail not delivered; stays in the inbox"),
                     }
                 }
             }
-            Err(_) => tracing::warn!("node-mail wake: inbox unavailable"),
+            Err(e) => tracing::warn!(reason = ?e, "node-mail wake: inbox unavailable"),
         }
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
     }

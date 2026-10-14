@@ -36,9 +36,10 @@ const SHAPES = [
 ];
 function hashOf(name) { let h = 2166136261; for (const c of String(name)) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return h; }
 // Avatar "critter": shape + colour derived from the id; state class animates it, .look follows the cursor.
-const FAMILY = { dm: [0, 5], group: [3, 4], agent: [1, 2, 6] };
+const FAMILY = { dm: [0, 5], group: [3], agent: [1, 2, 6], node: [4] };
+const isNode = (id) => (S.nodes || []).some((n) => n.node_id === id);
 const chatKind = (id) => ((S.chats || []).find((x) => x.target === id) || {}).kind;
-const kindOf = (id) => (chatKind(id) ? chatKind(id) : id === '*' || String(id).startsWith('room:') ? 'group' : S.session && S.sessionNode === id ? 'agent' : 'dm');
+const kindOf = (id) => (String(id).startsWith('pty:') ? 'agent' : isNode(id) ? 'node' : chatKind(id) ? chatKind(id) : id === '*' || String(id).startsWith('room:') ? 'group' : S.session && S.sessionNode === id ? 'agent' : 'dm');
 function avatar(name, cls = '', online, force, fam) {
   const h = hashOf(name); const c = colorOf(name); const f = FAMILY[fam || kindOf(name)] || FAMILY.dm; const shape = SHAPES[f[(h >>> 8) % f.length]]; const st = force || avatarState(name);
   const extra = st === 'thinking' ? '<g class="tdots"><circle cx="50" cy="8" r="2.4"/><circle cx="56" cy="3" r="1.8"/></g>' : st === 'attention' ? '<circle class="ring" cx="32" cy="32" r="30" fill="none" stroke="#e0a63a" stroke-width="2.5"/>' : '';
@@ -55,21 +56,37 @@ document.addEventListener('mousemove', (e) => {
 });
 
 // ---- state
-const S = { mode: 'chat', view: 'chat', space: '*', log: [], events: {}, agentState: {}, lastFrame: 0, promptAt: 0, lastAnsi: '', nodes: [], ready: null, chat: '*', mail: {}, local: {}, session: null, sessionNode: null, sessionProv: null, target: 'mail', working: {}, panel: false, tab: 'activity', lastStatus: {}, wake: null, library: [] };
+const S = { mode: 'chat', view: 'chat', space: '*', log: [], events: {}, agentState: {}, lastFrame: 0, promptAt: 0, lastAnsi: '', nodes: [], ready: null, chat: '*', nodeId: null, sessions: {}, ptyLayout: 'native', mail: {}, local: {}, session: null, sessionNode: null, sessionProv: null, target: 'mail', working: {}, panel: false, tab: 'activity', lastStatus: {}, wake: null, library: [] };
+// Providers offered by the node Start control. `parser` overrides the event parser (test fixtures).
+const PROVIDERS = [{ v: 'shell', label: 'shell' }, { v: 'browser', label: 'browser' }, { v: 'claude' }, { v: 'codex' }, { v: 'kimi' }, { v: 'grok' }, { v: 'grok', label: 'fixture agent (test)', parser: 'claude' }];
+const provOptions = (sel) => PROVIDERS.map((p, i) => `<option value="${esc(p.v)}"${p.parser ? ` data-parser="${esc(p.parser)}"` : ''}${i === sel ? ' selected' : ''}>${esc(p.label || p.v)}</option>`).join('');
 const chatName = (id) => { const c = (S.chats || []).find((x) => x.target === id); return c ? c.label : id === '*' ? 'general' : String(id).replace(/^room:/, ''); };
 const addLocal = (chat, item) => { (S.local[chat] ||= []).push({ ts: Date.now(), ...item }); renderChat(); };
 const logEv = (text) => { S.log.push({ ts: Date.now(), text }); if (S.log.length > 300) S.log.shift(); if (S.panel && S.tab === 'status') renderStatus(); };
 const visibleNodes = () => S.nodes.filter((n) => n.status !== 'revoked');
 
 const isGroup = (id) => chatKind(id) ? chatKind(id) === 'group' : id === '*' || String(id).startsWith('room:');
-// ---- sidebar: only chats (groups, DMs, agent sessions); kind is shown by creature shape only
+// ---- sidebar: sessions only (m4a chats and PTY/agent sessions), each its own entry; no nodes here
+const allSessions = () => Object.entries(S.sessions).flatMap(([node, arr]) => arr.map((s) => ({ node, s })));
 function renderSidebar() {
   const q = $('#search').value.toLowerCase(); const match = (n) => !q || n.toLowerCase().includes(q);
   const root = $('#chats'); root.innerHTML = '';
   const last = (id) => { const m = S.mail[id] || []; const l = m[m.length - 1]; return l ? l.body : ''; };
-  const item = (id, name, preview) => { if (!match(name)) return; const b = document.createElement('button'); b.className = 'chatitem' + (S.chat === id ? ' on' : ''); b.title = name; b.innerHTML = avatar(id) + `<div class="t"><div class="n">${esc(name)}</div><div class="p">${esc(preview)}</div></div>`; b.onclick = () => { openChat(id); document.body.classList.remove('sideopen'); }; root.appendChild(b); };
-  if (S.session) item(S.sessionNode, S.sessionNode, last(S.sessionNode) || S.sessionProv);
-  for (const c of S.chats || []) if (!(S.session && S.sessionNode === c.target)) item(c.target, c.label, last(c.target) || '');
+  const item = (id, name, preview, active, onclick) => { if (!match(name)) return; const b = document.createElement('button'); b.className = 'chatitem' + (active ? ' on' : ''); b.title = name; b.innerHTML = avatar(id) + `<div class="t"><div class="n">${esc(name)}</div><div class="p">${esc(preview)}</div></div>`; b.onclick = () => { onclick(); document.body.classList.remove('sideopen'); }; root.appendChild(b); };
+  for (const { node, s: x } of allSessions().reverse()) {
+    if (x.kind === 'browser') continue; // a browser is not a chat: it lives in its session's panel
+    item('pty:' + x.id, x.label || sessLabel(node, x), x.state === 'starting' ? 'starting…' : x.ended ? 'ended' : x._ws ? 'live' : 'reconnecting…', S.view === 'pty' && S.ptySession === x, () => openPty(node, x));
+  }
+  for (const c of S.chats || []) item(c.target, c.label, last(c.target) || '', S.view === 'chat' && S.chat === c.target, () => openChat(c.target));
+}
+
+// ---- center view switching: chat | node | pty
+function showView(v) {
+  S.view = v;
+  document.body.classList.toggle('ptymode', v === 'pty');
+  document.body.classList.toggle('nodemode', v === 'node');
+  $('#ptyview').classList.toggle('on', v === 'pty');
+  $('#chat').style.display = v === 'chat' ? '' : 'none';
 }
 $('#searchbtn').onclick = () => { const s = $('#search'); s.hidden = !s.hidden; if (!s.hidden) s.focus(); };
 $('#search').oninput = renderSidebar;
@@ -78,12 +95,55 @@ $('#sidetoggle').onclick = () => document.body.classList.toggle('sideopen');
 // ---- chat
 function openChat(id) {
   try { localStorage.setItem('hq.chat', id); history.replaceState(null, '', '#/chat/' + encodeURIComponent(id)); } catch (_) {}
-  setMode('chat');
-  S.chat = id; S.target = id === '*' ? 'room' : S.session && S.sessionNode === id ? 'agent' : 'mail';
+  showView('chat');
+  S.chat = id; S.target = id === '*' ? 'room' : 'mail';
   $('#headname').textContent = chatName(id); $('#headbtn').title = chatName(id); $('#headav').innerHTML = avatar(id, 'sm');
   $('#input').placeholder = `Message ${chatName(id)}`;
   renderChat(); $('#chat').scrollTop = 1e9; renderSidebar(); loadThread(); renderPanelHead(); if (S.panel) setTab(S.tab);
 }
+
+// ---- Nodes modal: connected nodes, status, environment, quick spawn (opened from the account menu / +)
+const fmtBytes = (b) => (!b && b !== 0) ? '?' : (b >= 1e9 ? (b / 1e9).toFixed(1) + 'G' : (b >= 1e6 ? (b / 1e6).toFixed(0) + 'M' : b + 'B'));
+function envHtml(n) {
+  const m = n && n.machine; if (!m) return '<div class="sub">No environment inventory yet.</div>';
+  const clis = (m.provider_clis || []).map((c) => `${c.id}${c.version ? ' ' + c.version : ''}`);
+  return `<div class="kv"><span>Host</span><span>${esc(m.hostname || '')} · ${esc(m.os)}/${esc(m.arch)}</span></div>
+    <div class="kv"><span>Kernel</span><span>${esc(m.kernel)}</span></div>
+    <div class="kv"><span>CPU</span><span>${m.cpu_cores} cores${m.cpu_model ? ' · ' + esc(m.cpu_model) : ''}</span></div>
+    <div class="kv"><span>Memory</span><span>${fmtBytes(m.ram_available_bytes)} free / ${fmtBytes(m.ram_total_bytes)}</span></div>
+    <div class="kv"><span>Disk</span><span>${fmtBytes(m.disk_available_bytes)} free / ${fmtBytes(m.disk_total_bytes)}</span></div>
+    <div class="kv"><span>Uptime</span><span>${Math.floor((m.uptime_secs || 0) / 3600)}h</span></div>
+    <div class="kv"><span>Provider CLIs</span><span>${clis.length ? clis.map(esc).join(', ') : '—'}</span></div>`;
+}
+const nodeStatus = (n) => `<span class="dot ${n && n.online ? 'ok' : ''}"></span> ${n && n.online ? 'online' : esc((n && n.transport) || 'offline')}`;
+function openNode(focus) {
+  let d = $('#nodesdlg'); if (!d) { d = document.createElement('div'); d.id = 'nodesdlg'; document.body.appendChild(d); d.onclick = (e) => { if (e.target === d) d.remove(); }; }
+  const ns = visibleNodes();
+  d.innerHTML = `<div class="ndlg"><div class="ndh"><h2>Fleet</h2><span class="grow"></span><button class="round" id="nclose">✕</button></div>
+    ${ns.length ? ns.map((n) => `<div class="ncard2"><div class="nrow">${avatar(n.node_id, 'mid')}<div class="grow"><b>${esc(n.node_id)}</b><div class="sub">${nodeStatus(n)} · ${esc(n.kind || '')}${n.tunnel_ip ? ' · ' + esc(n.tunnel_ip) : ''} · ${(S.sessions[n.node_id] || []).filter((x) => x.live).length} live</div></div>
+      <select data-prov="${esc(n.node_id)}">${provOptions(0)}</select><button class="btn blue" data-spawn="${esc(n.node_id)}"${n.online ? '' : ' disabled'}>Start</button></div>
+      <div class="row" style="margin:6px 0"><button class="btn" data-mainbr="${esc(n.node_id)}"${n.online ? '' : ' disabled'}>Main browser (shared cookies)</button></div>
+      <div class="fsess" data-fs="${esc(n.node_id)}">${fleetSessions(n.node_id)}</div>
+      <details${focus === n.node_id || ns.length === 1 ? ' open' : ''}><summary>Environment & resources</summary><div class="pcard">${envHtml(n)}</div></details></div>`).join('') : '<div class="pcard sub">No nodes connected.</div>'}
+    <div class="row" style="margin-top:12px"><button class="btn" id="nreattach">Reattach…</button><button class="btn" id="nenroll">Add a node (enrollment code)</button></div></div>`;
+  $('#nclose').onclick = () => d.remove();
+  $('#nenroll').onclick = () => { d.remove(); openPanel('status'); issueCode(); };
+  $('#nreattach').onclick = () => reattachDialog(focus);
+  wireFleet(d);
+  // Refresh per-node session lists, then redraw them in place.
+  ns.filter((n) => n.online).forEach((n) => reconcileNode(n.node_id).then(() => { const el = d.querySelector(`[data-fs="${CSS.escape(n.node_id)}"]`); if (el) { el.innerHTML = fleetSessions(n.node_id); wireFleet(d); } }));
+  d.querySelectorAll('[data-spawn]').forEach((b) => (b.onclick = () => { const sel = d.querySelector(`select[data-prov="${CSS.escape(b.dataset.spawn)}"]`); const opt = sel.selectedOptions[0]; d.remove(); startSession(b.dataset.spawn, opt.value, opt.dataset.parser); }));
+}
+function fleetSessions(node) {
+  const list = (S.nodeSessions || {})[node] || [];
+  if (!list.length) return '<div class="sub">No sessions.</div>';
+  return list.map((s) => `<div class="nrow fs-row"><span class="grow ell">${esc(s.label)} <span class="sub">${esc(String(s.status).split(' ')[0])}</span></span>${s.live ? `<button class="btn" data-fatt="${esc(node)}" data-inst="${s.instance_id}" data-prov="${esc(s.provider)}">Attach</button>` : ''}</div>`).join('');
+}
+function wireFleet(d) { d.querySelectorAll('[data-mainbr]').forEach((b) => (b.onclick = () => { d.remove(); openNodeBrowser(b.dataset.mainbr); }));
+  wireFleet2(d); }
+function wireFleet2(d) { d.querySelectorAll('[data-fatt]').forEach((b) => (b.onclick = () => { d.remove(); attachSession(b.dataset.fatt, b.dataset.inst, b.dataset.prov); })); }
+function renderNode() {}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#nodesdlg')) $('#nodesdlg').remove(); });
 // Timeline cache: in-memory S.mail, mirrored to sessionStorage so a reload or chat switch renders instantly.
 try { Object.assign(S.mail, JSON.parse(sessionStorage.getItem('hq.mail') || '{}')); } catch (_) {}
 let saveT = 0; const saveCache = () => { clearTimeout(saveT); saveT = setTimeout(() => { try { sessionStorage.setItem('hq.mail', JSON.stringify(S.mail)); } catch (_) {} }, 500); };
@@ -239,12 +299,11 @@ function menu(items, anchorLeft) {
 }
 document.addEventListener('click', (e) => { if (!e.target.closest('#menu') && !e.target.closest('#addbtn') && !e.target.closest('#plusbtn')) $('#menu').hidden = true; if (!e.target.closest('#acctmenu')) $('#acctmenu').hidden = true; });
 $('#addbtn').onclick = () => menu([
-  ['Open terminal for this agent', () => { if (!isGroup(S.chat)) setMode('pty'); else toast('Open an agent chat first'); }],
+  ['Fleet…', () => openNode()],
   ['Create a task…', () => { openPanel('tasks'); }],
   ['Issue enrollment code', issueCode],
-  ['Open browser stream…', () => openPanel('computer')],
 ]);
-$('#plusbtn').onclick = (e) => { e.stopPropagation(); menu([['New agent session…', () => { const n = (visibleNodes().find((x) => x.online) || {}).node_id; if (!n) { toast('No online node'); return; } openChat(n); setMode('pty'); }], ['Add a node (enrollment code)', () => { openPanel('status'); issueCode(); }]]); const m = $('#menu'); m.style.position = 'fixed'; m.style.left = '120px'; m.style.top = '54px'; m.style.bottom = 'auto'; };
+$('#plusbtn').onclick = (e) => { e.stopPropagation(); menu([...visibleNodes().filter((n) => n.online).flatMap((n) => ['shell', 'claude'].map((p) => [`New ${p} on ${n.node_id}`, () => startSession(n.node_id, p)])), ['Reattach…', () => reattachDialog()], ['Fleet…', () => openNode()], ['Add a node (enrollment code)', () => { openPanel('status'); issueCode(); }]]); const m = $('#menu'); m.style.position = 'fixed'; m.style.left = '120px'; m.style.top = '54px'; m.style.bottom = 'auto'; };
 // ---- account pill
 async function loadMe() {
   try { const r = await fetch('/api/me', { credentials: 'same-origin' }); const d = await r.json(); const u = d.user || {}; S.me = u; const nm = u.display_name || u.username || 'Account';
@@ -275,6 +334,7 @@ const LUC = {
 const ico = (k, sz = 16) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${LUC[k]}</svg>`;
 $('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); m.hidden = !m.hidden; if (m.hidden) return; m.className = 'pop amenu2'; m.innerHTML = '';
   const it = (ic, label, fn, right, chev) => { const b = document.createElement('button'); b.innerHTML = `<span class="ic">${ico(ic)}</span><span class="l">${esc(label)}</span>${right ? `<span class="r">${esc(right)}</span>` : ''}${chev ? `<span class="cv">${ico('chev', 16)}</span>` : ''}`; b.onclick = () => { m.hidden = true; fn(); }; m.appendChild(b); };
+  it('server', 'Fleet', () => openNode(), String(visibleNodes().filter((n) => n.online).length) + ' online', true);
   it('gauge', 'Usage & plan', () => openSettings('usage'), '— % used', true);
   it('phone', 'Get the apps', () => toast('Apps: coming soon'));
   it('book', 'Support', () => toast('Support: coming soon'), '', true);
@@ -322,7 +382,7 @@ async function loadNodes() {
       S.lastStatus[n.node_id] = key;
     }
   } catch (_) { if (S.ready !== false) logEv('C2 unreachable'); S.ready = false; }
-  renderSidebar(); if (S.panel && S.tab === 'status') renderStatus();
+  renderSidebar(); if (S.panel && S.tab === 'status') renderStatus(); if (S.view === 'node') renderNode();
 }
 
 // ---- status: the one place for C2 state, node trust, policy and the event log
@@ -331,7 +391,7 @@ async function renderStatus() {
   try { policy = JSON.stringify(await api('/api/c2/policy'), null, 2); } catch (e) { policy = e.message; }
   root.innerHTML = `<div class="stgrid" style="grid-template-columns:1fr 1fr"><div class="stat"><div class="l">C2</div><div class="v"><span class="dot ${S.ready ? 'ok' : 'bad'}"></span>${S.ready ? 'Ready' : 'Not ready'}</div></div><div class="stat"><div class="l">Nodes online</div><div class="v">${on} / ${S.nodes.length}</div></div><div class="stat"><div class="l">Agent session</div><div class="v">${S.session ? esc(S.sessionProv + ' · ' + S.sessionNode) : 'None'}</div></div></div>`
     + `<div class="row"><button class="btn blue" id="nc">Issue enrollment code</button><button class="btn" id="pr">Reload policy</button></div>${S.code ? `<div class="pcard"><h4>Enrollment code</h4><code class="big">${esc(S.code)}</code><div class="sub" style="margin-top:6px">Single use. The node generates its own keys.</div></div>` : ''}`
-    + `<h3>Nodes</h3>${S.nodes.map((n) => `<div class="ncard"><div class="nh"><b>${esc(n.node_id)}</b><span class="badge ${esc(n.status)}">${esc(n.status)}</span></div><div class="sub"><span class="dot ${n.online ? 'ok' : ''}"></span> ${n.online ? 'online' : esc(n.transport || 'offline')} · ${esc(n.kind)}${n.tunnel_ip ? ' · ' + esc(n.tunnel_ip) : ''}</div>${n.enrolled && n.status !== 'revoked' ? `<select data-id="${esc(n.node_id)}"><option value="">Set trust…</option>${['neutral', 'member', 'trusted', 'suspended'].filter((s) => s !== n.status).map((s) => `<option>${s}</option>`).join('')}<option value="revoke">revoke</option></select>` : ''}</div>`).join('')}`
+    + `<h3>Nodes</h3>${S.nodes.map((n) => { const m = n.machine; const fmt = (b) => !b && b !== 0 ? '?' : (b >= 1e9 ? (b/1e9).toFixed(1)+'G' : (b >= 1e6 ? (b/1e6).toFixed(0)+'M' : b+'B')); const clis = (m && m.provider_clis || []).map((c) => `${esc(c.id)}${c.version ? ' '+esc(c.version) : ''}`).join(', '); const env = m ? `<div class="sub" style="margin-top:6px">env: ${esc(m.os)}/${esc(m.arch)} · kernel ${esc(m.kernel)} · up ${Math.floor((m.uptime_secs||0)/3600)}h<br>cpu ${m.cpu_cores}${m.cpu_model ? ' · '+esc(m.cpu_model) : ''}<br>ram ${fmt(m.ram_available_bytes)} free / ${fmt(m.ram_total_bytes)} · disk ${fmt(m.disk_available_bytes)} free / ${fmt(m.disk_total_bytes)}${clis ? '<br>clis: '+clis : ''}</div>` : ''; return `<div class="ncard"><div class="nh"><b>${esc(n.node_id)}</b><span class="badge ${esc(n.status)}">${esc(n.status)}</span></div><div class="sub"><span class="dot ${n.online ? 'ok' : ''}"></span> ${n.online ? 'online' : esc(n.transport || 'offline')} · ${esc(n.kind)}${n.tunnel_ip ? ' · ' + esc(n.tunnel_ip) : ''}</div>${env}${n.enrolled && n.status !== 'revoked' ? `<select data-id="${esc(n.node_id)}"><option value="">Set trust…</option>${['neutral', 'member', 'trusted', 'suspended'].filter((s) => s !== n.status).map((s) => `<option>${s}</option>`).join('')}<option value="revoke">revoke</option></select>` : ''}</div>`; }).join('')}`
     + `<h3>Events</h3><div class="pcard log">${S.log.slice().reverse().map((l) => `<div>${fmtTime(l.ts)}  ${esc(l.text)}</div>`).join('') || '<div>No events yet</div>'}</div>`
     + `<h3>Policy</h3><pre>${esc(policy)}</pre>`;
   $('#nc').onclick = issueCode; $('#pr').onclick = async () => { try { await post('/api/c2/policy/reload'); toast('Policy reloaded'); renderStatus(); } catch (e) { toast('Error: ' + e.message); } };
@@ -342,8 +402,8 @@ async function renderStatus() {
 }
 
 // ---- right panel: chat info + all status / control
-const TABS = [['info', 'Overview', 'info'], ['terminal', 'Terminal', 'term'], ['browser', 'Browser', 'globe'], ['tasks', 'Tasks', 'check'], ['library', 'Files', 'folder'], ['status', 'Fleet', 'server']];
-function renderPanelHead() { if (!S.chat) return; $('#panelav').innerHTML = avatar(S.chat, 'mid'); $('#panelname').textContent = chatName(S.chat); $('#panelsub').textContent = ''; }
+const TABS = [['info', 'Overview', 'info'], ['tasks', 'Tasks', 'check'], ['library', 'Files', 'folder'], ['status', 'Fleet', 'server']];
+function renderPanelHead() { if (S.view === 'pty' && S.ptySession) { const x = S.ptySession; $('#panelav').innerHTML = avatar('pty:' + x.id, 'mid'); $('#panelname').textContent = x.provider; $('#panelsub').textContent = 'on ' + S.sessionNode; return; } if (!S.chat) return; $('#panelav').innerHTML = avatar(S.chat, 'mid'); $('#panelname').textContent = chatName(S.chat); $('#panelsub').textContent = ''; }
 function openPanel(tab) { S.panel = true; localStorage.setItem('hq.panel', '1'); $('#panel').classList.add('open'); syncHead(); renderPanelHead(); setTab(tab || S.tab); }
 function closePanel() { S.panel = false; localStorage.setItem('hq.panel', ''); $('#panel').classList.remove('open'); syncHead(); }
 // The pill lives inside the main pane (overflow hidden). On panel open/close it holds its old screen
@@ -384,80 +444,270 @@ $('#rzl').onpointerdown = (e) => {
 };
 dragger($('#rzr'), '--pw', 'hq.pw', 320, () => Math.min(640, innerWidth * 0.4), true);
 function setTab(tab) {
-  if (tab === 'computer') tab = 'browser';
+  if (tab === 'computer' || tab === 'browser') tab = 'info';
   if (!TABS.some(([id]) => id === tab)) tab = 'info';
   S.tab = tab; localStorage.setItem('hq.tab', tab); $('#ptabs').innerHTML = '';
   for (const [id, label, ic] of TABS) { const b = document.createElement('button'); b.innerHTML = `${ico(ic, 15)}<span class="l">${esc(label)}</span>`; b.title = label; b.setAttribute('role', 'tab'); b.className = id === tab ? 'on' : ''; b.onclick = () => setTab(id); $('#ptabs').appendChild(b); }
   document.querySelectorAll('.ptab').forEach((t) => t.classList.toggle('on', t.id === 'p-' + tab));
   $('#pbody').scrollTop = 0;
-  if (tab === 'info') renderInfo(); if (tab === 'status') renderStatus(); if (tab === 'tasks') renderTasksTab(); if (tab === 'library') renderLibraryTab(); if (tab === 'terminal') renderTermTab();
+  if (tab === 'info') renderInfo(); if (tab === 'status') renderStatus(); if (tab === 'tasks') renderTasksTab(); if (tab === 'library') renderLibraryTab();
 }
 const sec = (title, body, right = '') => `<section class="psec"><div class="sech"><span>${esc(title)}</span>${right}</div>${body}</section>`;
 function renderInfo() {
-  const root = $('#p-info'); const agent = S.chat && !isGroup(S.chat); const n = S.nodes.find((x) => x.node_id === S.chat);
-  const live = S.session && S.sessionNode === S.chat;
-  let kv = agent ? `<div class="kv"><span>Session</span><span>${live ? esc(S.sessionProv) + ' · live' : 'not running'}</span></div>` : `<div class="kv"><span>Room</span><span class="ell">${esc(chatName(S.chat))}</span></div>`;
-  if (n) kv += `<div class="kv"><span>Node</span><span><span class="dot ${n.online ? 'ok' : ''}"></span> ${n.online ? 'online' : 'offline'}</span></div>`;
+  const root = $('#p-info');
+  // PTY session: which node it runs on, and that node's environment.
+  if (S.view === 'pty') {
+    const id = S.sessionNode; const n = S.nodes.find((x) => x.node_id === id); const x = S.ptySession || {};
+    const lbl = x.label || (x.instance_id != null ? `${id}/${x.provider}#${x.instance_id}` : `${x.provider || ''} · ${id || ''}`);
+    const st = x.state === 'starting' ? 'starting' : x.ended ? 'ended' : x._ws ? 'live' : 'reconnecting';
+    const kv = `<div class="kv"><span>Session</span><span class="ell">${esc(lbl)}</span></div><div class="kv"><span>Status</span><span>${st}</span></div><div class="kv"><span>Size</span><span>${term.cols}×${term.rows}</span></div>`;
+    const lay = S.ptyLayout || 'native'; const link = $('#tlink').dataset.url;
+    const ctl = `<div class="tog cp-tog"><button data-cl="native" class="${lay === 'native' ? 'on' : ''}">PTY</button><button data-cl="chat" class="${lay === 'chat' ? 'on' : ''}">Chat view</button></div>
+      <div class="sub plat">PTY input latency: <span id="ptylat">${platText(x)}</span></div>
+      <div class="row cp-row"><button class="btn" data-c="paste">Paste</button>${link ? '<button class="btn blue" data-c="link" title="' + esc(link) + '">Open link</button>' : ''}<button class="btn" data-c="reattach">Reattach…</button><button class="btn red" data-c="stop"${x.ended ? ' disabled' : ''}>Stop</button></div>`;
+    const env = n && n.environment ? n.environment : null;
+    const brief = n ? `${nodeStatus(n)}${n.kind ? ' · ' + esc(n.kind) : ''}${(S.sessions[id] || []).filter((s) => !s.ended).length ? ' · ' + (S.sessions[id] || []).filter((s) => !s.ended).length + ' sessions' : ''}` : 'unknown';
+    root.innerHTML = sec('Session', `<div class="pcard">${kv}</div>`) + sec('Controls', `<div class="pcard">${ctl}</div>`)
+      + (x.instance_id != null ? sec('Browser', sessionBrowserHtml(id, x)) : '')
+      + sec('Node', `<div class="pcard"><div class="kv"><span>${esc(id || '')}</span><span>${brief}</span></div><div class="row" style="margin-top:6px"><button class="btn" data-c="fleet">Open in Fleet →</button></div></div>`);
+    void env;
+    root.querySelectorAll('[data-cl]').forEach((b) => (b.onclick = () => { setPtyLayout(b.dataset.cl); renderInfo(); }));
+    root.querySelectorAll('[data-c]').forEach((b) => (b.onclick = () => {
+      const c = b.dataset.c;
+      if (c === 'paste') $('#tpaste').click(); else if (c === 'link') $('#tlink').click(); else if (c === 'stop') $('#tstop').click();
+      else if (c === 'reattach') reattachDialog(id); else if (c === 'fleet') openNode(id);
+    }));
+    if (x.instance_id != null) wireSessionBrowser(root, id, x);
+    return;
+  }
+  const agent = S.chat && !isGroup(S.chat);
+  let kv = agent ? `<div class="kv"><span>Kind</span><span>${esc(chatKind(S.chat) || 'chat')}</span></div>` : `<div class="kv"><span>Room</span><span class="ell">${esc(chatName(S.chat))}</span></div>`;
   let h = sec('Details', `<div class="pcard">${kv}</div>`);
-  if (agent) h += sec('View', `<div class="tog" id="vtog"><button data-m="chat" class="${S.mode === 'chat' ? 'on' : ''}">Chat</button><button data-m="pty" class="${S.mode === 'pty' ? 'on' : ''}">Terminal</button></div>`);
+  // A chat is not owned by a node; offer a link to run a session on a node instead.
+  const nodes = visibleNodes();
+  if (nodes.length) h += sec('Fleet', `<div class="pcard"><div class="kv"><span>${nodes.filter((n) => n.online).length}/${nodes.length} nodes online</span><button class="btn" id="pfleet">Open Fleet →</button></div></div>`);
+  if (false) h += sec('Run on node', `<div class="pcard"><div class="chips">${nodes.map((n) => `<button class="chip" data-node="${esc(n.node_id)}"><span class="dot ${n.online ? 'ok' : ''}"></span>${esc(n.node_id)}</button>`).join('')}</div><div class="sub" style="margin-top:6px">Sessions run in a node environment, not in this chat.</div></div>`);
   root.innerHTML = h + '<div id="p-activity" class="secs"></div>';
-  root.querySelectorAll('#vtog button').forEach((b) => (b.onclick = () => { setMode(b.dataset.m); renderInfo(); }));
+  if ($('#pfleet')) $('#pfleet').onclick = () => openNode();
   if (agent) renderActivity();
 }
 $('#headbtn').onclick = () => { if (S.panel) closePanel(); else openPanel('info'); };
 $('#closepanel').onclick = closePanel;
 
-// ---- terminal tab
+// ---- PTY sessions: spawned from the node view, shown full-center as a native terminal
 const COLS = 100, ROWS = 30;
 const term = new Terminal({ rows: ROWS, cols: COLS, cursorBlink: true, fontSize: 13, fontFamily: 'ui-monospace,Menlo,Consolas,monospace', theme: { background: '#000000' } });
+const fit = new FitAddon.FitAddon(); term.loadAddon(fit);
+// Links never navigate the operator client. Open on the node via dig2browser.
+term.loadAddon(new WebLinksAddon.WebLinksAddon((ev, uri) => { ev.preventDefault(); if (ev.stopPropagation) ev.stopPropagation(); openUrlOnNode(uri); }));
 term.open($('#terminal'));
-let mini = null;
-function setMode(m) {
-  S.mode = m; document.body.classList.toggle('ptymode', m === 'pty'); $('#ptyview').classList.toggle('on', m === 'pty');
-  
-  if (m === 'pty') term.focus();
+// Ctrl/Cmd+V: let the browser fire a real paste (xterm forwards it via onData); Ctrl+Shift+C copies a selection.
+term.attachCustomKeyEventHandler((e) => {
+  if (e.type === 'keydown' && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') return false;
+  if (e.type === 'keydown' && (e.metaKey || (e.ctrlKey && e.shiftKey)) && e.key.toLowerCase() === 'c' && term.hasSelection()) { navigator.clipboard?.writeText(term.getSelection()); return false; }
+  return true;
+});
+// Fill the center: fit to the pane, and tell the PTY its new size.
+function refit() {
+  if (S.view !== 'pty' || S.ptyLayout !== 'native') return;
+  try { fit.fit(); } catch (_) { return; }
+  if (term.cols < 20 || term.rows < 5) return;
+  if (term.cols !== S.sentCols || term.rows !== S.sentRows) {
+    // Throttle: at most one resize per 400ms; the last size wins.
+    const now = Date.now(); if (now - (S.lastResizeAt || 0) < 400) { clearTimeout(S.resizeT); S.resizeT = setTimeout(refit, 420); return; }
+    S.lastResizeAt = now; S.sentCols = term.cols; S.sentRows = term.rows; tsend({ t: 'resize', cols: term.cols, rows: term.rows }); if (S.panel && S.tab === 'info') renderInfo();
+  }
 }
-let tws = null;
-function tsend(o) { if (tws && tws.readyState === 1) tws.send(JSON.stringify(o)); }
-$('#tspawn').onclick = () => {
-  const node = S.chat && !isGroup(S.chat) ? S.chat : null; if (!node) { toast('Open an agent first'); return; }
-  if (tws) tws.close();
-  const opt = $('#tprov').selectedOptions[0]; const prov = opt.dataset.parser ? 'fixture' : opt.value; const q = new URLSearchParams({ node, provider: opt.value, rows: ROWS, cols: COLS }); if (opt.dataset.parser) q.set('parser', opt.dataset.parser);
-  term.reset(); if (mini) mini.reset(); S.lastAnsi = ''; $('#tinfo').textContent = 'spawning…';
-  tws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/term?${q}`);
-  tws.onmessage = (m) => {
+let fitT = 0; const refitSoon = () => { clearTimeout(fitT); fitT = setTimeout(refit, 60); };
+new ResizeObserver(refitSoon).observe($('.termwrap')); window.addEventListener('resize', refitSoon);
+// Wrapped URLs in a redrawn screen are not one line; rebuild the newest one from the frame text.
+function findUrl(text, cols) {
+  const L = String(text || '').split('\n');
+  for (let i = L.length - 1; i >= 0; i--) {
+    const m = L[i].match(/https?:\/\/\S+/); if (!m) continue; let u = m[0];
+    for (let j = i; j + 1 < L.length && L[j].replace(/\s+$/, '').length >= cols - 2; j++) { const nx = L[j + 1].trim(); if (!nx || /\s/.test(nx)) break; u += nx; }
+    return u;
+  }
+  return null;
+}
+// Rebuild wrapped URLs; a click on a line fragment must open the full URL on the node.
+function resolveLink(uri) {
+  const frag = String(uri || '').replace(/[.,;:!?\)\]]+$/, '');
+  const full = findUrl(window.lastFrameText, term.cols);
+  if (full && (full === frag || full.startsWith(frag) || frag.startsWith(full))) return full.length >= frag.length ? full : frag;
+  return frag;
+}
+// Spawn or reuse a dig2browser session on the PTY node. Never navigate the operator client.
+function openUrlOnNode(uri) {
+  const url = resolveLink(uri);
+  if (!/^https?:\/\//i.test(url)) { toast('Not a navigable URL'); return; }
+  const ps = S.view === 'pty' ? S.ptySession : null;
+  if (ps && ps.instance_id != null) { openSessionBrowser(S.sessionNode, ps, url); return; }
+  const node = S.sessionNode || (visibleNodes().find((n) => n.online) || {}).node_id;
+  if (!node) { toast('No node online'); return; }
+  openNodeBrowser(node, url);
+}
+
+// ---- PTY sessions: one websocket per session, all kept open; only the active one paints the xterm.
+// A sidebar entry is 'starting' until the node returns a session id; failures remove it.
+const wsUrl = (path, q) => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}?${q}`;
+const sessLabel = (node, x) => x.instance_id != null ? `${node}/${x.provider}#${x.instance_id}` : `${x.provider} · ${node}`;
+function tsend(o, sess) {
+  const x = sess || S.ptySession; if (!(x && x._ws && x._ws.readyState === 1)) return;
+  if (o.t === 'data') { x.platSeq = (x.platSeq || 0) + 1; o.seq = x.platSeq; (x.platSent ||= {})[o.seq] = performance.now(); }
+  x._ws.send(JSON.stringify(o));
+}
+// PTY input latency per hop: keydown/mouse -> hq-web (wire) -> core/C2/node echo frame back at hq-web (hq) -> client wire -> xterm render.
+function recordPlat(sess, a) {
+  const done = performance.now(); const total = done - a.t0; const render = done - a.at; const wire = Math.max(0, a.at - a.t0 - a.hq);
+  const h = (sess.platHist ||= []); h.push({ seq: a.seq, total, wire, hq: a.hq, render, q: a.q / 1000 }); if (h.length > 50) h.shift();
+  if (S.panel && S.tab === 'info' && S.view === 'pty') { const el = $('#ptylat'); if (el) el.innerHTML = platText(sess); }
+}
+function platText(sess) {
+  const h = (sess && sess.platHist) || []; if (!h.length) return 'type or click to measure';
+  const med = (k) => { const v = h.map((x) => x[k]).filter((x) => x != null).sort((a, b) => a - b); return v.length ? Math.round(v[v.length >> 1]) : '–'; };
+  return `median of ${h.length}: <b>${med('total')} ms</b><br>client↔HQ ${med('wire')} · HQ→core→C2→node→HQ ${med('hq')} · render ${med('render')} · input ack ${med('ack')} ms`;
+}
+function recordSession(node, sess) { const arr = (S.sessions[node] ||= []); if (!arr.includes(sess)) arr.push(sess); }
+function dropSession(node, sess) { const arr = S.sessions[node]; if (!arr) return; const i = arr.indexOf(sess); if (i >= 0) arr.splice(i, 1); if (S.ptySession === sess) { S.ptySession = null; if (S.view === 'pty') openChat(S.chat || (S.chats[0] || {}).target); } renderSidebar(); }
+function endSession(node, sess, why) {
+  if (!sess || sess.ended) return; sess.live = false; sess.ended = true; sess.state = 'ended';
+  if (why) toast(`${sessLabel(node, sess)}: ${why}`);
+  renderSidebar(); if (S.ptySession === sess) $('#tinfo').textContent = `${sessLabel(node, sess)} — ended`;
+  setTimeout(() => dropSession(node, sess), 8000); // grace: last output stays visible
+}
+function paint(sess, onRendered) {
+  if (!sess || S.ptySession !== sess) return;
+  term.reset(); if (sess.lastAnsi) term.write(sess.lastAnsi, onRendered ? () => requestAnimationFrame(onRendered) : undefined);
+  window.lastFrameText = sess.lastText || '';
+  if (S.ptyLayout === 'chat') renderPtyChat(sess.lastText || '');
+  const u = findUrl(sess.lastText, sess.cols || term.cols); const tl = $('#tlink'); if (u) { tl.dataset.url = u; tl.title = u; tl.hidden = false; } else { tl.hidden = true; delete tl.dataset.url; }
+}
+// Open a socket for a session: spawn (provider) or attach (session id). Returns the sess object.
+function connectSession(node, sess, { provider, parser, attach } = {}) {
+  const rows = term.rows || 30, cols = term.cols || 110;
+  const q = new URLSearchParams({ node, rows, cols, keep: 'true' });
+  if (attach) q.set('session', attach); else q.set('provider', provider);
+  if (parser) q.set('parser', parser);
+  const sock = new WebSocket(wsUrl('/api/term', q)); sess._ws = sock; sess.state = sess.state || 'starting';
+  let bound = false;
+  sock.onmessage = (m) => {
     const d = JSON.parse(m.data);
-    if (d.type === 'spawned') { S.events[node] = new Map(); S.agentState[node] = 'idle'; S.session = d.session; S.sessionNode = node; S.sessionProv = prov; S.target = 'agent'; $('#tinfo').textContent = `${prov} on ${node}`; logEv(`agent ${prov} started on ${node}`); if (S.chat === node) openChat(node); }
-    if (d.type === 'error') { $('#tinfo').textContent = d.text; addLocal(node, { sys: true, text: d.text }); }
-    if (d.type === 'ack') { $('#tinfo').textContent = `${d.op}: ${d.ok ? 'ok' : 'failed'}`; if (!d.ok) { S.working[node] = 0; addLocal(node, { sys: true, text: 'Refused: ' + (/does not permit/.test(d.detail) ? 'node status does not permit operator requests (policy)' : d.detail.slice(0, 120)) }); } }
-    if (d.type === 'events') onEvents(node, d.events);
+    if (d.type === 'spawned') {
+      bound = true; sess.key = d.session; sess.instance_id = d.instance_id; sess.workspace_id = d.workspace_id;
+      if (d.provider) sess.provider = d.provider; sess.id = `${node}:${d.workspace_id}:${d.instance_id}`;
+      sess.live = true; sess.state = 'live'; sess.label = d.label || sessLabel(node, sess);
+      S.events[node] = S.events[node] || new Map();
+      if (S.ptySession === sess) { $('#tinfo').textContent = sess.label; $('#headname').textContent = sess.label; S.sentCols = 0; refit(); }
+      logEv(`session ${sess.label} ${attach ? 'attached' : 'started'}`); renderSidebar(); renderPanelHead();
+    }
+    if (d.type === 'error') { if (!bound) { toast(`${sess.provider} on ${node}: ${d.text}`); dropSession(node, sess); } else toast(d.text); }
+    if (d.type === 'ack' && !d.ok) toast('Refused: ' + String(d.detail).slice(0, 120));
+    if (d.type === 'ack' && d.seq != null && sess.platHist) { const h = sess.platHist.find((x) => x.seq === d.seq); if (h) h.ack = d.ack_ms; }
+    const pl = d.type === 'frame' && d.plat; if (pl) { const t0 = (sess.platSent || {})[pl.seq]; if (t0 != null) { delete sess.platSent[pl.seq]; sess.platArm = { seq: pl.seq, t0, at: performance.now(), hq: pl.hq_to_frame_ms, q: pl.hq_queue_us }; } }
+    if (d.type === 'events' && S.ptySession === sess) onEvents(node, d.events);
     if (d.type === 'frame') {
-      const bytes = Uint8Array.from(atob(d.ansi), (c) => c.charCodeAt(0));
-      window.lastFrameText = d.text; term.reset(); term.write(bytes); S.lastAnsi = bytes; if (mini) { mini.reset(); mini.write(bytes); $('#tempty').hidden = true; }
-      S.lastFrame = Date.now();
+      sess.lastAnsi = Uint8Array.from(atob(d.ansi), (c) => c.charCodeAt(0)); sess.lastText = d.text; sess.cols = d.cols; sess.lastFrame = Date.now();
+      const arm = sess.platArm; sess.platArm = null;
+      if (S.ptySession === sess) { S.lastFrame = Date.now(); paint(sess, arm ? () => recordPlat(sess, arm) : null); }
     }
   };
-  tws.onclose = () => { $('#tinfo').textContent += ' [closed]'; if (S.sessionNode) { logEv(`agent session on ${S.sessionNode} ended`); } S.session = null; if (S.sessionNode) S.agentState[S.sessionNode] = 'idle'; S.target = 'mail'; renderChip(); };
-};
-$('#tstop').onclick = () => tsend({ t: 'stop' });
+  sock.onclose = () => {
+    if (sess._ws !== sock) return;
+    sess._ws = null;
+    if (!bound) { if (!sess.ended) { toast(`${sess.provider} on ${node}: could not start`); dropSession(node, sess); } return; }
+    // Socket gone: check whether the session is still live on the node; reattach if so.
+    setTimeout(() => reconcileNode(node), 500);
+  };
+  return sess;
+}
+function startSession(node, provider, parser) {
+  if (!node) { toast('Pick a node first'); return; }
+  if (provider === 'browser') { openNodeBrowser(node); return; }
+  const prov = parser ? 'fixture' : provider;
+  const sess = { provider: prov, id: 'pending-' + Date.now() + Math.random().toString(36).slice(2, 6), live: false, state: 'starting', parser };
+  recordSession(node, sess); openPty(node, sess);
+  $('#tinfo').textContent = `starting ${prov} on ${node}…`;
+  connectSession(node, sess, { provider, parser });
+}
+// Attach to a live node session by id: "6", "primary/6", "claude#6", "node/claude#6".
+function attachSession(node, idText, provider) {
+  const want = String(idText).trim(); const m = want.match(/(\d+)\s*$/); if (!m) { toast('Session id must end with the instance number'); return; }
+  const inst = Number(m[1]);
+  const existing = (S.sessions[node] || []).find((x) => x.instance_id === inst && !x.ended);
+  if (existing) { if (!existing._ws) connectSession(node, existing, { attach: `${existing.workspace_id || 'primary'}/${inst}` }); openPty(node, existing); return existing; }
+  const sess = { provider: provider || 'session', id: `attach-${node}-${inst}`, instance_id: inst, live: false, state: 'starting' };
+  recordSession(node, sess); openPty(node, sess);
+  connectSession(node, sess, { attach: want.includes('/') && !want.includes('#') ? want.split('/').slice(-2).join('/') : `primary/${inst}` });
+  return sess;
+}
+// Reconcile the sidebar with the node's live sessions: add missing (attach), drop gone ones.
+async function reconcileNode(node) {
+  let list; try { list = (await api('/api/sessions?node=' + encodeURIComponent(node))).sessions || []; } catch (_) { return; }
+  const live = list.filter((s) => s.live);
+  const arr = (S.sessions[node] ||= []);
+  for (const x of [...arr]) {
+    if (x.kind === 'browser' || x.state === 'starting' || x.ended) continue;
+    const on = live.find((s) => s.instance_id === x.instance_id);
+    if (!on) endSession(node, x, 'exited');
+    else if (!x._ws) connectSession(node, x, { attach: `${on.workspace_id}/${on.instance_id}` });
+  }
+  for (const s of live) {
+    if (arr.some((x) => x.instance_id === s.instance_id && !x.ended)) continue;
+    const sess = { provider: s.provider, id: `${node}:${s.workspace_id}:${s.instance_id}`, instance_id: s.instance_id, workspace_id: s.workspace_id, live: false, state: 'starting', label: s.label };
+    recordSession(node, sess); connectSession(node, sess, { attach: `${s.workspace_id}/${s.instance_id}` });
+  }
+  S.nodeSessions = S.nodeSessions || {}; S.nodeSessions[node] = list;
+  renderSidebar();
+}
+async function reconcileAll() { for (const n of visibleNodes().filter((n) => n.online)) await reconcileNode(n.node_id); }
+function reattachDialog(node) {
+  const nodes = visibleNodes().filter((n) => n.online); node = node || (nodes[0] || {}).node_id;
+  if (!node) { toast('No online node'); return; }
+  let d = $('#nodesdlg'); if (!d) { d = document.createElement('div'); d.id = 'nodesdlg'; document.body.appendChild(d); d.onclick = (e) => { if (e.target === d) d.remove(); }; }
+  d.innerHTML = `<div class="ndlg"><div class="ndh"><h2>Reattach session</h2><span class="grow"></span><button class="round" id="nclose">✕</button></div>
+    <div class="row"><select id="ranode">${nodes.map((n) => `<option${n.node_id === node ? ' selected' : ''}>${esc(n.node_id)}</option>`).join('')}</select>
+    <input id="raid" placeholder="claude#6 or primary/6" style="flex:1"><button class="btn blue" id="rago">Attach</button></div>
+    <div id="ralist" class="sub" style="margin-top:10px">Loading live sessions…</div></div>`;
+  $('#nclose').onclick = () => d.remove();
+  const load = async () => { const nd = $('#ranode').value; try { const r = await api('/api/sessions?node=' + encodeURIComponent(nd)); const ls = (r.sessions || []);
+    $('#ralist').innerHTML = ls.length ? ls.map((s) => `<div class="nrow" style="margin:4px 0"><span class="grow">${esc(s.label)} <span class="sub">${esc(s.status)}</span></span>${s.live ? `<button class="btn" data-ra="${s.instance_id}" data-prov="${esc(s.provider)}">Attach</button>` : ''}</div>`).join('') : 'No sessions on this node.';
+    d.querySelectorAll('[data-ra]').forEach((b) => (b.onclick = () => { d.remove(); attachSession(nd, b.dataset.ra, b.dataset.prov); })); } catch (e) { $('#ralist').textContent = e.message; } };
+  $('#ranode').onchange = load; load();
+  $('#rago').onclick = () => { const v = $('#raid').value.trim(); if (!v) return; d.remove(); attachSession($('#ranode').value, v); };
+}
+function stopSession(sess) { tsend({ t: 'stop' }, sess); }
+function openPty(node, sess) {
+  $('#terminal').style.display = '';
+  showView('pty'); S.sessionNode = node; S.ptySession = sess;
+  const lbl = sess.label || sessLabel(node, sess);
+  $('#headname').textContent = lbl; $('#headbtn').title = 'Session info · runs on ' + node; $('#headav').innerHTML = avatar('pty:' + sess.id, 'sm');
+  renderSidebar(); renderPanelHead(); if (S.panel) setTab(S.tab);
+  $('#tinfo').textContent = sess.state === 'starting' ? `starting ${sess.provider} on ${node}…` : (sess.ended ? `${lbl} — ended` : lbl);
+  setPtyLayout(S.ptyLayout || 'native');
+  S.sentCols = 0; paint(sess);
+  setTimeout(() => { refit(); term.focus(); }, 30);
+}
+// Layout toggle: native xterm vs. a re-rendered chat-like PTY view (stub for later). Not m4a.
+function setPtyLayout(l) {
+  S.ptyLayout = l; localStorage.setItem('hq.ptylayout', l);
+  $('#ptylayout').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.l === l));
+  $('#terminal').style.display = l === 'native' ? '' : 'none';
+  const pc = $('#ptychat'); pc.hidden = l !== 'chat';
+  if (l === 'chat') renderPtyChat(window.lastFrameText || '');
+  else { setTimeout(refit, 0); term.focus(); }
+}
+function renderPtyChat(text) {
+  const pc = $('#ptychat'); if (!pc) return;
+  pc.innerHTML = `<div class="ptychat-stub"><b>Chat-like PTY view</b><div class="sub">Re-rendered conversation layout over this PTY session is coming next. This is a PTY view, not an m4a chat.</div><pre class="ptychat-screen">${esc(text || '')}</pre></div>`;
+}
+$('#tpaste').onclick = async () => { try { const t = await navigator.clipboard.readText(); if (t) term.paste(t); term.focus(); } catch (_) { toast('Clipboard blocked: press Ctrl+V (Cmd+V) in the terminal'); term.focus(); } };
+$('#ptylayout').onclick = (e) => { const b = e.target.closest('button[data-l]'); if (b) setPtyLayout(b.dataset.l); };
+$('#tstop').onclick = () => { if (S.ptySession) stopSession(S.ptySession); };
+$('#tlink').onclick = () => { const u = $('#tlink').dataset.url || findUrl(window.lastFrameText, term.cols); if (u) openUrlOnNode(u); else toast('No link in the current frame'); };
 term.onData((data) => tsend({ t: 'data', data }));
-
-// ---- panel terminal tab: a read-only live preview of the agent PTY, scaled to the panel width
-function renderTermTab() {
-  const sel = $('#tprov2'); if (!sel.options.length) { sel.innerHTML = $('#tprov').innerHTML; sel.onchange = () => { $('#tprov').selectedIndex = sel.selectedIndex; }; }
-  sel.selectedIndex = $('#tprov').selectedIndex;
-  $('#tstate').textContent = S.session ? `${S.sessionProv} on ${S.sessionNode}` : 'no session';
-  if (!mini) { mini = new Terminal({ rows: ROWS, cols: COLS, fontSize: 13, disableStdin: true, cursorBlink: false, fontFamily: 'ui-monospace,Menlo,Consolas,monospace', theme: { background: '#000000' } }); mini.open($('#tmini')); if (S.lastAnsi && S.lastAnsi.length) mini.write(S.lastAnsi); new ResizeObserver(fitMini).observe($('#tminihost')); }
-  $('#tempty').hidden = !!(S.lastAnsi && S.lastAnsi.length); fitMini();
-}
-function fitMini() {
-  const host = $('#tminihost'), inner = $('#tmini'); if (!host || !inner.firstChild) return;
-  inner.style.transform = ''; const w = inner.scrollWidth || 1, h = inner.scrollHeight || 1; const k = Math.min(1, host.clientWidth / w);
-  inner.style.transform = `scale(${k})`; host.style.height = Math.round(h * k) + 'px';
-}
-$('#tspawn2').onclick = () => { $('#tprov').selectedIndex = $('#tprov2').selectedIndex; $('#tspawn').click(); setTimeout(renderTermTab, 600); };
-$('#tstop2').onclick = () => { $('#tstop').click(); setTimeout(renderTermTab, 600); };
-$('#tfull').onclick = () => { if (S.chat && !isGroup(S.chat)) setMode('pty'); else toast('Open an agent chat first'); };
+// Mouse CSI reports arrive here only when the app enabled DEC mouse tracking (1000/1002/1003/1006).
+term.onBinary((data) => tsend({ t: 'data', data }));
 
 // ---- event layer: the browser reads ONLY typed session events from the server (no screen parsing here)
 function refreshAvatars() { renderSidebar(); if (S.chat) $('#headav').innerHTML = avatar(S.chat, 'mid'); renderChat(); }
@@ -514,26 +764,160 @@ async function renderLibraryTab() {
   root.querySelectorAll('img').forEach((i) => (i.onclick = () => { const lb = $('#lightbox'); lb.innerHTML = `<img src="${i.src}">`; lb.hidden = false; lb.onclick = () => (lb.hidden = true); }));
 }
 
-// ---- browser tab (dig2 station frames)
-let bws = null; const canvas = $('#bcanvas'); const ctx = canvas.getContext('2d');
-function bsend(o) { if (bws && bws.readyState === 1) bws.send(JSON.stringify(o)); }
-$('#bopen').onclick = () => {
-  if (bws) bws.close();
-  bws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/browser?session=${encodeURIComponent($('#bsess').value.trim())}`); bws.binaryType = 'blob';
-  bws.onmessage = async (m) => {
-    if (typeof m.data === 'string') { const d = JSON.parse(m.data); if (d.type === 'sent') $('#binfo').textContent = `sent ${d.op} (${d.bytes} bytes) at ${d.x ?? ''},${d.y ?? ''}`; return; }
-    const bmp = await createImageBitmap(m.data); canvas.width = bmp.width; canvas.height = bmp.height; ctx.drawImage(bmp, 0, 0); window.browserFrames = (window.browserFrames || 0) + 1;
+
+// ---- Browsers (dig2browser over HQ → core → C2 → node restream). A browser is not a chat:
+// each PTY session owns one (own profile: pty-<ws>-<instance>). The live view is a right-side
+// overlay drawer over the content (not the info sidebar). The info panel keeps only an
+// Open/Show browser control. Each node has a shared 'main' profile reachable from Fleet.
+const browserKey = (sess) => `pty-${sess.workspace_id || 'primary'}-${sess.instance_id}`;
+function browserObj(node, key, url) {
+  const arr = (S.sessions[node] ||= []);
+  let b = arr.find((x) => x.kind === 'browser' && x.key === key);
+  if (!b) { b = { kind: 'browser', provider: 'browser', key, id: node + ':' + key, url: url || 'about:blank', live: false }; arr.push(b); }
+  else if (url) b.url = url;
+  return b;
+}
+function openSessionBrowser(node, sess, url) {
+  const b = browserObj(node, browserKey(sess), url); b.owner = sess;
+  connectBrowser(node, b, url); showBrowserDrawer('mini');
+  if (S.panel && S.tab === 'info') renderInfo();
+}
+function openNodeBrowser(node, url) {
+  const b = browserObj(node, 'main', url);
+  connectBrowser(node, b, url); showBrowserDrawer('mini');
+}
+const startBrowser = (node, url) => openNodeBrowser(node, url);
+function browserCanvas() { return $('#bdcanvas'); }
+// Each browser keeps an offscreen base image; full frames replace it, delta frames
+// (changed rectangle only) are composited onto it, then the base is shown.
+function applyFrame(b, bmp, region) {
+  if (!region) { b.base = document.createElement('canvas'); b.base.width = bmp.width; b.base.height = bmp.height; b.base.getContext('2d').drawImage(bmp, 0, 0); }
+  else if (b.base) { const s = b.base.width / (region.src_w || b.base.width); b.base.getContext('2d').drawImage(bmp, region.x * s, region.y * s, region.w * s, region.h * s); }
+  b.lastBmp = b.base;
+}
+function paintBrowser(b) {
+  if (S.browserSession !== b || !b.lastBmp) return;
+  const c = browserCanvas(); if (!c) return; const W = b.vw || b.lastBmp.width, H = b.vh || b.lastBmp.height;
+  if (c.width !== W || c.height !== H) { c.width = W; c.height = H; }
+  c.getContext('2d').drawImage(b.lastBmp, 0, 0, W, H);
+}
+function bsend(o) { const b = S.browserSession; if (b && b._ws && b._ws.readyState === 1) b._ws.send(JSON.stringify(o)); }
+let clickSeq = 0; const clickAt = {};
+function wireCanvas(canvas) {
+  if (!canvas || canvas._wired) return; canvas._wired = true;
+  const pos = (e) => { const r = canvas.getBoundingClientRect(); const s = S.browserSession || {}; const W = s.vw || canvas.width, H = s.vh || canvas.height;
+    return { x: Math.round(Math.max(0, Math.min(W - 1, (e.clientX - r.left) * W / Math.max(1, r.width)))), y: Math.round(Math.max(0, Math.min(H - 1, (e.clientY - r.top) * H / Math.max(1, r.height)))) }; };
+  // Send on mousedown: no waiting for mouseup/click synthesis on the operator side.
+  canvas.onmousedown = (e) => { e.preventDefault(); canvas.focus(); if (e.button !== 0) return; const seq = ++clickSeq; clickAt[seq] = performance.now(); bsend({ t: 'click', ...pos(e), button: 'left', seq }); };
+  canvas.oncontextmenu = (e) => { e.preventDefault(); bsend({ t: 'click', ...pos(e), button: 'right' }); };
+  canvas.onwheel = (e) => { e.preventDefault(); bsend({ t: 'scroll', ...pos(e), dx: e.deltaX, dy: e.deltaY }); };
+  canvas.onkeydown = (e) => { e.preventDefault(); if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) bsend({ t: 'text', text: e.key }); else bsend({ t: 'key', key: e.key }); };
+}
+function connectBrowser(node, b, url) {
+  S.browserSession = b; S.browserNode = node;
+  if (b._ws && b._ws.readyState <= 1) { if (url) bsend({ t: 'nav', url }); paintBrowser(b); return; }
+  const q = new URLSearchParams({ node, session: b.key, url: url || b.url || 'about:blank', keep: 'true' });
+  const ws = new WebSocket(wsUrl('/api/browser', q)); ws.binaryType = 'blob'; b._ws = ws;
+  ws.onmessage = async (m) => {
+    if (typeof m.data === 'string') {
+      const d = JSON.parse(m.data);
+      if (d.type === 'spawned') { b.live = true; }
+      if (d.type === 'frame_info' && d.w && d.h) { b.vw = d.w; b.vh = d.h; b.nextRegion = d.region || null; fitBrowser(); }
+      if ((d.type === 'started' || d.type === 'frame_info') && d.url) { b.url = d.url; b.title = d.title || b.title; syncBrowserBar(b); }
+      if (d.type === 'lat') b.pendingLat = d;
+      if (d.type === 'error') toast('browser: ' + d.text);
+      if (d.type === 'stopped') { b.live = false; b._ws = null; hideBrowserOverlay(false); if (S.panel && S.tab === 'info') renderInfo(); }
+      return;
+    }
+    const region = b.nextRegion; b.nextRegion = null; const blob = m.data;
+    // Serialize decode+composite so deltas apply in arrival order.
+    b.chain = (b.chain || Promise.resolve()).then(async () => {
+      const bmp = await createImageBitmap(blob); applyFrame(b, bmp, region); paintBrowser(b);
+    if (b.pendingLat) {
+      const d = b.pendingLat; b.pendingLat = null;
+      requestAnimationFrame(() => {
+        const t0 = clickAt[d.seq]; if (t0 == null) return; delete clickAt[d.seq];
+        const total = Math.round(performance.now() - t0);
+        const lat = { total, client_hq: Math.max(0, total - d.hq_rtt_ms - d.hq_proc_ms), hq_proc: d.hq_proc_ms, net: d.net_ms, node: d.node.node_ms, cdp: d.node.cdp_ms, to_frame: d.node.to_frame_ms, src: d.node.source };
+        S.lat = lat; (window.__lat ||= []).push(lat); updateLatReadout();
+      });
+    }
+    }).catch(() => {});
   };
-};
-const pos = (e) => { const r = canvas.getBoundingClientRect(); return { x: Math.round((e.clientX - r.left) * canvas.width / r.width), y: Math.round((e.clientY - r.top) * canvas.height / r.height) }; };
-canvas.onclick = (e) => bsend({ t: 'click', ...pos(e), button: 'left' });
-canvas.oncontextmenu = (e) => { e.preventDefault(); bsend({ t: 'click', ...pos(e), button: 'right' }); };
-canvas.onwheel = (e) => { e.preventDefault(); bsend({ t: 'scroll', ...pos(e), dx: e.deltaX, dy: e.deltaY }); };
-$('#bnav').onclick = () => bsend({ t: 'nav', url: $('#burl').value });
-$('#btype').onclick = () => bsend({ t: 'text', text: $('#btext').value });
-$('#benter').onclick = () => bsend({ t: 'key', key: 'Enter' });
-$('#bup').onclick = () => bsend({ t: 'scroll', x: 400, y: 250, dx: 0, dy: -300 });
-$('#bdown').onclick = () => bsend({ t: 'scroll', x: 400, y: 250, dx: 0, dy: 300 });
+  ws.onclose = () => { if (b._ws === ws) { b._ws = null; b.live = false; } };
+}
+function syncBrowserBar(b) {
+  if (S.browserSession !== b) return;
+  const el = $('#bdurl'); if (el && document.activeElement !== el) el.value = b.url || '';
+  const t = $('#bdtitle'); if (t) t.textContent = b.key === 'main' ? `${S.browserNode} · main browser` : `${S.browserNode} · session browser`;
+}
+function latText() { const l = S.lat; if (!l) return 'No click measured yet'; return `${l.total} ms total · client↔hq ${l.client_hq} · hq ${l.hq_proc} · core+C2 ${l.net} · node ${l.node} (cdp ${l.cdp}, →frame ${l.to_frame}, ${l.src})`; }
+function updateLatReadout() { const el = $('#plat'); if (el) el.textContent = latText(); }
+// Right-side overlay drawer: mini (fitted slide-in) or expanded; never embedded in the info panel.
+function browserDrawer() {
+  let w = $('#bdrawer'); if (w) return w;
+  w = document.createElement('div'); w.id = 'bdrawer'; w.className = 'bdrawer'; w.hidden = true;
+  w.innerHTML = `<div class="bdbar"><span id="bdtitle" class="sub"></span><input id="bdurl" placeholder="https://…"><button class="ibtn" id="bdsize" title="Expand">⤢</button><button class="ibtn" id="bdhide" title="Hide">›</button><button class="ibtn" id="bdclose" title="Close browser">✕</button></div><canvas id="bdcanvas" tabindex="0"></canvas><div class="sub plat bdlat">Input latency: <span id="plat">No click measured yet</span></div>`;
+  document.body.appendChild(w);
+  $('#bdsize').onclick = () => { const big = w.classList.contains('big'); showBrowserDrawer(big ? 'mini' : 'big'); };
+  $('#bdhide').onclick = () => hideBrowserOverlay(false);
+  $('#bdclose').onclick = () => hideBrowserOverlay(true);
+  $('#bdurl').onkeydown = (e) => { if (e.key === 'Enter') navBrowser($('#bdurl').value); };
+  wireCanvas($('#bdcanvas')); addEventListener('resize', fitBrowser);
+  return w;
+}
+function navBrowser(v) { let u = String(v || '').trim(); if (!u) return; if (!/^https?:\/\//i.test(u)) u = 'https://' + u; if (S.browserSession) S.browserSession.url = u; bsend({ t: 'nav', url: u }); }
+function fitBrowser() {
+  const w = $('#bdrawer'); if (!w || w.hidden) return;
+  const s = S.browserSession || {}; const vw = s.vw || 1280, vh = s.vh || 720;
+  const big = w.classList.contains('big');
+  const aw = big ? innerWidth - 120 : Math.min(420, innerWidth * 0.42);
+  const ah = big ? innerHeight - 64 - 48 : Math.min(innerHeight - 80, aw * vh / vw + 56);
+  w.style.width = Math.max(280, Math.min(aw, (ah - 56) * vw / vh)) + 'px';
+}
+function showBrowserDrawer(mode) {
+  const w = browserDrawer();
+  w.hidden = false; w.classList.remove('off');
+  if (mode === 'big') w.classList.add('big'); else w.classList.remove('big');
+  const sz = $('#bdsize'); if (sz) { sz.title = mode === 'big' ? 'Collapse' : 'Expand'; sz.textContent = mode === 'big' ? '⤡' : '⤢'; }
+  fitBrowser(); syncBrowserBar(S.browserSession || {});
+  const b = S.browserSession; if (b) paintBrowser(b);
+  if (S.panel && S.tab === 'info') renderInfo();
+}
+function setBrowserBig(on) { showBrowserDrawer(on ? 'big' : 'mini'); }
+function hideBrowserOverlay(stop) {
+  const w = $('#bdrawer'); if (w) { w.hidden = true; w.classList.add('off'); }
+  if (stop) stopBrowser();
+  if (S.panel && S.tab === 'info') renderInfo();
+}
+function stopBrowser() {
+  const b = S.browserSession; if (!b) return;
+  bsend({ t: 'stop' }); try { b._ws && b._ws.close(); } catch (_) {}
+  b._ws = null; b.live = false; b.lastBmp = null;
+  const w = $('#bdrawer'); if (w) { w.hidden = true; w.classList.add('off'); }
+  if (S.panel && S.tab === 'info') renderInfo();
+}
+// Info panel: control only — no embedded browser surface.
+function sessionBrowserHtml(node, sess) {
+  const b = (S.sessions[node] || []).find((x) => x.kind === 'browser' && x.key === browserKey(sess));
+  const live = !!(b && b._ws);
+  const shown = !!(live && $('#bdrawer') && !$('#bdrawer').hidden);
+  const label = !live ? 'Open browser' : shown ? 'Hide browser' : 'Show browser';
+  return `<div class="pcard pbrowser"><div class="sub">${live ? 'Session browser is bound to this PTY (own profile).' : 'Links clicked in the terminal open the session browser as a drawer.'}</div>
+    <div class="row cp-row"><button class="btn" data-b="open">${label}</button>${live ? '<button class="btn red" data-b="stop">Close</button>' : ''}</div>
+    <div class="sub plat">Input latency: <span id="plat">${esc(latText())}</span></div></div>`;
+}
+function wireSessionBrowser(root, node, sess) {
+  root.querySelectorAll('[data-b]').forEach((x) => (x.onclick = () => {
+    if (x.dataset.b === 'stop') { stopBrowser(); return; }
+    const b = (S.sessions[node] || []).find((y) => y.kind === 'browser' && y.key === browserKey(sess));
+    if (b && b._ws) {
+      S.browserSession = b; S.browserNode = node;
+      const shown = $('#bdrawer') && !$('#bdrawer').hidden;
+      if (shown) hideBrowserOverlay(false); else showBrowserDrawer('mini');
+    } else openSessionBrowser(node, sess, 'about:blank');
+  }));
+}
 
 // ---- live events: mail wakes HQ
 const es = new EventSource('/api/events');
@@ -546,15 +930,18 @@ es.onmessage = (m) => {
     if (S.chat === msg.from || isGroup(S.chat)) loadThread(); else { S.mail[msg.from] = (S.mail[msg.from] || []).concat([msg]); renderSidebar(); }
   }
 };
+S.ptyLayout = localStorage.getItem('hq.ptylayout') || 'native';
 setTab('info');
 api('/api/config').then(async (c) => { S.chats = c.chats && c.chats.length ? c.chats : [{ label: 'general', target: 'room:general' }];
   if (c.m4a) { S.m4a = c.m4a; try { const d = await post('/api/s/m4a/rooms', {}); const rows = Array.isArray(d.result) ? d.result : d.result.rooms || [];
     const rooms = rows.map((r) => { const rid = r.room_id || r.id || r.room; const label = r.title || r.name || r.alias || rid; return { label, target: 'm4a:' + rid, kind: (c.m4a.groups || []).includes(label) || r.kind === 'group' || r.kind === 'channel' ? 'group' : 'dm' }; }).filter((r) => r.target !== 'm4a:undefined');
     S.chats = [...rooms, ...S.chats.filter((x) => !String(x.target).startsWith('room:'))]; } catch (e) { toast('m4a: ' + e.message); } } }).catch(() => { S.chats = [{ label: 'general', target: 'room:general' }]; }).then(loadNodes).then(() => {
-    const h = decodeURIComponent((location.hash.match(/^#\/chat\/(.+)$/) || [])[1] || ''); const want = h || localStorage.getItem('hq.chat');
-    const ok = (t) => t && ((S.chats || []).some((c) => c.target === t) || (S.nodes || []).some((n) => n.node_id === t));
-    openChat(ok(want) ? want : S.chats[0].target);
-    if (localStorage.getItem('hq.panel')) openPanel(SAVED_TAB || 'info'); setTimeout(prefetch, 1500); setInterval(prefetch, 60000); }); let pollN = 0; setInterval(() => { pollN++; if (S.chat && !document.hidden && (String(S.chat).startsWith('m4a:') || pollN % 4 === 0)) loadThread(); }, 2500); setInterval(loadNodes, 4000);
+    const nodeHash = decodeURIComponent((location.hash.match(/^#\/node\/(.+)$/) || [])[1] || '');
+    const chatHash = decodeURIComponent((location.hash.match(/^#\/chat\/(.+)$/) || [])[1] || '');
+    const want = nodeHash || chatHash || localStorage.getItem('hq.chat');
+    if (want && (S.chats || []).some((c) => c.target === want)) openChat(want); else openChat(S.chats[0].target);
+    if (nodeHash && (S.nodes || []).some((n) => n.node_id === nodeHash)) openNode(nodeHash);
+    if (localStorage.getItem('hq.panel')) openPanel(SAVED_TAB || 'info'); setTimeout(prefetch, 1500); setInterval(prefetch, 60000); }); let pollN = 0; setInterval(() => { pollN++; if (S.chat && !document.hidden && (String(S.chat).startsWith('m4a:') || pollN % 4 === 0)) loadThread(); }, 2500); setInterval(loadNodes, 4000); setTimeout(reconcileAll, 1200); setInterval(reconcileAll, 15000);
 
 // ---- message actions: react / reply / more
 const EMO = ['👍', '👎', '❤️', '😂', '🎉', '😮', '😢', '🙏', '🔥', '👀', '✅', '🤔'];
@@ -611,3 +998,6 @@ $('#chat').addEventListener('click', (e) => {
   else { const p = popAt(a, `<button data-c="text"><span class="ic">${ico('copy')}</span>Copy</button><button data-c="id"><span class="ic">${ico('hash')}</span>Copy message ID</button>`);
     if (!p) return; p.onclick = (ev) => { const b = ev.target.closest('[data-c]'); if (!b) return; p.remove(); navigator.clipboard?.writeText(b.dataset.c === 'id' ? id : m.body); toast(b.dataset.c === 'id' ? 'Message ID copied' : 'Copied'); }; }
 });
+if (new URLSearchParams(location.search).has('test') || localStorage.getItem('hq.test') === '1') {
+  window.hq = { startSession, startBrowser, attachSession, hideBrowserOverlay, stopSession, openSessionBrowser, openNodeBrowser, setBrowserBig, S };
+}

@@ -76,6 +76,15 @@ pub use control_detail::control_telemetry_detail;
 mod multiplex;
 pub use multiplex::*;
 pub mod inner;
+pub mod browser_wire;
+
+pub use browser_wire::{
+    decode_input as decode_browser_input, encode_click as encode_browser_click,
+    encode_key as encode_browser_key, encode_navigate as encode_browser_navigate,
+    encode_scroll as encode_browser_scroll, encode_text as encode_browser_text,
+    validate_session_id as validate_browser_session_id, BrowserClientOp, BrowserFrameRegion, BrowserFrameTrace, BrowserInput,
+    BrowserMouseButton, BrowserOpReply, BrowserStreamEvent,
+};
 #[cfg(feature = "nested-crypto")]
 pub mod nested;
 pub mod buffer;
@@ -362,7 +371,16 @@ impl From<&NodeFailure> for C2NodeFailure {
             NodeFailureCode::StaleGeneration => "stale session generation",
             NodeFailureCode::BackendBusy => "node backend busy",
             NodeFailureCode::BackendDisconnected => "node backend disconnected",
-            NodeFailureCode::BackendOperationFailed => "node backend operation failed",
+            // Allow a small set of fixed, non-sensitive diagnostics through so HQ
+            // can show "launcher unavailable" instead of a opaque bucket.
+            NodeFailureCode::BackendOperationFailed => {
+                match failure.message.as_str() {
+                    "provider launcher is unavailable" => "provider launcher is unavailable",
+                    "provider runtime probe task failed" => "provider runtime probe task failed",
+                    "session environment overlay is invalid" => "session environment overlay is invalid",
+                    _ => "node backend operation failed",
+                }
+            }
             NodeFailureCode::ShuttingDown => "node shutting down",
         };
         Self { code: failure.code, message: message.to_owned() }
@@ -682,6 +700,8 @@ pub struct C2NodeSnapshot {
     pub managed_worktrees: Vec<ManagedWorktreeLeaseSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch_inventory: Option<LaunchInventory>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<MachineEnvironment>,
 }
 
 impl C2NodeSnapshot {
@@ -826,6 +846,7 @@ impl From<&NodeSnapshot> for C2NodeSnapshot {
             agent_progress: snapshot.agent_progress.clone(),
             managed_worktrees: snapshot.managed_worktrees.clone(),
             launch_inventory: snapshot.launch_inventory.clone(),
+            machine: None,
         }
     }
 }
@@ -2445,6 +2466,8 @@ pub struct C2TopologyNode {
     pub relay_route: C2RelayRoute,
     pub transport: NodeTransportState,
     pub current_incarnation_id: Option<NodeIncarnationId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<MachineEnvironment>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub provider_contracts: Vec<ProviderContractSupport>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -2498,6 +2521,7 @@ impl C2Topology {
                 relay_route: C2RelayRoute::from_transport_label(&observed.transport_label),
                 transport: observed.transport,
                 current_incarnation_id: observed.cursor.map(|cursor| cursor.incarnation_id),
+                machine: observed.machine.clone(),
                 provider_contracts: provider_contract_inventory
                     .map(|inventory| inventory.provider_contracts.clone())
                     .unwrap_or_default(),
@@ -2523,12 +2547,22 @@ pub struct C2ReplyEnvelope {
     pub result: Result<RoutedNodeResponse, C2RelayFailure>,
 }
 
+
+/// Operator → core browser command (routed to one node over the restream control channel).
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct BrowserClientCommand {
+    pub node_id: String,
+    pub op: BrowserClientOp,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(tag = "kind", content = "payload", rename_all = "kebab-case")]
 pub enum C2ClientFrame {
     Hello(C2ClientHello),
     Authenticate(C2ClientAuthentication),
     Request(C2RequestEnvelope),
+    /// Start / drive / stop a dig2browser session on a node (A2 restream sidecar).
+    Browser(BrowserClientCommand),
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -2538,6 +2572,8 @@ pub enum C2ServerFrame {
     Hello(C2Hello),
     Reply(C2ReplyEnvelope),
     Event(RoutedNodeEvent),
+    /// Live dig2browser frame / lifecycle event from a node (A2 restream sidecar).
+    Browser(BrowserStreamEvent),
     Topology(C2Topology),
     Rejected(C2RelayFailure),
 }
@@ -3159,6 +3195,34 @@ fn sanitize_host_path_display(path: &OpaqueHostPath) -> String {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ProviderCliReport {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// Host machine resources + installed provider CLIs (node-collected, published in topology).
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct MachineEnvironment {
+    pub os: String,
+    pub kernel: String,
+    pub arch: String,
+    pub hostname: String,
+    pub uptime_secs: u64,
+    pub cpu_cores: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_model: Option<String>,
+    pub ram_total_bytes: u64,
+    pub ram_available_bytes: u64,
+    pub disk_total_bytes: u64,
+    pub disk_available_bytes: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provider_clis: Vec<ProviderCliReport>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ObservedNode {
     pub endpoint: String,
     pub transport_label: String,
@@ -3166,6 +3230,8 @@ pub struct ObservedNode {
     pub freshness: NodeFreshness,
     pub cursor: Option<NodeCursor>,
     pub inventory: Option<SlimNodeInventory>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<MachineEnvironment>,
     pub last_attempt_unix_ms: Option<u64>,
     pub last_success_unix_ms: Option<u64>,
     pub consecutive_failures: u32,
@@ -3375,6 +3441,7 @@ mod tests {
             agent_progress: vec![progress.clone()],
             managed_worktrees: Vec::new(),
             launch_inventory: None,
+            machine: None,
         };
         let json = serde_json::to_string(&snapshot).unwrap();
         let decoded = serde_json::from_str::<C2NodeSnapshot>(&json).unwrap();
@@ -5157,6 +5224,7 @@ mod tests {
             managed_worktrees: Vec::new(),
             launch_inventory: Some(launch_inventory.clone()),
             agent_progress: Vec::new(),
+            machine: None,
         };
 
         let full = C2NodeSnapshot::from(&snapshot);
@@ -5346,6 +5414,7 @@ mod tests {
                 freshness: NodeFreshness::Fresh,
                 cursor: Some(NodeCursor { incarnation_id, sequence: 99 }),
                 inventory: None,
+                machine: None,
                 last_attempt_unix_ms: Some(10),
                 last_success_unix_ms: Some(10),
                 consecutive_failures: 0,
@@ -5423,6 +5492,7 @@ mod tests {
                         sequence: 9,
                     }),
                     inventory: Some(inventory),
+                    machine: None,
                     last_attempt_unix_ms: Some(10),
                     last_success_unix_ms: Some(10),
                     consecutive_failures: 0,
@@ -6405,6 +6475,7 @@ mod tests {
                 .map(lease)
                 .collect(),
             launch_inventory: None,
+            machine: None,
         };
         let encoded = serde_json::to_value(overflow).unwrap();
         assert!(serde_json::from_value::<C2NodeSnapshot>(encoded).is_err());

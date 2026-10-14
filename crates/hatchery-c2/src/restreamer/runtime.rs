@@ -160,6 +160,8 @@ struct Inner {
 /// Shared restreamer state.
 #[derive(Clone)]
 pub struct Restreamer {
+    /// Wakes core drain sessions as soon as an uplink frame is buffered.
+    uplink_ready: Arc<tokio::sync::Notify>,
     inner: Arc<Mutex<Inner>>,
     journal: Arc<dyn NodeJournal>,
     peers: UplinkPeers,
@@ -174,8 +176,13 @@ impl Restreamer {
     ) -> Self {
         let _ = core_token; // validated by callers / RestreamerConfig
         Self {
+            uplink_ready: Arc::new(tokio::sync::Notify::new()),
             inner: Arc::new(Mutex::new(Inner {
-                buffer: ReplayBuffer::new(buffer_limits).with_default_credit(64),
+                // Per-stream credit: a PTY burst (echo frames + replies) easily has >64
+                // messages in flight over the C2->core RTT; at 0 credit the frame is
+                // refused and, as the node does not replay it, the inner Noise stream to
+                // core desyncs and the session wedges. Hard limits stay max_events/bytes.
+                buffer: ReplayBuffer::new(buffer_limits).with_default_credit(1024),
                 channels: BTreeMap::new(),
                 keys,
                 pushed_to_core: false,
@@ -187,6 +194,10 @@ impl Restreamer {
 
     pub fn set_keys(&self, keys: RestreamerKeys) {
         self.inner.lock().expect("lock").keys = Some(keys);
+    }
+
+    pub fn uplink_notify(&self) -> Arc<tokio::sync::Notify> {
+        self.uplink_ready.clone()
     }
 
     pub fn peers(&self) -> &UplinkPeers {
@@ -236,6 +247,7 @@ impl Restreamer {
             // best-effort journal mirror when the journal is a MemoryJournal-compatible append —
             // production journals live on the node; C2 asks via NodeJournal trait.
             let _ = (seq, opaque);
+            self.uplink_ready.notify_waiters();
         }
         Ok(outcome)
     }
@@ -425,6 +437,7 @@ pub async fn serve(
             }
             accepted = node_listener.accept() => {
                 let (stream, _) = accepted?;
+                let _ = stream.set_nodelay(true);
                 let rs = restreamer.clone();
                 tokio::spawn(async move {
                     if let Err(err) = handle_node_uplink(stream, rs).await {
@@ -434,6 +447,7 @@ pub async fn serve(
             }
             accepted = drain_listener.accept() => {
                 let (stream, _) = accepted?;
+                let _ = stream.set_nodelay(true);
                 let rs = restreamer.clone();
                 let token = config.core_token.clone();
                 tokio::spawn(async move {
@@ -508,6 +522,16 @@ async fn handle_node_uplink(mut stream: TcpStream, rs: Restreamer) -> Result<(),
                                                 .await?;
                                         }
                                         EnqueueOutcome::Backpressure => {
+                                            // Credit exhausted: frame is not buffered. The node
+                                            // does not replay, so a silent drop desyncs the inner
+                                            // Noise stream to core. Warn loudly; WINDOW 0 still
+                                            // tells the peer to pause.
+                                            tracing::warn!(
+                                                target: "restreamer",
+                                                node = %nid,
+                                                channel = frame.channel_id,
+                                                "restreamer credit exhausted; dropping node→core frame (Noise may desync)"
+                                            );
                                             let win = Frame::window(frame.channel_id, 0);
                                             stream
                                                 .write_all(
@@ -590,7 +614,12 @@ async fn handle_core_drain(
     let mut sent_through: u64 = 0;
     // Core must RESUME once before we drain; reconnects always start with RESUME.
     let mut resumed = false;
+    let uplink_ready = rs.uplink_notify();
     loop {
+        // Register for the wakeup before checking the buffer so none is missed.
+        let woken = uplink_ready.notified();
+        tokio::pin!(woken);
+        woken.as_mut().enable();
         // After the first RESUME, opportunistically drain newly buffered events.
         if resumed {
             if let Some((ref nid, ch)) = selected {
@@ -604,11 +633,13 @@ async fn handle_core_drain(
             }
         }
 
-        let read = tokio::time::timeout(
-            std::time::Duration::from_millis(50),
-            stream.read(&mut buf[filled..]),
-        )
-        .await;
+        // Wake on core input, on a newly buffered uplink frame (no 50 ms poll
+        // delay on the hot path), or on the fallback tick.
+        let read = tokio::select! {
+            r = stream.read(&mut buf[filled..]) => Ok(r),
+            _ = &mut woken => continue,
+            _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => Err(()),
+        };
         match read {
             Ok(Ok(0)) => break,
             Ok(Ok(n)) => {
@@ -711,6 +742,7 @@ impl DrainClient {
 
     pub async fn connect(&self) -> Result<DrainSession, RestreamerError> {
         let mut stream = TcpStream::connect(self.addr).await?;
+        let _ = stream.set_nodelay(true);
         stream.write_all(self.token.as_bytes()).await?;
         stream.write_all(b"\n").await?;
         Ok(DrainSession { stream })

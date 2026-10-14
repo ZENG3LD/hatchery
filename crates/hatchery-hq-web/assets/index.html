@@ -15,9 +15,10 @@
   <header id="head"><button id="sidetoggle" class="round" title="Chats">☰</button><button id="headbtn"><span id="headav"></span><span id="headname">general</span><span class="hchev">›</span></button></header>
   <div id="body">
    <div id="ptyview">
-    <div class="ptybar"><select id="tprov"><option>claude</option><option>codex</option><option>kimi</option><option>grok</option><option value="grok" data-parser="claude">fixture agent (test)</option></select>
-     <button class="btn blue" id="tspawn">Start</button><button class="btn" id="tstop">Stop</button><span class="sub" id="tinfo"></span></div>
-    <div class="termwrap"><div id="terminal"></div></div>
+    <div class="ptybar" aria-label="Session controls"><span id="tinfo" hidden></span><button class="sbtn blue" id="tlink" type="button" title="Open link in the node browser" hidden>↗<small>Link</small></button><button class="sbtn" id="tpaste" title="Paste clipboard into the terminal">⎘<small>Paste</small></button>
+     <div class="tog" id="ptylayout"><button data-l="native" class="on" title="Native terminal">▤<small>PTY</small></button><button data-l="chat" title="Chat view">☰<small>Chat</small></button></div>
+     <button class="sbtn red" id="tstop" title="Stop session">■<small>Stop</small></button></div>
+    <div class="termwrap"><div id="terminal"></div><div id="ptychat" class="ptychat" hidden></div></div>
    </div>
    <div id="chat" class="view"></div>
   </div>
@@ -37,21 +38,6 @@
   <div id="ptabs" role="tablist"></div>
   <div id="pbody">
    <div class="ptab" id="p-info"></div>
-   <div class="ptab" id="p-terminal">
-    <section class="psec"><div class="sech"><span>Agent terminal</span><span class="sub" id="tstate">no session</span></div>
-     <div class="pcard"><div class="row"><select id="tprov2"></select><button class="btn blue" id="tspawn2">Start</button><button class="btn" id="tstop2">Stop</button></div>
-      <div class="tmini" id="tminihost"><div class="inner" id="tmini"></div><div class="tempty sub" id="tempty">No output yet. Open an agent chat and start a session.</div></div>
-      <div class="row end"><button class="btn" id="tfull">Open full terminal</button></div></div></section>
-   </div>
-   <div class="ptab" id="p-browser">
-    <section class="psec"><div class="sech"><span>Browser stream</span><span class="sub" id="binfo"></span></div>
-     <div class="pcard">
-      <div class="row"><input id="bsess" placeholder="Browser session id"><button class="btn" id="bopen">Connect</button></div>
-      <div class="row"><input id="burl" value="https://example.org/"><button class="btn" id="bnav">Go</button></div>
-      <div class="frame"><canvas id="bcanvas" width="800" height="500"></canvas></div>
-      <div class="row ctl"><input id="btext" placeholder="Type into page…"><button class="btn" id="btype">Type</button><button class="ibtn" id="benter" title="Enter">⏎</button><button class="ibtn" id="bup" title="Scroll up">▲</button><button class="ibtn" id="bdown" title="Scroll down">▼</button></div>
-     </div></section>
-   </div>
    <div class="ptab" id="p-tasks"></div>
    <div class="ptab" id="p-library"></div>
    <div class="ptab" id="p-status"></div>
@@ -59,5 +45,5 @@
  </aside>
 </div>
 <div id="lightbox" hidden></div>
-<script src="/vendor/xterm.js"></script><script src="/app.js"></script>
+<script src="/vendor/xterm.js"></script><script src="/vendor/addon-fit.js"></script><script src="/vendor/addon-web-links.js"></script><script src="/app.js"></script>
 </body></html>

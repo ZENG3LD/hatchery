@@ -54,18 +54,19 @@ else
   install_npm_global @openai/codex || missing=1
 fi
 
-if have_cmd kimi; then
-  echo "install-provider-clis: kimi already present ($(command -v kimi))"
+# kimi ships as `kimi` or `kimi-cli` depending on the installer; accept either.
+if have_cmd kimi || have_cmd kimi-cli; then
+  echo "install-provider-clis: kimi already present ($(command -v kimi 2>/dev/null || command -v kimi-cli))"
 else
-  echo "install-provider-clis: kimi missing; set PROVIDER_CLI_INSTALL to an image package command for kimi (no credential copy)." >&2
-  missing=1
+  # Optional (no default package): warn and continue rather than fail startup.
+  echo "install-provider-clis: kimi missing; continuing without it (set PROVIDER_CLI_INSTALL to install)." >&2
 fi
 
 if have_cmd grok; then
   echo "install-provider-clis: grok already present ($(command -v grok))"
 else
-  echo "install-provider-clis: grok missing; set PROVIDER_CLI_INSTALL to an image package command for grok (no credential copy)." >&2
-  missing=1
+  # Optional (no default package): warn and continue rather than fail startup.
+  echo "install-provider-clis: grok missing; continuing without it (set PROVIDER_CLI_INSTALL to install)." >&2
 fi
 
 if [ "$missing" -ne 0 ]; then

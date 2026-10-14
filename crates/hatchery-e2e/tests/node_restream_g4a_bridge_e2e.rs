@@ -156,6 +156,8 @@ async fn snapshot_reaches_local_g4a_through_restream_bridge() {
             node_listen,
             upstream,
             None,
+            None,
+            None,
             bridge_rx,
         )
         .await

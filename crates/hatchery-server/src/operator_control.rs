@@ -8,7 +8,8 @@ use gate4agent_node_protocol::{
 };
 use gate4agent_node_wire::{local_hmac_sha256, proofs_match, random_nonce, OwnerOnlyLocalListener};
 use hatchery_core::{
-    c2_auth_transcript, c2_bound_auth_transcript, ArchitectureId, BUILD_STAMP, C2AuthDirection,
+    c2_auth_transcript, c2_bound_auth_transcript, ArchitectureId, BUILD_STAMP, BrowserClientCommand,
+    BrowserStreamEvent, C2AuthDirection,
     C2ClientAuthentication, C2ClientFrame, C2ClientHello, C2ControlCompatibilitySupport, C2Hello,
     C2RelayFailure, C2RelayFailureCode, C2ReplyEnvelope, C2RequestEnvelope, C2ServerChallenge,
     C2ServerFrame, C2Topology, CapabilityId, ClientCompatibilityOffer, HostDescriptor,
@@ -39,7 +40,7 @@ use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::sync::{watch, Semaphore};
+use tokio::sync::{broadcast, watch, Semaphore};
 #[cfg(test)]
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
@@ -53,7 +54,12 @@ const REQUEST_DEADLINE: Duration = Duration::from_secs(60);
 pub struct NodeOperatorMesh {
     inner: Arc<Mutex<BTreeMap<String, OperatorLink>>>,
     cursors: Arc<Mutex<BTreeMap<String, hatchery_core::NodeCursor>>>,
+    machines: Arc<Mutex<BTreeMap<String, hatchery_core::MachineEnvironment>>>,
     topology: watch::Sender<Arc<StatusResponse>>,
+    /// Fan-out of node-initiated g4a events (PTY frames, etc.) to every operator client.
+    events: broadcast::Sender<hatchery_core::RoutedNodeEvent>,
+    /// Fan-out of dig2browser frames / lifecycle events.
+    browser: broadcast::Sender<BrowserStreamEvent>,
 }
 
 impl NodeOperatorMesh {
@@ -65,10 +71,15 @@ impl NodeOperatorMesh {
             nodes: BTreeMap::new(),
         });
         let (topology, _) = watch::channel(initial);
+        let (events, _) = broadcast::channel(256);
+        let (browser, _) = broadcast::channel(64);
         Self {
             inner: Arc::new(Mutex::new(BTreeMap::new())),
             cursors: Arc::new(Mutex::new(BTreeMap::new())),
+            machines: Arc::new(Mutex::new(BTreeMap::new())),
             topology,
+            events,
+            browser,
         }
     }
 
@@ -87,6 +98,7 @@ impl NodeOperatorMesh {
     pub fn unregister(&self, node_id: &str) {
         self.inner.lock().expect("mesh").remove(node_id);
         self.cursors.lock().expect("cursors").remove(node_id);
+        self.machines.lock().expect("machines").remove(node_id);
         self.publish_topology();
     }
 
@@ -100,9 +112,45 @@ impl NodeOperatorMesh {
         self.publish_topology();
     }
 
+    pub fn set_machine(&self, node_id: &str, machine: hatchery_core::MachineEnvironment) {
+        self.machines.lock().expect("machines").insert(node_id.to_owned(), machine);
+        self.publish_topology();
+    }
+
+    /// Publish a node-initiated event to every connected operator client.
+    pub fn publish_event(&self, event: hatchery_core::RoutedNodeEvent) {
+        if matches!(event.event, hatchery_core::C2NodeEvent::TerminalFrame { .. }) {
+            if let Some(at) = PTY_PROBE.lock().unwrap_or_else(|p| p.into_inner()).take() {
+                tracing::debug!(target: "pty_lat", core_us = at.elapsed().as_micros() as u64, "core: pty input enqueued to echo frame published");
+            }
+        }
+        // Keep topology cursor fresh from live traffic.
+        self.set_cursor(
+            event.node_id.as_str(),
+            hatchery_core::NodeCursor {
+                incarnation_id: event.cursor.incarnation_id,
+                sequence: event.cursor.sequence,
+            },
+        );
+        let _ = self.events.send(event);
+    }
+
+    pub fn subscribe_events(&self) -> broadcast::Receiver<hatchery_core::RoutedNodeEvent> {
+        self.events.subscribe()
+    }
+
+    pub fn publish_browser(&self, event: BrowserStreamEvent) {
+        let _ = self.browser.send(event);
+    }
+
+    pub fn subscribe_browser(&self) -> broadcast::Receiver<BrowserStreamEvent> {
+        self.browser.subscribe()
+    }
+
     fn publish_topology(&self) {
         let ids: Vec<String> = self.inner.lock().expect("mesh").keys().cloned().collect();
         let cursors = self.cursors.lock().expect("cursors").clone();
+        let machines = self.machines.lock().expect("machines").clone();
         let mut nodes = BTreeMap::new();
         for id in &ids {
             let node_id = NodeId::new(id.clone()).expect("registered ids are valid");
@@ -115,6 +163,7 @@ impl NodeOperatorMesh {
                     freshness: NodeFreshness::Fresh,
                     cursor: cursors.get(id).cloned(),
                     inventory: None,
+                    machine: machines.get(id).cloned(),
                     last_attempt_unix_ms: None,
                     last_success_unix_ms: Some(unix_ms()),
                     consecutive_failures: 0,
@@ -153,7 +202,7 @@ pub async fn serve_local(
     let mut listener = OwnerOnlyLocalListener::bind(&endpoint).await?;
     tracing::info!(%endpoint, "core operator control listening");
     let preauth = Arc::new(Semaphore::new(4));
-    let authenticated = Arc::new(Semaphore::new(1));
+    let authenticated = Arc::new(Semaphore::new(8));
     let next_id = Arc::new(AtomicU64::new(1));
     let mut connections = JoinSet::new();
     loop {
@@ -246,6 +295,8 @@ where
 
     let connection_id = connection_ids.fetch_add(1, Ordering::AcqRel);
     let mut status_rx = mesh.subscribe();
+    let mut events_rx = mesh.subscribe_events();
+    let mut browser_rx = mesh.subscribe_browser();
     let hello_status = status_rx.borrow().as_ref().clone();
     timeout(AUTH_DEADLINE, write_json_frame_limited(
         &mut pipe,
@@ -259,6 +310,22 @@ where
     )).await.map_err(|_| FrameError::BodyTimedOut { length: 0 })??;
 
     let (mut reader, mut writer) = tokio::io::split(pipe);
+    // read_client_frame is not cancellation-safe: inside select! a busy event/browser
+    // branch could drop a half-read frame, desync the stream and close the operator
+    // connection. Read frames on their own task and hand complete ones over.
+    let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel(64);
+    // Requests and browser ops run on their own tasks so a slow node RPC never
+    // stalls frame/event delivery on this connection; replies come back here.
+    let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<C2ServerFrame>();
+    let reader_task = tokio::spawn(async move {
+        loop {
+            let frame = read_client_frame(&mut reader, MAX_C2_CLIENT_FRAME_BYTES).await;
+            let stop = frame.is_err();
+            if frame_tx.send(frame).await.is_err() || stop {
+                break;
+            }
+        }
+    });
     let mut last_topology = C2Topology::from_status(status_rx.borrow().as_ref());
     tracing::info!(connection_id, "core operator control opened");
 
@@ -278,22 +345,142 @@ where
                     }
                 }
             }
-            frame = read_client_frame(&mut reader, MAX_C2_CLIENT_FRAME_BYTES) => {
-                match frame {
-                    Ok(C2ClientFrame::Request(envelope)) => {
-                        let reply = dispatch_request(&mesh, envelope).await;
-                        if write_json_frame_limited(&mut writer, &C2ServerFrame::Reply(reply), MAX_C2_SERVER_FRAME_BYTES).await.is_err() {
+            event = events_rx.recv() => {
+                match event {
+                    Ok(routed) => {
+                        if write_json_frame_limited(
+                            &mut writer,
+                            &C2ServerFrame::Event(routed),
+                            MAX_C2_SERVER_FRAME_BYTES,
+                        ).await.is_err() {
                             break;
                         }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            browser = browser_rx.recv() => {
+                match browser {
+                    Ok(ev) => {
+                        if write_json_frame_limited(
+                            &mut writer,
+                            &C2ServerFrame::Browser(ev),
+                            MAX_C2_SERVER_FRAME_BYTES,
+                        ).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+            out = out_rx.recv() => {
+                let Some(out) = out else { break };
+                if write_json_frame_limited(&mut writer, &out, MAX_C2_SERVER_FRAME_BYTES).await.is_err() {
+                    break;
+                }
+            }
+            frame = frame_rx.recv() => {
+                let Some(frame) = frame else { break };
+                match frame {
+                    Ok(C2ClientFrame::Request(envelope)) => {
+                        // Enqueue toward the node right here (keeps PTY byte order),
+                        // then wait for the reply off-loop (never blocks events).
+                        let wait = start_request(&mesh, envelope).await;
+                        let out = out_tx.clone();
+                        tokio::spawn(async move {
+                            let _ = out.send(C2ServerFrame::Reply(wait.await));
+                        });
+                    }
+                    Ok(C2ClientFrame::Browser(cmd)) => {
+                        // Browser ops are acked via Browser stream events (Error on failure).
+                        let wait = start_browser(&mesh, cmd).await;
+                        let out = out_tx.clone();
+                        tokio::spawn(async move {
+                            if let Some(ev) = wait.await {
+                                let _ = out.send(C2ServerFrame::Browser(ev));
+                            }
+                        });
                     }
                     Ok(_) | Err(_) => break,
                 }
             }
         }
     }
+    reader_task.abort();
     Ok(())
 }
 
+
+/// Ordered enqueue of a browser op; the future waits for the node's reply.
+async fn start_browser(
+    mesh: &NodeOperatorMesh,
+    cmd: BrowserClientCommand,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<BrowserStreamEvent>> + Send>> {
+    let session = match &cmd.op {
+        hatchery_core::BrowserClientOp::Start { session, .. }
+        | hatchery_core::BrowserClientOp::Input { session, .. }
+        | hatchery_core::BrowserClientOp::Stop { session } => session.clone(),
+    };
+    let link = { let guard = mesh.inner.lock().expect("mesh"); guard.get(&cmd.node_id).cloned() };
+    let node_id = cmd.node_id.clone();
+    let Some(link) = link else {
+        return Box::pin(async move { Some(BrowserStreamEvent::Error { node_id, session, message: "node is not registered on core mesh".into() }) });
+    };
+    let sent = link.browser_op_pipelined(&cmd.op, Duration::from_secs(60)).await;
+    Box::pin(async move {
+        match sent {
+            Err(e) => Some(BrowserStreamEvent::Error { node_id, session, message: format!("{e:?}") }),
+            Ok(wait) => match wait.await {
+                Ok(reply) if reply.ok => None,
+                Ok(reply) => Some(BrowserStreamEvent::Error { node_id, session: reply.session, message: reply.message }),
+                Err(e) => Some(BrowserStreamEvent::Error { node_id, session, message: format!("{e:?}") }),
+            },
+        }
+    })
+}
+
+#[allow(dead_code)]
+async fn dispatch_browser(
+    mesh: &NodeOperatorMesh,
+    cmd: BrowserClientCommand,
+) -> Option<BrowserStreamEvent> {
+    let link = {
+        let guard = mesh.inner.lock().expect("mesh");
+        guard.get(&cmd.node_id).cloned()
+    };
+    let Some(link) = link else {
+        return Some(BrowserStreamEvent::Error {
+            node_id: cmd.node_id,
+            session: match &cmd.op {
+                hatchery_core::BrowserClientOp::Start { session, .. }
+                | hatchery_core::BrowserClientOp::Input { session, .. }
+                | hatchery_core::BrowserClientOp::Stop { session } => session.clone(),
+            },
+            message: "node is not registered on core mesh".into(),
+        });
+    };
+    match link.browser_op(&cmd.op, Duration::from_secs(60)).await {
+        Ok(reply) if reply.ok => None,
+        Ok(reply) => Some(BrowserStreamEvent::Error {
+            node_id: cmd.node_id,
+            session: reply.session,
+            message: reply.message,
+        }),
+        Err(err) => Some(BrowserStreamEvent::Error {
+            node_id: cmd.node_id,
+            session: match &cmd.op {
+                hatchery_core::BrowserClientOp::Start { session, .. }
+                | hatchery_core::BrowserClientOp::Input { session, .. }
+                | hatchery_core::BrowserClientOp::Stop { session } => session.clone(),
+            },
+            message: err.to_string(),
+        }),
+    }
+}
+
+#[allow(dead_code)]
 async fn dispatch_request(mesh: &NodeOperatorMesh, envelope: C2RequestEnvelope) -> C2ReplyEnvelope {
     let node_id = envelope.request.route.node_id.as_str().to_owned();
     let Some(link) = mesh.get(&node_id) else {
@@ -306,15 +493,88 @@ async fn dispatch_request(mesh: &NodeOperatorMesh, envelope: C2RequestEnvelope) 
         route: envelope.request.route.clone(),
         request: envelope.request.request.clone(),
     };
-    match link.request(&routed, REQUEST_DEADLINE).await {
-        Ok(G4aMessage::Response(response)) => C2ReplyEnvelope {
-            request_id: envelope.request_id,
-            result: Ok(response),
-        },
+    let result = match link.request_pipelined(&routed, REQUEST_DEADLINE).await {
+        Ok(wait) => wait.await,
+        Err(e) => Err(e),
+    };
+    finish_request(mesh, &node_id, envelope.request_id, result)
+}
+
+/// Enqueue a request on the node link in arrival order; the returned future
+/// only waits for the reply (so PTY bytes are pipelined, never reordered).
+/// PTY latency probe: first TerminalBytes enqueued at core -> next terminal frame published.
+static PTY_PROBE: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+async fn start_request(
+    mesh: &NodeOperatorMesh,
+    envelope: C2RequestEnvelope,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = C2ReplyEnvelope> + Send>> {
+    if matches!(envelope.request.request, gate4agent_node_protocol::NodeRequest::TerminalBytes { .. }) {
+        let mut g = PTY_PROBE.lock().unwrap_or_else(|p| p.into_inner());
+        if g.is_none() { *g = Some(std::time::Instant::now()); }
+        tracing::debug!(target: "pty_lat", "core: pty input enqueued toward node");
+    }
+    let node_id = envelope.request.route.node_id.as_str().to_owned();
+    let request_id = envelope.request_id;
+    let Some(link) = mesh.get(&node_id) else {
+        return Box::pin(async move { C2ReplyEnvelope {
+            request_id,
+            result: Err(fail(C2RelayFailureCode::NodeOffline, "node not on drain")),
+        } });
+    };
+    let routed = RoutedNodeRequest {
+        route: envelope.request.route.clone(),
+        request: envelope.request.request.clone(),
+    };
+    let sent = link.request_pipelined(&routed, REQUEST_DEADLINE).await;
+    let mesh = mesh.clone();
+    Box::pin(async move {
+        let result = match sent { Ok(wait) => wait.await, Err(e) => Err(e) };
+        finish_request(&mesh, &node_id, request_id, result)
+    })
+}
+
+fn finish_request(
+    mesh: &NodeOperatorMesh,
+    node_id: &str,
+    request_id: hatchery_core::C2RequestId,
+    result: Result<G4aMessage, crate::node_controller::OperatorError>,
+) -> C2ReplyEnvelope {
+    let node_id = node_id.to_owned();
+    struct E { request_id: hatchery_core::C2RequestId }
+    let envelope = E { request_id };
+    match result {
+        Ok(G4aMessage::Response(response)) => {
+            mesh.set_cursor(
+                &node_id,
+                hatchery_core::NodeCursor {
+                    incarnation_id: response.incarnation_id,
+                    sequence: 0,
+                },
+            );
+            if let Ok(hatchery_core::C2NodeResponse::Snapshot { snapshot, .. }) = &response.response {
+                if let Some(machine) = snapshot.machine.clone() {
+                    mesh.set_machine(&node_id, machine);
+                }
+            }
+            C2ReplyEnvelope {
+                request_id: envelope.request_id,
+                result: Ok(response),
+            }
+        }
         Ok(G4aMessage::Json(v)) => {
             // Forward-compatible: try as RoutedNodeResponse
             match serde_json::from_value::<RoutedNodeResponse>(v) {
-                Ok(response) => C2ReplyEnvelope { request_id: envelope.request_id, result: Ok(response) },
+                Ok(response) => {
+                    mesh.set_cursor(
+                        &node_id,
+                        hatchery_core::NodeCursor {
+                            incarnation_id: response.incarnation_id,
+                            sequence: 0,
+                        },
+                    );
+                    C2ReplyEnvelope { request_id: envelope.request_id, result: Ok(response) }
+                }
                 Err(_) => C2ReplyEnvelope {
                     request_id: envelope.request_id,
                     result: Err(fail(C2RelayFailureCode::RequestForbidden, "node reply was not a g4a response")),

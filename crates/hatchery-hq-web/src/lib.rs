@@ -1,6 +1,6 @@
 //! Web HQ: a loopback server for the operator's browser. The browser talks only to this server;
 //! the C2 operator token and the server control token live in this process's environment and are
-//! never sent to the page. Requests are checked for a loopback Host and a same-origin Origin
+//! never sent to the page. Requests are checked for an allowed Host (loopback, plus optional public hosts) and a same-origin Origin
 //! (DNS-rebinding and cross-site protection).
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -46,6 +46,10 @@ pub struct Config {
     /// The operator's own m4a account, reached through a local m4a client daemon (which alone holds
     /// the keys). `None` disables the m4a chats.
     pub m4a: Option<M4a>,
+    /// Extra `Host` values the request guard accepts (in addition to loopback). Used when an
+    /// opaque L4 proxy forwards without rewriting Host — e.g. the operator WG VIP on the edge.
+    /// From `HATCHERY_HQ_PUBLIC_HOSTS=host:port,...`.
+    pub public_hosts: Vec<String>,
 }
 
 /// `label=target,label2=room:x` → pairs; blank or malformed items are skipped.
@@ -88,6 +92,12 @@ impl Config {
                 (Some(cli), Some(nick), Some(sock)) => Some(M4a { cli: cli.into(), nick, sock: sock.into(), groups: var("HATCHERY_HQ_M4A_GROUPS").unwrap_or_default().split(',').map(|g| g.trim().to_owned()).filter(|g| !g.is_empty()).collect() }),
                 _ => None,
             },
+            public_hosts: var("HATCHERY_HQ_PUBLIC_HOSTS")
+                .unwrap_or_default()
+                .split(',')
+                .map(|s| s.trim().to_owned())
+                .filter(|s| !s.is_empty() && s.len() <= 253)
+                .collect(),
         })
     }
 }
@@ -113,13 +123,29 @@ pub fn index_html(base: &str) -> String {
 pub struct AppState {
     pub config: Config,
     pub events: broadcast::Sender<String>,
+    /// One held, self-reconnecting operator control connection whose
+    /// background supervisor keeps `current_topology()` fresh. `/api/nodes`
+    /// reads this instead of dialing core operator control on every poll,
+    /// which is what caused a new operator connection every few seconds.
+    /// `None` until `spawn_topology_watcher` establishes it; callers fall
+    /// back to a one-shot dial while it is unset.
+    pub topology: std::sync::OnceLock<hatchery_c2_client::C2ReconnectingHandle>,
+    /// Node events (terminal frames, controller changes, ...) fanned out from
+    /// the single held operator control to every live terminal view. Core
+    /// admits only one operator connection at a time, so all views must share
+    /// this one stream rather than each dialing its own.
+    pub node_events: broadcast::Sender<std::sync::Arc<Value>>,
+    /// Dig2browser frames / lifecycle from the held operator control.
+    pub browser_events: broadcast::Sender<std::sync::Arc<hatchery_core::BrowserStreamEvent>>,
 }
 
 type Shared = Arc<AppState>;
 
 pub fn router(config: Config) -> (Router, Shared) {
     let (events, _) = broadcast::channel(256);
-    let state = Arc::new(AppState { config, events });
+    let (node_events, _) = broadcast::channel(1024);
+    let (browser_events, _) = broadcast::channel(256);
+    let state = Arc::new(AppState { config, events, topology: std::sync::OnceLock::new(), node_events, browser_events });
     let base = state.config.base_path.clone();
     let index: &'static str = Box::leak(index_html(&base).into_boxed_str());
     let mut app = Router::new()
@@ -127,6 +153,8 @@ pub fn router(config: Config) -> (Router, Shared) {
         .route(&format!("{base}/app.js"), get(|| async { asset("text/javascript; charset=utf-8", include_str!("../assets/app.js").as_bytes()) }))
         .route(&format!("{base}/style.css"), get(|| async { asset("text/css; charset=utf-8", include_str!("../assets/style.css").as_bytes()) }))
         .route(&format!("{base}/vendor/xterm.js"), get(|| async { asset("text/javascript; charset=utf-8", include_bytes!("../assets/vendor/xterm.js")) }))
+        .route(&format!("{base}/vendor/addon-fit.js"), get(|| async { asset("text/javascript; charset=utf-8", include_bytes!("../assets/vendor/addon-fit.js")) }))
+        .route(&format!("{base}/vendor/addon-web-links.js"), get(|| async { asset("text/javascript; charset=utf-8", include_bytes!("../assets/vendor/addon-web-links.js")) }))
         .route(&format!("{base}/vendor/xterm.css"), get(|| async { asset("text/css; charset=utf-8", include_bytes!("../assets/vendor/xterm.css")) }));
     if !base.is_empty() {
         let to: &'static str = Box::leak(format!("{base}/").into_boxed_str());
@@ -141,6 +169,7 @@ pub fn router(config: Config) -> (Router, Shared) {
         .route("/api/library/{name}", get(api_library_file))
         .route("/api/events", get(api_events))
         .route("/api/term", get(term_ws))
+        .route("/api/sessions", get(api_sessions))
         .route("/api/browser", get(browser_ws))
         .layer(middleware::from_fn_with_state(Arc::clone(&state), guard))
         .with_state(Arc::clone(&state));
@@ -151,14 +180,20 @@ fn asset(content_type: &'static str, body: &'static [u8]) -> Response {
     ([(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, "no-store")], body).into_response()
 }
 
-/// Loopback Host only; any Origin must be this very origin.
+/// Loopback Host (plus optional HATCHERY_HQ_PUBLIC_HOSTS); any Origin must be this very origin.
 async fn guard(State(state): State<Shared>, request: Request, next: Next) -> Response {
     let headers = request.headers();
     let port = state.config.listen.port();
+    let mut allowed = vec![
+        format!("127.0.0.1:{port}"),
+        format!("localhost:{port}"),
+        format!("[::1]:{port}"),
+    ];
+    allowed.extend(state.config.public_hosts.iter().cloned());
     let host_ok = headers
         .get(header::HOST)
         .and_then(|h| h.to_str().ok())
-        .is_some_and(|h| [format!("127.0.0.1:{port}"), format!("localhost:{port}"), format!("[::1]:{port}")].iter().any(|ok| ok == h));
+        .is_some_and(|h| allowed.iter().any(|ok| ok == h));
     if !host_ok {
         return (StatusCode::FORBIDDEN, "bad host").into_response();
     }
@@ -249,15 +284,57 @@ async fn api_server(State(s): State<Shared>, Path(rest): Path<String>, method: M
     }
 }
 
-/// Enrollment records merged with live transport state from C2 `/status`.
+/// Enrollment records merged with live transport: prefer core operator topology (A2 drain),
+/// fall back to C2 HTTP `/status` (call-home presence).
 async fn api_nodes(State(s): State<Shared>) -> Response {
     let cfg = &s.config;
     let enrolled = upstream(cfg.c2_api, "GET", "/v1/enroll/nodes", Some(&cfg.c2_token), b"", Duration::from_secs(10)).await.ok().filter(|r| r.0 == 200).and_then(|r| serde_json::from_slice::<Value>(&r.1).ok());
+    // Prefer the held, self-reconnecting operator control (no per-poll dial,
+    // so no ~4s operator-connection churn on core). Fall back to a one-shot
+    // dial only while the watcher has not established the held handle yet.
+    let core_topo = if let Some(handle) = s.topology.get() {
+        serde_json::to_value(handle.current_topology().as_ref()).ok()
+    } else {
+        match tokio::time::timeout(
+            Duration::from_secs(3),
+            async {
+                match cfg.c2_control.parse::<SocketAddr>() {
+                    Ok(addr) => hatchery_c2_client::connect_tunnel_tcp(addr, &cfg.c2_token).await,
+                    Err(_) => hatchery_c2_client::connect_local(&cfg.c2_control, &cfg.c2_token).await,
+                }
+            },
+        )
+        .await
+        {
+            Ok(Ok((control, _ev))) => {
+                let topo = control.current_topology();
+                serde_json::to_value(topo.as_ref()).ok()
+            }
+            _ => None,
+        }
+    };
     let status = match hatchery_c2_client::C2Client::new(cfg.c2_api, cfg.c2_token.clone()) {
         Ok(c) => c.status().await.ok().and_then(|st| serde_json::to_value(st).ok()),
         Err(_) => None,
     };
     let live = |id: &str| -> String {
+        if let Some(tr) = core_topo
+            .as_ref()
+            .and_then(|st| st["nodes"].as_array())
+            .and_then(|nodes| {
+                nodes.iter().find_map(|n| {
+                    let nid = n["node_id"].as_str().or_else(|| n.get("id").and_then(|x| x.as_str()))?;
+                    if nid == id {
+                        n["transport"].as_str().map(str::to_lowercase)
+                            .or_else(|| n["transport_state"].as_str().map(str::to_lowercase))
+                    } else {
+                        None
+                    }
+                })
+            })
+        {
+            return tr;
+        }
         status
             .as_ref()
             .and_then(|st| st["nodes"][id]["transport"].as_str())
@@ -269,9 +346,16 @@ async fn api_nodes(State(s): State<Shared>) -> Response {
     for n in enrolled.as_ref().and_then(|v| v["nodes"].as_array()).cloned().unwrap_or_default() {
         let id = n["node_id"].as_str().unwrap_or_default().to_owned();
         seen.insert(id.clone());
+        let machine = core_topo.as_ref().and_then(|st| {
+            st["nodes"].as_array()?.iter().find_map(|n| {
+                let nid = n["node_id"].as_str().or_else(|| n.get("id").and_then(|x| x.as_str()))?;
+                (nid == id).then(|| n.get("machine").cloned()).flatten()
+            })
+        });
         out.push(json!({
             "node_id": id, "kind": n["kind"], "status": n["status"], "tunnel_ip": n["tunnel_ip"],
             "grants": n["grants"], "online": live(&id) == "online", "transport": live(&id), "enrolled": true,
+            "machine": machine,
         }));
     }
     if let Some(nodes) = status.as_ref().and_then(|st| st["nodes"].as_object()) {
@@ -328,11 +412,72 @@ pub fn spawn_mail_watcher(state: Shared) {
     });
 }
 
+/// Establish one held, self-reconnecting operator control connection and
+/// keep it. Its background supervisor keeps the cached topology fresh and
+/// reconnects on its own, so `/api/nodes` can read `current_topology()`
+/// without dialing core operator control on every poll (that per-poll dial
+/// was the ~4s operator-connection churn). The event stream must be drained
+/// or the supervisor's topology updates would stall, so a task consumes and
+/// discards events here; HQ's live views use their own per-view streams.
+pub fn spawn_topology_watcher(state: Shared) {
+    tokio::spawn(async move {
+        loop {
+            // A host:port control endpoint is dialed over TCP with TCP_NODELAY.
+            // (The unix entry on edge is a socket-proxyd hop whose outbound TCP to
+            // core has Nagle on: back-to-back keystrokes waited for each other's ACK.)
+            let dialed = match state.config.c2_control.parse::<SocketAddr>() {
+                Ok(addr) => hatchery_c2_client::connect_tunnel_reconnecting(addr, state.config.c2_token.clone()).await,
+                Err(_) => hatchery_c2_client::connect_local_reconnecting(
+                    state.config.c2_control.clone(),
+                    state.config.c2_token.clone(),
+                ).await,
+            };
+            match dialed
+            {
+                Ok((handle, mut events)) => {
+                    let _ = state.topology.set(handle);
+                    tracing::info!("HQ topology watcher: held operator control established");
+                    let (regular, harness, browser) = events.split_all();
+                    loop {
+                        tokio::select! {
+                            biased;
+                            ev = harness.recv() => {
+                                let Some(ev) = ev else { break; };
+                                if let Ok(v) = serde_json::to_value(&ev) {
+                                    let _ = state.node_events.send(std::sync::Arc::new(v));
+                                }
+                            }
+                            ev = regular.recv() => {
+                                let Some(ev) = ev else { break; };
+                                if let Ok(v) = serde_json::to_value(&ev) {
+                                    let _ = state.node_events.send(std::sync::Arc::new(v));
+                                }
+                            }
+                            ev = browser.recv() => {
+                                let Some(ev) = ev else { break; };
+                                let _ = state.browser_events.send(std::sync::Arc::new(ev));
+                            }
+                        }
+                    }
+                    tracing::warn!("HQ topology watcher: event stream ended; supervisor retains the handle");
+                    std::future::pending::<()>().await;
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "HQ topology watcher: initial connect failed; retrying");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            }
+        }
+    });
+}
+
 // ---------------------------------------------------------------------------------- terminals
 
 #[derive(Deserialize)]
 struct TermQuery {
     node: String,
+    /// Provider id for a fresh Spawn. Ignored when `session` is set (attach).
+    #[serde(default)]
     provider: String,
     /// Event parser to use when it differs from the provider id (test fixtures).
     parser: Option<String>,
@@ -342,13 +487,24 @@ struct TermQuery {
     cols: u16,
     #[serde(default = "d_ws")]
     workspace: String,
-    /// Leave the session running when the page closes.
-    #[serde(default)]
+    /// Leave the session running when the websocket closes (default true so
+    /// many concurrent HQ views can come and go without killing CLIs).
+    #[serde(default = "d_keep")]
     keep: bool,
+    /// Attach to an existing session: JSON `SessionAddress`, or shorthand
+    /// `workspace/instance` / `instance` (workspace defaults to `primary`).
+    #[serde(default)]
+    session: Option<String>,
 }
 fn d_rows() -> u16 { 30 }
 fn d_cols() -> u16 { 110 }
 fn d_ws() -> String { "primary".into() }
+fn d_keep() -> bool { true }
+
+#[derive(Deserialize)]
+struct SessionsQuery {
+    node: String,
+}
 
 async fn term_ws(State(s): State<Shared>, Query(q): Query<TermQuery>, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |socket| async move {
@@ -375,108 +531,216 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     use gate4agent_node_protocol::{AgentId, NodeRequest, SessionMode, WorkspaceId};
     use gate4agent_types::TerminalSize;
     use hatchery_core::{C2NodeResponse, NodeId, NodeRoute, NodeTransportState};
-    let cfg = &s.config;
     let say = |kind: &str, text: String| json!({ "type": kind, "text": text }).to_string();
     let node = NodeId::new(q.node.clone()).map_err(|e| e.to_string())?;
-    let http = hatchery_c2_client::C2Client::new(cfg.c2_api, cfg.c2_token.clone()).map_err(|e| e.to_string())?;
-    let status = http.status().await.map_err(|e| e.to_string())?;
-    let observed = status.nodes.get(&node).filter(|n| n.transport == NodeTransportState::Online);
-    let Some(observed) = observed else {
-        let _ = socket.send(Message::text(say("error", format!("node {} is not online", q.node)))).await;
+    let Some(control) = s.topology.get().cloned() else {
+        let _ = socket.send(Message::text(say("error", "operator control not ready yet".to_owned()))).await;
+        return Err("operator control not ready".into());
+    };
+    let mut events = s.node_events.subscribe();
+    let topo = control.current_topology();
+    let observed = topo.nodes.iter().find(|n| n.node_id == node && n.transport == NodeTransportState::Online);
+    let Some(_observed) = observed else {
+        let _ = socket.send(Message::text(say("error", format!("node {} is not online on core operator", q.node)))).await;
         return Err("node not online".into());
     };
-    let route = NodeRoute { node_id: node.clone(), expected_incarnation_id: observed.cursor.clone().ok_or("no cursor")?.incarnation_id };
-    let (control, mut events) = hatchery_c2_client::connect_local(&cfg.c2_control, &cfg.c2_token).await.map_err(|e| e.to_string())?;
-    let spawned = control
-        .request(
-            route.clone(),
-            NodeRequest::Spawn {
-                workspace_id: WorkspaceId::new(q.workspace.clone()).map_err(|e| e.to_string())?,
-                provider: AgentId::new(q.provider.clone()).map_err(|e| e.to_string())?,
-                mode: SessionMode::Pty,
-                terminal_size: TerminalSize { rows: q.rows, columns: q.cols },
-                initial_prompt: None,
-            },
-        )
-        .await
-        .map_err(|e| e.to_string())?;
-    let session = match spawned.response {
-        Ok(C2NodeResponse::SpawnAccepted { session }) => session,
-        other => {
-            let _ = socket.send(Message::text(say("error", format!("spawn refused: {other:?}")))).await;
-            return Err("spawn refused".into());
-        }
+    use gate4agent_node_protocol::NodeIncarnationId;
+    let mut route = NodeRoute {
+        node_id: node.clone(),
+        expected_incarnation_id: NodeIncarnationId::from_bytes([0; 16]),
     };
-    let session_key = serde_json::to_value(&session).map(|v| v.to_string()).unwrap_or_default();
-    let session_key = session_key.trim_matches('"').to_owned();
-    tracing::info!(node = %q.node, provider = %q.provider, "terminal session spawned from web HQ");
-    let _ = socket.send(Message::text(json!({ "type": "spawned", "node": q.node, "provider": q.provider, "session": session_key }).to_string())).await;
-    let mut pending: Option<Value> = None;
-    let mut tick = tokio::time::interval(Duration::from_millis(40));
+    let workspace = if q.workspace.trim().is_empty() { "primary".to_owned() } else { q.workspace.clone() };
+    let size = TerminalSize { rows: q.rows, columns: q.cols };
+
+    let (session, provider_label, initial_frame) = if let Some(raw) = q.session.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        // Attach / reattach: the session keeps running on the node; just bind to its
+        // frames (no Resume, which would relaunch the CLI). Snapshot confirms it exists.
+        let session = parse_session_address(raw, &workspace)?;
+        let (provider, frame, gen) = snapshot_session_screen(&control, route.clone(), &session).await;
+        let Some(provider) = provider else {
+            let _ = socket.send(Message::text(say("error", format!("no live session {raw} on {}", q.node)))).await;
+            return Err("no such session".into());
+        };
+        let mut session = session;
+        if let Some(g) = gen { session.session.generation = g; }
+        let _ = control.request(route.clone(), NodeRequest::Resize { session: session.clone(), size }).await;
+        (session, provider, frame)
+    } else {
+        let provider = q.provider.trim();
+        if provider.is_empty() {
+            let _ = socket.send(Message::text(say("error", "provider is required to spawn".into()))).await;
+            return Err("provider required".into());
+        }
+        let spawned = control
+            .request(
+                route.clone(),
+                NodeRequest::Spawn {
+                    workspace_id: WorkspaceId::new(workspace.clone()).map_err(|e| e.to_string())?,
+                    provider: AgentId::new(provider.to_owned()).map_err(|e| e.to_string())?,
+                    mode: SessionMode::Pty,
+                    terminal_size: size,
+                    initial_prompt: None,
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        let session = match spawned.response {
+            Ok(C2NodeResponse::SpawnAccepted { session }) => {
+                route.expected_incarnation_id = spawned.incarnation_id;
+                session
+            }
+            other => {
+                let _ = socket.send(Message::text(say("error", format!("spawn refused: {other:?}")))).await;
+                return Err("spawn refused".into());
+            }
+        };
+        (session, provider.to_owned(), None)
+    };
+
+    let instance_id = session.session.instance_id.0;
+    let session_key = serde_json::to_string(&session).unwrap_or_default();
+    let label = format!("{}/{}#{}", q.node, if provider_label.is_empty() { "session" } else { &provider_label }, instance_id);
+    tracing::info!(node = %q.node, provider = %provider_label, %instance_id, attach = q.session.is_some(), "terminal session ready from web HQ");
+    let _ = socket
+        .send(Message::text(
+            json!({
+                "type": "spawned",
+                "node": q.node,
+                "provider": provider_label,
+                "session": session_key,
+                "instance_id": instance_id,
+                "generation": session.session.generation.0,
+                "workspace_id": session.workspace_id.as_str(),
+                "label": label,
+            })
+            .to_string(),
+        ))
+        .await;
+    if let Some(f) = initial_frame {
+        let bytes: Vec<u8> = f
+            .get("formatted")
+            .and_then(|a| a.as_array())
+            .map(|a| a.iter().map(|x| x.as_u64().unwrap_or(0) as u8).collect())
+            .unwrap_or_default();
+        let msg = json!({
+            "type": "frame",
+            "rows": f["size"]["rows"],
+            "cols": f["size"]["columns"],
+            "cursor": [f["cursor_row"], f.get("cursor_column").or_else(|| f.get("cursor_col"))],
+            "ansi": B64.encode(&bytes),
+            "text": f["contents"],
+        });
+        let _ = socket.send(Message::text(msg.to_string())).await;
+    }
+
+    // PTY latency: frames go out the moment they arrive (no 40ms coalescing tick),
+    // and input is enqueued toward core in order without waiting for each reply
+    // (the old per-chunk `request().await` held frames and later keys for a full RTT).
     let mut settle = tokio::time::interval(Duration::from_millis(250));
-    // The browser reads only this typed event layer; it never parses terminal text itself.
-    let mut events_layer = hatchery_session_events::EventStream::new(q.parser.as_deref().unwrap_or(&q.provider));
+    let parser = q.parser.as_deref().unwrap_or(if provider_label.is_empty() { "shell" } else { &provider_label });
+    let mut events_layer = hatchery_session_events::EventStream::new(parser);
     events_layer.set_size(q.rows, q.cols);
     let started = std::time::Instant::now();
     let now_ms = move || started.elapsed().as_millis() as u64;
+    let id_token = format!("\"instance_id\":{instance_id}");
+    let mut last_size: Option<(u16, u16)> = None;
+    // (client seq, ws receipt, handed to the C2 link) of the oldest input still awaiting its echo frame.
+    let mut awaiting: Option<(Value, std::time::Instant, std::time::Instant)> = None;
+    let (ack_tx, mut ack_rx) = tokio::sync::mpsc::unbounded_channel::<(Value, Value, bool, String, u64)>();
     loop {
         tokio::select! {
+            ack = ack_rx.recv() => {
+                let Some((op, seq, ok, detail, ack_ms)) = ack else { continue };
+                if !ok { tracing::info!(op = %op, ok, detail = %detail.chars().take(160).collect::<String>(), "terminal command from web HQ"); }
+                let _ = socket.send(Message::text(json!({ "type": "ack", "op": op, "ok": ok, "seq": seq, "ack_ms": ack_ms, "detail": detail }).to_string())).await;
+            }
             event = events.recv() => {
-                let Some(event) = event else { break };
-                let Ok(value) = serde_json::to_value(&event) else { continue };
+                let value = match event {
+                    Ok(v) => v,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                };
+                let blob = value.to_string();
+                if !blob.contains(&id_token) { continue; }
                 let mut frames = Vec::new();
                 collect_frames(&value, &mut frames);
-                if !frames.is_empty() && (session_key.is_empty() || value.to_string().contains(&session_key)) {
-                    pending = frames.pop();
+                let Some(f) = frames.pop() else { continue };
+                // The latency stamp rides inside the frame: a separate small message
+                // ahead of it made the frame wait behind it (Nagle on the client leg).
+                let plat = awaiting.take().map(|(seq, recv_at, fwd_at)| json!({
+                    "seq": seq,
+                    "hq_queue_us": fwd_at.duration_since(recv_at).as_micros() as u64,
+                    "hq_to_frame_ms": recv_at.elapsed().as_millis() as u64,
+                }));
+                let bytes: Vec<u8> = f["formatted"].as_array().map(|a| a.iter().map(|x| x.as_u64().unwrap_or(0) as u8).collect()).unwrap_or_default();
+                let msg = json!({
+                    "type": "frame", "rows": f["size"]["rows"], "cols": f["size"]["columns"],
+                    "cursor": [f["cursor_row"], f["cursor_col"]], "ansi": B64.encode(&bytes),
+                    "text": f["contents"], "plat": plat,
+                });
+                if socket.send(Message::text(msg.to_string())).await.is_err() { break; }
+                if let Some(text) = f["contents"].as_str() {
+                    let evs = events_layer.observe_screen(text, now_ms());
+                    if !evs.is_empty() && socket.send(Message::text(json!({ "type": "events", "events": evs }).to_string())).await.is_err() { break; }
                 }
             }
             _ = settle.tick() => {
                 let evs = events_layer.tick(now_ms());
                 if !evs.is_empty() && socket.send(Message::text(json!({ "type": "events", "events": evs }).to_string())).await.is_err() { break; }
             }
-            _ = tick.tick() => {
-                if let Some(f) = pending.take() {
-                    if let Some(text) = f["contents"].as_str() {
-                        let evs = events_layer.observe_screen(text, now_ms());
-                        if !evs.is_empty() && socket.send(Message::text(json!({ "type": "events", "events": evs }).to_string())).await.is_err() { break; }
-                    }
-                    let bytes: Vec<u8> = f["formatted"].as_array().map(|a| a.iter().map(|x| x.as_u64().unwrap_or(0) as u8).collect()).unwrap_or_default();
-                    let msg = json!({
-                        "type": "frame", "rows": f["size"]["rows"], "cols": f["size"]["columns"],
-                        "cursor": [f["cursor_row"], f["cursor_col"]], "ansi": B64.encode(&bytes),
-                        "text": f["contents"],
-                    });
-                    if socket.send(Message::text(msg.to_string())).await.is_err() { break; }
-                }
-            }
             incoming = socket.recv() => {
+                let recv_at = std::time::Instant::now();
                 let Some(Ok(Message::Text(text))) = incoming else { if matches!(incoming, Some(Ok(Message::Close(_))) | None | Some(Err(_))) { break } else { continue } };
                 let Ok(cmd) = serde_json::from_str::<Value>(&text) else { continue };
-                // The node accepts at most 64 terminal bytes per request: split longer input.
                 let chunks = |bytes: Vec<u8>| -> Vec<NodeRequest> { bytes.chunks(64).map(|c| NodeRequest::TerminalBytes { session: session.clone(), bytes: c.to_vec() }).collect() };
-                let mut requests: Vec<NodeRequest> = match cmd["t"].as_str() {
+                let is_input = matches!(cmd["t"].as_str(), Some("data") | Some("prompt"));
+                let requests: Vec<NodeRequest> = match cmd["t"].as_str() {
                     Some("data") => cmd["data"].as_str().map(|d| chunks(d.as_bytes().to_vec())).unwrap_or_default(),
                     Some("prompt") => cmd["text"].as_str().map(|d| chunks(format!("{d}\r").into_bytes())).unwrap_or_default(),
-                    Some("resize") => vec![NodeRequest::Resize { session: session.clone(), size: TerminalSize { rows: cmd["rows"].as_u64().unwrap_or(30) as u16, columns: cmd["cols"].as_u64().unwrap_or(110) as u16 } }],
+                    Some("resize") => {
+                        // Clamp and dedupe: a fit oscillation in the client used to flood the
+                        // single operator control with Resize requests until it dropped.
+                        let rows = cmd["rows"].as_u64().unwrap_or(30).clamp(5, 300) as u16;
+                        let cols = cmd["cols"].as_u64().unwrap_or(110).clamp(20, 500) as u16;
+                        if last_size == Some((rows, cols)) { Vec::new() } else {
+                            last_size = Some((rows, cols));
+                            vec![NodeRequest::Resize { session: session.clone(), size: TerminalSize { rows, columns: cols } }]
+                        }
+                    }
                     Some("stop") => vec![NodeRequest::Stop { session: session.clone(), force: true }],
                     _ => Vec::new(),
                 };
-                if !requests.is_empty() {
-                    let mut last = None;
-                    let stopping = matches!(requests[0], NodeRequest::Stop { .. });
-                    for request in requests.drain(..) {
-                        let r = control.request(route.clone(), request).await;
-                        let failed = r.as_ref().map(|x| x.response.is_err()).unwrap_or(true);
-                        last = Some(r);
-                        if failed { break; }
-                    }
-                    let result = last.expect("at least one request");
-
-                    let ok = result.as_ref().map(|r| r.response.is_ok()).unwrap_or(false);
-                    tracing::info!(op = %cmd["t"], ok, detail = %match &result { Ok(r) => format!("{:?}", r.response).chars().take(160).collect::<String>(), Err(e) => e.to_string() }, "terminal command from web HQ");
-                    let _ = socket.send(Message::text(json!({ "type": "ack", "op": cmd["t"], "ok": ok, "detail": if ok { String::new() } else { match &result { Ok(r) => format!("{:?}", r.response), Err(e) => e.to_string() } } }).to_string())).await;
-                    if stopping { break; }
+                if requests.is_empty() { continue; }
+                if matches!(requests[0], NodeRequest::Stop { .. }) {
+                    let r = control.request(route.clone(), requests[0].clone()).await;
+                    let ok = r.as_ref().map(|r| r.response.is_ok()).unwrap_or(false);
+                    let _ = socket.send(Message::text(json!({ "type": "ack", "op": "stop", "ok": ok, "detail": "" }).to_string())).await;
+                    break;
                 }
+                // Enqueue every chunk now, in order; replies are collected off-loop.
+                let mut waits = Vec::with_capacity(requests.len());
+                let mut enqueue_err = None;
+                for request in requests {
+                    match control.start_request(route.clone(), request) {
+                        Ok(w) => waits.push(w),
+                        Err(e) => { enqueue_err = Some(e.to_string()); break; }
+                    }
+                }
+                let fwd_at = std::time::Instant::now();
+                if is_input && awaiting.is_none() { awaiting = Some((cmd["seq"].clone(), recv_at, fwd_at)); }
+                let (op, seq, tx) = (cmd["t"].clone(), cmd["seq"].clone(), ack_tx.clone());
+                tokio::spawn(async move {
+                    let mut ok = enqueue_err.is_none();
+                    let mut detail = enqueue_err.unwrap_or_default();
+                    for w in waits {
+                        match w.finish().await {
+                            Ok(r) if r.response.is_ok() => {}
+                            Ok(r) => { ok = false; detail = format!("{:?}", r.response); }
+                            Err(e) => { ok = false; detail = e.to_string(); }
+                        }
+                    }
+                    let _ = tx.send((op, seq, ok, detail, fwd_at.elapsed().as_millis() as u64));
+                });
             }
         }
     }
@@ -486,68 +750,336 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     Ok(())
 }
 
-// ---------------------------------------------------------------------------------- browser frames
+fn parse_session_address(raw: &str, default_workspace: &str) -> Result<gate4agent_node_protocol::SessionAddress, String> {
+    use gate4agent_node_protocol::{SessionAddress, SessionKey, WorkspaceId};
+    use gate4agent_types::{AgentInstanceId, SessionGeneration};
+    if let Ok(addr) = serde_json::from_str::<SessionAddress>(raw) {
+        return Ok(addr);
+    }
+    // Shorthand: "primary/6", "6", "claude#6" (provider ignored), "hatchery-box/claude#6"
+    let s = raw.trim().trim_start_matches('#');
+    let (workspace, instance_s) = if let Some((a, b)) = s.rsplit_once('#') {
+        let inst = b.trim();
+        let ws = if a.contains('/') {
+            a.rsplit_once('/').map(|(_, w)| w).unwrap_or("primary")
+        } else if a.chars().all(|c| c.is_ascii_digit()) {
+            "primary"
+        } else {
+            // "claude#6" or "node/claude" — workspace stays default
+            default_workspace
+        };
+        // If form is "primary/6" without hash:
+        let _ = a;
+        (ws, inst)
+    } else if let Some((ws, inst)) = s.rsplit_once('/') {
+        // "primary/6" or "hatchery-box/6"
+        if inst.chars().all(|c| c.is_ascii_digit()) {
+            (if ws.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') && !ws.chars().all(|c| c.is_ascii_digit()) {
+                // could be node id — use default workspace when left side looks like a node
+                if ws.contains('-') || ws.len() > 12 { default_workspace } else { ws }
+            } else { ws }, inst)
+        } else {
+            return Err(format!("cannot parse session id {raw:?}"));
+        }
+    } else {
+        (default_workspace, s)
+    };
+    let instance_id: u64 = instance_s.parse().map_err(|_| format!("bad instance id in {raw:?}"))?;
+    Ok(SessionAddress {
+        workspace_id: WorkspaceId::new(workspace).map_err(|e| e.to_string())?,
+        session: SessionKey {
+            instance_id: AgentInstanceId(instance_id),
+            generation: SessionGeneration(1),
+        },
+    })
+}
+
+async fn snapshot_session_screen(
+    control: &hatchery_c2_client::C2ReconnectingHandle,
+    route: hatchery_core::NodeRoute,
+    want: &gate4agent_node_protocol::SessionAddress,
+) -> (Option<String>, Option<Value>, Option<gate4agent_types::SessionGeneration>) {
+    use gate4agent_node_protocol::NodeRequest;
+    use hatchery_core::C2NodeResponse;
+    let Ok(routed) = control.request(route, NodeRequest::Snapshot).await else {
+        return (None, None, None);
+    };
+    let Ok(C2NodeResponse::Snapshot { snapshot, .. }) = routed.response else {
+        return (None, None, None);
+    };
+    for ws in &snapshot.workspaces {
+        if ws.workspace_id.as_str() != want.workspace_id.as_str() {
+            continue;
+        }
+        for sess in &ws.sessions {
+            if sess.instance_id == want.session.instance_id {
+                let st = format!("{:?}", sess.status).to_lowercase();
+                if !(st.contains("running") || st.contains("starting") || st.contains("registered")) {
+                    return (None, None, None);
+                }
+                let provider = Some(sess.agent_id.as_str().to_owned());
+                let frame = sess
+                    .terminal_frame
+                    .as_ref()
+                    .and_then(|f| serde_json::to_value(f).ok());
+                return (provider, frame, Some(sess.generation));
+            }
+        }
+    }
+    (None, None, None)
+}
+
+async fn api_sessions(State(s): State<Shared>, Query(q): Query<SessionsQuery>) -> Response {
+    use gate4agent_node_protocol::{NodeIncarnationId, NodeRequest};
+    use hatchery_core::{C2NodeResponse, NodeId, NodeRoute, NodeTransportState};
+    let Ok(node) = NodeId::new(q.node.clone()) else {
+        return err(StatusCode::BAD_REQUEST, "bad node id");
+    };
+    let Some(control) = s.topology.get().cloned() else {
+        return err(StatusCode::SERVICE_UNAVAILABLE, "operator control not ready");
+    };
+    let topo = control.current_topology();
+    if !topo.nodes.iter().any(|n| n.node_id == node && n.transport == NodeTransportState::Online) {
+        return err(StatusCode::BAD_REQUEST, "node not online");
+    }
+    let route = NodeRoute {
+        node_id: node.clone(),
+        expected_incarnation_id: NodeIncarnationId::from_bytes([0; 16]),
+    };
+    let routed = match control.request(route, NodeRequest::Snapshot).await {
+        Ok(r) => r,
+        Err(e) => return err(StatusCode::BAD_GATEWAY, &e.to_string()),
+    };
+    let Ok(C2NodeResponse::Snapshot { snapshot, .. }) = routed.response else {
+        return err(StatusCode::BAD_GATEWAY, "snapshot refused");
+    };
+    let mut sessions = Vec::new();
+    for ws in &snapshot.workspaces {
+        for sess in &ws.sessions {
+            let status = format!("{:?}", sess.status).to_lowercase();
+            let live = matches!(
+                status.as_str(),
+                s if s.contains("running") || s.contains("starting") || s.contains("registered")
+            );
+            let instance_id = sess.instance_id.0;
+            let provider = sess.agent_id.as_str().to_owned();
+            let key = json!({
+                "workspace_id": ws.workspace_id.as_str(),
+                "session": { "instance_id": instance_id, "generation": sess.generation.0 },
+            });
+            sessions.push(json!({
+                "node": q.node,
+                "workspace_id": ws.workspace_id.as_str(),
+                "instance_id": instance_id,
+                "generation": sess.generation.0,
+                "provider": provider,
+                "status": status,
+                "live": live,
+                "label": format!("{}/{}#{}", q.node, sess.agent_id.as_str(), instance_id),
+                "session": key,
+                "has_frame": sess.terminal_frame.is_some(),
+            }));
+        }
+    }
+    json_reply(200, serde_json::to_vec(&json!({ "node": q.node, "sessions": sessions })).unwrap_or_default())
+}
+
+// ---------------------------------------------------------------------------------- browser frames (A2 restream dig2browser)
 
 #[derive(Deserialize)]
 struct BrowserQuery {
-    session: String,
+    node: String,
+    #[serde(default)]
+    session: Option<String>,
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    keep: bool,
 }
 
 async fn browser_ws(State(s): State<Shared>, Query(q): Query<BrowserQuery>, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |socket| async move {
-        if let Err(e) = browser_session(socket, s, q.session).await {
+        if let Err(e) = browser_session(socket, s, q).await {
             tracing::warn!(error = %e, "browser stream ended with error");
         }
     })
 }
 
-async fn browser_session(mut socket: WebSocket, s: Shared, session: String) -> Result<(), String> {
-    use hatchery_bidi_client as bidi;
-    use tokio_tungstenite::tungstenite::Message as Tm;
-    if !session.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.')) {
-        return Err("bad session id".into());
+async fn browser_session(mut socket: WebSocket, s: Shared, q: BrowserQuery) -> Result<(), String> {
+    use hatchery_core::{
+        encode_browser_click, encode_browser_key, encode_browser_navigate, encode_browser_scroll,
+        encode_browser_text, validate_browser_session_id, BrowserClientCommand, BrowserClientOp,
+        BrowserMouseButton, BrowserStreamEvent,
+    };
+    let node = q.node.trim().to_owned();
+    if node.is_empty() {
+        return Err("node is required".into());
     }
-    let endpoints = bidi::c2_endpoints(&format!("http://{}", s.config.bidi.unwrap_or(s.config.c2_api)), &session).map_err(|e| e.to_string())?;
-    bidi::open_session(&endpoints.post_url).await.map_err(|e| e.to_string())?;
-    let upstream_ws = bidi::connect_ws(&endpoints.ws_url).await.map_err(|e| e.to_string())?;
-    let (mut up_tx, mut up_rx) = upstream_ws.split();
+    let session = q
+        .session
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("br-{}", now_ms()));
+    validate_browser_session_id(&session)?;
+    let url = q.url.filter(|u| !u.trim().is_empty()).unwrap_or_else(|| "about:blank".into());
+
+    let control = s.topology.get().cloned().ok_or_else(|| "operator control not ready".to_string())?;
+    let mut browser_rx = s.browser_events.subscribe();
+
+    control
+        .browser_command(BrowserClientCommand {
+            node_id: node.clone(),
+            op: BrowserClientOp::Start {
+                session: session.clone(),
+                url: url.clone(),
+                profile_dir: None,
+            },
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    tracing::info!(%node, %session, %url, "browser session start requested from web HQ");
+    let _ = socket
+        .send(Message::text(
+            json!({ "type": "spawned", "node": node, "session": session, "url": url }).to_string(),
+        ))
+        .await;
+
+    let send_input = |control: &hatchery_c2_client::C2ReconnectingHandle, session: &str, node: &str, bytes: Vec<u8>| {
+        let cmd = BrowserClientCommand {
+            node_id: node.to_owned(),
+            op: BrowserClientOp::Input {
+                session: session.to_owned(),
+                bytes,
+            },
+        };
+        let control = control.clone();
+        async move { control.browser_command(cmd).await.map_err(|e| e.to_string()) }
+    };
+
+    // Ordered input worker: one queue per browser socket, sent immediately (no batching);
+    // it reports when each input was written toward core so we can time the round trip.
+    let (in_tx, mut in_rx) = tokio::sync::mpsc::unbounded_channel::<(Vec<u8>, String, Option<u64>, std::time::Instant)>();
+    let (sent_tx, mut sent_rx) = tokio::sync::mpsc::unbounded_channel::<(Option<u64>, std::time::Instant, std::time::Instant)>();
+    {
+        let (control_i, session_i, node_i) = (control.clone(), session.clone(), node.clone());
+        tokio::spawn(async move {
+            while let Some((bytes, op, seq, recv_at)) = in_rx.recv().await {
+                match send_input(&control_i, &session_i, &node_i, bytes).await {
+                    Ok(()) => { let _ = sent_tx.send((seq, recv_at, std::time::Instant::now())); }
+                    Err(e) => tracing::warn!(op = %op, error = %e, "browser input RPC failed"),
+                }
+            }
+        });
+    }
+    // Last input awaiting its first reflecting frame: (client seq, ws receipt, written to core).
+    let mut last_input: Option<(Option<u64>, std::time::Instant, std::time::Instant)> = None;
+    let mut last_trace_n: u64 = 0;
+
     loop {
         tokio::select! {
-            frame = up_rx.next() => match frame {
-                Some(Ok(Tm::Binary(b))) => {
-                    use sha2::{Digest, Sha256};
-                    let sha: String = Sha256::digest(&b).iter().take(8).map(|x| format!("{x:02x}")).collect();
-                    let _ = socket.send(Message::text(json!({ "type": "frame_info", "bytes": b.len(), "sha256_8": sha }).to_string())).await;
-                    if socket.send(Message::binary(b.to_vec())).await.is_err() { break; }
+            sent = sent_rx.recv() => {
+                if let Some(s) = sent { last_input = Some(s); }
+            }
+            ev = browser_rx.recv() => {
+                let ev = match ev {
+                    Ok(v) => v,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                };
+                match ev.as_ref() {
+                    BrowserStreamEvent::Frame { node_id, session: sess, bytes, width, height, url, title, trace, region }
+                        if node_id == &node && sess == &session => {
+                        if let (Some(tr), Some((seq, recv_at, sent_at))) = (trace, last_input) {
+                            if tr.input_n > last_trace_n {
+                                last_trace_n = tr.input_n;
+                                last_input = None;
+                                let hq_rtt = sent_at.elapsed().as_millis() as u64;
+                                let lat = json!({
+                                    "type": "lat", "seq": seq,
+                                    "hq_proc_ms": sent_at.duration_since(recv_at).as_millis() as u64,
+                                    "hq_rtt_ms": hq_rtt,
+                                    "net_ms": hq_rtt.saturating_sub(tr.node_ms as u64),
+                                    "node": tr,
+                                });
+                                let _ = socket.send(Message::text(lat.to_string())).await;
+                            }
+                        }
+                        let _ = socket.send(Message::text(json!({
+                            "type": "frame_info", "bytes": bytes.len(), "w": width, "h": height, "url": url, "title": title, "region": region
+                        }).to_string())).await;
+                        if socket.send(Message::binary(bytes.clone())).await.is_err() { break; }
+                    }
+                    BrowserStreamEvent::Started { node_id, session: sess, url }
+                        if node_id == &node && sess == &session => {
+                        let _ = socket.send(Message::text(json!({ "type": "started", "url": url }).to_string())).await;
+                    }
+                    BrowserStreamEvent::Error { node_id, session: sess, message }
+                        if node_id == &node && sess == &session => {
+                        let _ = socket.send(Message::text(json!({ "type": "error", "text": message }).to_string())).await;
+                    }
+                    BrowserStreamEvent::Stopped { node_id, session: sess, reason }
+                        if node_id == &node && sess == &session => {
+                        let _ = socket.send(Message::text(json!({ "type": "stopped", "reason": reason }).to_string())).await;
+                        break;
+                    }
+                    _ => {}
                 }
-                Some(Ok(Tm::Ping(p))) => { let _ = up_tx.send(Tm::Pong(p)).await; }
-                Some(Ok(Tm::Close(_))) | None | Some(Err(_)) => break,
-                _ => {}
-            },
+            }
             incoming = socket.recv() => {
-                let Some(Ok(Message::Text(text))) = incoming else { if matches!(incoming, Some(Ok(Message::Close(_))) | None | Some(Err(_))) { break } else { continue } };
+                let Some(Ok(Message::Text(text))) = incoming else {
+                    if matches!(incoming, Some(Ok(Message::Close(_))) | None | Some(Err(_))) { break } else { continue }
+                };
                 let Ok(cmd) = serde_json::from_str::<Value>(&text) else { continue };
                 let f = |k: &str| cmd[k].as_f64().unwrap_or(0.0);
                 let wire = match cmd["t"].as_str() {
-                    Some("click") => Ok(bidi::encode_click(f("x"), f("y"), match cmd["button"].as_str() { Some("right") => bidi::MouseButton::Right, Some("middle") => bidi::MouseButton::Middle, _ => bidi::MouseButton::Left })),
-                    Some("scroll") => Ok(bidi::encode_scroll(f("x"), f("y"), f("dx"), f("dy"))),
-                    Some("key") => bidi::encode_key(cmd["key"].as_str().unwrap_or_default()),
-                    Some("text") => bidi::encode_text(cmd["text"].as_str().unwrap_or_default()),
-                    Some("nav") => bidi::encode_navigate(cmd["url"].as_str().unwrap_or_default()),
+                    Some("click") => Ok(encode_browser_click(f("x"), f("y"), match cmd["button"].as_str() {
+                        Some("right") => BrowserMouseButton::Right,
+                        Some("middle") => BrowserMouseButton::Middle,
+                        _ => BrowserMouseButton::Left,
+                    })),
+                    Some("scroll") => Ok(encode_browser_scroll(f("x"), f("y"), f("dx"), f("dy"))),
+                    Some("key") => encode_browser_key(cmd["key"].as_str().unwrap_or_default()),
+                    Some("text") => encode_browser_text(cmd["text"].as_str().unwrap_or_default()),
+                    Some("nav") => encode_browser_navigate(cmd["url"].as_str().unwrap_or_default()),
+                    Some("stop") => {
+                        let _ = control.browser_command(BrowserClientCommand {
+                            node_id: node.clone(),
+                            op: BrowserClientOp::Stop { session: session.clone() },
+                        }).await;
+                        break;
+                    }
                     _ => continue,
                 };
                 match wire {
                     Ok(bytes) => {
-                        tracing::info!(op = %cmd["t"], bytes = bytes.len(), x = f("x"), y = f("y"), "browser input from web HQ");
-                        let _ = socket.send(Message::text(json!({ "type": "sent", "op": cmd["t"], "x": cmd["x"], "y": cmd["y"], "bytes": bytes.len() }).to_string())).await;
-                        if up_tx.send(Tm::binary(bytes)).await.is_err() { break; }
+                        tracing::info!(op = %cmd["t"], bytes = bytes.len(), "browser input from web HQ");
+                        let op = cmd["t"].as_str().unwrap_or("input").to_owned();
+                        let n = bytes.len();
+                        let _ = in_tx.send((bytes, op.clone(), cmd["seq"].as_u64(), std::time::Instant::now()));
+                        let _ = socket.send(Message::text(json!({ "type": "sent", "op": op, "bytes": n }).to_string())).await;
                     }
-                    Err(e) => { let _ = socket.send(Message::text(json!({ "type": "error", "text": e.to_string() }).to_string())).await; }
+                    Err(e) => {
+                        let _ = socket.send(Message::text(json!({ "type": "error", "text": e }).to_string())).await;
+                    }
                 }
             }
         }
     }
+    if !q.keep {
+        let _ = control
+            .browser_command(BrowserClientCommand {
+                node_id: node,
+                op: BrowserClientOp::Stop { session },
+            })
+            .await;
+    }
     Ok(())
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
 }
 
 

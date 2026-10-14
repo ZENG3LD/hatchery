@@ -91,9 +91,17 @@ impl RestreamRig {
         tokio::time::sleep(Duration::from_millis(40)).await;
 
         let mesh = NodeOperatorMesh::new();
-        let (events_tx, _events_rx) = mpsc::unbounded_channel();
+        let (events_tx, mut events_rx) = mpsc::unbounded_channel();
         let (link, outbound) = OperatorLink::new(Some(events_tx));
         mesh.register(cfg.node_id.as_str(), link.clone());
+        let mesh_ev = mesh.clone();
+        tokio::spawn(async move {
+            while let Some(msg) = events_rx.recv().await {
+                if let G4aMessage::Event(ev) = msg {
+                    mesh_ev.publish_event(ev);
+                }
+            }
+        });
 
         let (drain_stop, drain_rx) = watch::channel(false);
         let consumer = DrainConsumer::new(
@@ -132,6 +140,8 @@ impl RestreamRig {
                 local_token,
                 node_listen,
                 upstream,
+                None,
+                None,
                 None,
                 bridge_rx,
             )

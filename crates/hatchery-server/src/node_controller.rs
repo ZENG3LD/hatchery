@@ -5,8 +5,8 @@
 //! decodes g4a frames (`RoutedNodeEvent` / `RoutedNodeResponse` / `C2ServerFrame`).
 
 use hatchery_core::{
-    ChannelKind, DrainEnvelope, RoutedNodeEvent, RoutedNodeRequest, RoutedNodeResponse,
-    C2ServerFrame,
+    BrowserClientOp, BrowserOpReply, BrowserStreamEvent, ChannelKind, DrainEnvelope,
+    RoutedNodeEvent, RoutedNodeRequest, RoutedNodeResponse, C2ServerFrame,
 };
 use serde_json::Value;
 
@@ -118,8 +118,10 @@ impl DrainWorker {
 pub struct OperatorLink {
     tx: tokio::sync::mpsc::Sender<Vec<u8>>,
     pending: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<u64, tokio::sync::oneshot::Sender<G4aMessage>>>>,
+    browser_pending: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<u64, tokio::sync::oneshot::Sender<BrowserOpReply>>>>,
     next: std::sync::Arc<std::sync::atomic::AtomicU64>,
     events: Option<tokio::sync::mpsc::UnboundedSender<G4aMessage>>,
+    browser_events: Option<tokio::sync::mpsc::UnboundedSender<BrowserStreamEvent>>,
 }
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -135,8 +137,107 @@ pub enum OperatorError {
 impl OperatorLink {
     /// Returns the link and the outbound queue to hand to `DrainConsumer::with_outbound`.
     pub fn new(events: Option<tokio::sync::mpsc::UnboundedSender<G4aMessage>>) -> (Self, tokio::sync::mpsc::Receiver<Vec<u8>>) {
+        Self::new_with_browser(events, None)
+    }
+
+    pub fn new_with_browser(
+        events: Option<tokio::sync::mpsc::UnboundedSender<G4aMessage>>,
+        browser_events: Option<tokio::sync::mpsc::UnboundedSender<BrowserStreamEvent>>,
+    ) -> (Self, tokio::sync::mpsc::Receiver<Vec<u8>>) {
         let (tx, rx) = tokio::sync::mpsc::channel(64);
-        (Self { tx, pending: Default::default(), next: std::sync::Arc::new(1.into()), events }, rx)
+        (
+            Self {
+                tx,
+                pending: Default::default(),
+                browser_pending: Default::default(),
+                next: std::sync::Arc::new(1.into()),
+                events,
+                browser_events,
+            },
+            rx,
+        )
+    }
+
+    /// Send a browser sidecar op and wait for the node's BrowserOpReply.
+    pub async fn browser_op(
+        &self,
+        op: &BrowserClientOp,
+        timeout: std::time::Duration,
+    ) -> Result<BrowserOpReply, OperatorError> {
+        let op_id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let bytes = serde_json::to_vec(&serde_json::json!({ "op_id": op_id, "browser": op }))
+            .map_err(|_| OperatorError::Encode)?;
+        let (done, wait) = tokio::sync::oneshot::channel();
+        self.browser_pending.lock().expect("pending").insert(op_id, done);
+        if self.tx.send(bytes).await.is_err() {
+            self.browser_pending.lock().expect("pending").remove(&op_id);
+            return Err(OperatorError::Closed);
+        }
+        match tokio::time::timeout(timeout, wait).await {
+            Ok(Ok(msg)) => Ok(msg),
+            Ok(Err(_)) => Err(OperatorError::Closed),
+            Err(_) => {
+                self.browser_pending.lock().expect("pending").remove(&op_id);
+                Err(OperatorError::Timeout)
+            }
+        }
+    }
+
+    /// Enqueue one g4a request toward the node now (preserving send order) and
+    /// return a future that waits for its reply, so callers can pipeline.
+    pub async fn request_pipelined<T: serde::Serialize>(
+        &self,
+        frame: &T,
+        timeout: std::time::Duration,
+    ) -> Result<impl std::future::Future<Output = Result<G4aMessage, OperatorError>> + Send + 'static, OperatorError> {
+        let op_id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let g4a = serde_json::to_value(frame).map_err(|_| OperatorError::Encode)?;
+        let bytes = serde_json::to_vec(&serde_json::json!({ "op_id": op_id, "g4a": g4a })).map_err(|_| OperatorError::Encode)?;
+        let (done, wait) = tokio::sync::oneshot::channel();
+        self.pending.lock().expect("pending").insert(op_id, done);
+        if self.tx.send(bytes).await.is_err() {
+            self.pending.lock().expect("pending").remove(&op_id);
+            return Err(OperatorError::Closed);
+        }
+        let pending = self.pending.clone();
+        Ok(async move {
+            match tokio::time::timeout(timeout, wait).await {
+                Ok(Ok(msg)) => Ok(msg),
+                Ok(Err(_)) => Err(OperatorError::Closed),
+                Err(_) => {
+                    pending.lock().expect("pending").remove(&op_id);
+                    Err(OperatorError::Timeout)
+                }
+            }
+        })
+    }
+
+    /// Enqueue a browser op now (ordered) and return a future for its reply.
+    pub async fn browser_op_pipelined(
+        &self,
+        op: &BrowserClientOp,
+        timeout: std::time::Duration,
+    ) -> Result<impl std::future::Future<Output = Result<BrowserOpReply, OperatorError>> + Send + 'static, OperatorError> {
+        let op_id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let bytes = serde_json::to_vec(&serde_json::json!({ "op_id": op_id, "browser": op }))
+            .map_err(|_| OperatorError::Encode)?;
+        let (done, wait) = tokio::sync::oneshot::channel();
+        self.browser_pending.lock().expect("pending").insert(op_id, done);
+        if self.tx.send(bytes).await.is_err() {
+            self.browser_pending.lock().expect("pending").remove(&op_id);
+            return Err(OperatorError::Closed);
+        }
+        let pending = self.browser_pending.clone();
+        Ok(async move {
+            match tokio::time::timeout(timeout, wait).await {
+                Ok(Ok(msg)) => Ok(msg),
+                Ok(Err(_)) => Err(OperatorError::Closed),
+                Err(_) => {
+                    pending.lock().expect("pending").remove(&op_id);
+                    Err(OperatorError::Timeout)
+                }
+            }
+        })
     }
 
     /// Send one g4a request (e.g. a `RoutedNodeRequest`) and wait for its reply.
@@ -167,6 +268,21 @@ impl OperatorLink {
                 return None;
             }
             let Ok(v) = serde_json::from_slice::<Value>(plain) else { return None };
+            // Browser sidecar (same Noise channel, not g4a).
+            if let Some(browser) = v.get("browser") {
+                if let Some(id) = v.get("op_id").and_then(Value::as_u64) {
+                    if let Ok(reply) = serde_json::from_value::<BrowserOpReply>(browser.clone()) {
+                        if let Some(done) = self.browser_pending.lock().expect("pending").remove(&id) {
+                            let _ = done.send(reply);
+                        }
+                    }
+                } else if let Ok(ev) = serde_json::from_value::<BrowserStreamEvent>(browser.clone()) {
+                    if let Some(tx) = &self.browser_events {
+                        let _ = tx.send(ev);
+                    }
+                }
+                return None;
+            }
             let g4a = v.get("g4a").cloned().unwrap_or(Value::Null);
             let Ok(bytes) = serde_json::to_vec(&g4a) else { return None };
             let Ok(msg) = parse_g4a_payload(&bytes) else { return None };

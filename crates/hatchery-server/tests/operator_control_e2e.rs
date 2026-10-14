@@ -47,7 +47,8 @@ async fn operator_request_round_trips_through_operator_link() {
                         agent_progress: vec![],
                         managed_worktrees: vec![],
                         launch_inventory: None,
-                    },
+
+                    machine: None,},
                 }),
             };
             let plain = serde_json::to_vec(&json!({ "op_id": op_id, "g4a": response })).unwrap();

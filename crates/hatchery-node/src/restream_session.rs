@@ -27,17 +27,17 @@ pub struct UpstreamKeys {
     pub recipient_public: PublicKeyBytes,
 }
 
-pub struct NodeSession {
-    channel_id: u32,
-    keys: UpstreamKeys,
+/// One TCP uplink to C2 carrying any number of channels. Downlink DATA frames are
+/// demultiplexed by channel id. C2 keys its downlink route by node, so every channel a
+/// node opens must share this single connection.
+pub struct NodeUplink {
     out: mpsc::Sender<Frame>,
-    down: mpsc::Receiver<Vec<u8>>,
-    transport: NoiseTransport,
+    routes: Arc<std::sync::Mutex<std::collections::BTreeMap<u32, mpsc::UnboundedSender<Vec<u8>>>>>,
     journal: Option<Arc<UplinkJournal>>,
     tasks: Vec<JoinHandle<()>>,
 }
 
-impl Drop for NodeSession {
+impl Drop for NodeUplink {
     fn drop(&mut self) {
         for t in &self.tasks {
             t.abort();
@@ -45,22 +45,13 @@ impl Drop for NodeSession {
     }
 }
 
-impl NodeSession {
-    /// Dial, OPEN, and complete the Noise_NK handshake over DATA frames.
-    pub async fn connect(
-        uplink: SocketAddr,
-        node_id: &str,
-        channel_id: u32,
-        kind: ChannelKind,
-        keys: UpstreamKeys,
-        journal: Option<Arc<UplinkJournal>>,
-        handshake_timeout: Duration,
-    ) -> Result<Self, String> {
+impl NodeUplink {
+    pub async fn connect(uplink: SocketAddr, journal: Option<Arc<UplinkJournal>>) -> Result<Arc<Self>, String> {
         let stream = TcpStream::connect(uplink).await.map_err(|e| e.to_string())?;
+        let _ = stream.set_nodelay(true);
         let (mut rd, mut wr) = stream.into_split();
         let (out_tx, mut out_rx) = mpsc::channel::<Frame>(64);
-        let (down_tx, down_rx) = mpsc::channel::<Vec<u8>>(64);
-
+        let routes: Arc<std::sync::Mutex<std::collections::BTreeMap<u32, mpsc::UnboundedSender<Vec<u8>>>>> = Arc::default();
         let writer = tokio::spawn(async move {
             while let Some(frame) = out_rx.recv().await {
                 let Ok(bytes) = frame.encode() else { break };
@@ -71,6 +62,9 @@ impl NodeSession {
         });
         let reader_out = out_tx.clone();
         let reader_journal = journal.clone();
+        let reader_routes = Arc::clone(&routes);
+        // The reader never blocks: per-channel queues are unbounded (a stalled reader
+        // stalls C2's downlink write and with it our uplink: a deadlock).
         let reader = tokio::spawn(async move {
             let mut buf = vec![0u8; 128 * 1024];
             let mut filled = 0usize;
@@ -87,8 +81,9 @@ impl NodeSession {
                             filled -= used;
                             match frame.frame_type {
                                 FrameType::Data => {
-                                    if down_tx.send(frame.payload).await.is_err() {
-                                        return;
+                                    let tx = reader_routes.lock().expect("routes").get(&frame.channel_id).cloned();
+                                    if let Some(tx) = tx {
+                                        let _ = tx.send(frame.payload);
                                     }
                                 }
                                 FrameType::JournalReq => {
@@ -100,33 +95,47 @@ impl NodeSession {
                                         }
                                     }
                                 }
-                                FrameType::GoAway | FrameType::Close => return,
+                                FrameType::GoAway | FrameType::Close => {
+                                    reader_routes.lock().expect("routes").clear();
+                                    return;
+                                }
                                 _ => {}
                             }
                         }
                         Err(FrameError::Truncated) => break,
-                        Err(_) => return,
+                        Err(_) => {
+                            reader_routes.lock().expect("routes").clear();
+                            return;
+                        }
                     }
                 }
                 if filled == buf.len() {
-                    return;
+                    break;
                 }
             }
+            // Dropping every route sender ends each session's recv with "uplink closed".
+            reader_routes.lock().expect("routes").clear();
         });
+        Ok(Arc::new(Self { out: out_tx, routes, journal, tasks: vec![writer, reader] }))
+    }
 
-        let open = Frame::open(
-            channel_id,
-            &OpenPayload { channel_kind: kind, node_id: node_id.to_owned() },
-        )
-        .map_err(|e| e.to_string())?;
-        out_tx.send(open).await.map_err(|_| "uplink closed".to_owned())?;
-
+    /// OPEN `channel_id` and complete the Noise_NK handshake on it.
+    pub async fn open(
+        self: &Arc<Self>,
+        node_id: &str,
+        channel_id: u32,
+        kind: ChannelKind,
+        keys: UpstreamKeys,
+        handshake_timeout: Duration,
+    ) -> Result<NodeSession, String> {
+        let (down_tx, mut down_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        self.routes.lock().expect("routes").insert(channel_id, down_tx);
+        let open = Frame::open(channel_id, &OpenPayload { channel_kind: kind, node_id: node_id.to_owned() }).map_err(|e| e.to_string())?;
+        self.out.send(open).await.map_err(|_| "uplink closed".to_owned())?;
         let mut initiator = NoiseInitiator::new(keys.recipient_public).map_err(|e| e.to_string())?;
         let msg1 = initiator.write_message1().map_err(|e| e.to_string())?;
-        let mut session_tmp = Partial { channel_id, keys, out: out_tx.clone(), journal: journal.clone() };
-        session_tmp.send_inner(&encode_inner(InnerKind::Handshake1, &msg1)).await?;
-
-        let mut down_rx = down_rx;
+        let mut tmp = Partial { channel_id, keys, out: self.out.clone(), journal: self.journal.clone() };
+        tmp.send_inner(&encode_inner(InnerKind::Handshake1, &msg1)).await?;
         let msg2 = tokio::time::timeout(handshake_timeout, async {
             loop {
                 let Some(bytes) = down_rx.recv().await else { return Err("uplink closed".to_owned()) };
@@ -138,16 +147,46 @@ impl NodeSession {
         .await
         .map_err(|_| "handshake timeout".to_owned())??;
         let transport = initiator.read_message2(&msg2).map_err(|e| e.to_string())?;
-
-        Ok(Self {
+        Ok(NodeSession {
             channel_id,
             keys,
-            out: out_tx,
+            out: self.out.clone(),
             down: down_rx,
             transport,
-            journal,
-            tasks: vec![writer, reader],
+            journal: self.journal.clone(),
+            _uplink: Arc::clone(self),
         })
+    }
+}
+
+pub struct NodeSession {
+    channel_id: u32,
+    keys: UpstreamKeys,
+    out: mpsc::Sender<Frame>,
+    down: mpsc::UnboundedReceiver<Vec<u8>>,
+    transport: NoiseTransport,
+    journal: Option<Arc<UplinkJournal>>,
+    _uplink: Arc<NodeUplink>,
+}
+
+impl NodeSession {
+    /// Dial a dedicated uplink, OPEN one channel, and complete the Noise_NK handshake.
+    pub async fn connect(
+        uplink: SocketAddr,
+        node_id: &str,
+        channel_id: u32,
+        kind: ChannelKind,
+        keys: UpstreamKeys,
+        journal: Option<Arc<UplinkJournal>>,
+        handshake_timeout: Duration,
+    ) -> Result<Self, String> {
+        let link = NodeUplink::connect(uplink, journal).await?;
+        link.open(node_id, channel_id, kind, keys, handshake_timeout).await
+    }
+
+    /// The shared uplink this session rides on (to open sibling channels).
+    pub fn uplink(&self) -> Arc<NodeUplink> {
+        Arc::clone(&self._uplink)
     }
 
     /// Encrypt and send one inner message toward core.

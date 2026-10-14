@@ -30,7 +30,7 @@ use crate::runtime::{
     C2PendingRequest, EVENT_CAPACITY, HARNESS_MCP_EVENT_CAPACITY,
 };
 use std::net::SocketAddr;
-use hatchery_core::{C2Topology, NodeRequest, NodeRoute, RoutedNodeEvent, RoutedNodeResponse};
+use hatchery_core::{BrowserClientCommand, BrowserStreamEvent, C2Topology, NodeRequest, NodeRoute, RoutedNodeEvent, RoutedNodeResponse};
 use std::fmt;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -158,6 +158,14 @@ impl C2ReconnectingHandle {
     /// whichever physical connection is live right now. Returns
     /// `Err(C2ControlError::Closed)` immediately -- never blocks or
     /// waits for a reconnect -- while the link is down.
+    pub async fn browser_command(
+        &self,
+        cmd: BrowserClientCommand,
+    ) -> Result<(), C2ControlError> {
+        let control = self.live.borrow().clone().ok_or(C2ControlError::Closed)?;
+        control.browser_command(cmd).await
+    }
+
     pub fn start_request(
         &self,
         route: NodeRoute,
@@ -257,6 +265,7 @@ async fn wait_for_link_connected(link_state: &mut watch::Receiver<C2LinkState>) 
 pub struct C2ReconnectingEventReceiver {
     inner: mpsc::Receiver<RoutedNodeEvent>,
     harness_mcp: mpsc::Receiver<RoutedNodeEvent>,
+    browser: mpsc::Receiver<BrowserStreamEvent>,
 }
 
 impl C2ReconnectingEventReceiver {
@@ -288,6 +297,10 @@ impl C2ReconnectingEventReceiver {
 
     /// Drains only the regular-event channel, leaving harness_mcp events
     /// untouched.
+    pub async fn recv_browser(&mut self) -> Option<BrowserStreamEvent> {
+        self.browser.recv().await
+    }
+
     pub async fn recv_regular(&mut self) -> Option<RoutedNodeEvent> {
         self.inner.recv().await
     }
@@ -313,6 +326,16 @@ impl C2ReconnectingEventReceiver {
     ) -> (&mut mpsc::Receiver<RoutedNodeEvent>, &mut mpsc::Receiver<RoutedNodeEvent>) {
         (&mut self.inner, &mut self.harness_mcp)
     }
+
+    pub fn split_all(
+        &mut self,
+    ) -> (
+        &mut mpsc::Receiver<RoutedNodeEvent>,
+        &mut mpsc::Receiver<RoutedNodeEvent>,
+        &mut mpsc::Receiver<BrowserStreamEvent>,
+    ) {
+        (&mut self.inner, &mut self.harness_mcp, &mut self.browser)
+    }
 }
 
 /// The long-lived channels the supervisor publishes into. Held as one
@@ -324,6 +347,7 @@ struct SupervisorChannels {
     events: mpsc::Sender<RoutedNodeEvent>,
     harness_mcp_events: mpsc::Sender<RoutedNodeEvent>,
     shutdown: watch::Receiver<bool>,
+    browser: mpsc::Sender<BrowserStreamEvent>,
 }
 
 /// Outcome of pumping one physical connection to completion.
@@ -347,18 +371,11 @@ async fn pump_one_connection(
     topology: &mut watch::Receiver<Arc<C2Topology>>,
     events_tx: &mpsc::Sender<RoutedNodeEvent>,
     harness_mcp_events_tx: &mpsc::Sender<RoutedNodeEvent>,
+    browser_tx: &mpsc::Sender<BrowserStreamEvent>,
     topology_tx: &watch::Sender<Arc<C2Topology>>,
     shutdown: &mut watch::Receiver<bool>,
 ) -> ConnectionEnded {
-    // Split once, up front: `events.recv_harness_mcp()` and
-    // `events.recv_regular()` cannot both appear as arms of the same
-    // `select!` below -- each is an `&mut self` async method, so the two
-    // futures would borrow the whole `C2EventReceiver` for the same
-    // lifetime, which the borrow checker rejects even though the methods
-    // only ever touch their own disjoint field. `split_mut` hands out the
-    // two channels' receivers as genuinely independent `&mut` borrows
-    // instead.
-    let (regular_events, harness_mcp_events) = events.split_mut();
+    let (regular_events, harness_mcp_events, browser_events) = events.split_mut();
     loop {
         tokio::select! {
             biased;
@@ -379,6 +396,16 @@ async fn pump_one_connection(
                     biased;
                     _ = shutdown.changed() => return ConnectionEnded::ShuttingDown,
                     sent = events_tx.send(event) => {
+                        if sent.is_err() { return ConnectionEnded::ConsumerGone; }
+                    }
+                }
+            }
+            event = browser_events.recv() => {
+                let Some(event) = event else { return ConnectionEnded::Lost; };
+                tokio::select! {
+                    biased;
+                    _ = shutdown.changed() => return ConnectionEnded::ShuttingDown,
+                    sent = browser_tx.send(event) => {
                         if sent.is_err() { return ConnectionEnded::ConsumerGone; }
                     }
                 }
@@ -462,6 +489,7 @@ async fn reconnect_supervisor(
             &mut topology,
             &channels.events,
             &channels.harness_mcp_events,
+            &channels.browser,
             &channels.topology,
             &mut channels.shutdown,
         )
@@ -540,6 +568,7 @@ async fn connect_reconnecting(
     let (link_state_tx, link_state_rx) = watch::channel(C2LinkState::Connected);
     let (events_tx, events_rx) = mpsc::channel(EVENT_CAPACITY);
     let (harness_mcp_events_tx, harness_mcp_events_rx) = mpsc::channel(HARNESS_MCP_EVENT_CAPACITY);
+    let (browser_tx, browser_rx) = mpsc::channel::<BrowserStreamEvent>(64);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
     tokio::spawn(reconnect_supervisor(
@@ -551,6 +580,7 @@ async fn connect_reconnecting(
             link_state: link_state_tx,
             events: events_tx,
             harness_mcp_events: harness_mcp_events_tx,
+            browser: browser_tx,
             shutdown: shutdown_rx,
         },
         control,
@@ -564,7 +594,7 @@ async fn connect_reconnecting(
             link_state: link_state_rx,
             _supervisor: Arc::new(SupervisorShutdownGuard(shutdown_tx)),
         },
-        C2ReconnectingEventReceiver { inner: events_rx, harness_mcp: harness_mcp_events_rx },
+        C2ReconnectingEventReceiver { inner: events_rx, harness_mcp: harness_mcp_events_rx, browser: browser_rx },
     ))
 }
 
@@ -673,6 +703,7 @@ mod tests {
                 relay_route: C2RelayRoute::default(),
                 transport: NodeTransportState::Online,
                 current_incarnation_id: None,
+                machine: None,
                 provider_contracts: Vec::new(),
                 provider_adapter_contracts: Vec::new(),
                 provider_runtime_statuses: Default::default(),
@@ -690,7 +721,8 @@ mod tests {
             agent_progress: Vec::new(),
             managed_worktrees: Vec::new(),
             launch_inventory: None,
-        }
+
+        machine: None,}
     }
 
     fn canned_reply(envelope: &C2RequestEnvelope, tag: &str) -> C2ReplyEnvelope {

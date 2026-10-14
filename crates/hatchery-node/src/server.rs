@@ -177,7 +177,9 @@ use gate4agent_node_wire::{
     AuthDirection, OwnerOnlyLocalListener,
 };
 use gate4agent_types::{
-    AdapterBinding, AdapterFamily, AgentId, AgentInstanceId, AgentSpec, ApprovalLevel,
+    AdapterBinding, AdapterFamily, AgentAdapterCapabilities, AgentCapabilities, AgentId,
+    AgentInstanceId, AgentReadinessSpec, AgentSpec, AgentTransportCapabilities, ApprovalLevel,
+    DetectionSpec, InitialPromptMode, LaunchSpec, ProcessMatcher, PromptSpec, SpecVerification,
     CommandEnvelope, CommandId,
     validate_candidate_id, ControlCommand, ControlEvent, ControlEventKind,
     HistoryCandidateSummary, HistoryOperation, HistoryQuery, HistorySessionRecord,
@@ -1148,7 +1150,12 @@ impl NodeServerConfig {
             node_id,
             workspaces,
             access_token,
-            runtime: NativeRuntimeConfig::default(),
+            // PTY output is polled by the runtime's effect worker; the upstream
+            // default (20ms) added ~10-20ms to every keystroke echo.
+            runtime: NativeRuntimeConfig {
+                worker_poll_interval_ms: 4,
+                ..NativeRuntimeConfig::default()
+            },
             session_record_retention: SessionRecordRetentionConfig::default(),
             state_path: None,
             spawn_profiles: SpawnProfileRegistry::default(),
@@ -2750,7 +2757,22 @@ async fn drive_runtime_until_shutdown(
             last_retention_sweep = Instant::now();
         }
 
-        sleep(Duration::from_millis(10)).await;
+        // Fast-poll for 300ms after PTY input so its echo is read and published
+        // within ~1ms; otherwise nap 10ms but wake at once on new input.
+        let hot = shared
+            .pty_input_marks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .values()
+            .any(|(at, _)| at.elapsed() < Duration::from_millis(300));
+        if hot {
+            sleep(Duration::from_millis(1)).await;
+        } else {
+            tokio::select! {
+                _ = sleep(Duration::from_millis(10)) => {}
+                _ = shared.pty_input_wake.notified() => {}
+            }
+        }
     }
 }
 
@@ -2801,12 +2823,53 @@ async fn wait_for_ctrl_signal() -> Result<(), NodeServerError> {
 /// A provider dropped from the fleet by this rule is removed outright, not
 /// carried dark: no catalog entry, no adapter, no dead code claiming support
 /// for something nobody can verify runs.
+/// Host interactive shell for HQ terminal attach (no provider CLI, no network).
+fn shell_host_spec() -> AgentSpec {
+    AgentSpec {
+        id: AgentId::new("shell").expect("shell agent id"),
+        revision: "hatchery:shell-pty-1".to_owned(),
+        display_name: "Host shell".to_owned(),
+        detection: DetectionSpec {
+            command: "bash".to_owned(),
+            aliases: vec!["sh".to_owned(), "shell".to_owned()],
+            required_commands: Vec::new(),
+            unsupported_platforms: Vec::new(),
+        },
+        launch: LaunchSpec {
+            // Absolute path so admission does not depend on PATH.
+            program: "/bin/bash".to_owned(),
+            fixed_args: vec!["-i".to_owned()],
+        },
+        expected_processes: vec![ProcessMatcher::Exact {
+            name: "bash".to_owned(),
+        }],
+        prompt: PromptSpec {
+            initial: InitialPromptMode::None,
+            native_draft: None,
+        },
+        readiness: AgentReadinessSpec::default(),
+        capabilities: AgentCapabilities {
+            agent_commands: None,
+            transports: AgentTransportCapabilities {
+                pty: true,
+                pty_adapter: None,
+                pipe: None,
+                acp: None,
+            },
+            adapters: AgentAdapterCapabilities::default(),
+        },
+        verification: SpecVerification::Gate4AgentVerified,
+    }
+}
+
 fn active_registry() -> Result<AgentRegistry, NodeServerError> {
-    let specs = builtin_registry()
-        .iter()
-        .filter(|spec| matches!(spec.id.as_str(), "claude" | "codex" | "grok" | "kimi"))
-        .cloned()
-        .collect::<Vec<_>>();
+    let mut specs = vec![shell_host_spec()];
+    specs.extend(
+        builtin_registry()
+            .iter()
+            .filter(|spec| matches!(spec.id.as_str(), "claude" | "codex" | "grok" | "kimi"))
+            .cloned(),
+    );
     AgentRegistry::new(specs).map_err(|error| NodeServerError::Registry(error.to_string()))
 }
 
@@ -3119,6 +3182,11 @@ struct NodeShared {
     harness_mcp_proxy_event_tx: broadcast::Sender<Arc<Vec<NodeEventEnvelope>>>,
     terminal_frame_watermarks:
         Mutex<BTreeMap<AgentInstanceId, (SessionAddress, u64)>>,
+    /// Wakes the drive loop as soon as PTY input is queued (no 10ms nap).
+    pty_input_wake: tokio::sync::Notify,
+    /// Per session: when the last PTY input was dispatched (latency probe +
+    /// a short fast-poll window so the echo is published within ~1ms).
+    pty_input_marks: Mutex<BTreeMap<AgentInstanceId, (Instant, bool)>>,
     next_connection_id: AtomicU64,
     next_instance_id: AtomicU64,
     next_command_id: AtomicU64,
@@ -3971,6 +4039,8 @@ impl NodeShared {
             agent_stream_event_tx,
             harness_mcp_proxy_event_tx,
             terminal_frame_watermarks: Mutex::new(BTreeMap::new()),
+            pty_input_wake: tokio::sync::Notify::new(),
+            pty_input_marks: Mutex::new(BTreeMap::new()),
             next_connection_id: AtomicU64::new(1),
             next_instance_id: AtomicU64::new(1),
             next_command_id: AtomicU64::new(1),
@@ -10959,6 +11029,18 @@ impl NodeShared {
                 address.session.instance_id,
                 (address.clone(), frame.sequence),
             );
+            if let Some((at, reported)) = self
+                .pty_input_marks
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .get_mut(&address.session.instance_id)
+            {
+                // First frame after an input: PTY write -> output published.
+                if !*reported && at.elapsed() < Duration::from_secs(5) {
+                    *reported = true;
+                    tracing::debug!(target: "pty_lat", instance_id = address.session.instance_id.0, node_us = at.elapsed().as_micros() as u64, "pty input to frame published");
+                }
+            }
             events.push(NodeEvent::TerminalFrame { address, frame });
         }
         drop(watermarks);
@@ -11964,6 +12046,11 @@ impl NodeShared {
         action: InputAction,
     ) -> Result<(), NodeFailure> {
         let started_after = self.current_sequence();
+        self.pty_input_marks
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(address.session.instance_id, (Instant::now(), false));
+        self.pty_input_wake.notify_one();
         let command_id = self
             .dispatch_bounded(
                 ControlCommand::SendInput {
@@ -16032,10 +16119,23 @@ async fn process_request_inner(shared: &NodeShared, connection_id: u64, role: Cl
             if let Some(prompt) = initial_prompt.as_deref() {
                 validate_node_text("spawn initial prompt", prompt)?;
             }
-            let session = shared
-                .spawn_session(workspace_id, provider, mode, terminal_size, initial_prompt)
-                .await?;
-            Ok(NodeResponse::SpawnAccepted { session })
+            match shared
+                .spawn_session(workspace_id.clone(), provider.clone(), mode, terminal_size, initial_prompt)
+                .await
+            {
+                Ok(session) => Ok(NodeResponse::SpawnAccepted { session }),
+                Err(err) => {
+                    tracing::warn!(
+                        %provider,
+                        %workspace_id,
+                        ?mode,
+                        code = ?err.code,
+                        message = %err.message,
+                        "session spawn refused"
+                    );
+                    Err(err)
+                }
+            }
         }
         NodeRequest::SpawnSpec { spec } => {
             shared.require_controller(connection_id, role)?;
