@@ -29,7 +29,9 @@ use thiserror::Error;
 
 mod memory_door;
 mod work_door;
+mod local_server_door;
 pub use work_door::WorkDoor;
+pub use local_server_door::LocalServerDoor;
 pub use memory_door::{MemoryDoor, MEMORY_START_TOOL};
 
 pub const MCP_PROTOCOL_VERSION_CURRENT: &str = "2025-11-25";
@@ -272,13 +274,14 @@ enum McpState { AwaitInitialize, AwaitInitialized, Ready }
 pub struct HarnessMcpServer<B> {
     memory_door: Option<MemoryDoor>,
     work_door: Option<WorkDoor>,
+    local_server_door: Option<LocalServerDoor>,
     backend: B,
     state: McpState,
 }
 
 impl<B: HarnessMcpBackend> HarnessMcpServer<B> {
     pub fn new(backend: B) -> Self {
-        Self { backend, state: McpState::AwaitInitialize, memory_door: MemoryDoor::from_env(), work_door: WorkDoor::from_env() }
+        Self { backend, state: McpState::AwaitInitialize, memory_door: MemoryDoor::from_env(), work_door: WorkDoor::from_env(), local_server_door: LocalServerDoor::from_env() }
     }
 
     /// Replace the memory door (tests, embedders).
@@ -413,6 +416,9 @@ impl<B: HarnessMcpBackend> HarnessMcpServer<B> {
         if self.work_door.is_some() {
             tools.extend(WorkDoor::tool_definitions());
         }
+        if self.local_server_door.is_some() {
+            tools.extend(LocalServerDoor::tool_definitions());
+        }
         rpc_result(id, json!({ "tools": tools }))
     }
 
@@ -449,6 +455,16 @@ impl<B: HarnessMcpBackend> HarnessMcpServer<B> {
         }
         if WorkDoor::owns(name) {
             let Some(door) = self.work_door.as_ref() else {
+                return rpc_error(id, -32601, "method not found");
+            };
+            let arguments = if params.arguments.is_null() { json!({}) } else { params.arguments.clone() };
+            return match door.call(name, arguments) {
+                Ok(text) => rpc_result(id, json!({ "content": [{ "type": "text", "text": text }], "isError": false })),
+                Err(()) => tool_error(id, "not available"),
+            };
+        }
+        if LocalServerDoor::owns(name) {
+            let Some(door) = self.local_server_door.as_ref() else {
                 return rpc_error(id, -32601, "method not found");
             };
             let arguments = if params.arguments.is_null() { json!({}) } else { params.arguments.clone() };

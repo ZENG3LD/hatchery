@@ -3686,6 +3686,22 @@ impl SpawnPreparer for NodeShared {
             if let Some(trace_entry) = harness_mcp_trace_env_entry(launch) {
                 env_entries.push(trace_entry);
             }
+            if let Some(door) = crate::door::door_listen_addr() {
+                env_entries.push((
+                    OsString::from("HATCHERY_NODE_DOOR"),
+                    OsString::from(door.to_string()),
+                ));
+                // Same key shape as the session browser (`pty-{workspace}-{instance}`).
+                let session_key = format!(
+                    "pty-{}-{}",
+                    address.workspace_id.as_str(),
+                    address.session.instance_id.0
+                );
+                env_entries.push((
+                    OsString::from("HATCHERY_LOCAL_SERVER_SESSION"),
+                    OsString::from(session_key),
+                ));
+            }
             let overlay = NativeMcpServerLaunchOverlay::new(
                 provider.clone(),
                 launch.server_name.as_str(),

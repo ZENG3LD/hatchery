@@ -48,6 +48,8 @@ pub mod restream_g4a_bridge;
 pub mod browser_capture;
 pub mod m4a_accounts;
 pub mod door;
+#[cfg(feature = "local-server")]
+pub mod local_server;
 pub mod wake_pipeline;
 #[cfg(unix)]
 pub mod isolation;

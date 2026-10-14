@@ -10,9 +10,21 @@ use hatchery_enroll::call::capability_for;
 use serde_json::{json, Value};
 use tokio::net::TcpListener;
 
+/// Process-wide door listen address (for harness MCP env injection).
+static DOOR_LISTEN: std::sync::OnceLock<std::net::SocketAddr> = std::sync::OnceLock::new();
+
+/// Loopback door address if the node started `--door-listen`, else None.
+pub fn door_listen_addr() -> Option<std::net::SocketAddr> {
+    DOOR_LISTEN.get().copied()
+}
+
+
 /// `session.wake` (handled here, never forwarded): `{"token","nick","from","event_id","body"}`,
 /// the letter event m4a's `M4A_LETTER_HOOK` emits plus the node's wake token.
 pub async fn serve(listener: TcpListener, calls: crate::uplink_calls::NodeCalls, wake: Option<crate::server::node_wake::NodeWake>) {
+    if let Ok(addr) = listener.local_addr() {
+        let _ = DOOR_LISTEN.set(addr);
+    }
     loop {
         let Ok((mut stream, peer)) = listener.accept().await else { continue };
         if !peer.ip().is_loopback() {
@@ -33,6 +45,23 @@ pub async fn serve(listener: TcpListener, calls: crate::uplink_calls::NodeCalls,
                 return;
             };
             let op = request.get("op").and_then(Value::as_str).unwrap_or_default();
+            if op.starts_with("local_server.") {
+                #[cfg(feature = "local-server")]
+                {
+                    let payload = request.get("payload").cloned().unwrap_or_else(|| json!({}));
+                    let (status, reply) = match crate::local_server::handle_op(op, &payload).await {
+                        Ok(v) => (200, v.to_string()),
+                        Err(e) => (400, json!({"error": e}).to_string()),
+                    };
+                    let _ = http::respond(&mut stream, status, reply.as_bytes()).await;
+                    return;
+                }
+                #[cfg(not(feature = "local-server"))]
+                {
+                    let _ = http::respond(&mut stream, 404, br#"{"error":"local-server feature off"}"#).await;
+                    return;
+                }
+            }
             if op == "session.wake" {
                 let p = request.get("payload").cloned().unwrap_or_else(|| json!({}));
                 let field = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or_default().to_owned();

@@ -577,6 +577,13 @@ async fn handle_browser_op(
     _browser_ev_tx: mpsc::UnboundedSender<BrowserStreamEvent>,
     #[cfg(feature = "d2b")] browsers: &std::sync::Arc<crate::browser_capture::BrowserSessionMap>,
 ) -> BrowserOpReply {
+    // Session-local servers are independent of dig2browser; handle them first.
+    #[cfg(feature = "local-server")]
+    {
+        if let Some(reply) = handle_local_server_op(node_id, &op).await {
+            return reply;
+        }
+    }
     #[cfg(not(feature = "d2b"))]
     {
         let _ = (node_id, op, browser_profile_root, _browser_ev_tx);
@@ -584,6 +591,7 @@ async fn handle_browser_op(
             ok: false,
             session: String::new(),
             message: "dig2browser feature (d2b) is not enabled in this node build".into(),
+            body: None,
         };
     }
     #[cfg(feature = "d2b")]
@@ -606,11 +614,13 @@ async fn handle_browser_op(
                         ok: true,
                         session,
                         message: String::new(),
+                        body: None,
                     },
                     Err(message) => BrowserOpReply {
                         ok: false,
                         session,
                         message,
+                        body: None,
                     },
                 }
             }
@@ -620,25 +630,105 @@ async fn handle_browser_op(
                     ok: true,
                     session,
                     message: String::new(),
+                    body: None,
                 },
                 Err(message) => BrowserOpReply {
                     ok: false,
                     session,
                     message,
+                    body: None,
                 },
             },
-            BrowserClientOp::Stop { session } => match browsers.stop(&session).await {
-                Ok(()) => BrowserOpReply {
-                    ok: true,
-                    session,
-                    message: String::new(),
-                },
-                Err(message) => BrowserOpReply {
-                    ok: false,
-                    session,
-                    message,
-                },
+            BrowserClientOp::Stop { session } => {
+                #[cfg(feature = "local-server")]
+                {
+                    crate::local_server::LocalServerPool::global()
+                        .stop_session(&session)
+                        .await;
+                }
+                match browsers.stop(&session).await {
+                    Ok(()) => BrowserOpReply {
+                        ok: true,
+                        session,
+                        message: String::new(),
+                        body: None,
+                    },
+                    Err(message) => BrowserOpReply {
+                        ok: false,
+                        session,
+                        message,
+                        body: None,
+                    },
+                }
+            }
+            BrowserClientOp::LocalServerStart { session, .. }
+            | BrowserClientOp::LocalServerStop { session, .. }
+            | BrowserClientOp::LocalServerList { session } => BrowserOpReply {
+                ok: false,
+                session,
+                message: "local_server op was not handled".into(),
+                body: None,
             },
         }
+    }
+}
+
+#[cfg(feature = "local-server")]
+async fn handle_local_server_op(node_id: &str, op: &BrowserClientOp) -> Option<BrowserOpReply> {
+    let _ = node_id;
+    let (session, door_op, payload) = match op {
+        BrowserClientOp::LocalServerList { session } => (
+            session.clone(),
+            "local_server.list",
+            serde_json::json!({ "session": session }),
+        ),
+        BrowserClientOp::LocalServerStop { session, id } => (
+            session.clone(),
+            "local_server.stop",
+            serde_json::json!({ "session": session, "id": id }),
+        ),
+        BrowserClientOp::LocalServerStart {
+            session,
+            kind,
+            root,
+            cwd,
+            bin,
+            open,
+            spa,
+        } => {
+            let mut payload = serde_json::json!({
+                "session": session,
+                "kind": kind,
+                "open": open,
+            });
+            if let Some(r) = root {
+                payload["root"] = serde_json::json!(r);
+            }
+            if let Some(c) = cwd {
+                payload["cwd"] = serde_json::json!(c);
+            }
+            if let Some(b) = bin {
+                payload["bin"] = serde_json::json!(b);
+            }
+            if let Some(s) = spa {
+                payload["spa"] = serde_json::json!(s);
+            }
+            (session.clone(), "local_server.start", payload)
+        }
+        _ => return None,
+    };
+    match crate::local_server::handle_op(door_op, &payload).await {
+        Ok(body) => Some(BrowserOpReply {
+            ok: true,
+            session,
+            message: String::new(),
+            body: Some(body),
+        }),
+        Err(message) => Some(BrowserOpReply {
+            ok: false,
+            session,
+            message,
+            body: None,
+        }),
     }
 }
