@@ -63,21 +63,13 @@ async fn open_hub(config: &ServerConfig) -> HubHandle {
             .expect("hub open task")
         {
             Ok(hub) => {
-                let hub = match hatchery_server::m4a_gateway::CliM4a::from_env() {
-                    Some(m4a) => {
-                        tracing::info!("core m4a gateway on (wake + run.close reader)");
-                        hub.with_m4a(Box::new(m4a))
-                    }
-                    None => hub,
-                };
                 let hub = std::sync::Arc::new(hub);
-                if hub.m4a_enabled() {
-                    let reader = std::sync::Arc::clone(&hub);
-                    std::thread::spawn(move || loop {
-                        reader.poll_m4a();
-                        std::thread::sleep(std::time::Duration::from_secs(10));
-                    });
-                }
+                // Core's own m4a: run.close letters to the operator mailbox.
+                let reader = std::sync::Arc::clone(&hub);
+                std::thread::spawn(move || loop {
+                    reader.poll_m4a();
+                    std::thread::sleep(std::time::Duration::from_secs(10));
+                });
                 Some(hub)
             }
             Err(error) => {

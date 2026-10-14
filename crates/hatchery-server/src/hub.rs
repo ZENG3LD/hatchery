@@ -39,7 +39,6 @@ pub struct Hub {
     /// Bumped on every message sent; lets HQ long-poll for new mail instead of polling blindly.
     mail_signal: (Mutex<u64>, Condvar),
     advice: Mutex<crate::routing::AdviceGate>,
-    m4a: Option<Box<dyn crate::m4a_gateway::M4a>>,
 }
 
 fn refused(r: Refused) -> HubError {
@@ -90,62 +89,42 @@ impl Hub {
         Ok((cfg, state))
     }
 
-    /// Talk to sessions over m4a with this gateway (wake + run.close reader).
-    pub fn with_m4a(mut self, m4a: Box<dyn crate::m4a_gateway::M4a>) -> Self {
-        self.m4a = Some(m4a);
-        self
-    }
-
-    pub fn m4a_enabled(&self) -> bool {
-        self.m4a.is_some()
-    }
-
-    /// Read run.close letters from the sessions of active runs. Each letter is handled once
-    /// (op id `m4a:<event_id>`). Returns how many runs were closed.
+    /// Core's own m4a (the in-process mailbox engine): read `run.close` letters that nodes'
+    /// sessions sent to the operator mailbox and close the named run when the letter comes
+    /// from the run's node. Each letter is acknowledged once handled. Returns runs closed.
     pub fn poll_m4a(&self) -> usize {
-        let Some(m4a) = &self.m4a else { return 0 };
-        let runs = match self.tasks.lock().expect("tasks").active_runs_with_nick() {
-            Ok(r) => r,
+        let letters = match self.messenger.lock().expect("messenger").inbox(OPERATOR, 0, 256) {
+            Ok(l) => l,
             Err(e) => {
-                tracing::warn!(error = %e, "m4a reader: runs unavailable");
+                tracing::debug!(error = %e, "m4a reader: operator inbox unavailable");
                 return 0;
             }
         };
         let mut closed = 0;
-        for (run, nick) in runs {
-            let letters = match m4a.read_dm(&nick, 20) {
-                Ok(l) => l,
-                Err(e) => {
-                    tracing::debug!(error = %e, "m4a reader: read failed");
-                    continue;
-                }
-            };
-            for letter in letters {
-                let from = crate::m4a_gateway::bare_nick(&letter.from);
-                if from != crate::m4a_gateway::bare_nick(&nick) {
-                    continue; // our own letters and anyone else's are not commands
-                }
-                let Some(cmd) = crate::m4a_gateway::parse_close(&letter.body) else { continue };
-                let op = format!("m4a:{}", letter.event_id);
-                let tasks = self.tasks.lock().expect("tasks");
-                if tasks.replay(Some(&op)).ok().flatten().is_some() {
-                    continue;
-                }
-                let outcome = if cmd.run_id != run.id {
-                    json!({ "ignored": "letter names another run" })
-                } else {
-                    match tasks.close_run(run.id, &cmd.status, "session", Some(&run.session_id), cmd.branch.as_deref(), cmd.commit.as_deref(), Some(&letter.event_id)) {
+        for letter in letters {
+            let Some(cmd) = crate::m4a_gateway::parse_close(&letter.body) else { continue };
+            let tasks = self.tasks.lock().expect("tasks");
+            let outcome = match tasks.run(cmd.run_id) {
+                Ok(Some(run)) if run.node_id == letter.from => {
+                    match tasks.close_run(run.id, &cmd.status, "session", Some(&run.session_id), cmd.branch.as_deref(), cmd.commit.as_deref(), Some(&letter.message_id)) {
                         Ok(Ok(r)) => {
                             closed += 1;
                             tracing::info!(run = r.id, status = %r.status, "run closed by its session via m4a");
-                            json!({ "run": r })
+                            "closed"
                         }
-                        Ok(Err(why)) => json!({ "refused": format!("{why:?}") }),
-                        Err(e) => json!({ "error": e.to_string() }),
+                        Ok(Err(why)) => {
+                            tracing::info!(run = run.id, ?why, "m4a run.close refused");
+                            "refused"
+                        }
+                        Err(_) => continue, // store error: retry next tick
                     }
-                };
-                let _ = tasks.record(Some(&op), &outcome);
-            }
+                }
+                Ok(_) => "ignored",
+                Err(_) => continue,
+            };
+            drop(tasks);
+            tracing::debug!(outcome, "m4a run.close letter handled");
+            let _ = self.messenger.lock().expect("messenger").ack(OPERATOR, &letter.message_id);
         }
         closed
     }
@@ -164,7 +143,6 @@ impl Hub {
             tasks: Mutex::new(TaskStore::open(data_dir)?),
             mail_signal: (Mutex::new(0), Condvar::new()),
             advice: Mutex::new(Default::default()),
-            m4a: None,
         })
     }
 
@@ -363,16 +341,24 @@ impl Hub {
                 let sessions = self.tasks.lock().expect("tasks").sessions(query_param(query, "node")).map_err(int)?;
                 Ok(json!({ "sessions": sessions }))
             }
-            // Wake a session: an m4a letter to its nick (the node turns it into a short wake).
+            // Wake a session: a letter from core's own m4a to the session's node, naming the
+            // session; the node wakes it and the session reads the letter from m4a.
             ("POST", ["v1", "sessions", id, "wake"]) => {
-                let Some(m4a) = &self.m4a else { return Err(HubError::new(503, "core m4a is not configured")) };
-                let nick = self.tasks.lock().expect("tasks").session_nick(id).map_err(int)?.ok_or_else(|| HubError::new(404, "session has no m4a nick"))?;
+                let session = self.tasks.lock().expect("tasks").session(id).map_err(int)?.ok_or_else(|| HubError::new(404, "not found"))?;
+                let nick = self.tasks.lock().expect("tasks").session_nick(id).map_err(int)?;
                 let text = opt_str(body, "text").map(str::trim).filter(|t| !t.is_empty()).unwrap_or("wake: check your tasks and m4a inbox");
                 if text.len() > 16 * 1024 {
                     return Err(HubError::new(400, "text too long"));
                 }
-                m4a.send(&nick, text).map_err(|e| HubError::new(502, e))?;
-                Ok(json!({ "woke": id, "via": "m4a" }))
+                let subject = format!("wake {}", nick.as_deref().unwrap_or(&session.session_id));
+                let message_id = self
+                    .messenger
+                    .lock()
+                    .expect("messenger")
+                    .send(OPERATOR, &session.node_id, &subject, text, opt_str(body, "op_id").map(str::to_owned))
+                    .map_err(|e| HubError::new(409, e.to_string()))?;
+                self.bump_mail();
+                Ok(json!({ "woke": id, "via": "m4a", "message_id": message_id }))
             }
             // Record a real provider session (a provider conversation id); drafts are not recorded.
             ("POST", ["v1", "sessions"]) => {
@@ -447,52 +433,16 @@ impl Hub {
 #[cfg(test)]
 mod task_api_tests {
     use super::*;
-    use crate::m4a_gateway::{Letter, M4a};
-    use std::sync::{Arc, Mutex as StdMutex};
-
-    #[derive(Clone, Default)]
-    struct FakeM4a {
-        sent: Arc<StdMutex<Vec<(String, String)>>>,
-        inbox: Arc<StdMutex<Vec<Letter>>>,
-    }
-    impl M4a for FakeM4a {
-        fn send(&self, to: &str, text: &str) -> Result<(), String> {
-            self.sent.lock().unwrap().push((to.into(), text.into()));
-            Ok(())
-        }
-        fn read_dm(&self, _nick: &str, _n: u32) -> Result<Vec<Letter>, String> {
-            Ok(self.inbox.lock().unwrap().clone())
-        }
-        fn me(&self) -> &str {
-            "hq-core"
-        }
-    }
 
     #[test]
-    fn wake_sends_m4a_and_reader_closes_run_once() {
+    fn wake_needs_a_known_session() {
         let dir = tempfile::tempdir().unwrap();
-        let fake = FakeM4a::default();
-        let hub = Hub::open(dir.path()).unwrap().with_m4a(Box::new(fake.clone()));
-        let op = |m: &str, p: &str, b: Value| hub.operator_call(m, p, &b);
-        op("POST", "/v1/sessions", json!({"session_id": "s1", "node_id": "alpha", "provider": "codex", "nick": "s1nick"})).unwrap();
-        let t = op("POST", "/v1/tasks", json!({"title": "t"})).unwrap();
-        let tid = t["task"]["id"].as_i64().unwrap();
-        let rid = op("POST", &format!("/v1/tasks/{tid}/runs"), json!({"session_id": "s1"})).unwrap()["run"]["id"].as_i64().unwrap();
-        op("POST", "/v1/sessions/s1/wake", json!({"text": "task #1: fix tests"})).unwrap();
-        assert_eq!(fake.sent.lock().unwrap()[0], ("s1nick".to_owned(), "task #1: fix tests".to_owned()));
-        assert_eq!(op("POST", "/v1/sessions/nope/wake", json!({})).unwrap_err().status, 404);
-        // Letters: one from a stranger, one from us naming another run, then the real close.
-        fake.inbox.lock().unwrap().extend([
-            Letter { event_id: "$1".into(), from: "@mallory:h".into(), body: format!("run.close {rid} done") },
-            Letter { event_id: "$2".into(), from: "@s1nick:h".into(), body: "run.close 999 done".into() },
-            Letter { event_id: "$3".into(), from: "@s1nick:h".into(), body: format!("run.close {rid} review feat/x abc") },
-        ]);
-        assert_eq!(hub.poll_m4a(), 1);
-        assert_eq!(hub.poll_m4a(), 0); // handled once
-        let got = op("GET", &format!("/v1/tasks/{tid}"), json!({})).unwrap();
-        assert_eq!(got["runs"][0]["status"], "review");
-        assert_eq!(got["runs"][0]["branch"], "feat/x");
-        assert_eq!(got["runs"][0]["result_message_id"], "$3");
+        let hub = Hub::open(dir.path()).unwrap();
+        assert_eq!(hub.operator_call("POST", "/v1/sessions/nope/wake", &json!({})).unwrap_err().status, 404);
+        // No ledger: the node is not a mailbox participant, so the letter is refused.
+        hub.operator_call("POST", "/v1/sessions", &json!({"session_id": "s1", "node_id": "alpha", "provider": "codex"})).unwrap();
+        assert!(hub.operator_call("POST", "/v1/sessions/s1/wake", &json!({})).is_err());
+        assert_eq!(hub.poll_m4a(), 0);
     }
 
     #[test]
