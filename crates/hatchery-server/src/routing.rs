@@ -22,7 +22,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::Path;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -69,13 +68,64 @@ pub struct RoutingConfig {
     pub advisor: AdvisorPolicy,
 }
 
-impl RoutingConfig {
-    pub fn load(data_dir: &Path) -> Result<Self, String> {
-        match std::fs::read(data_dir.join("routing.json")) {
-            Ok(b) => serde_json::from_slice(&b).map_err(|e| format!("routing.json: {e}")),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(e) => Err(format!("routing.json: {e}")),
+/// One model a node's provider CLI exposes (as reported by the node).
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct InventoryModel {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub efforts: Vec<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub default: bool,
+}
+
+/// What a node reports for one provider.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ProviderInventory {
+    pub provider: String,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub models: Vec<InventoryModel>,
+}
+
+/// Stored inventory row: one provider on one node.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+pub struct NodeInventory {
+    pub node: String,
+    pub provider: String,
+    pub source: String,
+    pub models: Vec<InventoryModel>,
+    pub updated_at_ms: u64,
+}
+
+fn ok_name(x: &str) -> bool {
+    !x.is_empty() && x.len() <= 128 && x.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.[]".contains(&b))
+}
+
+/// Validate a node's report (bounded, plain identifiers only).
+pub fn clean_report(providers: Vec<ProviderInventory>) -> Result<Vec<ProviderInventory>, &'static str> {
+    if providers.len() > 16 {
+        return Err("too many providers");
+    }
+    for p in &providers {
+        if !ok_name(&p.provider) || p.source.len() > 32 || p.models.len() > 256 {
+            return Err("bad provider entry");
         }
+        if p.models.iter().any(|m| !ok_name(&m.id) || m.efforts.len() > 16 || m.efforts.iter().any(|e| !ok_name(e))) {
+            return Err("bad model entry");
+        }
+    }
+    Ok(providers)
+}
+
+impl RoutingConfig {
+    /// Seats are the node-reported providers; roles are the user's stored choices.
+    pub fn from_store(inventory: &[NodeInventory], roles: BTreeMap<String, Role>) -> Self {
+        let seats = inventory
+            .iter()
+            .map(|i| Seat { id: format!("{}/{}", i.node, i.provider), node: i.node.clone(), provider: i.provider.clone(), account: None })
+            .collect();
+        Self { seats, roles, limit_cooldown_secs: None, advisor: AdvisorPolicy::default() }
     }
     fn cooldown_ms(&self) -> u64 {
         self.limit_cooldown_secs.unwrap_or(3600) * 1000
@@ -160,12 +210,30 @@ pub struct Recommendation {
     pub candidates: Vec<Candidate>,
 }
 
+/// A role preset entry is valid only if some node reports that provider/model (and effort).
+pub fn offered(inventory: &[NodeInventory], m: &ModelRef) -> bool {
+    inventory.iter().any(|i| {
+        i.provider == m.provider
+            && i.models.iter().any(|x| x.id == m.model && m.effort.as_ref().is_none_or(|e| x.efforts.iter().any(|y| y == e)))
+    })
+}
+
 pub fn recommend(cfg: &RoutingConfig, state: &BTreeMap<(String, String), SeatState>, role: &str, now_ms: u64) -> Result<Recommendation, String> {
+    recommend_in(cfg, None, state, role, now_ms)
+}
+
+/// Like [`recommend`], but only seats whose node reports the model count (when `inventory` is given).
+pub fn recommend_in(cfg: &RoutingConfig, inventory: Option<&[NodeInventory]>, state: &BTreeMap<(String, String), SeatState>, role: &str, now_ms: u64) -> Result<Recommendation, String> {
     let r = cfg.roles.get(role).ok_or("unknown role")?;
     let mut candidates = Vec::new();
     for entry in &r.preset {
         let model = parse_model_ref(entry).ok_or_else(|| format!("bad preset entry: {entry}"))?;
-        for seat in cfg.seats.iter().filter(|s| s.provider == model.provider) {
+        let has = |seat: &Seat| {
+            inventory.is_none_or(|inv| {
+                inv.iter().any(|i| i.node == seat.node && i.provider == seat.provider && i.models.iter().any(|x| x.id == model.model))
+            })
+        };
+        for seat in cfg.seats.iter().filter(|s| s.provider == model.provider && has(s)) {
             let st = state.get(&(seat.node.clone(), seat.provider.clone())).cloned().unwrap_or_default();
             let limited = st.limited_until_ms.filter(|u| *u > now_ms);
             candidates.push(Candidate { seat: seat.clone(), model: model.clone(), available: limited.is_none(), limited_until_ms: limited, hint: limited.and(st.hint) });

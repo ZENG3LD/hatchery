@@ -10,6 +10,7 @@ mod bundle_provider;
 
 mod git_worktree;
 pub mod plugins;
+pub mod provider_inventory;
 pub mod session_signals;
 
 mod host_directory_browser;

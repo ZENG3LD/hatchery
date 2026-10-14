@@ -724,6 +724,26 @@ async fn main() {
                 }
             }
         });
+        // Provider inventory (enabled CLIs and the models they expose) to core: at start, then
+        // every 30 min when it changed.
+        let inv_calls = calls.clone();
+        tokio::spawn(async move {
+            let mut last: Option<serde_json::Value> = None;
+            loop {
+                let providers = tokio::task::spawn_blocking(hatchery_node::provider_inventory::detect_all).await.unwrap_or_default();
+                let payload = serde_json::json!({ "providers": providers });
+                if last.as_ref() != Some(&payload) {
+                    match inv_calls.call("task.provider_inventory", &payload).await {
+                        Ok(_) => {
+                            tracing::info!(providers = providers.len(), "provider inventory sent");
+                            last = Some(payload);
+                        }
+                        Err(e) => tracing::warn!(error = ?e, "provider inventory not delivered"),
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(if last.is_some() { 1800 } else { 60 })).await;
+            }
+        });
         tokio::spawn(hatchery_node::door::serve(listener, calls, wake));
     } else if door_listen.is_some() || door_c2.is_some() {
         fail("--door-listen and --door-c2 need each other and --enrolled");

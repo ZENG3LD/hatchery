@@ -159,6 +159,11 @@ impl TaskStore {
                instance_id INTEGER NOT NULL, provider TEXT NOT NULL, kind TEXT NOT NULL, hint TEXT,
                at_ms INTEGER NOT NULL);
              CREATE INDEX IF NOT EXISTS signals_node ON signals(node_id, id);
+             CREATE TABLE IF NOT EXISTS provider_inventory (
+               node_id TEXT NOT NULL, provider TEXT NOT NULL, source TEXT NOT NULL, models TEXT NOT NULL,
+               updated_at_ms INTEGER NOT NULL, PRIMARY KEY (node_id, provider));
+             CREATE TABLE IF NOT EXISTS routing_roles (
+               role TEXT PRIMARY KEY, preset TEXT NOT NULL, auto INTEGER NOT NULL, updated_at_ms INTEGER NOT NULL);
              CREATE TABLE IF NOT EXISTS ops (
                op_id TEXT PRIMARY KEY, result TEXT NOT NULL, at_ms INTEGER NOT NULL);",
         )
@@ -360,6 +365,67 @@ impl TaskStore {
             .execute("UPDATE sessions SET state='archived', updated_at_ms=?2 WHERE session_id=?1", params![session_id, unix_ms() as i64])
             .map_err(db)?;
         Ok(Ok(()))
+    }
+
+    // ---- provider inventory (node-reported) and the user's role choices ----
+
+    /// Replace one node's provider inventory (what the node detected; nothing else).
+    pub fn set_inventory(&self, node_id: &str, providers: &[crate::routing::ProviderInventory]) -> Result<(), ServerError> {
+        let now = unix_ms() as i64;
+        let tx = self.conn.unchecked_transaction().map_err(db)?;
+        tx.execute("DELETE FROM provider_inventory WHERE node_id=?1", params![node_id]).map_err(db)?;
+        for p in providers {
+            let models = serde_json::to_string(&p.models).unwrap_or_else(|_| "[]".into());
+            tx.execute(
+                "INSERT INTO provider_inventory (node_id,provider,source,models,updated_at_ms) VALUES (?1,?2,?3,?4,?5)",
+                params![node_id, p.provider, p.source, models, now],
+            )
+            .map_err(db)?;
+        }
+        tx.commit().map_err(db)
+    }
+
+    pub fn inventory(&self) -> Result<Vec<crate::routing::NodeInventory>, ServerError> {
+        let mut stmt = self.conn.prepare("SELECT node_id,provider,source,models,updated_at_ms FROM provider_inventory ORDER BY node_id,provider").map_err(db)?;
+        let rows = stmt
+            .query_map([], |r| {
+                let models: String = r.get(3)?;
+                Ok(crate::routing::NodeInventory {
+                    node: r.get(0)?,
+                    provider: r.get(1)?,
+                    source: r.get(2)?,
+                    models: serde_json::from_str(&models).unwrap_or_default(),
+                    updated_at_ms: r.get::<_, i64>(4)? as u64,
+                })
+            })
+            .map_err(db)?;
+        rows.collect::<Result<_, _>>().map_err(db)
+    }
+
+    pub fn set_role(&self, role: &str, r: &crate::routing::Role) -> Result<(), ServerError> {
+        self.conn
+            .execute(
+                "INSERT INTO routing_roles (role,preset,auto,updated_at_ms) VALUES (?1,?2,?3,?4)
+                 ON CONFLICT(role) DO UPDATE SET preset=?2, auto=?3, updated_at_ms=?4",
+                params![role, serde_json::to_string(&r.preset).unwrap_or_else(|_| "[]".into()), r.auto as i64, unix_ms() as i64],
+            )
+            .map_err(db)?;
+        Ok(())
+    }
+
+    pub fn delete_role(&self, role: &str) -> Result<bool, ServerError> {
+        Ok(self.conn.execute("DELETE FROM routing_roles WHERE role=?1", params![role]).map_err(db)? > 0)
+    }
+
+    pub fn roles(&self) -> Result<std::collections::BTreeMap<String, crate::routing::Role>, ServerError> {
+        let mut stmt = self.conn.prepare("SELECT role,preset,auto FROM routing_roles ORDER BY role").map_err(db)?;
+        let rows = stmt
+            .query_map([], |r| {
+                let preset: String = r.get(1)?;
+                Ok((r.get::<_, String>(0)?, crate::routing::Role { preset: serde_json::from_str(&preset).unwrap_or_default(), auto: r.get::<_, i64>(2)? != 0 }))
+            })
+            .map_err(db)?;
+        rows.collect::<Result<_, _>>().map_err(db)
     }
 
     // ---- sessions (only real provider sessions) ----
