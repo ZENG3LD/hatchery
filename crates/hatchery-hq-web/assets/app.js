@@ -221,7 +221,7 @@ function openNode(focus) {
   let d = $('#nodesdlg'); if (!d) { d = document.createElement('div'); d.id = 'nodesdlg'; document.body.appendChild(d); d.onclick = (e) => { if (e.target === d) d.remove(); }; }
   const ns = visibleNodes();
   d.innerHTML = `<div class="ndlg"><div class="ndh"><h2>Fleet</h2><span class="grow"></span><button class="round" id="nclose">✕</button></div>
-    ${ns.length ? ns.map((n) => `<div class="ncard2"><div class="nrow">${avatar(n.node_id, 'mid')}<button class="round favstar${favNode() === n.node_id ? ' on' : ''}" data-fav="${esc(n.node_id)}" title="Избранная нода">${favNode() === n.node_id ? '★' : '☆'}</button><div class="grow"><b>${esc(n.node_id)}</b><div class="sub">${nodeStatus(n)} · ${esc(n.kind || '')}${n.tunnel_ip ? ' · ' + esc(n.tunnel_ip) : ''} · ${(S.sessions[n.node_id] || []).filter((x) => x.live).length} live</div></div>
+    ${ns.length ? ns.map((n) => `<div class="ncard2"><div class="nrow">${avatar(n.node_id, 'mid')}<button class="round favstar${isFav(n) ? ' on' : ''}" data-fav="${esc(n.node_id)}" title="Избранная нода">${isFav(n) ? '★' : '☆'}</button><div class="grow"><b>${esc(n.node_id)}</b><div class="sub">${nodeStatus(n)} · ${esc(n.kind || '')}${n.tunnel_ip ? ' · ' + esc(n.tunnel_ip) : ''} · ${(S.sessions[n.node_id] || []).filter((x) => x.live).length} live</div></div>
       <select data-prov="${esc(n.node_id)}">${provOptions(0)}</select><button class="btn blue" data-spawn="${esc(n.node_id)}"${n.online ? '' : ' disabled'}>Start</button></div>
       <div class="row" style="margin:6px 0"><button class="btn" data-mainbr="${esc(n.node_id)}"${n.online ? '' : ' disabled'}>Main browser (shared cookies)</button></div>
       <div class="fsess" data-fs="${esc(n.node_id)}">${fleetSessions(n.node_id)}</div>
@@ -231,7 +231,7 @@ function openNode(focus) {
   $('#nenroll').onclick = () => { d.remove(); openNode(); setTimeout(issueCode, 0); };
   $('#nreattach').onclick = () => reattachDialog(focus);
   wireFleet(d);
-  d.querySelectorAll('[data-fav]').forEach((b) => (b.onclick = () => { setFavNode(favNode() === b.dataset.fav ? '' : b.dataset.fav); openNode(focus); }));
+  d.querySelectorAll('[data-fav]').forEach((b) => (b.onclick = () => { setFavNode(stableNodeId(favNode()) === stableNodeId(b.dataset.fav) ? '' : b.dataset.fav); openNode(focus); }));
   // Refresh per-node session lists, then redraw them in place.
   ns.filter((n) => n.online).forEach((n) => reconcileNode(n.node_id).then(() => { const el = d.querySelector(`[data-fs="${CSS.escape(n.node_id)}"]`); if (el) { el.innerHTML = fleetSessions(n.node_id); wireFleet(d); } }));
   d.querySelectorAll('[data-spawn]').forEach((b) => (b.onclick = () => { const sel = d.querySelector(`select[data-prov="${CSS.escape(b.dataset.spawn)}"]`); const opt = sel.selectedOptions[0]; d.remove(); startSession(b.dataset.spawn, opt.value, opt.dataset.parser); }));
@@ -440,12 +440,24 @@ const ico = (k, sz = 16) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz
 // PTY providers only (no browser, no test fixtures); narrowed to the CLIs the node reports when it reports any.
 function ptyProviders(n) { const clis = ((n.machine && n.machine.provider_clis) || []).map((c) => c.id); return PROVIDERS.filter((p) => p.v !== 'browser' && p.v !== 'shell' && !p.parser && (!clis.length || clis.includes(p.v))); }
 // One favourite node (localStorage): its row under Fleet opens a submenu of PTY providers for that node.
-const favNode = () => { try { return localStorage.getItem('hq.favNode') || ''; } catch (_) { return ''; } };
-const setFavNode = (id) => { try { if (id) localStorage.setItem('hq.favNode', id); else localStorage.removeItem('hq.favNode'); } catch (_) {} };
+// Stored as {id, name}; legacy plain string accepted. Matched by stable node id (incarnation suffix stripped).
+const stableNodeId = (id) => String(id || '').split(/[#@]/)[0];
+const favRec = () => { try { const v = localStorage.getItem('hq.favNode'); if (!v) return null; try { const o = JSON.parse(v); if (o && o.id) return o; } catch (_) {} return { id: v, name: v }; } catch (_) { return null; } };
+const favNode = () => (favRec() || {}).id || '';
+const isFav = (n) => !!favNode() && stableNodeId(n.node_id) === stableNodeId(favNode());
+const setFavNode = (id) => { try { if (id) localStorage.setItem('hq.favNode', JSON.stringify({ id: stableNodeId(id), name: id })); else localStorage.removeItem('hq.favNode'); } catch (_) {} };
 const ptySub = (n) => () => n.online ? ptyProviders(n).map((p) => ({ ic: 'spark', label: p.label || p.v, fn: () => startSession(n.node_id, p.v) })) : [{ label: 'Нода офлайн', dim: true }];
+// Favourite row is always shown from storage; dimmed until the node is known and online.
+function favRow(m) {
+  const r = favRec(); if (!r) return;
+  const n = visibleNodes().find(isFav);
+  const b = menuRow({ ic: 'star', label: n ? n.node_id : r.name || r.id, right: !n ? '' : n.online ? '' : 'offline', sub: n && n.online ? ptySub(n) : null }, 0);
+  b.classList.add('favrow'); if (!n || !n.online) b.classList.add('dim');
+  const old = m.querySelector('.favrow'); if (old) { if (SUBS[0] && SUBS[0].row === old) return; old.replaceWith(b); } else m.children[0] ? m.children[0].after(b) : m.appendChild(b);
+}
 $('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); const was = !m.hidden; closeMenus(); if (was) return; m.hidden = false; m.className = 'pop amenu2'; m.innerHTML = '';
   m.appendChild(menuRow({ ic: 'server', label: 'Fleet', right: String(visibleNodes().filter((n) => n.online).length) + ' online', fn: () => openNode() }, 0));
-  { const fav = visibleNodes().find((n) => n.node_id === favNode()); if (fav) m.appendChild(menuRow({ ic: 'star', label: fav.node_id, right: fav.online ? '' : 'offline', sub: ptySub(fav) }, 0)); }
+  favRow(m);
   m.appendChild(menuRow({ ic: 'gauge', label: 'Usage & plan', right: '— % used', fn: () => openSettings('usage') }, 0));
   m.appendChild(menuRow({ ic: 'phone', label: 'Get the apps', fn: () => toast('Apps: coming soon') }, 0));
   m.appendChild(menuRow({ ic: 'book', label: 'Support', fn: () => openSupport() }, 0));
@@ -533,6 +545,7 @@ async function issueCode() {
 async function loadNodes() {
   try {
     const d = await api('/api/nodes'); S.nodes = d.nodes; S.ready = !!d.ready;
+    { const am = $('#acctmenu'); if (am && !am.hidden) favRow(am); }
     for (const n of S.nodes) {
       const key = n.status + '/' + (n.online ? 'on' : 'off'); const prev = S.lastStatus[n.node_id];
       if (prev && prev !== key) logEv(`${n.node_id}: ${prev.replace('/', ' · ')} → ${n.status} · ${n.online ? 'online' : 'offline'}`);
