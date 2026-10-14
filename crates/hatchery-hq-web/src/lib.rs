@@ -842,6 +842,7 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
         (session, provider.to_owned(), None)
     };
 
+    let in_worktree = q.session.is_none() && q.worktree.as_deref().is_some_and(|w| !w.trim().is_empty());
     let instance_id = session.session.instance_id.0;
     let session_key = serde_json::to_string(&session).unwrap_or_default();
     let label = format!("{}/{}#{}", q.node, if provider_label.is_empty() { "session" } else { &provider_label }, instance_id);
@@ -877,7 +878,7 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
         .await
         .is_err()
     {
-        schedule_draft_kill(s.clone(), control.clone(), route.clone(), session.clone(), q.node.clone(), draft_key);
+        schedule_draft_kill(s.clone(), control.clone(), route.clone(), session.clone(), q.node.clone(), draft_key, in_worktree);
         return Err("client disconnected before draft bind".into());
     }
     if let Some(f) = initial_frame {
@@ -978,6 +979,10 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
                 if matches!(requests[0], NodeRequest::Stop { .. }) {
                     let r = control.request(route.clone(), requests[0].clone()).await;
                     let ok = r.as_ref().map(|r| r.response.is_ok()).unwrap_or(false);
+                    if in_worktree {
+                        // Remove releases the managed worktree lease; the node cleans it.
+                        remove_after_stop(&control, &route, &session).await;
+                    }
                     let _ = socket.send(Message::text(json!({ "type": "ack", "op": "stop", "ok": ok, "detail": "" }).to_string())).await;
                     break;
                 }
@@ -1013,8 +1018,24 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     // Real provider-session survival (resume by session id) is future work — until
     // then keep is ignored for durability; drafts never outlive their HQ view.
     let _ = q.keep; // kept for API compat; drafts always schedule kill
-    schedule_draft_kill(s, control, route, session, q.node, draft_key);
+    schedule_draft_kill(s, control, route, session, q.node, draft_key, in_worktree);
     Ok(())
+}
+
+/// After Stop, Remove the session so the node releases (and, per its profile, cleans)
+/// the managed worktree. Retries briefly while the session settles.
+async fn remove_after_stop(
+    control: &hatchery_c2_client::C2ReconnectingHandle,
+    route: &hatchery_core::NodeRoute,
+    session: &gate4agent_node_protocol::SessionAddress,
+) {
+    for _ in 0..5 {
+        match control.request(route.clone(), gate4agent_node_protocol::NodeRequest::Remove { session: session.clone() }).await {
+            Ok(r) if r.response.is_ok() => return,
+            _ => tokio::time::sleep(std::time::Duration::from_millis(400)).await,
+        }
+    }
+    tracing::warn!(instance_id = session.session.instance_id.0, "worktree session remove did not settle");
 }
 
 fn cancel_draft_kill(s: &Shared, key: &str) {
@@ -1032,6 +1053,7 @@ fn schedule_draft_kill(
     session: gate4agent_node_protocol::SessionAddress,
     node: String,
     key: String,
+    in_worktree: bool,
 ) {
     cancel_draft_kill(&s, &key);
     let (tx, rx) = tokio::sync::oneshot::channel::<()>();
@@ -1055,7 +1077,10 @@ fn schedule_draft_kill(
                     session.workspace_id.as_str(),
                     session.session.instance_id.0
                 );
-                let _ = control.request(route, gate4agent_node_protocol::NodeRequest::Stop { session: session.clone(), force: true }).await;
+                let _ = control.request(route.clone(), gate4agent_node_protocol::NodeRequest::Stop { session: session.clone(), force: true }).await;
+                if in_worktree {
+                    remove_after_stop(&control, &route, &session).await;
+                }
                 let _ = control.browser_command(hatchery_core::BrowserClientCommand {
                     node_id: node,
                     op: hatchery_core::BrowserClientOp::Stop { session: br },
