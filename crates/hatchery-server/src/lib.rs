@@ -22,6 +22,7 @@ pub mod provision;
 #[cfg(feature = "m4a")]
 pub mod tasks;
 pub mod routing;
+pub mod m4a_gateway;
 pub mod subservice;
 pub mod supervisor;
 

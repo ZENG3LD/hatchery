@@ -177,7 +177,40 @@ impl TaskStore {
                 conn.execute(ddl, []).map_err(db)?;
             }
         }
+        let has_nick: bool = conn
+            .prepare("SELECT 1 FROM pragma_table_info('sessions') WHERE name='nick'")
+            .and_then(|mut s| s.exists([]))
+            .map_err(db)?;
+        if !has_nick {
+            conn.execute("ALTER TABLE sessions ADD COLUMN nick TEXT", []).map_err(db)?;
+        }
         Ok(Self { conn })
+    }
+
+    pub fn set_session_nick(&self, session_id: &str, nick: &str) -> Result<(), ServerError> {
+        self.conn.execute("UPDATE sessions SET nick=?2 WHERE session_id=?1", params![session_id, nick]).map_err(db)?;
+        Ok(())
+    }
+
+    pub fn session_nick(&self, session_id: &str) -> Result<Option<String>, ServerError> {
+        self.conn
+            .query_row("SELECT nick FROM sessions WHERE session_id=?1", params![session_id], |r| r.get::<_, Option<String>>(0))
+            .optional()
+            .map(Option::flatten)
+            .map_err(db)
+    }
+
+    /// (run, session nick) for every active run whose session has a nick.
+    pub fn active_runs_with_nick(&self) -> Result<Vec<(Run, String)>, ServerError> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!(
+                "SELECT {}, s.nick FROM runs r JOIN sessions s ON s.session_id=r.session_id WHERE r.status IN ('running','review') AND s.nick IS NOT NULL",
+                RUN_COLS.split(',').map(|c| format!("r.{c}")).collect::<Vec<_>>().join(",")
+            ))
+            .map_err(db)?;
+        let rows = stmt.query_map([], |r| Ok((run_row(r)?, r.get::<_, String>(11)?))).map_err(db)?;
+        rows.collect::<Result<_, _>>().map_err(db)
     }
 
     /// Replay a recorded operation result, if `op_id` was seen.
