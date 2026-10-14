@@ -249,10 +249,11 @@ const FRAME_BODY_TIMEOUT_MS: u64 = 5_000;
 const CONNECTION_SHUTDOWN_GRACE_MS: u64 = 250;
 const SPAWN_DISPATCH_TIMEOUT_MS: u64 = 2_000;
 /// Fresh Spawn stays provisional until HQ successfully attaches (first Resize /
-/// TerminalBytes). If attach never lands within this grace, the node kills the
-/// PTY and clears its bound browser station — so a reload mid-spawn cannot leave
-/// an orphan CLI with no sidebar tab.
-const PROVISIONAL_SPAWN_GRACE_MS: u64 = 5_000; // draft reconnect grace; HQ also kills drafts on WS close
+/// TerminalBytes). This is an *attach-never-arrived* timeout from spawn time —
+/// not the disconnect reconnect grace (HQ owns that, starting only on a real
+/// client WS close). A provider conversation id is a session; a PTY with no
+/// attached HQ view is still a draft and is reaped here if attach never lands.
+const PROVISIONAL_SPAWN_GRACE_MS: u64 = 30_000;
 /// How often `drive_runtime_until_shutdown`'s loop re-evaluates the session
 /// record retention policy (`NodeServerConfig::session_record_retention`).
 /// A sweep cadence, not a policy value -- the policy itself lives entirely
@@ -11036,10 +11037,12 @@ impl NodeShared {
                 continue;
             }
             if is_first_frame {
-                // First output also claims a provisional draft: a live PTY
-                // must not be reaped just because HQ's Resize/TerminalBytes
-                // is a few hundred ms late (browser fit throttle, remount).
-                self.sessionize_spawn(address.session.instance_id);
+                // Do NOT sessionize on first PTY output: a session is a
+                // provider conversation id, not bytes on the wire. Drafts
+                // leave the provisional map only when HQ attaches
+                // (Resize / TerminalBytes). The attach-never-arrived timer
+                // (PROVISIONAL_SPAWN_GRACE_MS) covers deploy lag; HQ's
+                // disconnect grace starts only on a real client WS close.
                 // This is the first PTY output this node has observed for
                 // this session -- a one-time event per spawn, not per-frame
                 // chatter (the watermark makes sure of that). A session that
@@ -11244,10 +11247,11 @@ impl NodeShared {
         released
     }
 
-    /// Mark a fresh Spawn as provisional and arm the grace reaper. A session is
-    /// sessionized (removed from this map) on the first Resize/TerminalBytes —
-    /// that is HQ successfully attaching. Until then a disconnect/reload that
-    /// never attaches, or the grace timeout, kills the PTY.
+    /// Mark a fresh Spawn as provisional and arm the attach-never-arrived
+    /// reaper (PROVISIONAL_SPAWN_GRACE_MS from spawn). Removed from this map
+    /// only when HQ attaches (Resize / TerminalBytes) — that is *not* a
+    /// provider session; it only cancels the orphan timer. Disconnect/reload
+    /// draft kills are owned by HQ and arm only on a real client WS close.
     fn mark_spawn_provisional(&self, address: SessionAddress) {
         let id = address.session.instance_id;
         self.provisional_spawns

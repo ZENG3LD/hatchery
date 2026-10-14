@@ -577,7 +577,7 @@ async fn durable_context_pack_survives_two_restarts_and_serves_finished_run_cont
     drop(client_a);
 
     // == STEP 2 ==
-    // Node auto-export-at-exit. C2 allows one operator connection at a
+    // Node auto-export-at-exit. Core operator control admits many connections; a
     // time, so this reconnects a bare adapter (no harness host attached)
     // and polls NodeRequest::Snapshot directly until
     // `session_records[…].exported_context.is_some()`. The adapter

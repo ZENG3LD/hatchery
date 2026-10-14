@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-harness-light"
-version = "0.2.8"
+version = "0.2.9"
 edition = "2021"
 description = "Stateless in-process light harness: serves the same operator wire as hatchery-harness-service, backed directly by C2 instead of the SWC task kernel"
 license = "MIT"
@@ -11,13 +11,13 @@ readme = "../../README.md"
 name = "hatchery_harness_light"
 
 [dependencies]
-hatchery-c2-client = { version = "0.2.8", path = "../hatchery-c2-client" }
-hatchery-core = { path = "../hatchery-core", version = "0.2.8" }
-hatchery-harness-api = { version = "0.2.8", path = "../hatchery-harness-api" }
-hatchery-harness-service = { version = "0.2.8", path = "../hatchery-harness-service" }
+hatchery-c2-client = { version = "0.2.9", path = "../hatchery-c2-client" }
+hatchery-core = { path = "../hatchery-core", version = "0.2.9" }
+hatchery-harness-api = { version = "0.2.9", path = "../hatchery-harness-api" }
+hatchery-harness-service = { version = "0.2.9", path = "../hatchery-harness-service" }
 gate4agent-node-protocol = { version = "0.5.2" }
 gate4agent-node-wire = { version = "0.5.2" }
-hatchery-observation-api = { version = "0.2.8", path = "../hatchery-observation-api" }
+hatchery-observation-api = { version = "0.2.9", path = "../hatchery-observation-api" }
 gate4agent-types = { version = "0.5.2" }
 serde_json = "1"
 thiserror = "2"
@@ -25,9 +25,9 @@ tokio = { version = "1", features = ["macros", "net", "rt", "sync", "time"] }
 tracing = "0.1"
 
 [dev-dependencies]
-hatchery-c2 = { version = "0.2.8", path = "../hatchery-c2" }
-hatchery-harness-client = { version = "0.2.8", path = "../hatchery-harness-client" }
-hatchery-node = { version = "0.2.8", path = "../hatchery-node", features = ["fixture"] }
+hatchery-c2 = { version = "0.2.9", path = "../hatchery-c2" }
+hatchery-harness-client = { version = "0.2.9", path = "../hatchery-harness-client" }
+hatchery-node = { version = "0.2.9", path = "../hatchery-node", features = ["fixture"] }
 tokio = { version = "1", features = ["full", "test-util"] }
 
 [target.'cfg(windows)'.dev-dependencies]

@@ -71,8 +71,8 @@ impl NodeOperatorMesh {
             nodes: BTreeMap::new(),
         });
         let (topology, _) = watch::channel(initial);
-        let (events, _) = broadcast::channel(256);
-        let (browser, _) = broadcast::channel(64);
+        let (events, _) = broadcast::channel(4096);
+        let (browser, _) = broadcast::channel(512);
         Self {
             inner: Arc::new(Mutex::new(BTreeMap::new())),
             cursors: Arc::new(Mutex::new(BTreeMap::new())),
@@ -201,8 +201,11 @@ pub async fn serve_local(
     let token = token.into();
     let mut listener = OwnerOnlyLocalListener::bind(&endpoint).await?;
     tracing::info!(%endpoint, "core operator control listening");
-    let preauth = Arc::new(Semaphore::new(4));
-    let authenticated = Arc::new(Semaphore::new(8));
+    // Many HQ term views each dial their own operator control (plus the
+    // topology watcher). Cap high enough for 100 parallel HQ PTYs with headroom
+    // for browser / one-shot dials; reject only true overload.
+    let preauth = Arc::new(Semaphore::new(32));
+    let authenticated = Arc::new(Semaphore::new(128));
     let next_id = Arc::new(AtomicU64::new(1));
     let mut connections = JoinSet::new();
     loop {
@@ -287,7 +290,7 @@ where
     let Ok(_op) = authenticated.try_acquire_owned() else {
         let _ = write_json_frame_limited(
             &mut pipe,
-            &C2ServerFrame::Rejected(fail(C2RelayFailureCode::OperatorAlreadyConnected, "operator already connected")),
+            &C2ServerFrame::Rejected(fail(C2RelayFailureCode::OperatorAlreadyConnected, "operator connection limit reached")),
             MAX_C2_SERVER_FRAME_BYTES,
         ).await;
         return Ok(());
@@ -313,7 +316,7 @@ where
     // read_client_frame is not cancellation-safe: inside select! a busy event/browser
     // branch could drop a half-read frame, desync the stream and close the operator
     // connection. Read frames on their own task and hand complete ones over.
-    let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel(64);
+    let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel(512);
     // Requests and browser ops run on their own tasks so a slow node RPC never
     // stalls frame/event delivery on this connection; replies come back here.
     let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<C2ServerFrame>();

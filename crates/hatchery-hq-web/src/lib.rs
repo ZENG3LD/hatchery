@@ -132,9 +132,10 @@ pub struct AppState {
     /// the watcher can replace a dead handle after the event stream ends.
     pub topology: std::sync::RwLock<Option<hatchery_c2_client::C2ReconnectingHandle>>,
     /// Node events (terminal frames, controller changes, ...) fanned out from
-    /// the single held operator control to every live terminal view. Core
-    /// admits only one operator connection at a time, so all views must share
-    /// this one stream rather than each dialing its own.
+    /// the topology-watcher operator control to every live terminal view.
+    /// Each `/api/term` also dials its own operator control for RPCs so many
+    /// concurrent PTYs do not share one request pipe; frames still arrive
+    /// here from the watcher so every view sees the mesh event stream once.
     pub node_events: broadcast::Sender<std::sync::Arc<Value>>,
     /// Dig2browser frames / lifecycle from the held operator control.
     pub browser_events: broadcast::Sender<std::sync::Arc<hatchery_core::BrowserStreamEvent>>,
@@ -483,6 +484,39 @@ pub fn spawn_topology_watcher(state: Shared) {
     });
 }
 
+/// Dial a dedicated operator control for one HQ term (or browser) view.
+/// Events on this link are drained and discarded: live frames come from the
+/// shared topology-watcher fanout (`node_events`). Dropping the returned
+/// handle (after draft-kill) tears the connection down.
+async fn dial_term_operator(cfg: &Config) -> Result<hatchery_c2_client::C2ReconnectingHandle, String> {
+    let dialed = match cfg.c2_control.parse::<SocketAddr>() {
+        Ok(addr) => {
+            hatchery_c2_client::connect_tunnel_reconnecting(addr, cfg.c2_token.clone()).await
+        }
+        Err(_) => {
+            hatchery_c2_client::connect_local_reconnecting(
+                cfg.c2_control.clone(),
+                cfg.c2_token.clone(),
+            )
+            .await
+        }
+    }
+    .map_err(|e| e.to_string())?;
+    let (handle, mut events) = dialed;
+    tokio::spawn(async move {
+        let (regular, harness, browser) = events.split_all();
+        loop {
+            tokio::select! {
+                biased;
+                ev = harness.recv() => { if ev.is_none() { break; } }
+                ev = regular.recv() => { if ev.is_none() { break; } }
+                ev = browser.recv() => { if ev.is_none() { break; } }
+            }
+        }
+    });
+    Ok(handle)
+}
+
 // ---------------------------------------------------------------------------------- terminals
 
 #[derive(Deserialize)]
@@ -545,16 +579,27 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     use hatchery_core::{C2NodeResponse, NodeId, NodeRoute, NodeTransportState};
     let say = |kind: &str, text: String| json!({ "type": kind, "text": text }).to_string();
     let node = NodeId::new(q.node.clone()).map_err(|e| e.to_string())?;
-    let Some(control) = s.topology.read().ok().and_then(|g| g.clone()) else {
+    // Topology watcher: online check + shared event fanout. Per-term control
+    // below carries Spawn/Resize/bytes so 20–100 parallel HQ PTYs do not share
+    // one request pipe (that used to close the single operator.sock under load).
+    let topo_handle = s.topology.read().ok().and_then(|g| g.clone());
+    let Some(topo_handle) = topo_handle else {
         let _ = socket.send(Message::text(say("error", "operator control not ready yet".to_owned()))).await;
         return Err("operator control not ready".into());
     };
     let mut events = s.node_events.subscribe();
-    let topo = control.current_topology();
+    let topo = topo_handle.current_topology();
     let observed = topo.nodes.iter().find(|n| n.node_id == node && n.transport == NodeTransportState::Online);
     let Some(_observed) = observed else {
         let _ = socket.send(Message::text(say("error", format!("node {} is not online on core operator", q.node)))).await;
         return Err("node not online".into());
+    };
+    let control = match dial_term_operator(&s.config).await {
+        Ok(h) => h,
+        Err(e) => {
+            let _ = socket.send(Message::text(say("error", format!("operator dial failed: {e}")))).await;
+            return Err(format!("operator dial failed: {e}"));
+        }
     };
     use gate4agent_node_protocol::NodeIncarnationId;
     let mut route = NodeRoute {
@@ -599,10 +644,10 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
         let session = match spawned.response {
             Ok(C2NodeResponse::SpawnAccepted { session }) => {
                 route.expected_incarnation_id = spawned.incarnation_id;
-                // Claim the draft on the node NOW (Resize sessionizes the
-                // provisional spawn). Do not wait for the browser fit/resize:
-                // a slow or remounting client used to lose the race with the
-                // node's 5s provisional reaper and the HQ 4s draft-kill timer.
+                // Claim the draft on the node NOW (Resize cancels the
+                // attach-never-arrived provisional timer). Do not wait for the
+                // browser fit/resize: HQ's disconnect grace starts only on a
+                // real WS close; the node's 30s timer covers spawn-without-attach.
                 let _ = control
                     .request(route.clone(), NodeRequest::Resize { session: session.clone(), size })
                     .await;

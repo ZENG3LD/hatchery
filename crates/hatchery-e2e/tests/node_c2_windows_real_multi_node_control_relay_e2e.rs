@@ -312,11 +312,10 @@ async fn windows_real_two_node_c2_control_relay_routes_commands_events_and_prese
     });
     let mut route_a = route(&initial, &id_a);
     let route_b = route(&initial, &id_b);
-    let second = match connect_core_operator(&control_endpoint, c2_token).await {
-        Err(error) => error,
-        Ok(_) => panic!("second C2 operator unexpectedly connected"),
-    };
-    assert!(matches!(second, C2ControlError::Relay(ref failure) if failure.code == C2RelayFailureCode::OperatorAlreadyConnected));
+    // Core admits many concurrent operator controls (HQ per-term dials).
+    let _second = connect_core_operator(&control_endpoint, c2_token)
+        .await
+        .expect("second operator control should connect alongside the first");
 
     let (snapshot_a, snapshot_b) = tokio::join!(
         control.request(route_a.clone(), NodeRequest::Snapshot),
