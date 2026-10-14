@@ -38,6 +38,7 @@ pub struct Hub {
     tasks: Mutex<TaskStore>,
     /// Bumped on every message sent; lets HQ long-poll for new mail instead of polling blindly.
     mail_signal: (Mutex<u64>, Condvar),
+    advice: Mutex<crate::routing::AdviceGate>,
 }
 
 fn refused(r: Refused) -> HubError {
@@ -64,13 +65,44 @@ fn str_field<'a>(v: &'a Value, name: &str) -> Result<&'a str, HubError> {
     v.get(name).and_then(Value::as_str).ok_or_else(|| HubError::new(400, format!("missing field: {name}")))
 }
 
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+}
+
 impl Hub {
+    fn routing(&self) -> Result<(crate::routing::RoutingConfig, std::collections::BTreeMap<(String, String), crate::routing::SeatState>), HubError> {
+        let cfg = crate::routing::RoutingConfig::load(&self.data_dir).map_err(|e| HubError::new(500, e))?;
+        let tasks = self.tasks.lock().expect("tasks");
+        // Fold the recent signal window (bounded table).
+        let mut all = Vec::new();
+        let mut after = None;
+        loop {
+            let page = tasks.signals(None, after, 500).map_err(int)?;
+            let done = page.len() < 500;
+            after = page.last().map(|s| s.id).or(after);
+            all.extend(page);
+            if done {
+                break;
+            }
+        }
+        let state = crate::routing::fold_signals(&all, &cfg);
+        Ok((cfg, state))
+    }
+
+    /// Routing recommendation for `role` (operator API and node door).
+    pub fn recommend(&self, role: &str) -> Result<Value, HubError> {
+        let (cfg, state) = self.routing()?;
+        let rec = crate::routing::recommend(&cfg, &state, role, now_ms()).map_err(|e| HubError::new(400, e))?;
+        Ok(json!({ "recommendation": rec }))
+    }
+
     pub fn open(data_dir: &Path) -> Result<Self, crate::error::ServerError> {
         Ok(Self {
             data_dir: data_dir.to_owned(),
             messenger: Mutex::new(Messenger::open(data_dir)?),
             tasks: Mutex::new(TaskStore::open(data_dir)?),
             mail_signal: (Mutex::new(0), Condvar::new()),
+            advice: Mutex::new(Default::default()),
         })
     }
 
@@ -131,6 +163,16 @@ impl Hub {
                 }
                 let changed = self.tasks.lock().expect("tasks").set_status(id, status, Some(node_id)).map_err(|e| HubError::new(500, e.to_string()))?;
                 if changed { Ok(json!({ "ok": true })) } else { Err(HubError::new(403, "refused")) }
+            }
+            "task.route" => self.recommend(str_field(payload, "role")?),
+            // Advisor anti-noise gate: an advisor session asks before it sends advice via m4a.
+            "task.advice_gate" => {
+                let (cfg, _) = self.routing()?;
+                let advisor = format!("{node_id}/{}", opt_str(payload, "advisor").unwrap_or("advisor"));
+                match self.advice.lock().expect("advice").check(&cfg.advisor, &advisor, str_field(payload, "topic")?, now_ms()) {
+                    Ok(()) => Ok(json!({ "allow": true })),
+                    Err(why) => Ok(json!({ "allow": false, "reason": why })),
+                }
             }
             // Short limit / login / ready signal read off a session screen by the node.
             "task.session_signal" => {
@@ -236,6 +278,19 @@ impl Hub {
                     .map_err(refused)?;
                 Ok(json!({ "run": run }))
             }
+            ("GET", ["v1", "routing"]) => {
+                let (cfg, state) = self.routing()?;
+                let seats: Vec<Value> = cfg
+                    .seats
+                    .iter()
+                    .map(|seat| {
+                        let st = state.get(&(seat.node.clone(), seat.provider.clone())).cloned().unwrap_or_default();
+                        json!({ "seat": seat, "state": st })
+                    })
+                    .collect();
+                Ok(json!({ "roles": cfg.roles, "seats": seats, "advisor": cfg.advisor }))
+            }
+            ("POST", ["v1", "routing", "recommend"]) => self.recommend(str_field(body, "role")?),
             ("GET", ["v1", "signals"]) => {
                 let after = query_param(query, "after").and_then(|v| v.parse().ok());
                 let limit = query_param(query, "limit").and_then(|v| v.parse().ok()).unwrap_or(100);

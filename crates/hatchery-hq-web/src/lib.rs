@@ -342,7 +342,7 @@ async fn api_server(State(s): State<Shared>, Path(rest): Path<String>, method: M
         return err(StatusCode::SERVICE_UNAVAILABLE, "server API is not configured");
     };
     let first = rest.split(['/', '?']).next().unwrap_or_default();
-    if !safe_rest(&rest) || !matches!(first, "mail" | "tasks" | "runs" | "sessions" | "signals") || !matches!(method, Method::GET | Method::POST) {
+    if !safe_rest(&rest) || !matches!(first, "mail" | "tasks" | "runs" | "sessions" | "signals" | "routing") || !matches!(method, Method::GET | Method::POST) {
         return err(StatusCode::NOT_FOUND, "not found");
     }
     if rest == "mail/sent" {

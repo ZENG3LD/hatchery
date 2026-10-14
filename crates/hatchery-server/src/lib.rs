@@ -21,6 +21,7 @@ pub mod messenger;
 pub mod provision;
 #[cfg(feature = "m4a")]
 pub mod tasks;
+pub mod routing;
 pub mod subservice;
 pub mod supervisor;
 
