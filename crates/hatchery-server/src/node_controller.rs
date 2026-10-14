@@ -183,6 +183,63 @@ impl OperatorLink {
         }
     }
 
+    /// Enqueue one g4a request toward the node now (preserving send order) and
+    /// return a future that waits for its reply, so callers can pipeline.
+    pub async fn request_pipelined<T: serde::Serialize>(
+        &self,
+        frame: &T,
+        timeout: std::time::Duration,
+    ) -> Result<impl std::future::Future<Output = Result<G4aMessage, OperatorError>> + Send + 'static, OperatorError> {
+        let op_id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let g4a = serde_json::to_value(frame).map_err(|_| OperatorError::Encode)?;
+        let bytes = serde_json::to_vec(&serde_json::json!({ "op_id": op_id, "g4a": g4a })).map_err(|_| OperatorError::Encode)?;
+        let (done, wait) = tokio::sync::oneshot::channel();
+        self.pending.lock().expect("pending").insert(op_id, done);
+        if self.tx.send(bytes).await.is_err() {
+            self.pending.lock().expect("pending").remove(&op_id);
+            return Err(OperatorError::Closed);
+        }
+        let pending = self.pending.clone();
+        Ok(async move {
+            match tokio::time::timeout(timeout, wait).await {
+                Ok(Ok(msg)) => Ok(msg),
+                Ok(Err(_)) => Err(OperatorError::Closed),
+                Err(_) => {
+                    pending.lock().expect("pending").remove(&op_id);
+                    Err(OperatorError::Timeout)
+                }
+            }
+        })
+    }
+
+    /// Enqueue a browser op now (ordered) and return a future for its reply.
+    pub async fn browser_op_pipelined(
+        &self,
+        op: &BrowserClientOp,
+        timeout: std::time::Duration,
+    ) -> Result<impl std::future::Future<Output = Result<BrowserOpReply, OperatorError>> + Send + 'static, OperatorError> {
+        let op_id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let bytes = serde_json::to_vec(&serde_json::json!({ "op_id": op_id, "browser": op }))
+            .map_err(|_| OperatorError::Encode)?;
+        let (done, wait) = tokio::sync::oneshot::channel();
+        self.browser_pending.lock().expect("pending").insert(op_id, done);
+        if self.tx.send(bytes).await.is_err() {
+            self.browser_pending.lock().expect("pending").remove(&op_id);
+            return Err(OperatorError::Closed);
+        }
+        let pending = self.browser_pending.clone();
+        Ok(async move {
+            match tokio::time::timeout(timeout, wait).await {
+                Ok(Ok(msg)) => Ok(msg),
+                Ok(Err(_)) => Err(OperatorError::Closed),
+                Err(_) => {
+                    pending.lock().expect("pending").remove(&op_id);
+                    Err(OperatorError::Timeout)
+                }
+            }
+        })
+    }
+
     /// Send one g4a request (e.g. a `RoutedNodeRequest`) and wait for its reply.
     pub async fn request<T: serde::Serialize>(&self, frame: &T, timeout: std::time::Duration) -> Result<G4aMessage, OperatorError> {
         let op_id = self.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

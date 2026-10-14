@@ -28,5 +28,7 @@ async fn main() {
         std::process::exit(2)
     });
     tracing::info!("web HQ on http://{listen}/ (tokens stay on the server side)");
+    use axum::serve::ListenerExt;
+    let listener = listener.tap_io(|tcp| { let _ = tcp.set_nodelay(true); });
     let _ = axum::serve(listener, app).with_graceful_shutdown(async { let _ = tokio::signal::ctrl_c().await; }).await;
 }

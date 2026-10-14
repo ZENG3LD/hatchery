@@ -281,7 +281,12 @@ async fn api_nodes(State(s): State<Shared>) -> Response {
     } else {
         match tokio::time::timeout(
             Duration::from_secs(3),
-            hatchery_c2_client::connect_local(&cfg.c2_control, &cfg.c2_token),
+            async {
+                match cfg.c2_control.parse::<SocketAddr>() {
+                    Ok(addr) => hatchery_c2_client::connect_tunnel_tcp(addr, &cfg.c2_token).await,
+                    Err(_) => hatchery_c2_client::connect_local(&cfg.c2_control, &cfg.c2_token).await,
+                }
+            },
         )
         .await
         {
@@ -401,11 +406,17 @@ pub fn spawn_mail_watcher(state: Shared) {
 pub fn spawn_topology_watcher(state: Shared) {
     tokio::spawn(async move {
         loop {
-            match hatchery_c2_client::connect_local_reconnecting(
-                state.config.c2_control.clone(),
-                state.config.c2_token.clone(),
-            )
-            .await
+            // A host:port control endpoint is dialed over TCP with TCP_NODELAY.
+            // (The unix entry on edge is a socket-proxyd hop whose outbound TCP to
+            // core has Nagle on: back-to-back keystrokes waited for each other's ACK.)
+            let dialed = match state.config.c2_control.parse::<SocketAddr>() {
+                Ok(addr) => hatchery_c2_client::connect_tunnel_reconnecting(addr, state.config.c2_token.clone()).await,
+                Err(_) => hatchery_c2_client::connect_local_reconnecting(
+                    state.config.c2_control.clone(),
+                    state.config.c2_token.clone(),
+                ).await,
+            };
+            match dialed
             {
                 Ok((handle, mut events)) => {
                     let _ = state.topology.set(handle);
@@ -606,8 +617,9 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
         let _ = socket.send(Message::text(msg.to_string())).await;
     }
 
-    let mut pending: Option<Value> = None;
-    let mut tick = tokio::time::interval(Duration::from_millis(40));
+    // PTY latency: frames go out the moment they arrive (no 40ms coalescing tick),
+    // and input is enqueued toward core in order without waiting for each reply
+    // (the old per-chunk `request().await` held frames and later keys for a full RTT).
     let mut settle = tokio::time::interval(Duration::from_millis(250));
     let parser = q.parser.as_deref().unwrap_or(if provider_label.is_empty() { "shell" } else { &provider_label });
     let mut events_layer = hatchery_session_events::EventStream::new(parser);
@@ -616,45 +628,57 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     let now_ms = move || started.elapsed().as_millis() as u64;
     let id_token = format!("\"instance_id\":{instance_id}");
     let mut last_size: Option<(u16, u16)> = None;
+    // (client seq, ws receipt, handed to the C2 link) of the oldest input still awaiting its echo frame.
+    let mut awaiting: Option<(Value, std::time::Instant, std::time::Instant)> = None;
+    let (ack_tx, mut ack_rx) = tokio::sync::mpsc::unbounded_channel::<(Value, Value, bool, String, u64)>();
     loop {
         tokio::select! {
+            ack = ack_rx.recv() => {
+                let Some((op, seq, ok, detail, ack_ms)) = ack else { continue };
+                if !ok { tracing::info!(op = %op, ok, detail = %detail.chars().take(160).collect::<String>(), "terminal command from web HQ"); }
+                let _ = socket.send(Message::text(json!({ "type": "ack", "op": op, "ok": ok, "seq": seq, "ack_ms": ack_ms, "detail": detail }).to_string())).await;
+            }
             event = events.recv() => {
                 let value = match event {
                     Ok(v) => v,
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };
+                let blob = value.to_string();
+                if !blob.contains(&id_token) { continue; }
                 let mut frames = Vec::new();
                 collect_frames(&value, &mut frames);
-                let blob = value.to_string();
-                if !frames.is_empty() && blob.contains(&id_token) {
-                    pending = frames.pop();
+                let Some(f) = frames.pop() else { continue };
+                // The latency stamp rides inside the frame: a separate small message
+                // ahead of it made the frame wait behind it (Nagle on the client leg).
+                let plat = awaiting.take().map(|(seq, recv_at, fwd_at)| json!({
+                    "seq": seq,
+                    "hq_queue_us": fwd_at.duration_since(recv_at).as_micros() as u64,
+                    "hq_to_frame_ms": recv_at.elapsed().as_millis() as u64,
+                }));
+                let bytes: Vec<u8> = f["formatted"].as_array().map(|a| a.iter().map(|x| x.as_u64().unwrap_or(0) as u8).collect()).unwrap_or_default();
+                let msg = json!({
+                    "type": "frame", "rows": f["size"]["rows"], "cols": f["size"]["columns"],
+                    "cursor": [f["cursor_row"], f["cursor_col"]], "ansi": B64.encode(&bytes),
+                    "text": f["contents"], "plat": plat,
+                });
+                if socket.send(Message::text(msg.to_string())).await.is_err() { break; }
+                if let Some(text) = f["contents"].as_str() {
+                    let evs = events_layer.observe_screen(text, now_ms());
+                    if !evs.is_empty() && socket.send(Message::text(json!({ "type": "events", "events": evs }).to_string())).await.is_err() { break; }
                 }
             }
             _ = settle.tick() => {
                 let evs = events_layer.tick(now_ms());
                 if !evs.is_empty() && socket.send(Message::text(json!({ "type": "events", "events": evs }).to_string())).await.is_err() { break; }
             }
-            _ = tick.tick() => {
-                if let Some(f) = pending.take() {
-                    if let Some(text) = f["contents"].as_str() {
-                        let evs = events_layer.observe_screen(text, now_ms());
-                        if !evs.is_empty() && socket.send(Message::text(json!({ "type": "events", "events": evs }).to_string())).await.is_err() { break; }
-                    }
-                    let bytes: Vec<u8> = f["formatted"].as_array().map(|a| a.iter().map(|x| x.as_u64().unwrap_or(0) as u8).collect()).unwrap_or_default();
-                    let msg = json!({
-                        "type": "frame", "rows": f["size"]["rows"], "cols": f["size"]["columns"],
-                        "cursor": [f["cursor_row"], f["cursor_col"]], "ansi": B64.encode(&bytes),
-                        "text": f["contents"],
-                    });
-                    if socket.send(Message::text(msg.to_string())).await.is_err() { break; }
-                }
-            }
             incoming = socket.recv() => {
+                let recv_at = std::time::Instant::now();
                 let Some(Ok(Message::Text(text))) = incoming else { if matches!(incoming, Some(Ok(Message::Close(_))) | None | Some(Err(_))) { break } else { continue } };
                 let Ok(cmd) = serde_json::from_str::<Value>(&text) else { continue };
                 let chunks = |bytes: Vec<u8>| -> Vec<NodeRequest> { bytes.chunks(64).map(|c| NodeRequest::TerminalBytes { session: session.clone(), bytes: c.to_vec() }).collect() };
-                let mut requests: Vec<NodeRequest> = match cmd["t"].as_str() {
+                let is_input = matches!(cmd["t"].as_str(), Some("data") | Some("prompt"));
+                let requests: Vec<NodeRequest> = match cmd["t"].as_str() {
                     Some("data") => cmd["data"].as_str().map(|d| chunks(d.as_bytes().to_vec())).unwrap_or_default(),
                     Some("prompt") => cmd["text"].as_str().map(|d| chunks(format!("{d}\r").into_bytes())).unwrap_or_default(),
                     Some("resize") => {
@@ -670,21 +694,37 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
                     Some("stop") => vec![NodeRequest::Stop { session: session.clone(), force: true }],
                     _ => Vec::new(),
                 };
-                if !requests.is_empty() {
-                    let mut last = None;
-                    let stopping = matches!(requests[0], NodeRequest::Stop { .. });
-                    for request in requests.drain(..) {
-                        let r = control.request(route.clone(), request).await;
-                        let failed = r.as_ref().map(|x| x.response.is_err()).unwrap_or(true);
-                        last = Some(r);
-                        if failed { break; }
-                    }
-                    let result = last.expect("at least one request");
-                    let ok = result.as_ref().map(|r| r.response.is_ok()).unwrap_or(false);
-                    tracing::info!(op = %cmd["t"], ok, detail = %match &result { Ok(r) => format!("{:?}", r.response).chars().take(160).collect::<String>(), Err(e) => e.to_string() }, "terminal command from web HQ");
-                    let _ = socket.send(Message::text(json!({ "type": "ack", "op": cmd["t"], "ok": ok, "detail": if ok { String::new() } else { match &result { Ok(r) => format!("{:?}", r.response), Err(e) => e.to_string() } } }).to_string())).await;
-                    if stopping { break; }
+                if requests.is_empty() { continue; }
+                if matches!(requests[0], NodeRequest::Stop { .. }) {
+                    let r = control.request(route.clone(), requests[0].clone()).await;
+                    let ok = r.as_ref().map(|r| r.response.is_ok()).unwrap_or(false);
+                    let _ = socket.send(Message::text(json!({ "type": "ack", "op": "stop", "ok": ok, "detail": "" }).to_string())).await;
+                    break;
                 }
+                // Enqueue every chunk now, in order; replies are collected off-loop.
+                let mut waits = Vec::with_capacity(requests.len());
+                let mut enqueue_err = None;
+                for request in requests {
+                    match control.start_request(route.clone(), request) {
+                        Ok(w) => waits.push(w),
+                        Err(e) => { enqueue_err = Some(e.to_string()); break; }
+                    }
+                }
+                let fwd_at = std::time::Instant::now();
+                if is_input && awaiting.is_none() { awaiting = Some((cmd["seq"].clone(), recv_at, fwd_at)); }
+                let (op, seq, tx) = (cmd["t"].clone(), cmd["seq"].clone(), ack_tx.clone());
+                tokio::spawn(async move {
+                    let mut ok = enqueue_err.is_none();
+                    let mut detail = enqueue_err.unwrap_or_default();
+                    for w in waits {
+                        match w.finish().await {
+                            Ok(r) if r.response.is_ok() => {}
+                            Ok(r) => { ok = false; detail = format!("{:?}", r.response); }
+                            Err(e) => { ok = false; detail = e.to_string(); }
+                        }
+                    }
+                    let _ = tx.send((op, seq, ok, detail, fwd_at.elapsed().as_millis() as u64));
+                });
             }
         }
     }

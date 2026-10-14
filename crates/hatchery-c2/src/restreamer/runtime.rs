@@ -178,7 +178,11 @@ impl Restreamer {
         Self {
             uplink_ready: Arc::new(tokio::sync::Notify::new()),
             inner: Arc::new(Mutex::new(Inner {
-                buffer: ReplayBuffer::new(buffer_limits).with_default_credit(64),
+                // Per-stream credit: a PTY burst (echo frames + replies) easily has >64
+                // messages in flight over the C2->core RTT; at 0 credit the frame is
+                // refused and, as the node does not replay it, the inner Noise stream to
+                // core desyncs and the session wedges. Hard limits stay max_events/bytes.
+                buffer: ReplayBuffer::new(buffer_limits).with_default_credit(1024),
                 channels: BTreeMap::new(),
                 keys,
                 pushed_to_core: false,

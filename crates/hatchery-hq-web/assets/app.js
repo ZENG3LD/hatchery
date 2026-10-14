@@ -463,6 +463,7 @@ function renderInfo() {
     const kv = `<div class="kv"><span>Session</span><span class="ell">${esc(lbl)}</span></div><div class="kv"><span>Status</span><span>${st}</span></div><div class="kv"><span>Size</span><span>${term.cols}×${term.rows}</span></div>`;
     const lay = S.ptyLayout || 'native'; const link = $('#tlink').dataset.url;
     const ctl = `<div class="tog cp-tog"><button data-cl="native" class="${lay === 'native' ? 'on' : ''}">PTY</button><button data-cl="chat" class="${lay === 'chat' ? 'on' : ''}">Chat view</button></div>
+      <div class="sub plat">PTY input latency: <span id="ptylat">${platText(x)}</span></div>
       <div class="row cp-row"><button class="btn" data-c="paste">Paste</button>${link ? '<button class="btn blue" data-c="link" title="' + esc(link) + '">Open link</button>' : ''}<button class="btn" data-c="reattach">Reattach…</button><button class="btn red" data-c="stop"${x.ended ? ' disabled' : ''}>Stop</button></div>`;
     const env = n && n.environment ? n.environment : null;
     const brief = n ? `${nodeStatus(n)}${n.kind ? ' · ' + esc(n.kind) : ''}${(S.sessions[id] || []).filter((s) => !s.ended).length ? ' · ' + (S.sessions[id] || []).filter((s) => !s.ended).length + ' sessions' : ''}` : 'unknown';
@@ -551,7 +552,22 @@ function openUrlOnNode(uri) {
 // A sidebar entry is 'starting' until the node returns a session id; failures remove it.
 const wsUrl = (path, q) => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${path}?${q}`;
 const sessLabel = (node, x) => x.instance_id != null ? `${node}/${x.provider}#${x.instance_id}` : `${x.provider} · ${node}`;
-function tsend(o, sess) { const x = sess || S.ptySession; if (x && x._ws && x._ws.readyState === 1) x._ws.send(JSON.stringify(o)); }
+function tsend(o, sess) {
+  const x = sess || S.ptySession; if (!(x && x._ws && x._ws.readyState === 1)) return;
+  if (o.t === 'data') { x.platSeq = (x.platSeq || 0) + 1; o.seq = x.platSeq; (x.platSent ||= {})[o.seq] = performance.now(); }
+  x._ws.send(JSON.stringify(o));
+}
+// PTY input latency per hop: keydown/mouse -> hq-web (wire) -> core/C2/node echo frame back at hq-web (hq) -> client wire -> xterm render.
+function recordPlat(sess, a) {
+  const done = performance.now(); const total = done - a.t0; const render = done - a.at; const wire = Math.max(0, a.at - a.t0 - a.hq);
+  const h = (sess.platHist ||= []); h.push({ seq: a.seq, total, wire, hq: a.hq, render, q: a.q / 1000 }); if (h.length > 50) h.shift();
+  if (S.panel && S.tab === 'info' && S.view === 'pty') { const el = $('#ptylat'); if (el) el.innerHTML = platText(sess); }
+}
+function platText(sess) {
+  const h = (sess && sess.platHist) || []; if (!h.length) return 'type or click to measure';
+  const med = (k) => { const v = h.map((x) => x[k]).filter((x) => x != null).sort((a, b) => a - b); return v.length ? Math.round(v[v.length >> 1]) : '–'; };
+  return `median of ${h.length}: <b>${med('total')} ms</b><br>client↔HQ ${med('wire')} · HQ→core→C2→node→HQ ${med('hq')} · render ${med('render')} · input ack ${med('ack')} ms`;
+}
 function recordSession(node, sess) { const arr = (S.sessions[node] ||= []); if (!arr.includes(sess)) arr.push(sess); }
 function dropSession(node, sess) { const arr = S.sessions[node]; if (!arr) return; const i = arr.indexOf(sess); if (i >= 0) arr.splice(i, 1); if (S.ptySession === sess) { S.ptySession = null; if (S.view === 'pty') openChat(S.chat || (S.chats[0] || {}).target); } renderSidebar(); }
 function endSession(node, sess, why) {
@@ -560,9 +576,9 @@ function endSession(node, sess, why) {
   renderSidebar(); if (S.ptySession === sess) $('#tinfo').textContent = `${sessLabel(node, sess)} — ended`;
   setTimeout(() => dropSession(node, sess), 8000); // grace: last output stays visible
 }
-function paint(sess) {
+function paint(sess, onRendered) {
   if (!sess || S.ptySession !== sess) return;
-  term.reset(); if (sess.lastAnsi) term.write(sess.lastAnsi);
+  term.reset(); if (sess.lastAnsi) term.write(sess.lastAnsi, onRendered ? () => requestAnimationFrame(onRendered) : undefined);
   window.lastFrameText = sess.lastText || '';
   if (S.ptyLayout === 'chat') renderPtyChat(sess.lastText || '');
   const u = findUrl(sess.lastText, sess.cols || term.cols); const tl = $('#tlink'); if (u) { tl.dataset.url = u; tl.title = u; tl.hidden = false; } else { tl.hidden = true; delete tl.dataset.url; }
@@ -587,10 +603,13 @@ function connectSession(node, sess, { provider, parser, attach } = {}) {
     }
     if (d.type === 'error') { if (!bound) { toast(`${sess.provider} on ${node}: ${d.text}`); dropSession(node, sess); } else toast(d.text); }
     if (d.type === 'ack' && !d.ok) toast('Refused: ' + String(d.detail).slice(0, 120));
+    if (d.type === 'ack' && d.seq != null && sess.platHist) { const h = sess.platHist.find((x) => x.seq === d.seq); if (h) h.ack = d.ack_ms; }
+    const pl = d.type === 'frame' && d.plat; if (pl) { const t0 = (sess.platSent || {})[pl.seq]; if (t0 != null) { delete sess.platSent[pl.seq]; sess.platArm = { seq: pl.seq, t0, at: performance.now(), hq: pl.hq_to_frame_ms, q: pl.hq_queue_us }; } }
     if (d.type === 'events' && S.ptySession === sess) onEvents(node, d.events);
     if (d.type === 'frame') {
       sess.lastAnsi = Uint8Array.from(atob(d.ansi), (c) => c.charCodeAt(0)); sess.lastText = d.text; sess.cols = d.cols; sess.lastFrame = Date.now();
-      if (S.ptySession === sess) { S.lastFrame = Date.now(); paint(sess); }
+      const arm = sess.platArm; sess.platArm = null;
+      if (S.ptySession === sess) { S.lastFrame = Date.now(); paint(sess, arm ? () => recordPlat(sess, arm) : null); }
     }
   };
   sock.onclose = () => {

@@ -31,7 +31,7 @@ pub struct NodeSession {
     channel_id: u32,
     keys: UpstreamKeys,
     out: mpsc::Sender<Frame>,
-    down: mpsc::Receiver<Vec<u8>>,
+    down: mpsc::UnboundedReceiver<Vec<u8>>,
     transport: NoiseTransport,
     journal: Option<Arc<UplinkJournal>>,
     tasks: Vec<JoinHandle<()>>,
@@ -60,7 +60,10 @@ impl NodeSession {
         let _ = stream.set_nodelay(true);
         let (mut rd, mut wr) = stream.into_split();
         let (out_tx, mut out_rx) = mpsc::channel::<Frame>(64);
-        let (down_tx, down_rx) = mpsc::channel::<Vec<u8>>(64);
+        // Unbounded: the reader must never stop draining the uplink socket. With a bounded
+        // queue a full downlink (fast typing) stalled the reader, C2 then stalled on its
+        // downlink write, stopped reading our uplink, and our sender blocked: a deadlock.
+        let (down_tx, down_rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
         let writer = tokio::spawn(async move {
             while let Some(frame) = out_rx.recv().await {
@@ -88,7 +91,7 @@ impl NodeSession {
                             filled -= used;
                             match frame.frame_type {
                                 FrameType::Data => {
-                                    if down_tx.send(frame.payload).await.is_err() {
+                                    if down_tx.send(frame.payload).is_err() {
                                         return;
                                     }
                                 }
