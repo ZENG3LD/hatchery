@@ -387,6 +387,16 @@ impl Hub {
                 }
                 if self.tasks.lock().expect("tasks").assign(id, node).map_err(|e| HubError::new(500, e.to_string()))? { Ok(json!({ "ok": true })) } else { Err(HubError::new(409, "task cannot be assigned")) }
             }
+            // Operator archive: finished tasks and idle session records leave the lists.
+            ("POST", ["v1", "tasks", id, "archive"]) => {
+                let id: i64 = id.parse().map_err(|_| HubError::new(400, "bad id"))?;
+                let task = self.tasks.lock().expect("tasks").archive_task(id).map_err(int)?.map_err(refused)?;
+                Ok(json!({ "task": task }))
+            }
+            ("POST", ["v1", "sessions", id, "archive"]) => {
+                self.tasks.lock().expect("tasks").archive_session(id).map_err(int)?.map_err(refused)?;
+                Ok(json!({ "archived": id }))
+            }
             ("POST", ["v1", "tasks", id, "cancel"]) => {
                 let id: i64 = id.parse().map_err(|_| HubError::new(400, "bad id"))?;
                 if self.tasks.lock().expect("tasks").set_status(id, "cancelled", None).map_err(|e| HubError::new(500, e.to_string()))? { Ok(json!({ "ok": true })) } else { Err(HubError::new(409, "task is final")) }

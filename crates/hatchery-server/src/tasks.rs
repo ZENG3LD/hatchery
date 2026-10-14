@@ -15,7 +15,7 @@ use std::path::Path;
 
 pub const TASK_STATES: &[&str] =
     &["backlog", "open", "assigned", "in_progress", "review", "done", "failed", "cancelled"];
-pub const FINAL_TASK_STATES: &[&str] = &["done", "failed", "cancelled"];
+pub const FINAL_TASK_STATES: &[&str] = &["done", "failed", "cancelled", "archived"];
 pub const RUN_STATES: &[&str] = &["running", "review", "done", "failed", "cancelled"];
 
 #[derive(Clone, Debug, Serialize, Eq, PartialEq)]
@@ -273,7 +273,7 @@ impl TaskStore {
         let mut stmt = self
             .conn
             .prepare(&format!(
-                "SELECT {TASK_COLS} FROM tasks WHERE (?1 IS NULL OR assignee=?1) AND (?2=0 OR status NOT IN ('done','failed','cancelled')) ORDER BY id"
+                "SELECT {TASK_COLS} FROM tasks WHERE (?1 IS NULL OR assignee=?1) AND status<>'archived' AND (?2=0 OR status NOT IN ('done','failed','cancelled')) ORDER BY id"
             ))
             .map_err(db)?;
         let rows = stmt.query_map(params![assignee, open_only as i64], task_row).map_err(db)?;
@@ -332,6 +332,36 @@ impl TaskStore {
         Ok(self.move_to(id, status, None)?.is_ok())
     }
 
+    /// Operator archive of a finished task: hidden from lists, kept for history.
+    pub fn archive_task(&self, id: i64) -> Result<Result<Task, Refused>, ServerError> {
+        let Some(task) = self.get(id)? else { return Ok(Err(Refused::NotFound)) };
+        if !FINAL_TASK_STATES.contains(&task.status.as_str()) && task.status != "archived" {
+            return Ok(Err(Refused::Conflict("only a finished task can be archived")));
+        }
+        self.conn
+            .execute("UPDATE tasks SET status='archived', revision=revision+1, updated_at_ms=?2 WHERE id=?1", params![id, unix_ms() as i64])
+            .map_err(db)?;
+        Ok(self.get(id)?.ok_or(Refused::NotFound))
+    }
+
+    /// Operator archive of a session record with no running run: hidden from lists.
+    pub fn archive_session(&self, session_id: &str) -> Result<Result<(), Refused>, ServerError> {
+        if self.session(session_id)?.is_none() {
+            return Ok(Err(Refused::NotFound));
+        }
+        let running: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM runs WHERE session_id=?1 AND status='running'", params![session_id], |r| r.get(0))
+            .map_err(db)?;
+        if running > 0 {
+            return Ok(Err(Refused::Conflict("session has a running run")));
+        }
+        self.conn
+            .execute("UPDATE sessions SET state='archived', updated_at_ms=?2 WHERE session_id=?1", params![session_id, unix_ms() as i64])
+            .map_err(db)?;
+        Ok(Ok(()))
+    }
+
     // ---- sessions (only real provider sessions) ----
 
     pub fn upsert_session(&self, s: &Session) -> Result<Session, ServerError> {
@@ -356,7 +386,7 @@ impl TaskStore {
     pub fn sessions(&self, node: Option<&str>) -> Result<Vec<Session>, ServerError> {
         let mut stmt = self
             .conn
-            .prepare(&format!("SELECT {SESSION_COLS} FROM sessions WHERE (?1 IS NULL OR node_id=?1) ORDER BY updated_at_ms DESC"))
+            .prepare(&format!("SELECT {SESSION_COLS} FROM sessions WHERE (?1 IS NULL OR node_id=?1) AND state<>'archived' ORDER BY updated_at_ms DESC"))
             .map_err(db)?;
         let rows = stmt.query_map(params![node], session_row).map_err(db)?;
         rows.collect::<Result<_, _>>().map_err(db)
@@ -560,6 +590,8 @@ mod tests {
         assert_eq!(s.move_to(t.id, "bogus", None).unwrap().unwrap_err(), Refused::Invalid("unknown status"));
         let t3 = s.move_to(t.id, "cancelled", Some(2)).unwrap().unwrap();
         assert_eq!(t3.status, "cancelled");
+        assert_eq!(s.archive_task(t.id).unwrap().unwrap().status, "archived");
+        assert!(s.list_filtered(None, None, false).unwrap().iter().all(|x| x.id != t.id));
         assert_eq!(s.move_to(t.id, "open", Some(3)).unwrap().unwrap_err(), Refused::Conflict("task is final"));
     }
 
