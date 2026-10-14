@@ -110,15 +110,14 @@ function sbMove(from, to, rows) {
   sbSave(); renderSidebar();
 }
 function sbMenu(x, y, r) {
-  document.querySelector('#sbmenu')?.remove();
+  closeMenus();
   const m = document.createElement('div'); m.id = 'sbmenu';
   const pinned = SB.pins.includes(r.id), unread = SB.unread.includes(r.id);
   const items = [['pin', pinned ? 'Открепить' : 'Закрепить'], ['section', 'Переместить в новый раздел'], ['unread', unread ? 'Отметить как прочитанное' : 'Отметить как непрочитанное'], ['rename', 'Переименовать'], ['copy', 'Копировать ID беседы'], ['hide', 'Скрыть из боковой панели'], ['del', 'Удалить']];
   m.innerHTML = items.map(([k, l]) => `<button data-m="${k}"${k === 'del' ? ' class="red"' : ''}>${esc(l)}</button>`).join('');
   document.body.appendChild(m);
   const R = m.getBoundingClientRect(); m.style.left = Math.min(x, innerWidth - R.width - 8) + 'px'; m.style.top = Math.min(y, innerHeight - R.height - 8) + 'px';
-  const close = () => { m.remove(); document.removeEventListener('mousedown', out, true); };
-  const out = (e) => { if (!m.contains(e.target)) close(); }; setTimeout(() => document.addEventListener('mousedown', out, true), 0);
+  const close = () => closeMenus();
   m.onclick = async (e) => { const k = e.target.dataset.m; if (!k) return; close();
     if (k === 'pin') sbToggle('pins', r.id, !pinned);
     else if (k === 'unread') sbToggle('unread', r.id, !unread);
@@ -129,7 +128,57 @@ function sbMenu(x, y, r) {
     else if (k === 'del') { if (!confirm(`Удалить «${r.name}»?` + (r.del ? ' Сессия будет остановлена.' : ''))) return; if (r.del) r.del(); else SB.hidden.unshift(r.id); ['pins', 'unread', 'order'].forEach((f) => (SB[f] = SB[f].filter((i) => i !== r.id))); sbSave(); renderSidebar(); }
   };
 }
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelector('#sbmenu')?.remove(); });
+// ---- menus are invariant: one open at a time; any press outside, Escape, blur or resize closes all (with nested submenus)
+function closeMenus() { document.querySelector('#sbmenu')?.remove(); const a = $('#acctmenu'); if (a) a.hidden = true; const m = $('#menu'); if (m) m.hidden = true; subClose(0); }
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#sbmenu,#acctmenu,#menu,.subm,#acctbtn,#addbtn,#plusbtn')) closeMenus(); }, true);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
+window.addEventListener('blur', () => closeMenus()); window.addEventListener('resize', () => closeMenus());
+
+// ---- nested submenus with a safe triangle (hover intent): while the cursor travels from a row toward its open
+// submenu, the submenu stays open as long as the cursor is inside the triangle (previous cursor point, near corners
+// of the submenu). Leaving the triangle closes it; stopping inside it for SUB_DWELL ms resolves to what is under the cursor.
+const SUBS = []; // [{ row, el }] by level
+const SUB_DWELL = 350; let subPrev = null, subTimer = 0;
+function subClose(level) { while (SUBS.length > level) { const s = SUBS.pop(); s.el.remove(); s.row.classList.remove('subon'); } clearTimeout(subTimer); }
+const inRect = (r, x, y, pad = 0) => x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
+function inTri(p, a, b, c) { const d = (p1, p2, p3) => (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y); const d1 = d(p, a, b), d2 = d(p, b, c), d3 = d(p, c, a); return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0)); }
+function subTri(s, from, x, y) { const r = s.el.getBoundingClientRect(); const ex = s.el.dataset.side === 'l' ? r.right : r.left; return inTri({ x, y }, from, { x: ex, y: r.top - 8 }, { x: ex, y: r.bottom + 8 }); }
+function menuRow(o, level) { // o: { ic, label, right, fn, sub, dim, head }
+  if (o.head) { const h = document.createElement('div'); h.className = 'subhd'; h.textContent = o.label; return h; }
+  const b = document.createElement('button'); b.dataset.lvl = level;
+  b.innerHTML = `${o.ic ? `<span class="ic">${ico(o.ic)}</span>` : ''}<span class="l">${esc(o.label)}</span>${o.right ? `<span class="r">${esc(o.right)}</span>` : ''}${o.sub ? `<span class="cv">${ico('chev', 16)}</span>` : ''}`;
+  if (o.dim) b.classList.add('dim'); if (o.sub) b._sub = o.sub;
+  b.onclick = (e) => { e.stopPropagation(); if (o.fn) { closeMenus(); o.fn(); } else if (o.sub) subOpen(b, level); };
+  return b;
+}
+function subOpen(row, level) {
+  if (SUBS[level] && SUBS[level].row === row) return;
+  subClose(level);
+  const items = row._sub(); const el = document.createElement('div'); el.className = 'mpop subm amenu2s'; el.dataset.lvl = level + 1;
+  for (const o of items) el.appendChild(menuRow(o, level + 1));
+  document.body.appendChild(el); row.classList.add('subon');
+  const rr = row.getBoundingClientRect(), r = el.getBoundingClientRect(); const pr = row.closest('.pop,.subm').getBoundingClientRect();
+  let left = pr.right + 4, side = 'r'; if (left + r.width > innerWidth - 8) { left = Math.max(8, pr.left - r.width - 4); side = 'l'; }
+  const top = Math.max(8, Math.min(rr.top - 6, innerHeight - r.height - 8));
+  el.style.left = left + 'px'; el.style.top = top + 'px'; el.dataset.side = side;
+  SUBS[level] = { row, el };
+}
+function subResolve(x, y) { // no triangle grace: close what the cursor is not in, open what it hovers
+  const t = document.elementFromPoint(x, y);
+  for (let L = 0; L < SUBS.length; L++) { const s = SUBS[L]; if (SUBS.slice(L).some((q) => q.el.contains(t)) || s.row.contains(t)) continue; const owner = t && t.closest('[data-lvl]'); if (owner && +owner.dataset.lvl > L) continue; subClose(L); break; }
+  const row = t && t.closest('button[data-lvl]'); if (row && row._sub) subOpen(row, +row.dataset.lvl);
+}
+document.addEventListener('mousemove', (e) => {
+  const x = e.clientX, y = e.clientY, from = subPrev || { x, y }; subPrev = { x, y };
+  if (!SUBS.length) { const t = e.target.closest && e.target.closest('button[data-lvl]'); if (t && t._sub) subOpen(t, +t.dataset.lvl); return; }
+  for (let L = SUBS.length - 1; L >= 0; L--) { // deepest open submenu first
+    const s = SUBS[L]; if (inRect(s.el.getBoundingClientRect(), x, y)) break; // inside it: deeper levels decide
+    if (inRect(s.row.getBoundingClientRect(), x, y) && L === SUBS.length - 1) break;
+    if (subTri(s, from, x, y)) { clearTimeout(subTimer); subTimer = setTimeout(() => subPrev && subResolve(subPrev.x, subPrev.y), SUB_DWELL); return; } // in transit toward it
+    clearTimeout(subTimer); subResolve(x, y); return;
+  }
+  clearTimeout(subTimer); subResolve(x, y);
+});
 
 // ---- center view switching: chat | node | pty
 function showView(v) {
@@ -345,10 +394,10 @@ $('#sendbtn').onclick = send;
 
 // ---- composer + menu
 function menu(items, anchorLeft) {
-  const m = $('#menu'); m.removeAttribute('style'); m.innerHTML = ''; m.hidden = false;
+  closeMenus(); const m = $('#menu'); m.removeAttribute('style'); m.innerHTML = ''; m.hidden = false;
   for (const [label, fn] of items) { const b = document.createElement('button'); b.textContent = label; b.onclick = () => { m.hidden = true; fn(); }; m.appendChild(b); }
 }
-document.addEventListener('click', (e) => { if (!e.target.closest('#menu') && !e.target.closest('#addbtn') && !e.target.closest('#plusbtn')) $('#menu').hidden = true; if (!e.target.closest('#acctmenu')) $('#acctmenu').hidden = true; });
+document.addEventListener('click', (e) => { if (!e.target.closest('#menu') && !e.target.closest('#addbtn') && !e.target.closest('#plusbtn')) $('#menu').hidden = true; if (!e.target.closest('#acctmenu,.subm,#acctbtn')) { $('#acctmenu').hidden = true; subClose(0); } });
 $('#addbtn').onclick = () => menu([
   ['Fleet…', () => openNode()],
   ['Create a task…', () => { openPanel('tasks'); }],
@@ -385,16 +434,19 @@ const LUC = {
   spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/>',
 };
 const ico = (k, sz = 16) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${LUC[k]}</svg>`;
-$('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); m.hidden = !m.hidden; if (m.hidden) return; m.className = 'pop amenu2'; m.innerHTML = '';
-  const it = (ic, label, fn, right, chev) => { const b = document.createElement('button'); b.innerHTML = `<span class="ic">${ico(ic)}</span><span class="l">${esc(label)}</span>${right ? `<span class="r">${esc(right)}</span>` : ''}${chev ? `<span class="cv">${ico('chev', 16)}</span>` : ''}`; b.onclick = () => { m.hidden = true; fn(); }; m.appendChild(b); };
-  it('server', 'Fleet', () => openNode(), String(visibleNodes().filter((n) => n.online).length) + ' online', true);
-  it('gauge', 'Usage & plan', () => openSettings('usage'), '— % used', true);
-  it('phone', 'Get the apps', () => toast('Apps: coming soon'));
-  it('book', 'Support', () => toast('Support: coming soon'), '', true);
-  it('gear', 'Settings', () => openSettings('general'));
+// PTY providers only (no browser, no test fixtures); narrowed to the CLIs the node reports when it reports any.
+function ptyProviders(n) { const clis = ((n.machine && n.machine.provider_clis) || []).map((c) => c.id); return PROVIDERS.filter((p) => p.v !== 'browser' && !p.parser && (p.v === 'shell' || !clis.length || clis.includes(p.v))); }
+const fleetSub = () => { const ns = visibleNodes().filter((n) => n.online);
+  return [{ head: true, label: 'Ноды' }, ...(ns.length ? ns.map((n) => ({ ic: 'term', label: n.node_id, sub: () => [{ head: true, label: 'Открыть PTY' }, ...ptyProviders(n).map((p) => ({ ic: p.v === 'shell' ? 'term' : 'spark', label: p.label || p.v, fn: () => startSession(n.node_id, p.v) }))] })) : [{ label: 'Нет нод онлайн', dim: true }]), { label: 'Открыть Fleet…', ic: 'server', fn: () => openNode() }]; };
+$('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); const was = !m.hidden; closeMenus(); if (was) return; m.hidden = false; m.className = 'pop amenu2'; m.innerHTML = '';
+  m.appendChild(menuRow({ ic: 'server', label: 'Fleet', right: String(visibleNodes().filter((n) => n.online).length) + ' online', sub: fleetSub }, 0));
+  m.appendChild(menuRow({ ic: 'gauge', label: 'Usage & plan', right: '— % used', fn: () => openSettings('usage') }, 0));
+  m.appendChild(menuRow({ ic: 'phone', label: 'Get the apps', fn: () => toast('Apps: coming soon') }, 0));
+  m.appendChild(menuRow({ ic: 'book', label: 'Support', fn: () => toast('Support: coming soon') }, 0));
+  m.appendChild(menuRow({ ic: 'gear', label: 'Settings', fn: () => openSettings('general') }, 0));
   m.insertAdjacentHTML('beforeend', '<hr>');
-  it('userplus', 'Add account', () => toast('Multiple accounts: coming soon'));
-  it('logout', 'Sign out', signOut); };
+  m.appendChild(menuRow({ ic: 'userplus', label: 'Add account', fn: () => toast('Multiple accounts: coming soon') }, 0));
+  m.appendChild(menuRow({ ic: 'logout', label: 'Sign out', fn: signOut }, 0)); };
 // ---- settings modal (stubs)
 const SNAV = [['general', '⚙', 'General'], ['computer', '▭', 'Computer & nodes'], ['usage', '◔', 'Usage'], ['updates', '↻', 'Updates']];
 function openSettings(sec) {
