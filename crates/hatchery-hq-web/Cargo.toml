@@ -24,7 +24,7 @@ base64 = "0.22"
 hatchery-session-events = { path = "../hatchery-session-events", version = "0.2.14" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-gate4agent-node-protocol = { version = "0.5.2" }
+gate4agent-node-protocol = { version = "0.5.4" }
 gate4agent-types = { version = "0.5.2" }
 hatchery-c2-client = { path = "../hatchery-c2-client", version = "0.2.14" }
 hatchery-core = { path = "../hatchery-core", version = "0.2.14" }

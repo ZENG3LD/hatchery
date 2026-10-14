@@ -20,8 +20,8 @@ hatchery-c2-client = { path = "../hatchery-c2-client" }
 hatchery-server = { path = "../hatchery-server" }
 hatchery-node = { path = "../hatchery-node", features = ["fixture"] }
 tokio = { version = "1", features = ["full"] }
-gate4agent-node-protocol = { version = "0.5.2" }
-gate4agent-node-wire = { version = "0.5.2" }
+gate4agent-node-protocol = { version = "0.5.4" }
+gate4agent-node-wire = { version = "0.5.4" }
 
 [dev-dependencies]
 hatchery-enroll = { path = "../hatchery-enroll" }

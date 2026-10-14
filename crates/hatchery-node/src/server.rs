@@ -211,6 +211,30 @@ use tokio::time::{sleep, timeout};
 mod http_api;
 pub mod node_wake;
 
+tokio::task_local! {
+    /// Launch options (model / effort) of a `SpawnWithOptions` request, scoped around that
+    /// spawn so the provider's start carries them (g4a maps them to the CLI's own flags).
+    static SPAWN_SESSION_OPTIONS: Option<gate4agent_types::SessionOptionSelection>;
+}
+
+/// `SpawnSessionOptions` -> g4a selection. Effort needs a model (g4a options hang off a model).
+fn spawn_selection(
+    options: &gate4agent_node_protocol::SpawnSessionOptions,
+) -> Result<Option<gate4agent_types::SessionOptionSelection>, NodeFailure> {
+    options.validate().map_err(|e| failure(NodeFailureCode::InvalidRequest, e))?;
+    match (&options.model, &options.effort) {
+        (None, None) => Ok(None),
+        (None, Some(_)) => Err(failure(NodeFailureCode::InvalidRequest, "spawn effort needs a model")),
+        (Some(model), effort) => {
+            let mut sel = gate4agent_types::SessionOptionSelection::new(model.clone());
+            if let Some(e) = effort {
+                sel = sel.with_value("effort", e.clone());
+            }
+            Ok(Some(sel))
+        }
+    }
+}
+
 mod browser_bridge;
 
 use gate4agent_node_core::drive_loop_profile;
@@ -12617,7 +12641,7 @@ impl NodeShared {
                         working_directory,
                         terminal_size,
                         initial_prompt,
-                        session_options: None,
+                        session_options: SPAWN_SESSION_OPTIONS.try_with(|o| o.clone()).ok().flatten(),
                         approval_level,
                     },
                 },
@@ -14197,6 +14221,7 @@ fn request_requires_child_environment_profile(
         | NodeRequest::AcquireController { .. }
         | NodeRequest::ReleaseController
         | NodeRequest::Spawn { .. }
+        | NodeRequest::SpawnWithOptions { .. }
         | NodeRequest::SpawnSpec { .. }
         | NodeRequest::RegisterWorkspace { .. }
         | NodeRequest::CreateStandaloneWorkspace { .. }
@@ -14289,6 +14314,7 @@ fn request_requires_session_bundle(shared: &NodeShared, request: &NodeRequest) -
         | NodeRequest::AcquireController { .. }
         | NodeRequest::ReleaseController
         | NodeRequest::Spawn { .. }
+        | NodeRequest::SpawnWithOptions { .. }
         | NodeRequest::SpawnSpec { .. }
         | NodeRequest::RegisterWorkspace { .. }
         | NodeRequest::CreateStandaloneWorkspace { .. }
@@ -14380,6 +14406,7 @@ fn request_requires_history_context_pack(shared: &NodeShared, request: &NodeRequ
         | NodeRequest::AcquireController { .. }
         | NodeRequest::ReleaseController
         | NodeRequest::Spawn { .. }
+        | NodeRequest::SpawnWithOptions { .. }
         | NodeRequest::SpawnSpec { .. }
         | NodeRequest::RegisterWorkspace { .. }
         | NodeRequest::CreateStandaloneWorkspace { .. }
@@ -14412,7 +14439,7 @@ fn request_requires_open_provider_ids_with(
     provider_for_record: impl Fn(&SessionRecordId) -> Option<AgentId>,
 ) -> bool {
     match request {
-        NodeRequest::Spawn { provider, .. } => !provider_id_is_legacy(provider),
+        NodeRequest::Spawn { provider, .. } | NodeRequest::SpawnWithOptions { provider, .. } => !provider_id_is_legacy(provider),
         NodeRequest::IndexProviderSession { provider, .. } => !provider_id_is_legacy(provider),
         NodeRequest::CatalogNativeSessions { route, .. }
         | NodeRequest::PageNativeSessions { route, .. } => {
@@ -16252,6 +16279,30 @@ async fn process_request_inner(shared: &NodeShared, connection_id: u64, role: Cl
                         message = %err.message,
                         "session spawn refused"
                     );
+                    Err(err)
+                }
+            }
+        }
+        NodeRequest::SpawnWithOptions { workspace_id, provider, mode, terminal_size, initial_prompt, options } => {
+            shared.require_controller(connection_id, role)?;
+            if !terminal_size.is_valid() {
+                return Err(failure(NodeFailureCode::InvalidRequest, "spawn requires a valid terminal size"));
+            }
+            if let Some(prompt) = initial_prompt.as_deref() {
+                validate_node_text("spawn initial prompt", prompt)?;
+            }
+            let selection = spawn_selection(&options)?;
+            let spawned = SPAWN_SESSION_OPTIONS
+                .scope(selection, shared.spawn_session(workspace_id.clone(), provider.clone(), mode, terminal_size, initial_prompt))
+                .await;
+            match spawned {
+                Ok(session) => {
+                    shared.mark_spawn_provisional(session.clone());
+                    tracing::info!(%provider, model = ?options.model, effort = ?options.effort, "session spawned with launch options");
+                    Ok(NodeResponse::SpawnAccepted { session })
+                }
+                Err(err) => {
+                    tracing::warn!(%provider, %workspace_id, code = ?err.code, message = %err.message, "session spawn with options refused");
                     Err(err)
                 }
             }

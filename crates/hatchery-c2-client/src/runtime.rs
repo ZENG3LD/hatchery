@@ -323,7 +323,9 @@ fn control_request_deadline(request: &NodeRequest) -> Duration {
         // acquire + bridge queue + Claude/Codex cold start). 15+5 headroom
         // timed out the owner path at ~20s while the node still accepted.
         NodeRequest::Spawn { .. }
-        | NodeRequest::Resume { .. } => Duration::from_secs(90),
+        | NodeRequest::SpawnWithOptions { .. }
+        | NodeRequest::Resume { .. }
+        | NodeRequest::ResumeSessionRecord { .. } => Duration::from_secs(90),
         NodeRequest::Stop { .. } => Duration::from_secs(15),
         NodeRequest::SpawnSpec { spec } =>
             Duration::from_millis(spec.deadline_ms.get()) + RELAY_REPLY_HEADROOM,
@@ -898,7 +900,7 @@ fn reject_unnegotiated_outbound_path(
         ));
     }
     if !capabilities.provider_ids_open
-        && (matches!(request, NodeRequest::Spawn { provider, .. } if !provider_id_is_legacy(provider))
+        && (matches!(request, NodeRequest::Spawn { provider, .. } | NodeRequest::SpawnWithOptions { provider, .. } if !provider_id_is_legacy(provider))
             || matches!(request, NodeRequest::IndexProviderSession { provider, .. } if !provider_id_is_legacy(provider))
             || matches!(request, NodeRequest::CatalogNativeSessions { route, .. } if !provider_id_is_legacy(&route.provider))
             || matches!(request, NodeRequest::PageNativeSessions { route, .. } if !provider_id_is_legacy(&route.provider))
@@ -1080,6 +1082,7 @@ fn node_request_has_unix_repository_path(request: &NodeRequest) -> bool {
         | NodeRequest::CreateWorktree { .. }
         | NodeRequest::RemoveWorktree { .. }
         | NodeRequest::Spawn { .. }
+        | NodeRequest::SpawnWithOptions { .. }
         | NodeRequest::SpawnSpec { .. }
         | NodeRequest::SpawnManagedWorktree { .. }
         | NodeRequest::SpawnManagedWorktreeV2 { .. }
@@ -1156,6 +1159,7 @@ fn node_request_has_unix_bytes(request: &NodeRequest) -> bool {
         | NodeRequest::ReleaseController
         | NodeRequest::UnregisterWorkspace { .. }
         | NodeRequest::Spawn { .. }
+        | NodeRequest::SpawnWithOptions { .. }
         | NodeRequest::SpawnSpec { .. }
         | NodeRequest::SpawnManagedWorktree { .. }
         | NodeRequest::SpawnManagedWorktreeV2 { .. }

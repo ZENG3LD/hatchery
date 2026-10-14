@@ -81,6 +81,15 @@ function renderSidebar() {
     if (x.kind === 'browser') continue; // a browser is not a chat: it lives in its session's panel
     rows.push({ id: 'pty:' + x.id, copy: sessLabel(node, x), name: x.label || sessLabel(node, x), preview: x.state === 'starting' ? 'starting…' : x.ended ? 'ended' : x._ws ? 'live' : 'reconnecting…', active: S.view === 'pty' && S.ptySession === x, open: () => openPty(node, x), del: () => { stopSession(x); const a = S.sessions[node] || []; const i = a.indexOf(x); if (i >= 0) a.splice(i, 1); } });
   }
+  // Dormant provider conversations on nodes: click reopens a PTY resuming them by provider
+  // session id (the node picks `claude --resume`, `codex resume`, ...).
+  for (const [node, recs] of Object.entries(S.nodeRecords || {})) {
+    for (const r of recs) {
+      if (!r.resumable) continue;
+      if ((S.sessions[node] || []).some((x) => x.record_id === r.record_id && !x.ended)) continue;
+      rows.push({ id: 'rec:' + r.record_id, copy: r.record_id, name: r.name || `${node}/${r.provider}`, preview: `resume · ${r.provider}`, active: false, open: () => resumeRecord(node, r), del: null });
+    }
+  }
   for (const c of S.chats || []) rows.push({ id: c.target, copy: c.target, name: c.label, preview: last(c.target) || '', active: S.view === 'chat' && S.chat === c.target, open: () => openChat(c.target), del: null });
   const rank = (r) => { const i = SB.order.indexOf(r.id); return i < 0 ? -1 : i; };
   rows.sort((a, b) => { const pa = SB.pins.indexOf(a.id), pb = SB.pins.indexOf(b.id); if ((pa >= 0) !== (pb >= 0)) return pa >= 0 ? -1 : 1; if (pa >= 0) return pa - pb; return rank(a) - rank(b); });
@@ -275,7 +284,7 @@ async function loadRoles(d) {
       const rec = (await post('/api/s/routing/recommend', { role: b.dataset.rstart })).recommendation;
       if (!rec || !rec.pick) { toast('No seat for this role right now'); return; }
       if (!rec.pick.available) { toast('All seats for this role are limited'); return; }
-      d.remove(); startSession(rec.pick.seat.node, rec.pick.seat.provider);
+      d.remove(); startSession(rec.pick.seat.node, rec.pick.seat.provider, undefined, { model: rec.pick.model.model, effort: rec.pick.model.effort });
     } catch (e) { toast(e.message); }
   }));
   const sel = box.querySelector('#rmodels'); const picked = [];
@@ -834,7 +843,13 @@ function paint(sess, onRendered) {
   const u = findUrl(sess.lastText, sess.cols || term.cols); const tl = $('#tlink'); if (u) { tl.dataset.url = u; tl.title = u; tl.hidden = false; } else { tl.hidden = true; delete tl.dataset.url; }
 }
 // Open a socket for a session: spawn (provider) or attach (session id). Returns the sess object.
-function connectSession(node, sess, { provider, parser, attach } = {}) {
+function resumeRecord(node, r) {
+  const sess = { provider: r.provider, id: 'resume-' + r.record_id + '-' + Date.now(), record_id: r.record_id, label: r.name, live: false, state: 'starting' };
+  recordSession(node, sess); openPty(node, sess);
+  $('#tinfo').textContent = `resuming ${r.provider} on ${node}…`;
+  connectSession(node, sess, { provider: r.provider, resume: r.record_id });
+}
+function connectSession(node, sess, { provider, parser, attach, resume, model, effort } = {}) {
   const rows = term.rows || 30, cols = term.cols || 110;
   // Draft PTY: never keep on disconnect. Real provider-session survival is future work.
   const cid = sess.cid || (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').slice(0, 16) : Math.random().toString(16).slice(2, 18));
@@ -842,6 +857,9 @@ function connectSession(node, sess, { provider, parser, attach } = {}) {
   const q = new URLSearchParams({ node, rows, cols, keep: 'false', cid });
   if (attach) q.set('session', attach); else q.set('provider', provider);
   if (parser) q.set('parser', parser);
+  if (resume) q.set('resume', resume);
+  if (model) q.set('model', model);
+  if (effort) q.set('effort', effort);
   ptyTrace(cid, 'browser', attach ? 'attach' : 'spawn', { node, provider: provider || '' });
   const sock = new WebSocket(wsUrl('/api/term', q)); sess._ws = sock; sess.state = sess.state || 'starting';
   let bound = false;
@@ -887,14 +905,14 @@ function connectSession(node, sess, { provider, parser, attach } = {}) {
   };
   return sess;
 }
-function startSession(node, provider, parser) {
+function startSession(node, provider, parser, launch) {
   if (!node) { toast('Pick a node first'); return; }
   if (provider === 'browser') { openNodeBrowser(node); return; }
   const prov = parser ? 'fixture' : provider;
   const sess = { provider: prov, id: 'pending-' + Date.now() + Math.random().toString(36).slice(2, 6), live: false, state: 'starting', parser };
   recordSession(node, sess); openPty(node, sess);
   $('#tinfo').textContent = `starting ${prov} on ${node}…`;
-  connectSession(node, sess, { provider, parser });
+  connectSession(node, sess, { provider, parser, model: launch && launch.model, effort: launch && launch.effort });
 }
 // Attach to a live node session by id: "6", "primary/6", "claude#6", "node/claude#6".
 function attachSession(node, idText, provider) {
@@ -911,7 +929,7 @@ function attachSession(node, idText, provider) {
 async function reconcileNode(node) {
   // Drafts are not sessions: never promote a live node PTY into the sidebar.
   // Only sync status for tabs this HQ already opened; drop ones the node exited.
-  let list; try { list = (await api('/api/sessions?node=' + encodeURIComponent(node))).sessions || []; } catch (_) { return; }
+  let list, listRecords; try { const r = await api('/api/sessions?node=' + encodeURIComponent(node)); list = r.sessions || []; listRecords = r.records || []; } catch (_) { return; }
   const live = list.filter((s) => s.live);
   const arr = (S.sessions[node] ||= []);
   for (const x of [...arr]) {
@@ -921,6 +939,7 @@ async function reconcileNode(node) {
     else if (!x._ws) connectSession(node, x, { attach: `${on.workspace_id}/${on.instance_id}` }); // brief reconnect of OUR tab
   }
   S.nodeSessions = S.nodeSessions || {}; S.nodeSessions[node] = list;
+  S.nodeRecords = S.nodeRecords || {}; S.nodeRecords[node] = listRecords;
   renderSidebar();
 }
 async function reconcileAll() { for (const n of visibleNodes().filter((n) => n.online)) await reconcileNode(n.node_id); }

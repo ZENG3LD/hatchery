@@ -616,6 +616,15 @@ struct TermQuery {
     /// worktree and cleans it when the session releases it.
     #[serde(default)]
     worktree: Option<String>,
+    /// Resume a dormant node session record (provider conversation by provider session id:
+    /// `claude --resume`, `codex resume`, ... chosen by the node per provider).
+    #[serde(default)]
+    resume: Option<String>,
+    /// Launch options for a fresh spawn (router pick): provider model and reasoning effort.
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    effort: Option<String>,
 }
 fn d_rows() -> u16 { 30 }
 fn d_cols() -> u16 { 110 }
@@ -833,8 +842,25 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
         tracing::info!(%cid, node = %q.node, %provider, "pty spawn requested");
         push_support_trace(&s, &cid, "hq-web", "spawn_requested", json!({ "node": q.node, "provider": provider }));
         let spawn_t0 = std::time::Instant::now();
+        let resume = q.resume.as_deref().map(str::trim).filter(|r| !r.is_empty());
         let request = match q.worktree.as_deref().map(str::trim).filter(|w| !w.is_empty()) {
+            _ if resume.is_some() => NodeRequest::ResumeSessionRecord {
+                record_id: serde_json::from_value(json!(resume.unwrap_or_default())).map_err(|e| format!("bad record id: {e}"))?,
+                terminal_size: size,
+                initial_prompt: None,
+            },
             Some(wt) => managed_worktree_spawn(&q.node, &workspace, provider, size, wt, &cid)?,
+            None if q.model.as_deref().is_some_and(|m| !m.trim().is_empty()) => NodeRequest::SpawnWithOptions {
+                workspace_id: WorkspaceId::new(workspace.clone()).map_err(|e| e.to_string())?,
+                provider: AgentId::new(provider.to_owned()).map_err(|e| e.to_string())?,
+                mode: SessionMode::Pty,
+                terminal_size: size,
+                initial_prompt: None,
+                options: gate4agent_node_protocol::SpawnSessionOptions {
+                    model: q.model.as_deref().map(str::trim).map(str::to_owned),
+                    effort: q.effort.as_deref().map(str::trim).filter(|e| !e.is_empty()).map(str::to_owned),
+                },
+            },
             None => NodeRequest::Spawn {
                 workspace_id: WorkspaceId::new(workspace.clone()).map_err(|e| e.to_string())?,
                 provider: AgentId::new(provider.to_owned()).map_err(|e| e.to_string())?,
@@ -856,6 +882,10 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
         };
         let accepted = match spawned.response {
             Ok(C2NodeResponse::SpawnAccepted { session }) => Ok(session),
+            Ok(C2NodeResponse::SessionRecordResumed { session, .. }) => {
+                push_support_trace(&s, &cid, "hq-web", "record_resumed", json!({ "node": q.node }));
+                Ok(session)
+            }
             Ok(C2NodeResponse::ManagedWorktreeSpawnAccepted { receipt }) => {
                 tracing::info!(%cid, worktree = %receipt.lease.workspace_id.as_str(), "managed worktree spawned");
                 push_support_trace(&s, &cid, "hq-web", "worktree_spawned", json!({ "worktree": receipt.lease.workspace_id.as_str() }));
@@ -1283,7 +1313,25 @@ async fn api_sessions(State(s): State<Shared>, Query(q): Query<SessionsQuery>) -
             }));
         }
     }
-    json_reply(200, serde_json::to_vec(&json!({ "node": q.node, "sessions": sessions })).unwrap_or_default())
+    // Provider conversations the node can resume (dormant = no live runtime, identity known).
+    let records: Vec<Value> = snapshot
+        .session_records
+        .iter()
+        .map(|r| {
+            let state = format!("{:?}", r.state).to_lowercase();
+            json!({
+                "record_id": r.record_id,
+                "provider": r.provider.as_str(),
+                "name": r.display_name,
+                "workspace_id": r.workspace_id.as_str(),
+                "state": state,
+                "live": r.active_session.is_some(),
+                "resumable": r.active_session.is_none() && state == "dormant",
+                "updated_at_ms": r.updated_at_unix_ms,
+            })
+        })
+        .collect();
+    json_reply(200, serde_json::to_vec(&json!({ "node": q.node, "sessions": sessions, "records": records })).unwrap_or_default())
 }
 
 // ---------------------------------------------------------------------------------- browser frames (A2 restream dig2browser)
