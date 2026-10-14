@@ -169,8 +169,8 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 8px;b
 #sidetoggle{position:absolute;left:12px;top:0}
 #headbtn{display:flex;align-items:center;gap:8px;background:#232323e6;backdrop-filter:blur(10px);border:1px solid #303030;border-radius:22px;padding:5px 16px 5px 6px;font-weight:650;font-size:14px;box-shadow:0 4px 16px #0006}
 #headbtn:hover{background:#2a2a2ae6}
-#chat{padding-top:64px}
-#ptyview{padding-top:56px}
+#chat{padding-top:0}
+#ptyview{padding-top:0}
 .ptybar{border:0}
 #composer{padding:6px max(16px,calc((100% - 780px)/2)) 16px}
 #box{background:#1e1e1e;border:1px solid #333;border-radius:22px;padding:10px 10px 8px 14px;display:flex;flex-direction:column;gap:6px;transition:border-color .15s}
@@ -188,7 +188,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 8px;b
 #ptabs{justify-content:center;padding:0 12px 6px;flex:none}
 .tog{display:flex;background:var(--el);border:1px solid var(--line);border-radius:10px;padding:3px}.tog button{flex:1;border-radius:7px;padding:5px 12px;color:var(--sub);font-size:13px}.tog button.on{background:var(--el2);color:var(--txt)}
 .kv{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}.kv:last-child{border:0}.kv span:first-child{color:var(--sub)}
-@media (max-width:760px){#sidetoggle{display:grid}#chat{padding-top:60px}}
+@media (max-width:760px){#sidetoggle{display:grid}#chat{padding-top:0}}
 @media (max-width:760px){#side{box-shadow:none}body.sideopen #side{box-shadow:12px 0 40px #000a}}
 /* round 4: tones, docked panel, delayed pill, account menu, settings */
 :root{--side:#0f0f0f;--bg:#181818;--el:#212121;--el2:#2a2a2a;--hover:#1c1c1c;--line:#262626}
@@ -279,7 +279,7 @@ body.rail #chats{order:2}body.rail .sidetop{order:3;padding:8px 0 0}body.rail .s
 #headbtn:hover{background:#242424}
 #headav .av,#headav .gi{width:24px!important;height:24px!important}
 #headbtn:hover .hchev{margin-left:-4px}
-#chat{padding-top:60px}
+#chat{padding-top:0}
 
 ::-webkit-scrollbar-button{display:none;width:0;height:0}
 #input,#box #input{max-height:45vh;overflow-y:hidden;scrollbar-width:auto}
@@ -509,3 +509,8 @@ body.nodemode #composer{display:none}
 .bdbar #bdtitle{white-space:nowrap;font-size:11px;padding:0 4px}
 .plat{margin-top:8px;font-size:11px;line-height:1.4}
 .bdtab{display:none!important}
+
+/* session pill floats over the scene; scene reaches the top edge under it */
+#head{z-index:30}
+#ptyview,#chat,#body{padding-top:0!important}
+.termwrap{padding-top:0}

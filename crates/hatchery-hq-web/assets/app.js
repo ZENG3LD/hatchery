@@ -998,4 +998,6 @@ $('#chat').addEventListener('click', (e) => {
   else { const p = popAt(a, `<button data-c="text"><span class="ic">${ico('copy')}</span>Copy</button><button data-c="id"><span class="ic">${ico('hash')}</span>Copy message ID</button>`);
     if (!p) return; p.onclick = (ev) => { const b = ev.target.closest('[data-c]'); if (!b) return; p.remove(); navigator.clipboard?.writeText(b.dataset.c === 'id' ? id : m.body); toast(b.dataset.c === 'id' ? 'Message ID copied' : 'Copied'); }; }
 });
-window.hq = { startSession, startBrowser, attachSession, hideBrowserOverlay, stopSession, openSessionBrowser, openNodeBrowser, setBrowserBig, S }; // test/console hook
+if (new URLSearchParams(location.search).has('test') || localStorage.getItem('hq.test') === '1') {
+  window.hq = { startSession, startBrowser, attachSession, hideBrowserOverlay, stopSession, openSessionBrowser, openNodeBrowser, setBrowserBig, S };
+}
