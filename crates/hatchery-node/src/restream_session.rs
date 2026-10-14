@@ -16,7 +16,7 @@
 use crate::uplink_journal::UplinkJournal;
 use hatchery_core::inner::{decode_inner, encode_inner, InnerKind};
 use hatchery_core::nested::{node_seal_outer, NoiseInitiator, NoiseTransport, PublicKeyBytes};
-use hatchery_core::{ChannelKind, Frame, FrameError, FrameType, OpenPayload};
+use hatchery_core::{grow_read_buf, ChannelKind, Frame, FrameError, FrameType, OpenPayload};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
@@ -277,7 +277,11 @@ impl NodeUplink {
                     }
                 }
                 if filled == buf.len() {
-                    break;
+                    // Same grow path as C2: do not tear the bridge when a
+                    // single frame exceeds the initial 128 KiB read buf.
+                    if grow_read_buf(&mut buf, filled).is_err() {
+                        break;
+                    }
                 }
             }
             kill(&alive_rd, &dead_rd, &reader_routes);

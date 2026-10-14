@@ -15,6 +15,24 @@ pub const MAX_DATA_PAYLOAD: usize = 1024 * 1024;
 /// Frame header size before the payload: version, type, channel_id, seq, length.
 pub const FRAME_HEADER_LEN: usize = 1 + 1 + 4 + 8 + 4;
 
+
+/// Grow a stream read buffer when a truncated frame cannot fit.
+/// Caps at `MAX_DATA_PAYLOAD + FRAME_HEADER_LEN`. Returns Err if already at cap
+/// (the peer is sending something larger than the protocol allows).
+pub fn grow_read_buf(buf: &mut Vec<u8>, filled: usize) -> Result<(), FrameError> {
+    const CAP: usize = MAX_DATA_PAYLOAD + FRAME_HEADER_LEN;
+    if filled < buf.len() {
+        return Ok(());
+    }
+    if buf.len() >= CAP {
+        return Err(FrameError::PayloadTooLarge(filled));
+    }
+    let next = (buf.len().saturating_mul(2)).clamp(filled + 64 * 1024, CAP);
+    buf.resize(next, 0);
+    Ok(())
+}
+
+
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FrameType {
@@ -424,6 +442,42 @@ mod tests {
         let payload = decoded.parse_open().unwrap();
         assert_eq!(payload.channel_kind, ChannelKind::M4a);
         assert_eq!(payload.node_id, "node-a");
+    }
+
+
+    #[test]
+    fn grow_read_buf_accepts_frames_between_64kib_and_1mib() {
+        // Simulate the C2 uplink read loop: start at 64 KiB, receive a 100 KiB DATA.
+        let payload = vec![0xABu8; 100 * 1024];
+        let frame = Frame::data(1, 7, payload.clone()).unwrap();
+        let wire = frame.encode().unwrap();
+        assert!(wire.len() > 64 * 1024);
+
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut filled = 0usize;
+        let mut offset = 0usize;
+        loop {
+            if filled == buf.len() {
+                grow_read_buf(&mut buf, filled).expect("must grow for 100 KiB frame");
+            }
+            let space = buf.len() - filled;
+            let take = space.min(wire.len() - offset);
+            buf[filled..filled + take].copy_from_slice(&wire[offset..offset + take]);
+            filled += take;
+            offset += take;
+            match Frame::decode(&buf[..filled]) {
+                Ok((decoded, consumed)) => {
+                    assert_eq!(decoded.payload, payload);
+                    assert_eq!(consumed, wire.len());
+                    break;
+                }
+                Err(FrameError::Truncated) => {
+                    assert!(offset < wire.len(), "still truncated after full wire");
+                    continue;
+                }
+                Err(e) => panic!("unexpected {e}"),
+            }
+        }
     }
 
     #[test]

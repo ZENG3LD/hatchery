@@ -9,8 +9,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use hatchery_core::{
-    ChannelKind, DrainEnvelope, Frame, FrameError, FrameType, JournalReplyBody, OpenPayload,
-    MAX_DATA_PAYLOAD,
+    grow_read_buf, ChannelKind, DrainEnvelope, Frame, FrameError, FrameType, JournalReplyBody,
+    OpenPayload, MAX_DATA_PAYLOAD,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -577,7 +577,11 @@ async fn handle_node_uplink(mut stream: TcpStream, rs: Restreamer) -> Result<(),
                     }
                 }
                 if filled == buf.len() {
-                    return Err(RestreamerError::Frame(FrameError::PayloadTooLarge(filled)));
+                    // Frames may be up to MAX_DATA_PAYLOAD (1 MiB). A fixed
+                    // 64 KiB read buf used to kill the whole uplink with
+                    // "payload length 65536 exceeds limit" on journal replies
+                    // / large Noise frames — taking PTY with it.
+                    grow_read_buf(&mut buf, filled).map_err(RestreamerError::Frame)?;
                 }
             }
         }
@@ -713,6 +717,9 @@ async fn handle_core_drain(
                         Err(FrameError::Truncated) => break,
                         Err(err) => return Err(RestreamerError::Frame(err)),
                     }
+                }
+                if filled == buf.len() {
+                    grow_read_buf(&mut buf, filled).map_err(RestreamerError::Frame)?;
                 }
             }
             Ok(Err(e)) => return Err(e.into()),
@@ -1002,6 +1009,66 @@ mod tests {
         let mut hq_tx = sealed.hq_transport;
         let plain = core_open_inner(&mut hq_tx, &env.frame.payload).unwrap();
         assert_eq!(plain, b"visible-only-to-core");
+    }
+
+    #[test]
+    fn open_resets_credit_so_reopen_gets_positive_window() {
+        // Regression: spent credit + re-OPEN without reset left WINDOW=0 and the
+        // node wedged on "window credit timeout after OPEN" (HQ PTY blank).
+        let rs = Restreamer::new(
+            super::super::buffer::BufferLimits::default(),
+            Arc::new(MemoryJournal::new()),
+            token(),
+            None,
+        );
+        // Shrink credit so we can exhaust it quickly.
+        {
+            let mut g = rs.inner.lock().expect("lock");
+            g.buffer = ReplayBuffer::new(super::super::buffer::BufferLimits::default())
+                .with_default_credit(2);
+        }
+        let now = Instant::now();
+        for _ in 0..2 {
+            let _ = rs.admit_from_node("box", 3, b"x".to_vec()).unwrap();
+            let _ = now;
+        }
+        // Force credit to 0 by enqueuing until backpressure if admit doesn't.
+        loop {
+            match rs.admit_from_node("box", 3, b"y".to_vec()).unwrap() {
+                EnqueueOutcome::Backpressure => break,
+                EnqueueOutcome::Accepted { window_credit } if window_credit == 0 => break,
+                _ => {}
+            }
+        }
+        assert_eq!(rs.window_credit("box", 3), 0);
+        rs.open_channel("box", 3, ChannelKind::G4aControl);
+        assert!(rs.window_credit("box", 3) > 0, "re-OPEN must restore WINDOW credit");
+    }
+
+    /// Twenty parallel channel opens after exhaustion: each must get its own credit.
+    #[test]
+    fn parallel_channel_opens_each_get_fresh_credit() {
+        let rs = Restreamer::new(
+            super::super::buffer::BufferLimits::default(),
+            Arc::new(MemoryJournal::new()),
+            token(),
+            None,
+        );
+        {
+            let mut g = rs.inner.lock().expect("lock");
+            g.buffer = ReplayBuffer::new(super::super::buffer::BufferLimits::default())
+                .with_default_credit(3);
+        }
+        for ch in 1u32..=20 {
+            for _ in 0..3 {
+                let _ = rs.admit_from_node("box", ch, b"z".to_vec());
+            }
+            assert_eq!(rs.window_credit("box", ch), 0);
+        }
+        for ch in 1u32..=20 {
+            rs.open_channel("box", ch, ChannelKind::G4aPty);
+            assert!(rs.window_credit("box", ch) > 0, "ch {ch}");
+        }
     }
 
     #[tokio::test]
