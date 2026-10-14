@@ -19,10 +19,10 @@ hatchery-arcade-engine = { version = "0.1.4", path = "../hatchery-arcade/engine"
 hatchery-arcade-pet-bastion = { version = "0.1.4", path = "../hatchery-arcade/games/pet-bastion", optional = true }
 hatchery-arcade-pet-bastion-render = { version = "0.1.4", path = "../hatchery-arcade/games/pet-bastion-render", optional = true }
 gate4agent-build-stamp = { version = "0.5.2" }
-hatchery-c2-client = { version = "0.2.14", path = "../hatchery-c2-client" }
-hatchery-core = { path = "../hatchery-core", version = "0.2.14" }
-hatchery-harness-client = { version = "0.2.14", path = "../hatchery-harness-client" }
-hatchery-harness-protocol = { version = "0.2.14", path = "../hatchery-harness-protocol" }
+hatchery-c2-client = { version = "0.2.14" }
+hatchery-core = { version = "0.2.14" }
+hatchery-harness-client = { version = "0.2.14" }
+hatchery-harness-protocol = { version = "0.2.14" }
 gate4agent-node-protocol = { version = "0.5.2" }
 # `local_hmac_sha256`/`proofs_match`: the same constant-time credential-
 # digest primitives `hatchery-harness-service`'s own operator-credential
@@ -30,10 +30,10 @@ gate4agent-node-protocol = { version = "0.5.2" }
 # follows that exact precedent instead of hand-rolling a second comparison
 # scheme. In-tree sibling crate, no new external dependency.
 gate4agent-node-wire = { version = "0.5.2" }
-hatchery-observation-api = { version = "0.2.14", path = "../hatchery-observation-api" }
-hatchery-observation-engine = { version = "0.2.14", path = "../hatchery-observation-engine" }
-hatchery-observation-protocol = { version = "0.2.14", path = "../hatchery-observation-protocol" }
-hatchery-observation-service = { version = "0.2.14", path = "../hatchery-observation-service" }
+hatchery-observation-api = { version = "0.2.14" }
+hatchery-observation-engine = { version = "0.2.14" }
+hatchery-observation-protocol = { version = "0.2.14" }
+hatchery-observation-service = { version = "0.2.14" }
 gate4agent-types = { version = "0.5.2" }
 icy_sixel = "0.6"
 # `control_plane`'s wire frame: line-delimited JSON, the same idiom
@@ -60,10 +60,10 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [features]
-# The full local TUI (legacy operator UI with the Pet Bastion arcade overlay). Off by default:
-# the default build is the hq-edge wrapper (`hatchery-tui hq ...`). Local edge only; built on the
+# The full local TUI (legacy operator UI with the Pet Bastion arcade overlay). On by default in
+# the local-HQ line; `--no-default-features` builds only the hq-edge wrapper. Built on the
 # user's machine, never deployed to a server.
-default = []
+default = ["arcade"]
 arcade = ["dep:hatchery-arcade-engine", "dep:hatchery-arcade-pet-bastion", "dep:hatchery-arcade-pet-bastion-render"]
 
 [lib]

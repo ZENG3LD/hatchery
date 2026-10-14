@@ -1,8 +1,0 @@
-# Minimal Alpine/musl builder for Hatchery binaries.
-# rust:alpine targets x86_64-unknown-linux-musl and links statically by default
-# (do not set +crt-static via RUSTFLAGS: it breaks proc-macro crates).
-FROM rust:alpine
-RUN apk add --no-cache musl-dev pkgconf openssl-dev openssl-libs-static \
-        sqlite-dev sqlite-static perl make cmake clang git linux-headers
-ENV OPENSSL_STATIC=1 PKG_CONFIG_ALL_STATIC=1 CARGO_INCREMENTAL=0
-WORKDIR /src
