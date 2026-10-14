@@ -138,7 +138,7 @@ window.addEventListener('blur', () => closeMenus()); window.addEventListener('re
 // submenu, the submenu stays open as long as the cursor is inside the triangle (previous cursor point, near corners
 // of the submenu). Leaving the triangle closes it; stopping inside it for SUB_DWELL ms resolves to what is under the cursor.
 const SUBS = []; // [{ row, el }] by level
-const SUB_DWELL = 350; let subPrev = null, subTimer = 0;
+const SUB_DWELL = 300; let subPrev = null, subTimer = 0;
 function subClose(level) { while (SUBS.length > level) { const s = SUBS.pop(); s.el.remove(); s.row.classList.remove('subon'); } clearTimeout(subTimer); }
 const inRect = (r, x, y, pad = 0) => x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
 function inTri(p, a, b, c) { const d = (p1, p2, p3) => (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y); const d1 = d(p, a, b), d2 = d(p, b, c), d3 = d(p, c, a); return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0)); }
@@ -169,16 +169,34 @@ function subResolve(x, y) { // no triangle grace: close what the cursor is not i
   for (let L = 0; L < SUBS.length; L++) { const s = SUBS[L]; if (SUBS.slice(L).some((q) => q.el.contains(t) || inRect(q.el.getBoundingClientRect(), x, y, 6)) || s.row.contains(t)) continue; const owner = t && t.closest('[data-lvl]'); if (owner && +owner.dataset.lvl > L) continue; subClose(L); break; }
   const row = t && t.closest('button[data-lvl]'); if (row && row._sub) subOpen(row, +row.dataset.lvl);
 }
+// Robust hover intent (safePolygon / menu-aim): apex fixed at the exit point on the trigger row; the whole segment
+// from the previous sample is tested (sparse samples on fast moves); an invisible bridge covers the menu gap; leaving
+// everything only closes after SUB_GRACE, so a single bad sample never kills the submenu.
+const SUB_GRACE = 200;
+function subBridge(s, x, y) { // gap between the parent menu edge and the submenu, over the submenu height (+tolerance)
+  const r = s.el.getBoundingClientRect(), pm = s.row.closest('.pop,.subm'); const pr = pm ? pm.getBoundingClientRect() : s.row.getBoundingClientRect();
+  const l = s.el.dataset.side === 'l' ? r.right : pr.right, rt = s.el.dataset.side === 'l' ? pr.left : r.left;
+  return x >= Math.min(l, rt) - 4 && x <= Math.max(l, rt) + 4 && y >= Math.min(r.top, s.row.getBoundingClientRect().top) - 12 && y <= Math.max(r.bottom, s.row.getBoundingClientRect().bottom) + 12;
+}
+function subSafe(s, from, x, y) { // any point of the segment from->(x,y) inside triangle, bridge or submenu
+  const n = Math.max(1, Math.ceil(Math.hypot(x - from.x, y - from.y) / 6));
+  const r = s.el.getBoundingClientRect();
+  for (let i = 0; i <= n; i++) { const px = from.x + (x - from.x) * i / n, py = from.y + (y - from.y) * i / n;
+    if (inRect(r, px, py, 8) || subBridge(s, px, py) || subTri(s, from, px, py)) return true; }
+  return false;
+}
 document.addEventListener('mousemove', (e) => {
   const x = e.clientX, y = e.clientY, from = subPrev || { x, y }; subPrev = { x, y };
   if (!SUBS.length) { const t = e.target.closest && e.target.closest('button[data-lvl]'); if (t && t._sub) subOpen(t, +t.dataset.lvl); return; }
+  const later = (ms) => { clearTimeout(subTimer); subTimer = setTimeout(() => subPrev && subResolve(subPrev.x, subPrev.y), ms); };
   for (let L = SUBS.length - 1; L >= 0; L--) { // deepest open submenu first
-    const s = SUBS[L]; if (inRect(s.el.getBoundingClientRect(), x, y, 6)) break; // inside it (or the gap): deeper levels decide
-    if (inRect(s.row.getBoundingClientRect(), x, y)) { s.anchor = { x, y }; if (L === SUBS.length - 1) break; }
-    if (subTri(s, from, x, y)) { clearTimeout(subTimer); subTimer = setTimeout(() => subPrev && subResolve(subPrev.x, subPrev.y), SUB_DWELL); return; } // in transit toward it
-    clearTimeout(subTimer); subResolve(x, y); return;
+    const s = SUBS[L];
+    if (inRect(s.el.getBoundingClientRect(), x, y, 8) || subBridge(s, x, y)) { if (L === SUBS.length - 1) { clearTimeout(subTimer); return; } break; }
+    if (inRect(s.row.getBoundingClientRect(), x, y)) { s.anchor = { x, y }; if (L === SUBS.length - 1) { clearTimeout(subTimer); return; } }
+    if (subSafe(s, from, x, y)) { later(SUB_DWELL); return; } // in transit toward it; resting here resolves by intent
+    later(SUB_GRACE); return; // outside everything: close only after a short grace
   }
-  clearTimeout(subTimer); subResolve(x, y);
+  later(SUB_DWELL); // inside a shallower submenu on another row: switch by resting intent
 });
 
 // ---- center view switching: chat | node | pty
@@ -1066,8 +1084,16 @@ function syncBrowserBar(b) {
 function latText() { const l = S.lat; if (!l) return 'No click measured yet'; return `${l.total} ms total · client↔hq ${l.client_hq} · hq ${l.hq_proc} · core+C2 ${l.net} · node ${l.node} (cdp ${l.cdp}, →frame ${l.to_frame}, ${l.src})`; }
 function updateLatReadout() { const el = $('#plat'); if (el) el.textContent = latText(); }
 // Right-side overlay drawer: mini (fitted slide-in) or expanded; never embedded in the info panel.
+// Mini mode docks flush to the scene's top-right corner (no gap) until the user drags it; then their position is kept.
+function sceneRect() { const m = $('#main'); return m ? m.getBoundingClientRect() : { left: 0, top: 0, right: innerWidth, bottom: innerHeight }; }
+function dockMini(w) {
+  const sr = sceneRect(); const r = w.getBoundingClientRect();
+  w.classList.add('docked'); w.style.right = 'auto'; w.style.transform = 'none';
+  w.style.left = Math.round(sr.right - r.width) + 'px'; w.style.top = Math.round(sr.top) + 'px';
+}
 function clampDrawer(w) {
-  const m = 24; const r = w.getBoundingClientRect();
+  if (!w.classList.contains('big') && !w.dataset.miniPos) { dockMini(w); return; }
+  const m = w.classList.contains('big') ? 24 : 0; const r = w.getBoundingClientRect();
   let left = r.left, top = r.top;
   const maxL = Math.max(m, innerWidth - r.width - m);
   const maxT = Math.max(m, innerHeight - r.height - m);
@@ -1097,18 +1123,18 @@ function browserDrawer() {
     e.preventDefault(); bar.setPointerCapture(e.pointerId); bar.classList.add('dragging');
     // Leaving centered-transform mode: pin current rect, then drag in left/top coords.
     const r0 = w.getBoundingClientRect();
-    w.classList.add('dragged');
+    w.classList.add('dragged'); w.classList.remove('docked'); if (!w.classList.contains('big')) w.dataset.miniPos = '1';
     w.style.left = r0.left + 'px'; w.style.top = r0.top + 'px'; w.style.right = 'auto'; w.style.transform = 'none';
     const ox = e.clientX - r0.left, oy = e.clientY - r0.top;
     bar.onpointermove = (ev) => {
       const r = w.getBoundingClientRect();
-      const m = 24;
+      const m = w.classList.contains('big') ? 24 : 0;
       let left = ev.clientX - ox, top = ev.clientY - oy;
       left = Math.min(Math.max(m, innerWidth - r.width - m), Math.max(m, left));
       top = Math.min(Math.max(m, innerHeight - r.height - m), Math.max(m, top));
       w.style.left = left + 'px'; w.style.top = top + 'px';
     };
-    bar.onpointerup = () => { bar.onpointermove = null; bar.classList.remove('dragging'); clampDrawer(w); };
+    bar.onpointerup = () => { bar.onpointermove = null; bar.classList.remove('dragging'); clampDrawer(w); if (!w.classList.contains('big')) { w.dataset.miniL = w.style.left; w.dataset.miniT = w.style.top; } };
   };
   wireCanvas($('#bdcanvas')); addEventListener('resize', () => { fitBrowser(); const d = $('#bdrawer'); if (d && !d.hidden) clampDrawer(d); });
   return w;
@@ -1137,9 +1163,6 @@ function fitBrowser() {
     const aw = Math.min(420, innerWidth * 0.42);
     const ah = Math.min(innerHeight - margin, aw * vh / vw + barH);
     w.style.width = Math.max(280, Math.min(aw, (ah - barH) * vw / vh)) + 'px';
-    if (!w.dataset.miniPos) {
-      w.style.top = '64px'; w.style.right = '16px'; w.style.left = 'auto'; w.style.transform = 'none';
-    }
     clampDrawer(w);
   }
 }
@@ -1148,14 +1171,14 @@ function showBrowserDrawer(mode) {
   const scrim = browserScrim();
   w.hidden = false; w.classList.remove('off');
   if (mode === 'big') {
-    w.classList.add('big'); w.classList.remove('dragged');
+    w.classList.add('big'); w.classList.remove('dragged', 'docked');
     w.style.left = ''; w.style.top = ''; w.style.right = ''; w.style.transform = '';
     scrim.hidden = false;
   } else {
     w.classList.remove('big'); w.classList.remove('dragged');
     scrim.hidden = true;
     w.style.height = ''; w.style.transform = 'none';
-    if (!w.style.left || w.style.left === '') { w.style.top = '64px'; w.style.right = '16px'; w.style.left = 'auto'; }
+    if (w.dataset.miniPos && w.dataset.miniL) { w.style.left = w.dataset.miniL; w.style.top = w.dataset.miniT; w.style.right = 'auto'; }
   }
   const sz = $('#bdsize'); if (sz) { sz.title = mode === 'big' ? 'Collapse' : 'Expand'; sz.textContent = mode === 'big' ? '⤡' : '⤢'; }
   fitBrowser(); syncBrowserBar(S.browserSession || {});
