@@ -62,12 +62,9 @@ in this repository. Crate names below are prefixed `hatchery-` unless noted.
   `-harness-mcp` (bin `hatchery-harness-mcp`), `-harness-delivery`,
   `-harness-light` (stateless, serves the same operator wire straight over
   c2 with no task kernel behind it).
-- **Client** — `crates/hatchery-tui` (root workspace member): bins
-  `hatchery-tui` (against a durable harness) and `hatchery-tui-light`
-  (hosts `hatchery-harness-light` in-process). Neither app speaks c2
-  itself.
-- **Arcade** — `crates/hatchery-arcade/{engine,games/*,sweep,preview,bench}`
-  as root workspace members (`hatchery-arcade-*`); hatchery-owned, not g4a.
+- **Local HQ (TUI + arcade)** — not in this workspace: the `local-hq` branch
+  holds `hatchery-tui` and `hatchery-arcade-*` with their own workspace,
+  built on the user's machine against the hq-edge API.
 - **Build stamp** — `gate4agent-build-stamp` (in `gate4agent`): a git
   content-hash of that repository's working tree, carried by every wire
   handshake instead of a hand-typed protocol version number. hatchery's
@@ -76,7 +73,7 @@ in this repository. Crate names below are prefixed `hatchery-` unless noted.
 Pipe and env-var names above still carry the `gate4agent-`/`GATE4AGENT_`
 prefix inherited from the repository this stack was split out of — a later
 step (§11.4 / brand Step 4b) renames those **hatchery-side** runtime
-identifiers. TUI binaries are already `hatchery-tui` / `hatchery-tui-light`.
+identifiers. The TUI binary (local-hq branch) is already `hatchery-tui`.
 Full ledger: hatchery-websession-docs
 `plans/harness-mcp-bin-env-domain-rename-2026-10-02.md` and `STATUS.md`.
 
