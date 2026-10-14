@@ -509,10 +509,12 @@ async fn dispatch_browser(
 #[allow(dead_code)]
 async fn dispatch_request(mesh: &NodeOperatorMesh, envelope: C2RequestEnvelope) -> C2ReplyEnvelope {
     let node_id = envelope.request.route.node_id.as_str().to_owned();
+    let cid = envelope.correlation_id.clone();
     let Some(link) = mesh.get(&node_id) else {
         return C2ReplyEnvelope {
             request_id: envelope.request_id,
             result: Err(fail(C2RelayFailureCode::NodeOffline, "node not on drain")),
+            correlation_id: cid,
         };
     };
     let routed = RoutedNodeRequest {
@@ -523,7 +525,7 @@ async fn dispatch_request(mesh: &NodeOperatorMesh, envelope: C2RequestEnvelope) 
         Ok(wait) => wait.await,
         Err(e) => Err(e),
     };
-    finish_request(mesh, &node_id, envelope.request_id, result)
+    finish_request(mesh, &node_id, envelope.request_id, result, cid)
 }
 
 /// Enqueue a request on the node link in arrival order; the returned future
@@ -535,18 +537,40 @@ async fn start_request(
     mesh: &NodeOperatorMesh,
     envelope: C2RequestEnvelope,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = C2ReplyEnvelope> + Send>> {
-    if matches!(envelope.request.request, gate4agent_node_protocol::NodeRequest::TerminalBytes { .. }) {
+    let correlation_id = envelope.correlation_id.clone();
+    let req_kind = match &envelope.request.request {
+        gate4agent_node_protocol::NodeRequest::Spawn { provider, .. } => {
+            tracing::info!(
+                cid = correlation_id.as_deref().unwrap_or("-"),
+                node = %envelope.request.route.node_id,
+                %provider,
+                "operator spawn forward",
+            );
+            "spawn"
+        }
+        gate4agent_node_protocol::NodeRequest::Resize { .. } => "resize",
+        gate4agent_node_protocol::NodeRequest::Stop { .. } => "stop",
+        gate4agent_node_protocol::NodeRequest::TerminalBytes { .. } => "terminal_bytes",
+        _ => "other",
+    };
+    if req_kind == "terminal_bytes" {
         let mut g = PTY_PROBE.lock().unwrap_or_else(|p| p.into_inner());
-        if g.is_none() { *g = Some(std::time::Instant::now()); }
+        if g.is_none() {
+            *g = Some(std::time::Instant::now());
+        }
         tracing::debug!(target: "pty_lat", "core: pty input enqueued toward node");
     }
     let node_id = envelope.request.route.node_id.as_str().to_owned();
     let request_id = envelope.request_id;
     let Some(link) = mesh.get(&node_id) else {
-        return Box::pin(async move { C2ReplyEnvelope {
-            request_id,
-            result: Err(fail(C2RelayFailureCode::NodeOffline, "node not on drain")),
-        } });
+        let cid = correlation_id.clone();
+        return Box::pin(async move {
+            C2ReplyEnvelope {
+                request_id,
+                result: Err(fail(C2RelayFailureCode::NodeOffline, "node not on drain")),
+                correlation_id: cid,
+            }
+        });
     };
     let routed = RoutedNodeRequest {
         route: envelope.request.route.clone(),
@@ -554,9 +578,22 @@ async fn start_request(
     };
     let sent = link.request_pipelined(&routed, REQUEST_DEADLINE).await;
     let mesh = mesh.clone();
+    let cid = correlation_id.clone();
     Box::pin(async move {
-        let result = match sent { Ok(wait) => wait.await, Err(e) => Err(e) };
-        finish_request(&mesh, &node_id, request_id, result)
+        let result = match sent {
+            Ok(wait) => wait.await,
+            Err(e) => Err(e),
+        };
+        if matches!(req_kind, "spawn" | "resize" | "stop") {
+            tracing::info!(
+                cid = cid.as_deref().unwrap_or("-"),
+                node = %node_id,
+                kind = req_kind,
+                ok = result.is_ok(),
+                "operator request settled",
+            );
+        }
+        finish_request(&mesh, &node_id, request_id, result, cid)
     })
 }
 
@@ -565,10 +602,9 @@ fn finish_request(
     node_id: &str,
     request_id: hatchery_core::C2RequestId,
     result: Result<G4aMessage, crate::node_controller::OperatorError>,
+    correlation_id: Option<String>,
 ) -> C2ReplyEnvelope {
     let node_id = node_id.to_owned();
-    struct E { request_id: hatchery_core::C2RequestId }
-    let envelope = E { request_id };
     match result {
         Ok(G4aMessage::Response(response)) => {
             mesh.set_cursor(
@@ -584,36 +620,47 @@ fn finish_request(
                 }
             }
             C2ReplyEnvelope {
-                request_id: envelope.request_id,
+                request_id,
                 result: Ok(response),
+                correlation_id,
             }
         }
-        Ok(G4aMessage::Json(v)) => {
-            // Forward-compatible: try as RoutedNodeResponse
-            match serde_json::from_value::<RoutedNodeResponse>(v) {
-                Ok(response) => {
-                    mesh.set_cursor(
-                        &node_id,
-                        hatchery_core::NodeCursor {
-                            incarnation_id: response.incarnation_id,
-                            sequence: 0,
-                        },
-                    );
-                    C2ReplyEnvelope { request_id: envelope.request_id, result: Ok(response) }
+        Ok(G4aMessage::Json(v)) => match serde_json::from_value::<RoutedNodeResponse>(v) {
+            Ok(response) => {
+                mesh.set_cursor(
+                    &node_id,
+                    hatchery_core::NodeCursor {
+                        incarnation_id: response.incarnation_id,
+                        sequence: 0,
+                    },
+                );
+                C2ReplyEnvelope {
+                    request_id,
+                    result: Ok(response),
+                    correlation_id,
                 }
-                Err(_) => C2ReplyEnvelope {
-                    request_id: envelope.request_id,
-                    result: Err(fail(C2RelayFailureCode::RequestForbidden, "node reply was not a g4a response")),
-                },
             }
-        }
+            Err(_) => C2ReplyEnvelope {
+                request_id,
+                result: Err(fail(
+                    C2RelayFailureCode::RequestForbidden,
+                    "node reply was not a g4a response",
+                )),
+                correlation_id,
+            },
+        },
         Ok(_) => C2ReplyEnvelope {
-            request_id: envelope.request_id,
-            result: Err(fail(C2RelayFailureCode::RequestForbidden, "unexpected g4a reply kind")),
+            request_id,
+            result: Err(fail(
+                C2RelayFailureCode::RequestForbidden,
+                "unexpected g4a reply kind",
+            )),
+            correlation_id,
         },
         Err(_) => C2ReplyEnvelope {
-            request_id: envelope.request_id,
+            request_id,
             result: Err(fail(C2RelayFailureCode::RelayBusy, "node did not answer")),
+            correlation_id,
         },
     }
 }

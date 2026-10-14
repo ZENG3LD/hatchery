@@ -11303,6 +11303,8 @@ impl NodeShared {
             node_id = %self.node_id,
             instance_id = instance_id.0,
             workspace = %address.workspace_id,
+            reason = "attach_never_arrived",
+            grace_ms = PROVISIONAL_SPAWN_GRACE_MS,
             "draft spawn never viewed; stopping PTY",
         );
         let _ = self.dispatch(ControlCommand::Stop {

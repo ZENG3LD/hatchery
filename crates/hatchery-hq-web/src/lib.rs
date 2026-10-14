@@ -5,6 +5,7 @@
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, Request, State};
+use axum::Json;
 use axum::http::{header, Method, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -145,6 +146,8 @@ pub struct AppState {
     /// A live term WS cancels the entry; closing the last view arms a short
     /// reconnect grace then Stop+browser-kill. Today every PTY is a draft.
     pub draft_kills: std::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<()>>>,
+    /// Recent PTY spawn traces for the Support modal (no secrets).
+    pub support_traces: std::sync::Mutex<std::collections::VecDeque<Value>>,
 }
 
 type Shared = Arc<AppState>;
@@ -156,7 +159,7 @@ pub fn router(config: Config) -> (Router, Shared) {
     let (events, _) = broadcast::channel(256);
     let (node_events, _) = broadcast::channel(1024);
     let (browser_events, _) = broadcast::channel(256);
-    let state = Arc::new(AppState { config, events, topology: std::sync::RwLock::new(None), node_events, browser_events, draft_kills: std::sync::Mutex::new(std::collections::HashMap::new()) });
+    let state = Arc::new(AppState { config, events, topology: std::sync::RwLock::new(None), node_events, browser_events, draft_kills: std::sync::Mutex::new(std::collections::HashMap::new()), support_traces: std::sync::Mutex::new(std::collections::VecDeque::new()) });
     let base = state.config.base_path.clone();
     let index: &'static str = Box::leak(index_html(&base).into_boxed_str());
     let mut app = Router::new()
@@ -180,6 +183,7 @@ pub fn router(config: Config) -> (Router, Shared) {
         .route("/api/library/{name}", get(api_library_file))
         .route("/api/events", get(api_events))
         .route("/api/term", get(term_ws))
+        .route("/api/support/traces", get(api_support_traces))
         .route("/api/sessions", get(api_sessions))
         .route("/api/browser", get(browser_ws))
         .route("/api/local_server", axum::routing::post(api_local_server))
@@ -541,6 +545,9 @@ struct TermQuery {
     /// `workspace/instance` / `instance` (workspace defaults to `primary`).
     #[serde(default)]
     session: Option<String>,
+    /// Browser-generated correlation id for one spawn/attach attempt (opaque).
+    #[serde(default)]
+    cid: Option<String>,
 }
 fn d_rows() -> u16 { 30 }
 fn d_cols() -> u16 { 110 }
@@ -552,10 +559,31 @@ struct SessionsQuery {
     node: String,
 }
 
+
+fn push_support_trace(s: &Shared, cid: &str, component: &str, event: &str, detail: Value) {
+    let row = json!({
+        "ts_ms": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0),
+        "cid": cid,
+        "component": component,
+        "event": event,
+        "detail": detail,
+    });
+    if let Ok(mut q) = s.support_traces.lock() {
+        q.push_back(row);
+        while q.len() > 400 { q.pop_front(); }
+    }
+}
+
+async fn api_support_traces(State(s): State<Shared>) -> Response {
+    let traces: Vec<Value> = s.support_traces.lock().ok().map(|q| q.iter().cloned().collect()).unwrap_or_default();
+    (StatusCode::OK, Json(json!({ "traces": traces }))).into_response()
+}
+
 async fn term_ws(State(s): State<Shared>, Query(q): Query<TermQuery>, ws: WebSocketUpgrade) -> Response {
     ws.on_upgrade(move |socket| async move {
+        let cid = q.cid.clone().unwrap_or_else(|| "-".into());
         if let Err(message) = term_session(socket, s, q).await {
-            tracing::warn!(%message, "terminal session ended with error");
+            tracing::warn!(%cid, %message, "terminal session ended with error");
         }
     })
 }
@@ -577,7 +605,18 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     use gate4agent_node_protocol::{AgentId, NodeRequest, SessionMode, WorkspaceId};
     use gate4agent_types::TerminalSize;
     use hatchery_core::{C2NodeResponse, NodeId, NodeRoute, NodeTransportState};
-    let say = |kind: &str, text: String| json!({ "type": kind, "text": text }).to_string();
+    let cid = q
+        .cid
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
+        .unwrap_or("nocid")
+        .to_owned();
+    let say = |kind: &str, text: String| {
+        json!({ "type": kind, "text": text, "cid": cid.as_str() }).to_string()
+    };
+    tracing::info!(%cid, node = %q.node, provider = %q.provider, attach = q.session.is_some(), "pty session begin");
+    push_support_trace(&s, &cid, "hq-web", "begin", json!({ "node": q.node, "provider": q.provider, "attach": q.session.is_some() }));
     let node = NodeId::new(q.node.clone()).map_err(|e| e.to_string())?;
     // Topology watcher: online check + shared event fanout. Per-term control
     // below carries Spawn/Resize/bytes so 20–100 parallel HQ PTYs do not share
@@ -628,8 +667,10 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
             let _ = socket.send(Message::text(say("error", "provider is required to spawn".into()))).await;
             return Err("provider required".into());
         }
+        tracing::info!(%cid, node = %q.node, %provider, "pty spawn requested");
+        push_support_trace(&s, &cid, "hq-web", "spawn_requested", json!({ "node": q.node, "provider": provider }));
         let spawned = control
-            .request(
+            .request_with_correlation(
                 route.clone(),
                 NodeRequest::Spawn {
                     workspace_id: WorkspaceId::new(workspace.clone()).map_err(|e| e.to_string())?,
@@ -638,24 +679,54 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
                     terminal_size: size,
                     initial_prompt: None,
                 },
+                Some(cid.clone()),
             )
-            .await
-            .map_err(|e| e.to_string())?;
+            .await;
+        let spawned = match spawned {
+            Ok(r) => r,
+            Err(e) => {
+                let text = format!("spawn failed: {e}");
+                let _ = socket.send(Message::text(say("error", text.clone()))).await;
+                tracing::warn!(%cid, error = %e, "pty spawn RPC failed");
+                push_support_trace(&s, &cid, "hq-web", "spawn_rpc_failed", json!({ "error": e.to_string() }));
+                return Err(text);
+            }
+        };
         let session = match spawned.response {
             Ok(C2NodeResponse::SpawnAccepted { session }) => {
                 route.expected_incarnation_id = spawned.incarnation_id;
+                tracing::info!(
+                    %cid,
+                    node = %q.node,
+                    instance_id = session.session.instance_id.0,
+                    "pty spawn accepted",
+                );
+                push_support_trace(&s, &cid, "hq-web", "spawn_accepted", json!({ "instance_id": session.session.instance_id.0, "node": q.node }));
                 // Claim the draft on the node NOW (Resize cancels the
-                // attach-never-arrived provisional timer). Do not wait for the
-                // browser fit/resize: HQ's disconnect grace starts only on a
-                // real WS close; the node's 30s timer covers spawn-without-attach.
-                let _ = control
-                    .request(route.clone(), NodeRequest::Resize { session: session.clone(), size })
-                    .await;
+                // attach-never-arrived provisional timer).
+                match control
+                    .request_with_correlation(
+                        route.clone(),
+                        NodeRequest::Resize { session: session.clone(), size },
+                        Some(cid.clone()),
+                    )
+                    .await
+                {
+                    Ok(_) => {
+                        tracing::info!(%cid, instance_id = session.session.instance_id.0, "pty attach resize ok");
+                        push_support_trace(&s, &cid, "hq-web", "attach_resize_ok", json!({ "instance_id": session.session.instance_id.0 }));
+                    }
+                    Err(e) => {
+                        tracing::warn!(%cid, error = %e, "pty attach resize failed");
+                        push_support_trace(&s, &cid, "hq-web", "attach_resize_failed", json!({ "error": e.to_string() }));
+                    }
+                }
                 session
             }
             other => {
-                let _ = socket.send(Message::text(say("error", format!("spawn refused: {other:?}")))).await;
-                return Err("spawn refused".into());
+                let text = format!("spawn refused: {other:?}");
+                let _ = socket.send(Message::text(say("error", text.clone()))).await;
+                return Err(text);
             }
         };
         (session, provider.to_owned(), None)
@@ -676,7 +747,8 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
         instance_id
     );
     cancel_draft_kill(&s, &draft_key);
-    tracing::info!(node = %q.node, provider = %provider_label, %instance_id, attach = q.session.is_some(), "terminal draft ready from web HQ");
+    tracing::info!(%cid, node = %q.node, provider = %provider_label, %instance_id, attach = q.session.is_some(), "pty draft ready");
+    push_support_trace(&s, &cid, "hq-web", "draft_ready", json!({ "instance_id": instance_id, "node": q.node, "provider": provider_label }));
     if socket
         .send(Message::text(
             json!({
@@ -688,6 +760,7 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
                 "generation": session.session.generation.0,
                 "workspace_id": session.workspace_id.as_str(),
                 "label": label,
+                "cid": cid,
             })
             .to_string(),
         ))

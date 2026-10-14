@@ -182,9 +182,18 @@ impl C2ReconnectingHandle {
         route: NodeRoute,
         request: NodeRequest,
     ) -> Result<RoutedNodeResponse, C2ControlError> {
+        self.request_with_correlation(route, request, None).await
+    }
+
+    pub async fn request_with_correlation(
+        &self,
+        route: NodeRoute,
+        request: NodeRequest,
+        correlation_id: Option<String>,
+    ) -> Result<RoutedNodeResponse, C2ControlError> {
         let handle = self.live.borrow().clone();
         match handle {
-            Some(handle) => handle.request(route, request).await,
+            Some(handle) => handle.request_with_correlation(route, request, correlation_id).await,
             None => Err(C2ControlError::Closed),
         }
     }
@@ -721,8 +730,8 @@ mod tests {
             agent_progress: Vec::new(),
             managed_worktrees: Vec::new(),
             launch_inventory: None,
-
-        machine: None,}
+            machine: None,
+        }
     }
 
     fn canned_reply(envelope: &C2RequestEnvelope, tag: &str) -> C2ReplyEnvelope {
@@ -738,6 +747,7 @@ mod tests {
                     snapshot: canned_node_snapshot(&envelope.request.route.node_id, tag),
                 }),
             }),
+            correlation_id: envelope.correlation_id.clone(),
         }
     }
 

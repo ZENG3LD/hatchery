@@ -2539,12 +2539,18 @@ impl C2Topology {
 pub struct C2RequestEnvelope {
     pub request_id: C2RequestId,
     pub request: RoutedNodeRequest,
+    /// HQ-generated spawn/session correlation id (opaque, no secrets).
+    /// Echoed on the reply when present. Older peers omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct C2ReplyEnvelope {
     pub request_id: C2RequestId,
     pub result: Result<RoutedNodeResponse, C2RelayFailure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub correlation_id: Option<String>,
 }
 
 

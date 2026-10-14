@@ -180,6 +180,17 @@ impl C2ControlHandle {
         route: NodeRoute,
         request: NodeRequest,
     ) -> Result<RoutedNodeResponse, C2ControlError> {
+        self.request_with_correlation(route, request, None).await
+    }
+
+    /// Like [`Self::request`], attaching an opaque HQ correlation id to the
+    /// operator-wire envelope (logged on core; echoed on the reply).
+    pub async fn request_with_correlation(
+        &self,
+        route: NodeRoute,
+        request: NodeRequest,
+        correlation_id: Option<String>,
+    ) -> Result<RoutedNodeResponse, C2ControlError> {
         reject_unnegotiated_outbound_path(
             &request,
             negotiated_path_capabilities(self.hello.compatibility.as_ref()),
@@ -187,7 +198,12 @@ impl C2ControlHandle {
         let deadline = control_request_deadline(&request);
         let (reply_tx, reply_rx) = oneshot::channel();
         timeout(deadline, async {
-            self.commands.send(ControlCommand { route, request, reply: reply_tx })
+            self.commands.send(ControlCommand {
+                route,
+                request,
+                correlation_id,
+                reply: reply_tx,
+            })
                 .await.map_err(|_| C2ControlError::Closed)?;
             reply_rx.await.map_err(|_| C2ControlError::Closed)?
         }).await.map_err(|_| C2ControlError::Closed)?
@@ -252,7 +268,7 @@ fn start_control_request(
         )?;
         let deadline_at = Instant::now() + control_request_deadline(&request);
         let (reply_tx, reply_rx) = oneshot::channel();
-        commands.try_send(ControlCommand { route, request, reply: reply_tx })
+        commands.try_send(ControlCommand { route, request, correlation_id: None, reply: reply_tx })
             .map_err(|error| match error {
                 mpsc::error::TrySendError::Full(_) => C2ControlError::QueueFull,
                 mpsc::error::TrySendError::Closed(_) => C2ControlError::Closed,
@@ -303,9 +319,12 @@ fn control_request_deadline(request: &NodeRequest) -> Duration {
         | NodeRequest::CreateStandaloneWorkspace { .. }
         | NodeRequest::RemoveWorktree { .. }
         | NodeRequest::CleanupManagedWorktree { .. } => Duration::from_secs(240),
+        // HQ PTY spawn over restream can exceed 20s under load (controller
+        // acquire + bridge queue + Claude/Codex cold start). 15+5 headroom
+        // timed out the owner path at ~20s while the node still accepted.
         NodeRequest::Spawn { .. }
-        | NodeRequest::Resume { .. }
-        | NodeRequest::Stop { .. } => Duration::from_secs(15),
+        | NodeRequest::Resume { .. } => Duration::from_secs(90),
+        NodeRequest::Stop { .. } => Duration::from_secs(15),
         NodeRequest::SpawnSpec { spec } =>
             Duration::from_millis(spec.deadline_ms.get()) + RELAY_REPLY_HEADROOM,
         NodeRequest::SpawnManagedWorktree { request } =>
@@ -387,6 +406,7 @@ impl From<mpsc::Sender<RoutedNodeEvent>> for EventDelivery {
 struct ControlCommand {
     route: NodeRoute,
     request: NodeRequest,
+    correlation_id: Option<String>,
     reply: oneshot::Sender<Result<RoutedNodeResponse, C2ControlError>>,
 }
 
@@ -2392,6 +2412,7 @@ async fn control_owner<E>(
                         route: command.route.clone(),
                         request: command.request,
                     },
+                    correlation_id: command.correlation_id,
                 });
                 pending.insert(
                     request_id,
@@ -3865,6 +3886,7 @@ mod tests {
                 incarnation_id: NodeIncarnationId::from_bytes([7; 16]),
                 response: Ok(hatchery_core::C2NodeResponse::Accepted),
             }),
+            correlation_id: None,
         }))
     }
 
@@ -3894,6 +3916,7 @@ mod tests {
                     }],
                 }),
             }),
+            correlation_id: None,
         }))
     }
 
@@ -3912,6 +3935,7 @@ mod tests {
                     workspace_id: None,
                 }),
             }),
+            correlation_id: None,
         }))
     }
 
@@ -3968,6 +3992,7 @@ mod tests {
                     None,
                 )),
             }),
+            correlation_id: None,
         }))
     }
 
@@ -4066,6 +4091,7 @@ mod tests {
             route: route(),
             request: request.clone(),
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
         let Some(C2ClientFrame::Request(envelope)) = writer_rx.recv().await else {
             panic!("host directory browse was not written");
@@ -4092,6 +4118,7 @@ mod tests {
                         },
                     }),
                 }),
+                correlation_id: None,
             },
         ))).await.unwrap();
         assert!(matches!(
@@ -4124,6 +4151,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Snapshot,
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
         let Some(C2ClientFrame::Request(envelope)) = writer_rx.recv().await else {
             panic!("snapshot request was not written");
@@ -4144,6 +4172,7 @@ mod tests {
                         },
                     }),
                 }),
+                correlation_id: None,
             },
         ))).await.unwrap();
         assert!(matches!(
@@ -4207,6 +4236,7 @@ mod tests {
             route: route(),
             request: request.clone(),
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
         let Some(C2ClientFrame::Request(envelope)) = writer_rx.recv().await else {
             panic!("standalone workspace request was not written");
@@ -4230,6 +4260,7 @@ mod tests {
                         workspace: workspace.clone(),
                     }),
                 }),
+                correlation_id: None,
             },
         ))).await.unwrap();
         let response = timeout(Duration::from_secs(1), reply_rx)
@@ -4303,6 +4334,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Resync { after_sequence: 7 },
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
 
@@ -4345,6 +4377,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Snapshot,
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
         incoming_tx.send(reply(1)).await.unwrap();
@@ -4476,6 +4509,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Snapshot,
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
         incoming_tx.send(reply(1)).await.unwrap();
@@ -4520,6 +4554,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Snapshot,
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
         incoming_tx.send(reply(1)).await.unwrap();
@@ -4550,6 +4585,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Snapshot,
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
 
@@ -4875,7 +4911,7 @@ mod tests {
         assert!(reject_unnegotiated_outbound_path(&request, all_path_capabilities()).is_ok());
         let (reply_tx, reply_rx) = oneshot::channel();
         commands_tx
-            .send(ControlCommand { route: route(), request, reply: reply_tx })
+            .send(ControlCommand { route: route(), request, reply: reply_tx,  correlation_id: None, })
             .await
             .unwrap();
 
@@ -4911,6 +4947,7 @@ mod tests {
                 initial_prompt: None,
             },
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
 
         assert!(matches!(
@@ -5009,6 +5046,7 @@ mod tests {
             route: route(),
             request: NodeRequest::SpawnSpec { spec: spawn_spec("node-a") },
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
 
         assert!(matches!(
@@ -5039,6 +5077,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Snapshot,
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
         incoming_tx.send(OwnerInput::Frame(C2ServerFrame::Reply(
@@ -5051,6 +5090,7 @@ mod tests {
                         receipt: spawn_receipt(),
                     }),
                 }),
+                correlation_id: None,
             },
         ))).await.unwrap();
 
@@ -5064,6 +5104,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Snapshot,
             reply: oneshot::channel().0,
+            correlation_id: None,
         }).await.is_err());
     }
 
@@ -5086,6 +5127,7 @@ mod tests {
             route: route(),
             request: NodeRequest::SpawnSpec { spec: spawn_spec("node-a") },
             reply: legacy_reply_tx,
+            correlation_id: None,
         }).await.unwrap();
         assert!(matches!(
             writer_rx.recv().await,
@@ -5099,6 +5141,7 @@ mod tests {
             route: route(),
             request: NodeRequest::SpawnSpec { spec },
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
         assert!(matches!(
             timeout(Duration::from_secs(1), reply_rx).await.unwrap().unwrap(),
@@ -5128,6 +5171,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Snapshot,
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
         let mut receipt = spawn_receipt();
@@ -5140,6 +5184,7 @@ mod tests {
                     incarnation_id: NodeIncarnationId::from_bytes([7; 16]),
                     response: Ok(C2NodeResponse::SpawnSpecAccepted { receipt }),
                 }),
+                correlation_id: None,
             },
         ))).await.unwrap();
         assert!(matches!(
@@ -5168,6 +5213,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Snapshot,
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
         let mut receipt = spawn_receipt();
@@ -5194,6 +5240,7 @@ mod tests {
                     incarnation_id: NodeIncarnationId::from_bytes([7; 16]),
                     response: Ok(C2NodeResponse::SpawnSpecAccepted { receipt }),
                 }),
+                correlation_id: None,
             },
         ))).await.unwrap();
         assert!(matches!(
@@ -5220,6 +5267,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Snapshot,
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
         incoming_tx.send(OwnerInput::Frame(C2ServerFrame::Reply(
@@ -5246,6 +5294,7 @@ mod tests {
                         machine: None,},
                     }),
                 }),
+                correlation_id: None,
             },
         ))).await.unwrap();
 
@@ -5277,6 +5326,7 @@ mod tests {
                 path: repository_path("src/lib.rs"),
             },
             reply: read_tx,
+            correlation_id: None,
         }).await.unwrap();
 
         assert!(matches!(
@@ -5291,6 +5341,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Snapshot,
             reply: snapshot_tx,
+            correlation_id: None,
         }).await.unwrap();
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
         incoming_tx.send(reply(1)).await.unwrap();
@@ -5335,6 +5386,7 @@ mod tests {
                 route: route(),
                 request,
                 reply: create_tx,
+                correlation_id: None,
             })
             .await
             .unwrap();
@@ -5351,6 +5403,7 @@ mod tests {
                 route: route(),
                 request: NodeRequest::Snapshot,
                 reply: snapshot_tx,
+                correlation_id: None,
             })
             .await
             .unwrap();
@@ -5585,6 +5638,7 @@ mod tests {
                 route: route(),
                 request: NodeRequest::Snapshot,
                 reply: reply_tx,
+                correlation_id: None,
             })
             .await
             .unwrap();
@@ -5619,6 +5673,7 @@ mod tests {
                     workspace_id: WorkspaceId::new("foreign").unwrap(),
                 },
                 reply: reply_tx,
+                correlation_id: None,
             })
             .await
             .unwrap();
@@ -5668,6 +5723,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Snapshot,
             reply: expired_tx,
+            correlation_id: None,
         }).await.unwrap();
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
         drop(expired_rx);
@@ -5678,6 +5734,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Snapshot,
             reply: live_tx,
+            correlation_id: None,
         }).await.unwrap();
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
         incoming_tx.send(reply(2)).await.unwrap();
@@ -5727,6 +5784,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Snapshot,
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
         // The `regular` channel is full but its receiver is alive -- this
@@ -5784,6 +5842,7 @@ mod tests {
             route: route(),
             request: NodeRequest::Snapshot,
             reply: reply_tx,
+            correlation_id: None,
         }).await.unwrap();
         assert!(matches!(writer_rx.recv().await, Some(C2ClientFrame::Request(_))));
         incoming_tx.send(reply(1)).await.unwrap();
@@ -6238,6 +6297,7 @@ mod tests {
                 route: route(),
                 request: NodeRequest::Snapshot,
                 reply: reply_tx,
+                correlation_id: None,
             })
             .await
             .unwrap();
@@ -6253,6 +6313,7 @@ mod tests {
                         incarnation_id: NodeIncarnationId::from_bytes([8; 16]),
                         response: Ok(C2NodeResponse::Accepted),
                     }),
+                    correlation_id: None,
                 },
             )))
             .await

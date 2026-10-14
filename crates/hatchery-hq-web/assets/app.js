@@ -448,11 +448,58 @@ $('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); 
   { const fav = visibleNodes().find((n) => n.node_id === favNode()); if (fav) m.appendChild(menuRow({ ic: 'star', label: fav.node_id, right: fav.online ? '' : 'offline', sub: ptySub(fav) }, 0)); }
   m.appendChild(menuRow({ ic: 'gauge', label: 'Usage & plan', right: '— % used', fn: () => openSettings('usage') }, 0));
   m.appendChild(menuRow({ ic: 'phone', label: 'Get the apps', fn: () => toast('Apps: coming soon') }, 0));
-  m.appendChild(menuRow({ ic: 'book', label: 'Support', fn: () => toast('Support: coming soon') }, 0));
+  m.appendChild(menuRow({ ic: 'book', label: 'Support', fn: () => openSupport() }, 0));
   m.appendChild(menuRow({ ic: 'gear', label: 'Settings', fn: () => openSettings('general') }, 0));
   m.insertAdjacentHTML('beforeend', '<hr>');
   m.appendChild(menuRow({ ic: 'userplus', label: 'Add account', fn: () => toast('Multiple accounts: coming soon') }, 0));
   m.appendChild(menuRow({ ic: 'logout', label: 'Sign out', fn: signOut }, 0)); };
+// ---- Support: operator-only spawn traces (never shown in sidebar/tabs)
+const PTY_TRACES = [];
+const PTY_TRACE_MAX = 400;
+function ptyTrace(cid, component, event, detail) {
+  const row = { ts: Date.now(), cid: cid || '-', component: component || 'browser', event: event || '', detail: detail || {} };
+  PTY_TRACES.push(row);
+  if (PTY_TRACES.length > PTY_TRACE_MAX) PTY_TRACES.splice(0, PTY_TRACES.length - PTY_TRACE_MAX);
+  try { console.info('[hq-pty]', row.cid, row.component, row.event, row.detail); } catch (_) {}
+}
+function formatTrace(r) {
+  const d = r.detail && typeof r.detail === 'object' ? Object.entries(r.detail).map(([k, v]) => `${k}=${v}`).join(' ') : '';
+  return `${new Date(r.ts).toISOString()}  ${r.cid}  ${r.component}  ${r.event}${d ? '  ' + d : ''}`;
+}
+async function openSupport() {
+  let d = $('#support'); if (!d) { d = document.createElement('div'); d.id = 'support'; document.body.appendChild(d); d.onclick = (e) => { if (e.target === d) d.remove(); }; }
+  let server = [];
+  try { const r = await api('/api/support/traces'); server = r.traces || []; } catch (_) { server = []; }
+  const merge = [];
+  for (const r of server) merge.push({ ts: r.ts_ms || r.ts || 0, cid: r.cid || '-', component: r.component || 'hq-web', event: r.event || '', detail: r.detail || {} });
+  for (const r of PTY_TRACES) merge.push(r);
+  merge.sort((a, b) => a.ts - b.ts);
+  const renderList = (filter) => {
+    const f = (filter || '').trim().toLowerCase();
+    const rows = f ? merge.filter((r) => formatTrace(r).toLowerCase().includes(f)) : merge;
+    return rows.length ? rows.map((r) => `<div class="sup-line">${esc(formatTrace(r))}</div>`).join('') : '<div class="sub">No traces yet. Spawn a PTY, then reopen Support.</div>';
+  };
+  d.innerHTML = `<div class="sdlg" style="max-width:860px"><div class="sbody" style="padding:20px 24px;width:100%">
+    <h2>Support</h2>
+    <p class="sub">Recent PTY spawn traces by correlation id (cid). Filter, then copy for debugging. Nothing here appears in the sidebar.</p>
+    <div class="row" style="gap:8px;margin:12px 0;align-items:center">
+      <input id="supf" placeholder="filter cid / component / event" style="flex:1">
+      <button class="btn" id="supcopy">Copy</button>
+      <button class="btn" id="supref">Refresh</button>
+    </div>
+    <div class="pcard log" id="suplog" style="max-height:50vh;overflow:auto;font-family:ui-monospace,monospace;font-size:12px">${renderList('')}</div>
+  </div><button class="round sx" id="supx">✕</button></div>`;
+  const paint = () => { $('#suplog').innerHTML = renderList($('#supf').value); };
+  $('#supf').oninput = paint;
+  $('#supx').onclick = () => d.remove();
+  $('#supcopy').onclick = async () => {
+    const text = [...$('#suplog').querySelectorAll('.sup-line')].map((e) => e.textContent).join('\n');
+    try { await navigator.clipboard.writeText(text || ''); toast('Copied'); } catch (_) { toast('Copy failed'); }
+  };
+  $('#supref').onclick = () => { d.remove(); openSupport(); };
+}
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#support')) $('#support').remove(); });
+
 // ---- settings modal (stubs)
 const SNAV = [['general', '⚙', 'General'], ['computer', '▭', 'Computer & nodes'], ['usage', '◔', 'Usage'], ['updates', '↻', 'Updates']];
 function openSettings(sec) {
@@ -717,29 +764,38 @@ function paint(sess, onRendered) {
 // Open a socket for a session: spawn (provider) or attach (session id). Returns the sess object.
 function connectSession(node, sess, { provider, parser, attach } = {}) {
   const rows = term.rows || 30, cols = term.cols || 110;
-  // keep=true only after sessionize (server also treats spawn as provisional until attach completes).
   // Draft PTY: never keep on disconnect. Real provider-session survival is future work.
-  const q = new URLSearchParams({ node, rows, cols, keep: 'false' });
+  const cid = sess.cid || (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, '').slice(0, 16) : Math.random().toString(16).slice(2, 18));
+  sess.cid = cid;
+  const q = new URLSearchParams({ node, rows, cols, keep: 'false', cid });
   if (attach) q.set('session', attach); else q.set('provider', provider);
   if (parser) q.set('parser', parser);
+  ptyTrace(cid, 'browser', attach ? 'attach' : 'spawn', { node, provider: provider || '' });
   const sock = new WebSocket(wsUrl('/api/term', q)); sess._ws = sock; sess.state = sess.state || 'starting';
   let bound = false;
   sock.onmessage = (m) => {
     const d = JSON.parse(m.data);
+    if (d.cid && !sess.cid) sess.cid = d.cid;
     if (d.type === 'spawned') {
       bound = true; sess.key = d.session; sess.instance_id = d.instance_id; sess.workspace_id = d.workspace_id;
       if (d.provider) sess.provider = d.provider; sess.id = `${node}:${d.workspace_id}:${d.instance_id}`;
       sess.live = true; sess.state = 'live'; sess.label = d.label || sessLabel(node, sess);
       S.events[node] = S.events[node] || new Map();
+      ptyTrace(cid, 'browser', 'spawned', { instance_id: d.instance_id, node });
       if (S.ptySession === sess) { $('#tinfo').textContent = sess.label; $('#headname').textContent = sess.label; S.sentCols = 0; refit(); }
       logEv(`session ${sess.label} ${attach ? 'attached' : 'started'}`); renderSidebar(); renderPanelHead();
     }
-    if (d.type === 'error') { if (!bound) { toast(`${sess.provider} on ${node}: ${d.text}`); dropSession(node, sess); } else toast(d.text); }
+    if (d.type === 'error') {
+      ptyTrace(cid, 'hq-web', 'error', { text: String(d.text || '').slice(0, 200) });
+      if (!bound) { dropSession(node, sess); renderSidebar(); }
+      // no toast / no technical text in the UI
+    }
     if (d.type === 'ack' && !d.ok) toast('Refused: ' + String(d.detail).slice(0, 120));
     if (d.type === 'ack' && d.seq != null && sess.platHist) { const h = sess.platHist.find((x) => x.seq === d.seq); if (h) h.ack = d.ack_ms; }
     const pl = d.type === 'frame' && d.plat; if (pl) { const t0 = (sess.platSent || {})[pl.seq]; if (t0 != null) { delete sess.platSent[pl.seq]; sess.platArm = { seq: pl.seq, t0, at: performance.now(), hq: pl.hq_to_frame_ms, q: pl.hq_queue_us }; } }
     if (d.type === 'events' && S.ptySession === sess) onEvents(node, d.events);
     if (d.type === 'frame') {
+      if (sess.state === 'starting') { sess.state = 'live'; sess.live = true; renderSidebar(); }
       sess.lastAnsi = Uint8Array.from(atob(d.ansi), (c) => c.charCodeAt(0)); sess.lastText = d.text; sess.cols = d.cols; sess.lastFrame = Date.now();
       const arm = sess.platArm; sess.platArm = null;
       if (S.ptySession === sess) { S.lastFrame = Date.now(); paint(sess, arm ? () => recordPlat(sess, arm) : null); }
@@ -748,8 +804,13 @@ function connectSession(node, sess, { provider, parser, attach } = {}) {
   sock.onclose = () => {
     if (sess._ws !== sock) return;
     sess._ws = null;
-    if (!bound) { if (!sess.ended) { toast(`${sess.provider} on ${node}: could not start`); dropSession(node, sess); } return; }
-    // Socket gone: check whether the session is still live on the node; reattach if so.
+    if (!bound) {
+      if (!sess.ended) {
+        ptyTrace(cid, 'browser', 'closed_before_spawn', { node, provider: sess.provider || '' });
+        dropSession(node, sess);
+      }
+      return;
+    }
     setTimeout(() => reconcileNode(node), 500);
   };
   return sess;
