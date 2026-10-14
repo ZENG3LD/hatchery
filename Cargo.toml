@@ -14,15 +14,6 @@ members = [
     "crates/hatchery-observation-engine",
     "crates/hatchery-observation-store",
     "crates/hatchery-observation-service",
-    # Arcade (was nested workspace under crates/hatchery-arcade)
-    "crates/hatchery-arcade/engine",
-    "crates/hatchery-arcade/games/pet-bastion",
-    "crates/hatchery-arcade/games/pet-bastion-render",
-    "crates/hatchery-arcade/sweep",
-    "crates/hatchery-arcade/preview",
-    "crates/hatchery-arcade/bench",
-    # TUI (was nested single-crate workspace)
-    "crates/hatchery-tui",
     "crates/hatchery-bidi-client",
     "crates/hatchery-core",
     "crates/hatchery-enroll",
@@ -35,7 +26,7 @@ members = [
     "crates/hatchery-server",
     "crates/hatchery-e2e",
 ]
-# Default build skips the arcade (a local-edge TUI extra: `cargo build -p hatchery-tui --features arcade`).
+# The TUI and the arcade are the local-HQ line (branch `local-hq`), not part of the server workspace.
 default-members = [
     "crates/hatchery-harness-protocol",
     "crates/hatchery-bidi-relay",
@@ -50,7 +41,6 @@ default-members = [
     "crates/hatchery-observation-engine",
     "crates/hatchery-observation-store",
     "crates/hatchery-observation-service",
-    "crates/hatchery-tui",
     "crates/hatchery-bidi-client",
     "crates/hatchery-core",
     "crates/hatchery-enroll",
