@@ -238,6 +238,14 @@ impl Restreamer {
             payload
         };
         // Also record in journal view for gap recovery tests / local nodes.
+        // Handshake1 must not be silently dropped: a drop desyncs Noise and the
+        // node never gets Handshake2 (seen as "handshake timeout" on m4a).
+        if matches!(
+            hatchery_core::inner::decode_inner(&opaque),
+            Some((hatchery_core::inner::InnerKind::Handshake1, _))
+        ) {
+            guard.buffer.ensure_handshake_credit(node_id, channel_id);
+        }
         let outcome = guard
             .buffer
             .enqueue(node_id, channel_id, opaque.clone(), Instant::now());
@@ -253,11 +261,12 @@ impl Restreamer {
     }
 
     pub fn open_channel(&self, node_id: &str, channel_id: u32, kind: ChannelKind) {
-        self.inner
-            .lock()
-            .expect("lock")
-            .channels
-            .insert((node_id.to_owned(), channel_id), kind);
+        let mut guard = self.inner.lock().expect("lock");
+        guard.channels.insert((node_id.to_owned(), channel_id), kind);
+        // Re-OPEN must be able to carry a fresh Noise handshake even if the
+        // previous session spent the stream's credit (otherwise Handshake1 is
+        // dropped and the node times out).
+        guard.buffer.reset_channel_credit(node_id, channel_id);
     }
 
     pub fn ack(&self, node_id: &str, channel_id: u32, seq: u64) {

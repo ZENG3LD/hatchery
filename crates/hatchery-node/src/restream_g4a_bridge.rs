@@ -4,7 +4,7 @@
 //! Core speaks the OperatorLink wire (`{"op_id","g4a"}`); C2 only ever sees opaque
 //! Noise ciphertext. The node never learns what sits behind C2.
 
-use crate::restream_session::{NodeSession, UpstreamKeys};
+use crate::restream_session::{NodeSession, SendPrio, UpstreamKeys};
 use crate::uplink_journal::UplinkJournal;
 use gate4agent_node_protocol::{
     ClientRole, NodeEventEnvelope, NodeFailureCode, NodeId, NodeIncarnationId, NodeRequest,
@@ -110,6 +110,7 @@ async fn run_loop(
         worker_stop,
     ));
     let mut last_pty_input: Option<std::time::Instant> = None;
+    let uplink_watch = session.uplink();
     let result = loop {
         if *shutdown.borrow() {
             break Ok(());
@@ -124,14 +125,16 @@ async fn run_loop(
             frame = client.recv() => {
                 match frame {
                     Ok(ServerFrame::Event(envelope)) => {
-                        if matches!(envelope.event, gate4agent_node_protocol::NodeEvent::TerminalFrame { .. }) {
+                        let is_pty = matches!(envelope.event, gate4agent_node_protocol::NodeEvent::TerminalFrame { .. });
+                        if is_pty {
                             if let Some(at) = last_pty_input.take() {
                                 tracing::debug!(target: "pty_lat", bridge_us = at.elapsed().as_micros() as u64, "bridge: pty input received to echo frame forwarded");
                             }
                         }
                         if envelope.event.requires_harness_mcp_proxy_capability() { continue; }
                         let plain = event_bytes(&node_id, incarnation_id, envelope)?;
-                        if let Err(e) = session.send(&plain).await { break Err(e); }
+                        let prio = if is_pty { SendPrio::Pty } else { SendPrio::Control };
+                        if let Err(e) = session.send_prio(&plain, prio).await { break Err(e); }
                     }
                     Ok(_) => break Err("local g4a sent an unexpected frame on the event connection".into()),
                     Err(err) => break Err(err.to_string()),
@@ -139,7 +142,7 @@ async fn run_loop(
             }
             out = out_rx.recv() => {
                 let Some(out) = out else { break Err("request worker closed".into()) };
-                if let Err(e) = session.send(&out).await { break Err(e); }
+                if let Err(e) = session.send_prio(&out, SendPrio::Control).await { break Err(e); }
             }
             plain = session.recv(Duration::from_secs(120)) => {
                 match plain {
@@ -151,10 +154,12 @@ async fn run_loop(
                     Err(err) => break Err(err),
                 }
             }
+            _ = uplink_watch.closed() => break Err("uplink write stalled; reconnecting".into()),
             ev = browser_ev_rx.recv() => {
                 let Some(ev) = ev else { continue };
                 let plain = serde_json::to_vec(&json!({ "browser": ev })).map_err(|e| e.to_string())?;
-                if let Err(e) = session.send(&plain).await { break Err(e); }
+                // Under pressure the uplink coalesces/drops browser frames; never blocks PTY.
+                if let Err(e) = session.send_prio(&plain, SendPrio::Browser).await { break Err(e); }
             }
         }
     };
