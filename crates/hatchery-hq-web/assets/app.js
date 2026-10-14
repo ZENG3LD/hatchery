@@ -244,6 +244,7 @@ function openNode(focus) {
       <div class="row" style="margin:6px 0"><button class="btn" data-mainbr="${esc(n.node_id)}"${n.online ? '' : ' disabled'}>Main browser (shared cookies)</button></div>
       <div class="fsess" data-fs="${esc(n.node_id)}">${fleetSessions(n.node_id)}</div>
       <details${focus === n.node_id || ns.length === 1 ? ' open' : ''}><summary>Environment & resources</summary><div class="pcard">${envHtml(n)}</div></details></div>`).join('') : '<div class="pcard sub">No nodes connected.</div>'}
+    <details id="rolesbox"><summary>Roles (routing)</summary><div class="pcard" id="roles"><div class="sub">Loading…</div></div></details>
     <div class="row" style="margin-top:12px"><button class="btn" id="nreattach">Reattach…</button><button class="btn" id="nenroll">Add a node (enrollment code)</button></div></div>`;
   $('#nclose').onclick = () => d.remove();
   $('#nenroll').onclick = () => { d.remove(); openNode(); setTimeout(issueCode, 0); };
@@ -252,7 +253,39 @@ function openNode(focus) {
   d.querySelectorAll('[data-fav]').forEach((b) => (b.onclick = () => { setFavNode(stableNodeId(favNode()) === stableNodeId(b.dataset.fav) ? '' : b.dataset.fav); openNode(focus); }));
   // Refresh per-node session lists, then redraw them in place.
   ns.filter((n) => n.online).forEach((n) => reconcileNode(n.node_id).then(() => { const el = d.querySelector(`[data-fs="${CSS.escape(n.node_id)}"]`); if (el) { el.innerHTML = fleetSessions(n.node_id); wireFleet(d); } }));
+  loadRoles(d);
   d.querySelectorAll('[data-spawn]').forEach((b) => (b.onclick = () => { const sel = d.querySelector(`select[data-prov="${CSS.escape(b.dataset.spawn)}"]`); const opt = sel.selectedOptions[0]; d.remove(); startSession(b.dataset.spawn, opt.value, opt.dataset.parser); }));
+}
+// Roles: the user fills each role from what the nodes detected (provider/model[:effort]);
+// choices are stored in core. An auto role can start a session on the router's pick.
+async function loadRoles(d) {
+  const box = d.querySelector('#roles'); if (!box) return;
+  let r; try { r = await api('/api/s/routing'); } catch (e) { box.innerHTML = `<div class="sub">Routing unavailable.</div>`; return; }
+  const opts = [];
+  (r.inventory || []).forEach((i) => (i.models || []).forEach((m) => {
+    const base = `${i.provider}/${m.id}`;
+    (m.efforts && m.efforts.length ? m.efforts.map((e) => `${base}:${e}`) : [base]).forEach((o) => { if (!opts.includes(o)) opts.push(o); });
+  }));
+  const roles = Object.entries(r.roles || {});
+  box.innerHTML = (roles.length ? roles.map(([name, role]) => `<div class="nrow"><span class="grow ell"><b>${esc(name)}</b> <span class="sub">${role.preset.map(esc).join(' → ')}${role.auto ? ' · auto' : ''}</span></span>${role.auto ? `<button class="btn blue" data-rstart="${esc(name)}">Start</button>` : ''}<button class="btn" data-rdel="${esc(name)}">Remove</button></div>`).join('') : '<div class="sub">No roles yet.</div>')
+    + (opts.length ? `<div class="row" style="margin-top:8px;flex-wrap:wrap;gap:6px"><input id="rname" placeholder="role (e.g. coder)" size="12"><select id="rmodels" multiple size="${Math.min(6, opts.length)}">${opts.map((o) => `<option>${esc(o)}</option>`).join('')}</select><label class="sub"><input type="checkbox" id="rauto"> auto</label><button class="btn blue" id="rsave">Save role</button></div><div class="sub">Order of selection = fallback order. Only models the nodes reported are offered.</div>` : '<div class="sub">No provider models reported by nodes yet.</div>');
+  box.querySelectorAll('[data-rdel]').forEach((b) => (b.onclick = async () => { try { await post(`/api/s/routing/roles/${encodeURIComponent(b.dataset.rdel)}/delete`); loadRoles(d); } catch (e) { toast(e.message); } }));
+  box.querySelectorAll('[data-rstart]').forEach((b) => (b.onclick = async () => {
+    try {
+      const rec = (await post('/api/s/routing/recommend', { role: b.dataset.rstart })).recommendation;
+      if (!rec || !rec.pick) { toast('No seat for this role right now'); return; }
+      if (!rec.pick.available) { toast('All seats for this role are limited'); return; }
+      d.remove(); startSession(rec.pick.seat.node, rec.pick.seat.provider);
+    } catch (e) { toast(e.message); }
+  }));
+  const sel = box.querySelector('#rmodels'); const picked = [];
+  if (sel) sel.onchange = () => { [...sel.options].forEach((o) => { const i = picked.indexOf(o.value); if (o.selected && i < 0) picked.push(o.value); if (!o.selected && i >= 0) picked.splice(i, 1); }); };
+  const save = box.querySelector('#rsave');
+  if (save) save.onclick = async () => {
+    const role = box.querySelector('#rname').value.trim();
+    if (!role || !picked.length) { toast('Name the role and pick at least one model'); return; }
+    try { await post('/api/s/routing/roles', { role, preset: picked, auto: box.querySelector('#rauto').checked }); loadRoles(d); } catch (e) { toast(e.message); }
+  };
 }
 function fleetSessions(node) {
   const list = (S.nodeSessions || {})[node] || [];
