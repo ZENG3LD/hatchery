@@ -82,7 +82,7 @@ pub use browser_wire::{
     decode_input as decode_browser_input, encode_click as encode_browser_click,
     encode_key as encode_browser_key, encode_navigate as encode_browser_navigate,
     encode_scroll as encode_browser_scroll, encode_text as encode_browser_text,
-    validate_session_id as validate_browser_session_id, BrowserClientOp, BrowserInput,
+    validate_session_id as validate_browser_session_id, BrowserClientOp, BrowserFrameRegion, BrowserFrameTrace, BrowserInput,
     BrowserMouseButton, BrowserOpReply, BrowserStreamEvent,
 };
 #[cfg(feature = "nested-crypto")]

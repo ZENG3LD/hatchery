@@ -899,8 +899,30 @@ async fn browser_session(mut socket: WebSocket, s: Shared, q: BrowserQuery) -> R
         async move { control.browser_command(cmd).await.map_err(|e| e.to_string()) }
     };
 
+    // Ordered input worker: one queue per browser socket, sent immediately (no batching);
+    // it reports when each input was written toward core so we can time the round trip.
+    let (in_tx, mut in_rx) = tokio::sync::mpsc::unbounded_channel::<(Vec<u8>, String, Option<u64>, std::time::Instant)>();
+    let (sent_tx, mut sent_rx) = tokio::sync::mpsc::unbounded_channel::<(Option<u64>, std::time::Instant, std::time::Instant)>();
+    {
+        let (control_i, session_i, node_i) = (control.clone(), session.clone(), node.clone());
+        tokio::spawn(async move {
+            while let Some((bytes, op, seq, recv_at)) = in_rx.recv().await {
+                match send_input(&control_i, &session_i, &node_i, bytes).await {
+                    Ok(()) => { let _ = sent_tx.send((seq, recv_at, std::time::Instant::now())); }
+                    Err(e) => tracing::warn!(op = %op, error = %e, "browser input RPC failed"),
+                }
+            }
+        });
+    }
+    // Last input awaiting its first reflecting frame: (client seq, ws receipt, written to core).
+    let mut last_input: Option<(Option<u64>, std::time::Instant, std::time::Instant)> = None;
+    let mut last_trace_n: u64 = 0;
+
     loop {
         tokio::select! {
+            sent = sent_rx.recv() => {
+                if let Some(s) = sent { last_input = Some(s); }
+            }
             ev = browser_rx.recv() => {
                 let ev = match ev {
                     Ok(v) => v,
@@ -908,10 +930,25 @@ async fn browser_session(mut socket: WebSocket, s: Shared, q: BrowserQuery) -> R
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 };
                 match ev.as_ref() {
-                    BrowserStreamEvent::Frame { node_id, session: sess, bytes, width, height, url, title }
+                    BrowserStreamEvent::Frame { node_id, session: sess, bytes, width, height, url, title, trace, region }
                         if node_id == &node && sess == &session => {
+                        if let (Some(tr), Some((seq, recv_at, sent_at))) = (trace, last_input) {
+                            if tr.input_n > last_trace_n {
+                                last_trace_n = tr.input_n;
+                                last_input = None;
+                                let hq_rtt = sent_at.elapsed().as_millis() as u64;
+                                let lat = json!({
+                                    "type": "lat", "seq": seq,
+                                    "hq_proc_ms": sent_at.duration_since(recv_at).as_millis() as u64,
+                                    "hq_rtt_ms": hq_rtt,
+                                    "net_ms": hq_rtt.saturating_sub(tr.node_ms as u64),
+                                    "node": tr,
+                                });
+                                let _ = socket.send(Message::text(lat.to_string())).await;
+                            }
+                        }
                         let _ = socket.send(Message::text(json!({
-                            "type": "frame_info", "bytes": bytes.len(), "w": width, "h": height, "url": url, "title": title
+                            "type": "frame_info", "bytes": bytes.len(), "w": width, "h": height, "url": url, "title": title, "region": region
                         }).to_string())).await;
                         if socket.send(Message::binary(bytes.clone())).await.is_err() { break; }
                     }
@@ -959,19 +996,9 @@ async fn browser_session(mut socket: WebSocket, s: Shared, q: BrowserQuery) -> R
                 match wire {
                     Ok(bytes) => {
                         tracing::info!(op = %cmd["t"], bytes = bytes.len(), "browser input from web HQ");
-                        // Do not await the node RPC inside this select arm: a long navigate
-                        // would stall frame delivery to the web client.
-                        let control_i = control.clone();
-                        let session_i = session.clone();
-                        let node_i = node.clone();
                         let op = cmd["t"].as_str().unwrap_or("input").to_owned();
-                        let op_log = op.clone();
                         let n = bytes.len();
-                        tokio::spawn(async move {
-                            if let Err(e) = send_input(&control_i, &session_i, &node_i, bytes).await {
-                                tracing::warn!(op = %op_log, error = %e, "browser input RPC failed");
-                            }
-                        });
+                        let _ = in_tx.send((bytes, op.clone(), cmd["seq"].as_u64(), std::time::Instant::now()));
                         let _ = socket.send(Message::text(json!({ "type": "sent", "op": op, "bytes": n }).to_string())).await;
                     }
                     Err(e) => {

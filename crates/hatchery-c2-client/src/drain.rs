@@ -50,6 +50,7 @@ impl DrainClient {
 
     pub async fn connect(&self) -> Result<DrainSession, DrainError> {
         let mut stream = TcpStream::connect(self.addr).await?;
+        let _ = stream.set_nodelay(true);
         stream.write_all(self.token.as_bytes()).await?;
         stream.write_all(b"\n").await?;
         Ok(DrainSession { stream, buf: Vec::new() })

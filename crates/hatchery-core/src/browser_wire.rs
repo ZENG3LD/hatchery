@@ -67,6 +67,12 @@ pub enum BrowserStreamEvent {
         url: String,
         #[serde(default)]
         title: String,
+        /// Latency trace for the first frame after an input (node-side hops).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        trace: Option<BrowserFrameTrace>,
+        /// Delta frame: `bytes` covers only this region of the full image.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        region: Option<BrowserFrameRegion>,
     },
     Stopped {
         node_id: String,
@@ -79,6 +85,36 @@ pub enum BrowserStreamEvent {
         session: String,
         message: String,
     },
+}
+
+/// Changed rectangle of a delta frame, in source-image pixels.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrowserFrameRegion {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+    /// Full source image size the region is relative to.
+    pub src_w: u32,
+    pub src_h: u32,
+}
+
+/// Node-side timings (milliseconds) for the frame that first reflects an input.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BrowserFrameTrace {
+    /// Count of inputs this browser session has received (monotonic).
+    pub input_n: u64,
+    /// Bridge receipt → CDP dispatch start.
+    pub queue_ms: u32,
+    /// CDP Input.dispatch* round trip(s).
+    pub cdp_ms: u32,
+    /// CDP dispatch done → first changed frame available on the node.
+    pub to_frame_ms: u32,
+    /// Total node time (receipt → frame handed to the uplink).
+    pub node_ms: u32,
+    /// "screencast" or "poll".
+    #[serde(default)]
+    pub source: String,
 }
 
 /// Reply to a BrowserClientOp (correlated by op_id on the control channel).
@@ -251,6 +287,7 @@ pub fn decode_input(bytes: &[u8]) -> Result<BrowserInput, String> {
 pub fn validate_session_id(session: &str) -> Result<(), String> {
     if session.is_empty()
         || session.len() > 64
+        || session.starts_with('.')
         || !session
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.'))

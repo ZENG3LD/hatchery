@@ -503,3 +503,10 @@ body.nodemode #composer{display:none}
 .cp-tog{display:inline-flex;margin-bottom:8px}.cp-row{flex-wrap:wrap;gap:6px}.btn.red{color:#ff6b6b}
 .fsess{margin:6px 0 4px}.fs-row{padding:3px 0}
 .cp-tog button{white-space:nowrap;padding:4px 14px}
+
+.bdrawer[hidden]{display:none}
+.bdbar #bdtitle{white-space:nowrap;font-size:11px;padding:0 4px}
+.pbrowser input{width:100%;height:26px;font-size:12px;margin-bottom:6px}
+#pbcanvas{display:block;width:100%;height:auto;background:#fff;border-radius:6px;outline:none}
+.plat{margin-top:8px;font-size:11px;line-height:1.4}
+.bdtab{display:none!important}

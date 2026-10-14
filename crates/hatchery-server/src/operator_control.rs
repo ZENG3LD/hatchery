@@ -309,6 +309,9 @@ where
     // branch could drop a half-read frame, desync the stream and close the operator
     // connection. Read frames on their own task and hand complete ones over.
     let (frame_tx, mut frame_rx) = tokio::sync::mpsc::channel(64);
+    // Requests and browser ops run on their own tasks so a slow node RPC never
+    // stalls frame/event delivery on this connection; replies come back here.
+    let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<C2ServerFrame>();
     let reader_task = tokio::spawn(async move {
         loop {
             let frame = read_client_frame(&mut reader, MAX_C2_CLIENT_FRAME_BYTES).await;
@@ -367,31 +370,30 @@ where
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
+            out = out_rx.recv() => {
+                let Some(out) = out else { break };
+                if write_json_frame_limited(&mut writer, &out, MAX_C2_SERVER_FRAME_BYTES).await.is_err() {
+                    break;
+                }
+            }
             frame = frame_rx.recv() => {
                 let Some(frame) = frame else { break };
                 match frame {
                     Ok(C2ClientFrame::Request(envelope)) => {
-                        let reply = dispatch_request(&mesh, envelope).await;
-                        if write_json_frame_limited(&mut writer, &C2ServerFrame::Reply(reply), MAX_C2_SERVER_FRAME_BYTES).await.is_err() {
-                            break;
-                        }
+                        let (mesh, out) = (mesh.clone(), out_tx.clone());
+                        tokio::spawn(async move {
+                            let reply = dispatch_request(&mesh, envelope).await;
+                            let _ = out.send(C2ServerFrame::Reply(reply));
+                        });
                     }
                     Ok(C2ClientFrame::Browser(cmd)) => {
-                        let reply = dispatch_browser(&mesh, cmd).await;
-                        // Replies for browser ops are also pushed as Browser stream events when needed;
-                        // still ack with a Topology-neutral Rejected-free path: reuse Reply with empty request id 0.
-                        // HQ correlates via the BrowserStreamEvent::Started / Error / Stopped events.
-                        let _ = reply;
-                        // Also emit a tiny Browser event so HQ can wait on start failure.
-                        if let Some(ev) = reply {
-                            if write_json_frame_limited(
-                                &mut writer,
-                                &C2ServerFrame::Browser(ev),
-                                MAX_C2_SERVER_FRAME_BYTES,
-                            ).await.is_err() {
-                                break;
+                        // Browser ops are acked via Browser stream events (Error on failure).
+                        let (mesh, out) = (mesh.clone(), out_tx.clone());
+                        tokio::spawn(async move {
+                            if let Some(ev) = dispatch_browser(&mesh, cmd).await {
+                                let _ = out.send(C2ServerFrame::Browser(ev));
                             }
-                        }
+                        });
                     }
                     Ok(_) | Err(_) => break,
                 }

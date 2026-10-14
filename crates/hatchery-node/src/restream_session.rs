@@ -57,6 +57,7 @@ impl NodeSession {
         handshake_timeout: Duration,
     ) -> Result<Self, String> {
         let stream = TcpStream::connect(uplink).await.map_err(|e| e.to_string())?;
+        let _ = stream.set_nodelay(true);
         let (mut rd, mut wr) = stream.into_split();
         let (out_tx, mut out_rx) = mpsc::channel::<Frame>(64);
         let (down_tx, down_rx) = mpsc::channel::<Vec<u8>>(64);

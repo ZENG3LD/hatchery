@@ -2093,6 +2093,7 @@ dependencies = [
  "claude-session-restore",
  "codex-session-restore",
  "dig2browser",
+ "futures-util",
  "gate4agent-adapters",
  "gate4agent-catalog",
  "gate4agent-handle",
@@ -2107,6 +2108,7 @@ dependencies = [
  "hatchery-build",
  "hatchery-core",
  "hatchery-enroll",
+ "image",
  "kimi-session-restore",
  "libc",
  "mail4agent",
@@ -2117,6 +2119,7 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-tungstenite 0.26.2",
  "tracing",
  "tracing-subscriber",
  "vt100",
@@ -2570,6 +2573,8 @@ dependencies = [
  "moxcms",
  "num-traits",
  "png",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -6268,4 +6273,19 @@ checksum = "aeec9eaf2dffbbd09201e23bd0ffcbaa33bb8e9266a10734fd7ed90a85eca078"
 dependencies = [
  "cc",
  "pkg-config",
+]
+
+[[package]]
+name = "zune-core"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d56377fd46368984a170bc5aac5567e52ca5da874caa60bea39fcbca78fb658b"
+
+[[package]]
+name = "zune-jpeg"
+version = "0.5.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
+dependencies = [
+ "zune-core",
 ]
