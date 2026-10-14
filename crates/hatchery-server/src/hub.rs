@@ -38,6 +38,9 @@ pub struct Hub {
     tasks: Mutex<TaskStore>,
     /// Bumped on every message sent; lets HQ long-poll for new mail instead of polling blindly.
     mail_signal: (Mutex<u64>, Condvar),
+    /// hq-core task kernel (former harness), when built in and its databases open.
+    #[cfg(feature = "harness")]
+    kernel: Option<Mutex<crate::kernel::Kernel>>,
 }
 
 fn str_field<'a>(v: &'a Value, name: &str) -> Result<&'a str, HubError> {
@@ -51,6 +54,14 @@ impl Hub {
             messenger: Mutex::new(Messenger::open(data_dir)?),
             tasks: Mutex::new(TaskStore::open(data_dir)?),
             mail_signal: (Mutex::new(0), Condvar::new()),
+            #[cfg(feature = "harness")]
+            kernel: match crate::kernel::Kernel::open(data_dir) {
+                Ok(k) => Some(Mutex::new(k)),
+                Err(err) => {
+                    tracing::warn!(error = %err, "task kernel unavailable");
+                    None
+                }
+            },
         })
     }
 
@@ -120,6 +131,11 @@ impl Hub {
     pub fn operator_call(&self, method: &str, path: &str, body: &Value) -> Result<Value, HubError> {
         let (path, query) = path.split_once('?').unwrap_or((path, ""));
         let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
+        #[cfg(feature = "harness")]
+        if let ["v1", "kernel", rest @ ..] = parts.as_slice() {
+            let Some(kernel) = &self.kernel else { return Err(HubError::new(503, "task kernel unavailable")) };
+            return kernel.lock().expect("kernel").call(method, rest, body).map_err(|e| HubError::new(e.status, e.message));
+        }
         match (method, parts.as_slice()) {
             ("POST", ["v1", "tasks"]) => {
                 let assignee = body.get("assignee").and_then(Value::as_str);

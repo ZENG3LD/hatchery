@@ -13,6 +13,8 @@ pub mod memory;
 pub mod hub;
 pub mod node_controller;
 pub mod drain_consumer;
+#[cfg(feature = "harness")]
+pub mod kernel;
 pub mod operator_control;
 pub mod mesh_runtime;
 #[cfg(feature = "m4a")]
