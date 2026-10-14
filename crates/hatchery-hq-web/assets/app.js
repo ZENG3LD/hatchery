@@ -766,8 +766,9 @@ async function renderLibraryTab() {
 
 
 // ---- Browsers (dig2browser over HQ → core → C2 → node restream). A browser is not a chat:
-// each PTY session owns one (own profile: pty-<ws>-<instance>), reachable only from that
-// session's info panel; each node has a shared 'main' profile reachable from Fleet.
+// each PTY session owns one (own profile: pty-<ws>-<instance>). The live view is a right-side
+// overlay drawer over the content (not the info sidebar). The info panel keeps only an
+// Open/Show browser control. Each node has a shared 'main' profile reachable from Fleet.
 const browserKey = (sess) => `pty-${sess.workspace_id || 'primary'}-${sess.instance_id}`;
 function browserObj(node, key, url) {
   const arr = (S.sessions[node] ||= []);
@@ -778,15 +779,15 @@ function browserObj(node, key, url) {
 }
 function openSessionBrowser(node, sess, url) {
   const b = browserObj(node, browserKey(sess), url); b.owner = sess;
-  connectBrowser(node, b, url); if (!S.panel || S.tab !== 'info') openPanel('info'); else renderInfo();
+  connectBrowser(node, b, url); showBrowserDrawer('mini');
+  if (S.panel && S.tab === 'info') renderInfo();
 }
 function openNodeBrowser(node, url) {
   const b = browserObj(node, 'main', url);
-  connectBrowser(node, b, url); setBrowserBig(true);
+  connectBrowser(node, b, url); showBrowserDrawer('mini');
 }
 const startBrowser = (node, url) => openNodeBrowser(node, url);
-// The panel mini view or the expanded overlay paints the active browser.
-function browserCanvas() { const big = $('#bdrawer'); if (big && !big.hidden) return $('#bdcanvas'); return $('#pbcanvas'); }
+function browserCanvas() { return $('#bdcanvas'); }
 // Each browser keeps an offscreen base image; full frames replace it, delta frames
 // (changed rectangle only) are composited onto it, then the base is shown.
 function applyFrame(b, bmp, region) {
@@ -821,11 +822,11 @@ function connectBrowser(node, b, url) {
     if (typeof m.data === 'string') {
       const d = JSON.parse(m.data);
       if (d.type === 'spawned') { b.live = true; }
-      if (d.type === 'frame_info' && d.w && d.h) { b.vw = d.w; b.vh = d.h; b.nextRegion = d.region || null; }
+      if (d.type === 'frame_info' && d.w && d.h) { b.vw = d.w; b.vh = d.h; b.nextRegion = d.region || null; fitBrowser(); }
       if ((d.type === 'started' || d.type === 'frame_info') && d.url) { b.url = d.url; b.title = d.title || b.title; syncBrowserBar(b); }
       if (d.type === 'lat') b.pendingLat = d;
       if (d.type === 'error') toast('browser: ' + d.text);
-      if (d.type === 'stopped') { b.live = false; b._ws = null; if (S.panel && S.tab === 'info') renderInfo(); }
+      if (d.type === 'stopped') { b.live = false; b._ws = null; hideBrowserOverlay(false); if (S.panel && S.tab === 'info') renderInfo(); }
       return;
     }
     const region = b.nextRegion; b.nextRegion = null; const blob = m.data;
@@ -847,48 +848,74 @@ function connectBrowser(node, b, url) {
 }
 function syncBrowserBar(b) {
   if (S.browserSession !== b) return;
-  for (const id of ['#bdurl', '#pburl']) { const el = $(id); if (el && document.activeElement !== el) el.value = b.url || ''; }
+  const el = $('#bdurl'); if (el && document.activeElement !== el) el.value = b.url || '';
   const t = $('#bdtitle'); if (t) t.textContent = b.key === 'main' ? `${S.browserNode} · main browser` : `${S.browserNode} · session browser`;
 }
 function latText() { const l = S.lat; if (!l) return 'No click measured yet'; return `${l.total} ms total · client↔hq ${l.client_hq} · hq ${l.hq_proc} · core+C2 ${l.net} · node ${l.node} (cdp ${l.cdp}, →frame ${l.to_frame}, ${l.src})`; }
 function updateLatReadout() { const el = $('#plat'); if (el) el.textContent = latText(); }
-// Expanded view: centered overlay with collapse (back to the panel mini view).
-function browserBig() {
+// Right-side overlay drawer: mini (fitted slide-in) or expanded; never embedded in the info panel.
+function browserDrawer() {
   let w = $('#bdrawer'); if (w) return w;
-  w = document.createElement('div'); w.id = 'bdrawer'; w.className = 'bdrawer big'; w.hidden = true;
-  w.innerHTML = `<div class="bdbar"><span id="bdtitle" class="sub"></span><input id="bdurl" placeholder="https://…"><button class="ibtn" id="bdsize" title="Collapse">⤡</button><button class="ibtn" id="bdclose" title="Close">✕</button></div><canvas id="bdcanvas" tabindex="0"></canvas>`;
+  w = document.createElement('div'); w.id = 'bdrawer'; w.className = 'bdrawer'; w.hidden = true;
+  w.innerHTML = `<div class="bdbar"><span id="bdtitle" class="sub"></span><input id="bdurl" placeholder="https://…"><button class="ibtn" id="bdsize" title="Expand">⤢</button><button class="ibtn" id="bdhide" title="Hide">›</button><button class="ibtn" id="bdclose" title="Close browser">✕</button></div><canvas id="bdcanvas" tabindex="0"></canvas><div class="sub plat bdlat">Input latency: <span id="plat">No click measured yet</span></div>`;
   document.body.appendChild(w);
-  $('#bdsize').onclick = () => setBrowserBig(false);
-  $('#bdclose').onclick = () => setBrowserBig(false);
+  $('#bdsize').onclick = () => { const big = w.classList.contains('big'); showBrowserDrawer(big ? 'mini' : 'big'); };
+  $('#bdhide').onclick = () => hideBrowserOverlay(false);
+  $('#bdclose').onclick = () => hideBrowserOverlay(true);
   $('#bdurl').onkeydown = (e) => { if (e.key === 'Enter') navBrowser($('#bdurl').value); };
   wireCanvas($('#bdcanvas')); addEventListener('resize', fitBrowser);
   return w;
 }
 function navBrowser(v) { let u = String(v || '').trim(); if (!u) return; if (!/^https?:\/\//i.test(u)) u = 'https://' + u; if (S.browserSession) S.browserSession.url = u; bsend({ t: 'nav', url: u }); }
-function fitBrowser() { const w = $('#bdrawer'); if (!w || w.hidden) return; const s = S.browserSession || {}; const vw = s.vw || 1280, vh = s.vh || 720; const aw = innerWidth - 120, ah = innerHeight - 64 - 24 - 32; w.style.width = Math.max(320, Math.min(aw, ah * vw / vh)) + 'px'; }
-function setBrowserBig(on) {
-  const w = browserBig(); w.hidden = !on; w.classList.remove('off');
-  if (on) { fitBrowser(); syncBrowserBar(S.browserSession || {}); }
-  const b = S.browserSession; if (b) paintBrowser(b);
-  if (!on && S.panel && S.tab === 'info') renderInfo();
+function fitBrowser() {
+  const w = $('#bdrawer'); if (!w || w.hidden) return;
+  const s = S.browserSession || {}; const vw = s.vw || 1280, vh = s.vh || 720;
+  const big = w.classList.contains('big');
+  const aw = big ? innerWidth - 120 : Math.min(420, innerWidth * 0.42);
+  const ah = big ? innerHeight - 64 - 48 : Math.min(innerHeight - 80, aw * vh / vw + 56);
+  w.style.width = Math.max(280, Math.min(aw, (ah - 56) * vw / vh)) + 'px';
 }
-function hideBrowserOverlay(stop) { const w = $('#bdrawer'); if (w) w.hidden = true; if (stop) stopBrowser(); }
-function stopBrowser() { const b = S.browserSession; if (!b) return; bsend({ t: 'stop' }); try { b._ws && b._ws.close(); } catch (_) {} b._ws = null; b.live = false; b.lastBmp = null; if (S.panel && S.tab === 'info') renderInfo(); }
-// Panel section for the current PTY session's browser (mini view + controls + latency).
+function showBrowserDrawer(mode) {
+  const w = browserDrawer();
+  w.hidden = false; w.classList.remove('off');
+  if (mode === 'big') w.classList.add('big'); else w.classList.remove('big');
+  const sz = $('#bdsize'); if (sz) { sz.title = mode === 'big' ? 'Collapse' : 'Expand'; sz.textContent = mode === 'big' ? '⤡' : '⤢'; }
+  fitBrowser(); syncBrowserBar(S.browserSession || {});
+  const b = S.browserSession; if (b) paintBrowser(b);
+  if (S.panel && S.tab === 'info') renderInfo();
+}
+function setBrowserBig(on) { showBrowserDrawer(on ? 'big' : 'mini'); }
+function hideBrowserOverlay(stop) {
+  const w = $('#bdrawer'); if (w) { w.hidden = true; w.classList.add('off'); }
+  if (stop) stopBrowser();
+  if (S.panel && S.tab === 'info') renderInfo();
+}
+function stopBrowser() {
+  const b = S.browserSession; if (!b) return;
+  bsend({ t: 'stop' }); try { b._ws && b._ws.close(); } catch (_) {}
+  b._ws = null; b.live = false; b.lastBmp = null;
+  const w = $('#bdrawer'); if (w) { w.hidden = true; w.classList.add('off'); }
+  if (S.panel && S.tab === 'info') renderInfo();
+}
+// Info panel: control only — no embedded browser surface.
 function sessionBrowserHtml(node, sess) {
   const b = (S.sessions[node] || []).find((x) => x.kind === 'browser' && x.key === browserKey(sess));
-  const on = b && b._ws;
-  return `<div class="pcard pbrowser">${on ? `<input id="pburl" placeholder="https://…" value="${esc(b.url || '')}"><canvas id="pbcanvas" tabindex="0"></canvas>` : '<div class="sub">No browser for this session yet. Links clicked in the terminal open here.</div>'}
-    <div class="row cp-row"><button class="btn" data-b="open">${on ? 'Expand' : 'Open browser'}</button>${on ? '<button class="btn red" data-b="stop">Close</button>' : ''}</div>
+  const live = !!(b && b._ws);
+  const shown = !!(live && $('#bdrawer') && !$('#bdrawer').hidden);
+  const label = !live ? 'Open browser' : shown ? 'Hide browser' : 'Show browser';
+  return `<div class="pcard pbrowser"><div class="sub">${live ? 'Session browser is bound to this PTY (own profile).' : 'Links clicked in the terminal open the session browser as a drawer.'}</div>
+    <div class="row cp-row"><button class="btn" data-b="open">${label}</button>${live ? '<button class="btn red" data-b="stop">Close</button>' : ''}</div>
     <div class="sub plat">Input latency: <span id="plat">${esc(latText())}</span></div></div>`;
 }
 function wireSessionBrowser(root, node, sess) {
-  const c = $('#pbcanvas'); if (c) { wireCanvas(c); const b = (S.sessions[node] || []).find((x) => x.kind === 'browser' && x.key === browserKey(sess)); if (b) { S.browserSession = b; S.browserNode = node; paintBrowser(b); } }
-  const u = $('#pburl'); if (u) u.onkeydown = (e) => { if (e.key === 'Enter') navBrowser(u.value); };
   root.querySelectorAll('[data-b]').forEach((x) => (x.onclick = () => {
     if (x.dataset.b === 'stop') { stopBrowser(); return; }
     const b = (S.sessions[node] || []).find((y) => y.kind === 'browser' && y.key === browserKey(sess));
-    if (b && b._ws) { S.browserSession = b; setBrowserBig(true); } else openSessionBrowser(node, sess, 'about:blank');
+    if (b && b._ws) {
+      S.browserSession = b; S.browserNode = node;
+      const shown = $('#bdrawer') && !$('#bdrawer').hidden;
+      if (shown) hideBrowserOverlay(false); else showBrowserDrawer('mini');
+    } else openSessionBrowser(node, sess, 'about:blank');
   }));
 }
 

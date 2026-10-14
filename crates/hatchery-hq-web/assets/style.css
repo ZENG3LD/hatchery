@@ -483,15 +483,16 @@ body.nodemode #composer{display:none}
 .ptybar .tog button.on{background:#ffffff1f}
 .ptybar .sbtn.blue{color:#5ea2ff}.ptybar .sbtn.red{color:#ff6b6b}
 .ptybar [hidden]{display:none}
-/* browser: right-side drawer (mini, fitted to frame) that can expand over the center */
-.bdrawer{position:fixed;z-index:60;top:64px;right:0;width:400px;max-width:92vw;background:#111;border:1px solid var(--line);border-right:0;border-radius:12px 0 0 12px;box-shadow:-14px 10px 44px #000a;display:flex;flex-direction:column;overflow:hidden;transform:translateX(0);transition:transform .2s cubic-bezier(.2,.8,.3,1),width .2s,top .2s,right .2s}
+/* browser: right-side overlay drawer over content (not the info sidebar); mini fitted to frame, expandable */
+.bdrawer{position:fixed;z-index:60;top:64px;right:0;width:400px;max-width:92vw;max-height:calc(100vh - 72px);background:#111;border:1px solid var(--line);border-right:0;border-radius:12px 0 0 12px;box-shadow:-14px 10px 44px #000a;display:flex;flex-direction:column;overflow:hidden;transform:translateX(0);transition:transform .2s cubic-bezier(.2,.8,.3,1),width .2s,top .2s,right .2s}
 .bdrawer.off{transform:translateX(calc(100% + 2px))}
-.bdrawer.big{top:64px;right:50%;transform:translateX(50%);border-right:1px solid var(--line);border-radius:12px}
+.bdrawer.big{top:64px;right:50%;transform:translateX(50%);border-right:1px solid var(--line);border-radius:12px;max-height:calc(100vh - 72px)}
 .bdrawer.big.off{transform:translateX(200%)}
-.bdbar{display:flex;align-items:center;gap:4px;padding:4px 6px;background:var(--el)}
+.bdbar{display:flex;align-items:center;gap:4px;padding:4px 6px;background:var(--el);flex:none}
 .bdbar input{flex:1;min-width:0;height:24px;font-size:12px;padding:0 8px;border-radius:6px}
 .bdbar .ibtn{width:26px;height:24px;font-size:13px}
-#bdcanvas{display:block;width:100%;height:auto;background:#fff;outline:none;cursor:default}
+#bdcanvas{display:block;width:100%;height:auto;max-height:calc(100vh - 140px);object-fit:contain;background:#fff;outline:none;cursor:default}
+.bdlat{padding:6px 8px;flex:none}
 .bdtab{position:fixed;z-index:59;right:0;top:120px;writing-mode:vertical-rl;padding:10px 5px;background:var(--el);border:1px solid var(--line);border-right:0;border-radius:8px 0 0 8px;font-size:12px;color:var(--txt);cursor:pointer}
 .bdtab[hidden]{display:none}
 /* right info panel as a hideable overlay over the center */
@@ -506,7 +507,5 @@ body.nodemode #composer{display:none}
 
 .bdrawer[hidden]{display:none}
 .bdbar #bdtitle{white-space:nowrap;font-size:11px;padding:0 4px}
-.pbrowser input{width:100%;height:26px;font-size:12px;margin-bottom:6px}
-#pbcanvas{display:block;width:100%;height:auto;background:#fff;border-radius:6px;outline:none}
 .plat{margin-top:8px;font-size:11px;line-height:1.4}
 .bdtab{display:none!important}

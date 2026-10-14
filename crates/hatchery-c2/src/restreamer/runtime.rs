@@ -522,6 +522,16 @@ async fn handle_node_uplink(mut stream: TcpStream, rs: Restreamer) -> Result<(),
                                                 .await?;
                                         }
                                         EnqueueOutcome::Backpressure => {
+                                            // Credit exhausted: frame is not buffered. The node
+                                            // does not replay, so a silent drop desyncs the inner
+                                            // Noise stream to core. Warn loudly; WINDOW 0 still
+                                            // tells the peer to pause.
+                                            tracing::warn!(
+                                                target: "restreamer",
+                                                node = %nid,
+                                                channel = frame.channel_id,
+                                                "restreamer credit exhausted; dropping node→core frame (Noise may desync)"
+                                            );
                                             let win = Frame::window(frame.channel_id, 0);
                                             stream
                                                 .write_all(
