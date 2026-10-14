@@ -15,6 +15,8 @@ pub enum DrainError {
     Io(std::io::Error),
     Frame(FrameError),
     Auth,
+    /// Peer closed the TCP stream (distinct from a read timeout).
+    Closed,
 }
 
 impl std::fmt::Display for DrainError {
@@ -23,6 +25,7 @@ impl std::fmt::Display for DrainError {
             Self::Io(e) => write!(f, "{e}"),
             Self::Frame(e) => write!(f, "{e}"),
             Self::Auth => write!(f, "drain auth refused"),
+            Self::Closed => write!(f, "drain closed"),
         }
     }
 }
@@ -107,8 +110,8 @@ impl DrainSession {
         Ok(())
     }
 
-    /// Next drained envelope, or `None` on timeout / close. Non-DATA control frames
-    /// from C2 (e.g. PONG) are skipped.
+    /// Next drained envelope, or `None` on timeout. EOF is `Err(Closed)`. Non-DATA
+    /// control frames from C2 (e.g. PONG) are skipped.
     pub async fn recv_envelope(
         &mut self,
         deadline: Duration,
@@ -138,7 +141,7 @@ impl DrainSession {
             let mut chunk = vec![0u8; 64 * 1024];
             let left = until.saturating_duration_since(tokio::time::Instant::now());
             match tokio::time::timeout(left, self.stream.read(&mut chunk)).await {
-                Ok(Ok(0)) => return Ok(None),
+                Ok(Ok(0)) => return Err(DrainError::Closed),
                 Ok(Ok(n)) => self.buf.extend_from_slice(&chunk[..n]),
                 Ok(Err(e)) => return Err(e.into()),
                 Err(_) => return Ok(None),
