@@ -62,7 +62,7 @@ const PROVIDERS = [{ v: 'shell', label: 'shell' }, { v: 'browser', label: 'brows
 const provOptions = (sel) => PROVIDERS.map((p, i) => `<option value="${esc(p.v)}"${p.parser ? ` data-parser="${esc(p.parser)}"` : ''}${i === sel ? ' selected' : ''}>${esc(p.label || p.v)}</option>`).join('');
 const chatName = (id) => { const c = (S.chats || []).find((x) => x.target === id); return c ? c.label : id === '*' ? 'general' : String(id).replace(/^room:/, ''); };
 const addLocal = (chat, item) => { (S.local[chat] ||= []).push({ ts: Date.now(), ...item }); renderChat(); };
-const logEv = (text) => { S.log.push({ ts: Date.now(), text }); if (S.log.length > 300) S.log.shift(); if (S.panel && S.tab === 'status') renderStatus(); };
+const logEv = (text) => { S.log.push({ ts: Date.now(), text }); if (S.log.length > 300) S.log.shift(); if (false) {} };
 const visibleNodes = () => S.nodes.filter((n) => n.status !== 'revoked');
 
 const isGroup = (id) => chatKind(id) ? chatKind(id) === 'group' : id === '*' || String(id).startsWith('room:');
@@ -127,7 +127,7 @@ function openNode(focus) {
       <details${focus === n.node_id || ns.length === 1 ? ' open' : ''}><summary>Environment & resources</summary><div class="pcard">${envHtml(n)}</div></details></div>`).join('') : '<div class="pcard sub">No nodes connected.</div>'}
     <div class="row" style="margin-top:12px"><button class="btn" id="nreattach">Reattach…</button><button class="btn" id="nenroll">Add a node (enrollment code)</button></div></div>`;
   $('#nclose').onclick = () => d.remove();
-  $('#nenroll').onclick = () => { d.remove(); openPanel('status'); issueCode(); };
+  $('#nenroll').onclick = () => { d.remove(); openNode(); setTimeout(issueCode, 0); };
   $('#nreattach').onclick = () => reattachDialog(focus);
   wireFleet(d);
   // Refresh per-node session lists, then redraw them in place.
@@ -362,14 +362,14 @@ function openSettings(sec) {
   d.querySelectorAll('[data-s]').forEach((b) => (b.onclick = () => openSettings(b.dataset.s)));
   d.querySelectorAll('.sw').forEach((b) => (b.onclick = () => b.classList.toggle('on')));
   $('#sclose').onclick = () => d.remove(); const so = $('#sout'); if (so) so.onclick = signOut; const sa = $('#sadd'); if (sa) sa.onclick = () => toast('Multiple accounts: coming soon');
-  const se = $('#senr'); if (se) se.onclick = () => { d.remove(); openPanel('status'); issueCode(); };
+  const se = $('#senr'); if (se) se.onclick = () => { d.remove(); openNode(); setTimeout(issueCode, 0); };
 }
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#settings')) $('#settings').remove(); });
 loadMe();
 async function issueCode() {
   try {
     const d = await post('/api/c2/codes');
-    S.code = d.code; logEv('enrollment code issued'); if (S.panel && S.tab === 'status') renderStatus(); else addLocal(S.chat, { card: `<b>Enrollment code</b><br><code class="big" id="codetext">${esc(d.code)}</code><br><span class="sub">Single use. Give it to the node operator; the node generates its own keys.</span>` });
+    S.code = d.code; logEv('enrollment code issued'); addLocal(S.chat, { card: `<b>Enrollment code</b><br><code class="big" id="codetext">${esc(d.code)}</code><br><span class="sub">Single use. Give it to the node operator; the node generates its own keys.</span>` });
   } catch (e) { toast('error: ' + e.message); }
 }
 
@@ -384,12 +384,13 @@ async function loadNodes() {
       S.lastStatus[n.node_id] = key;
     }
   } catch (_) { if (S.ready !== false) logEv('C2 unreachable'); S.ready = false; }
-  renderSidebar(); if (S.panel && S.tab === 'status') renderStatus(); if (S.view === 'node') renderNode();
+  renderSidebar(); if (S.view === 'node') renderNode();
 }
 
 // ---- status: the one place for C2 state, node trust, policy and the event log
 async function renderStatus() {
-  const root = $('#p-status'); const on = S.nodes.filter((n) => n.online).length; let policy = '';
+  const root = $('#p-status'); if (!root) { openNode(); return; }
+  const on = S.nodes.filter((n) => n.online).length; let policy = '';
   try { policy = JSON.stringify(await api('/api/c2/policy'), null, 2); } catch (e) { policy = e.message; }
   root.innerHTML = `<div class="stgrid" style="grid-template-columns:1fr 1fr"><div class="stat"><div class="l">C2</div><div class="v"><span class="dot ${S.ready ? 'ok' : 'bad'}"></span>${S.ready ? 'Ready' : 'Not ready'}</div></div><div class="stat"><div class="l">Nodes online</div><div class="v">${on} / ${S.nodes.length}</div></div><div class="stat"><div class="l">Agent session</div><div class="v">${S.session ? esc(S.sessionProv + ' · ' + S.sessionNode) : 'None'}</div></div></div>`
     + `<div class="row"><button class="btn blue" id="nc">Issue enrollment code</button><button class="btn" id="pr">Reload policy</button></div>${S.code ? `<div class="pcard"><h4>Enrollment code</h4><code class="big">${esc(S.code)}</code><div class="sub" style="margin-top:6px">Single use. The node generates its own keys.</div></div>` : ''}`
