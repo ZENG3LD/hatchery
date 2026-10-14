@@ -3,8 +3,6 @@
 pub mod config;
 pub mod control;
 pub mod error;
-#[cfg(feature = "harness")]
-pub mod harness;
 #[cfg(feature = "m4a")]
 pub mod m4a;
 #[cfg(feature = "memory")]
@@ -13,10 +11,6 @@ pub mod memory;
 pub mod hub;
 pub mod node_controller;
 pub mod drain_consumer;
-#[cfg(feature = "harness")]
-pub mod kernel;
-#[cfg(feature = "harness")]
-pub mod kernel_runtime;
 pub mod operator_control;
 pub mod mesh_runtime;
 #[cfg(feature = "m4a")]
@@ -39,12 +33,6 @@ pub use supervisor::Supervisor;
 pub fn build_subservices(config: &ServerConfig) -> Vec<Box<dyn Subservice>> {
     #[allow(unused_mut)]
     let mut services: Vec<Box<dyn Subservice>> = Vec::new();
-    #[cfg(feature = "harness")]
-    if config.harness_enabled {
-        if let Some(bin) = config.harness_bin.clone() {
-            services.push(Box::new(harness::HarnessSubservice::new(bin, config.harness_args.clone())));
-        }
-    }
     #[cfg(feature = "m4a")]
     if config.m4a_enabled {
         services.push(Box::new(m4a::M4aSubservice::new(

@@ -12,8 +12,6 @@ pub const CONFIG_ENV: &str = "HATCHERY_SERVER_CONFIG";
 pub const CONTROL_LISTEN_ENV: &str = "HATCHERY_SERVER_CONTROL_LISTEN";
 pub const CONTROL_TOKEN_ENV: &str = "HATCHERY_SERVER_CONTROL_TOKEN";
 pub const DATA_DIR_ENV: &str = "HATCHERY_SERVER_DATA_DIR";
-pub const HARNESS_BIN_ENV: &str = "HATCHERY_HARNESS_BIN";
-pub const HARNESS_ARGS_ENV: &str = "HATCHERY_HARNESS_ARGS";
 pub const MEMORY_BIN_ENV: &str = "HATCHERY_MEMORY_BIN";
 pub const M4A_MASTER_KEY_VAR_ENV: &str = "HATCHERY_M4A_MASTER_KEY_VAR";
 /// C2 operator API the provisioner polls (`host:port`, reachable on loopback or a tunnel).
@@ -36,17 +34,8 @@ const DEFAULT_CONTROL_LISTEN: &str = "127.0.0.1:18340";
 pub struct FileConfig {
     pub control_listen: Option<String>,
     pub data_dir: Option<PathBuf>,
-    pub harness: HarnessFile,
     pub memory: MemoryFile,
     pub m4a: M4aFile,
-}
-
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
-#[serde(default, deny_unknown_fields)]
-pub struct HarnessFile {
-    pub enabled: bool,
-    pub bin: Option<PathBuf>,
-    pub args: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
@@ -68,9 +57,6 @@ pub struct ServerConfig {
     pub control_listen: SocketAddr,
     pub control_token: Option<String>,
     pub data_dir: PathBuf,
-    pub harness_enabled: bool,
-    pub harness_bin: Option<PathBuf>,
-    pub harness_args: Vec<String>,
     pub memory_bin: PathBuf,
     pub m4a_enabled: bool,
     pub m4a_master_key_var: Option<String>,
@@ -121,18 +107,10 @@ impl ServerConfig {
         if !data_dir.is_absolute() {
             return Err(ServerError::Config(format!("{DATA_DIR_ENV} must be absolute")));
         }
-        let harness_bin = env(HARNESS_BIN_ENV).map(PathBuf::from).or(file.harness.bin);
-        let harness_args = match env(HARNESS_ARGS_ENV) {
-            Some(raw) => raw.split_whitespace().map(str::to_owned).collect(),
-            None => file.harness.args,
-        };
         Ok(Self {
             control_listen,
             control_token: env(CONTROL_TOKEN_ENV).filter(|v| !v.is_empty()),
             data_dir,
-            harness_enabled: file.harness.enabled || harness_bin.is_some(),
-            harness_bin,
-            harness_args,
             memory_bin: env(MEMORY_BIN_ENV)
                 .map(PathBuf::from)
                 .or(file.memory.bin)
@@ -175,7 +153,7 @@ mod tests {
         )
         .unwrap();
         assert!(cfg.control_listen.ip().is_loopback());
-        assert!(!cfg.harness_enabled && !cfg.m4a_enabled);
+        assert!(!cfg.m4a_enabled);
     }
 
     #[test]
@@ -191,17 +169,15 @@ mod tests {
     #[test]
     fn env_overrides_file_and_enables_subservices() {
         let file: FileConfig = toml::from_str(
-            "data_dir = \"/from/file\"\n[harness]\nbin = \"/opt/h\"\nargs = [\"--a\"]\n[m4a]\nmaster_key_var = \"FILE_VAR\"\n",
+            "data_dir = \"/from/file\"\n[m4a]\nmaster_key_var = \"FILE_VAR\"\n",
         )
         .unwrap();
         let cfg = ServerConfig::resolve(
             file,
-            env_of(&[(DATA_DIR_ENV, "/from/env"), (HARNESS_ARGS_ENV, "--x --y")]),
+            env_of(&[(DATA_DIR_ENV, "/from/env")]),
         )
         .unwrap();
         assert_eq!(cfg.data_dir, PathBuf::from("/from/env"));
-        assert_eq!(cfg.harness_args, ["--x", "--y"]);
-        assert!(cfg.harness_enabled);
         assert_eq!(cfg.m4a_master_key_var.as_deref(), Some("FILE_VAR"));
     }
 

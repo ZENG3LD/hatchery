@@ -4,7 +4,7 @@ version = "0.2.11"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
-description = "Host for hatchery subservices (harness, m4a, memory): one supervisor process, loopback control and health"
+description = "hq-core server: drain, operator control, tasks, m4a, provisioning, memory: one supervisor process, loopback control and health"
 
 [lib]
 name = "hatchery_server"
@@ -13,7 +13,7 @@ name = "hatchery_server"
 name = "hatchery-server"
 path = "src/main.rs"
 
-# The harness and memory run as supervised processes; only the m4a library is
+# memory runs as a supervised process; the m4a library is
 # embedded. (All crates now share one native sqlite, rusqlite 0.36.)
 
 [dependencies]
@@ -35,11 +35,6 @@ hatchery-c2-client = { path = "../hatchery-c2-client", version = "0.2.11" }
 gate4agent-node-protocol = { version = "0.5.2" }
 gate4agent-node-wire = { version = "0.5.2" }
 gate4agent-types = { version = "0.5.2" }
-hatchery-harness-protocol = { path = "../hatchery-harness-protocol", version = "0.2.11", optional = true }
-hatchery-harness-engine = { path = "../hatchery-harness-engine", version = "0.2.11", optional = true }
-hatchery-harness-api = { path = "../hatchery-harness-api", version = "0.2.11", optional = true }
-hatchery-harness-service = { path = "../hatchery-harness-service", version = "0.2.11", optional = true }
-hatchery-observation-service = { path = "../hatchery-observation-service", version = "0.2.11", optional = true }
 
 # musl/Alpine builds: Alpine ships no static libdbus, so build it from source
 # (pulled transitively via m4a-agent -> keyring).
@@ -49,9 +44,7 @@ libdbus-sys = { version = "0.2", features = ["vendored"] }
 [features]
 # Full kit by default: there is no light mode.
 default = ["kit"]
-kit = ["harness", "m4a", "memory"]
-# hq-core task kernel (former harness) + observation store, in-process behind the hub.
-harness = ["dep:hatchery-harness-api", "dep:hatchery-harness-protocol", "dep:hatchery-harness-engine", "dep:hatchery-harness-service", "dep:hatchery-observation-service"]
+kit = ["m4a", "memory"]
 # m4a: key vault of the node-side messenger (m4a-agent 0.4); master key from env.
 m4a = ["dep:m4a-agent", "dep:mail4agent-core", "dep:mail4agent-api", "dep:mail4agent-store-sqlite", "dep:rusqlite"]
 # memory4agent-server (crates.io memory4agent 0.3) as an on-demand loopback process.

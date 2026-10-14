@@ -126,7 +126,7 @@ impl NodeOperatorMesh {
                 tracing::debug!(target: "pty_lat", core_us = at.elapsed().as_micros() as u64, "core: pty input enqueued to echo frame published");
             }
         }
-        // Gap diagnostics: the kernel runtime resyncs the node on any sequence gap.
+        // Gap diagnostics: operator clients rely on contiguous node event sequences.
         {
             let mut last = self.last_event_seq.lock().expect("last seq");
             let key = (event.node_id.as_str().to_owned(), event.cursor.incarnation_id);
