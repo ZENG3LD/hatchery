@@ -349,3 +349,28 @@ async fn node_with_stale_keys_is_nudged_to_rehandshake() {
     drop(old);
     let _ = edge.stop.send(true);
 }
+
+/// A closing older uplink of the same node id must not unregister the newer one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn older_uplink_closing_keeps_newer_registered() {
+    let recipient = HqRecipientSecret::generate();
+    let edge = edge(&recipient).await;
+    let stop = consume_with_cursor(&edge, &recipient, None);
+    let older = NodeSession::connect(edge.node, "node-r", 3, ChannelKind::M4a, edge.keys, None, Duration::from_secs(5)).await.unwrap();
+    let mut newer = NodeSession::connect(edge.node, "node-r", 3, ChannelKind::M4a, edge.keys, None, Duration::from_secs(5)).await.unwrap();
+    drop(older);
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(edge.rs.peers().is_registered("node-r"));
+    newer.send(b"still here").await.unwrap();
+    assert_eq!(newer.recv(Duration::from_secs(5)).await.unwrap(), b"echo:still here".to_vec());
+    let _ = stop.send(true);
+    let _ = edge.stop.send(true);
+}
+
+/// Core restarts with no cursor: C2 cannot recover the acked gap from the node journal
+/// (this test node does not answer journal requests) and must resume from its buffer
+/// instead of closing the drain.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn unrecoverable_gap_falls_back_to_buffer() {
+    restart_cycles(false).await;
+}

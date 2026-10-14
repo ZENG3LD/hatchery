@@ -87,6 +87,15 @@ impl UplinkPeers {
         self.inner.lock().expect("peers").remove(node_id);
     }
 
+    /// Remove the slot only if it still belongs to `tx`: a closing older uplink must not
+    /// unregister a newer connection of the same node id.
+    pub fn unregister_if(&self, node_id: &str, tx: &tokio::sync::mpsc::Sender<Frame>) {
+        let mut guard = self.inner.lock().expect("peers");
+        if guard.get(node_id).is_some_and(|slot| slot.out.same_channel(tx)) {
+            guard.remove(node_id);
+        }
+    }
+
     pub fn deliver_reply(&self, node_id: &str, body: JournalReplyBody) {
         let mut guard = self.inner.lock().expect("peers");
         if let Some(slot) = guard.get_mut(node_id) {
@@ -360,7 +369,15 @@ impl Restreamer {
                         1024,
                         std::time::Duration::from_secs(5),
                     )
-                    .await?;
+                    .await;
+                let body = match body {
+                    Ok(b) => b,
+                    Err(err) => {
+                        // Unrecoverable gap: serve what is buffered instead of closing the drain.
+                        tracing::warn!(%node_id, channel_id, after, error = %err, "journal gap not recoverable; resuming from buffer");
+                        JournalReplyBody { after, entries: Vec::new() }
+                    }
+                };
                 body.entries
                     .into_iter()
                     .filter(|e| until.map(|u| e.seq < u).unwrap_or(true))
@@ -381,7 +398,10 @@ impl Restreamer {
                     until,
                     1024,
                 )
-                .map_err(|e| RestreamerError::Frame(FrameError::Io(e.to_string())))?
+                .unwrap_or_else(|err| {
+                    tracing::warn!(%node_id, channel_id, after, error = %err, "journal gap not recoverable; resuming from buffer");
+                    Vec::new()
+                })
             };
             for ev in recovered {
                 out.push(DrainEnvelope {
@@ -503,7 +523,7 @@ async fn handle_node_uplink(mut stream: TcpStream, rs: Restreamer) -> Result<(),
                                 FrameType::Open => {
                                     let open = frame.parse_open().map_err(RestreamerError::Frame)?;
                                     if let Some(prev) = node_id.replace(open.node_id.clone()) {
-                                        rs.peers().unregister(&prev);
+                                        rs.peers().unregister_if(&prev, &out_tx);
                                     }
                                     rs.peers().register(open.node_id.clone(), out_tx.clone());
                                     rs.open_channel(&open.node_id, frame.channel_id, open.channel_kind);
@@ -565,7 +585,7 @@ async fn handle_node_uplink(mut stream: TcpStream, rs: Restreamer) -> Result<(),
                                 }
                                 FrameType::Close | FrameType::GoAway => {
                                     if let Some(ref nid) = node_id {
-                                        rs.peers().unregister(nid);
+                                        rs.peers().unregister_if(nid, &out_tx);
                                     }
                                     return Ok(());
                                 }
@@ -587,7 +607,7 @@ async fn handle_node_uplink(mut stream: TcpStream, rs: Restreamer) -> Result<(),
         }
     }
     if let Some(ref nid) = node_id {
-        rs.peers().unregister(nid);
+        rs.peers().unregister_if(nid, &out_tx);
     }
     Ok(())
 }
