@@ -669,6 +669,7 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
         }
         tracing::info!(%cid, node = %q.node, %provider, "pty spawn requested");
         push_support_trace(&s, &cid, "hq-web", "spawn_requested", json!({ "node": q.node, "provider": provider }));
+        let spawn_t0 = std::time::Instant::now();
         let spawned = control
             .request_with_correlation(
                 route.clone(),
@@ -699,9 +700,10 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
                     %cid,
                     node = %q.node,
                     instance_id = session.session.instance_id.0,
+                    rpc_ms = spawn_t0.elapsed().as_millis() as u64,
                     "pty spawn accepted",
                 );
-                push_support_trace(&s, &cid, "hq-web", "spawn_accepted", json!({ "instance_id": session.session.instance_id.0, "node": q.node }));
+                push_support_trace(&s, &cid, "hq-web", "spawn_accepted", json!({ "instance_id": session.session.instance_id.0, "node": q.node, "rpc_ms": spawn_t0.elapsed().as_millis() as u64 }));
                 // Claim the draft on the node NOW (Resize cancels the
                 // attach-never-arrived provisional timer).
                 match control

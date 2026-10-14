@@ -20,13 +20,18 @@ use hatchery_core::{grow_read_buf, ChannelKind, Frame, FrameError, FrameType, Op
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, VecDeque};
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Notify};
 use tokio::task::JoinHandle;
+
+/// App-level ping on an idle node→C2 uplink (C2 answers Pong).
+const UPLINK_PING_EVERY: Duration = Duration::from_secs(10);
+/// No inbound bytes (pong or data) for this long => path is dead; reconnect.
+const UPLINK_DEAD_AFTER: Duration = Duration::from_secs(35);
 
 /// Keys C2 hands a node at enrollment: its own outer key and the upstream recipient key.
 #[derive(Clone, Copy, Debug)]
@@ -120,6 +125,12 @@ impl NodeUplink {
         let wake = Arc::new(Notify::new());
 
         let out_state = Arc::new(Mutex::new(OutState { chans: BTreeMap::new() }));
+        // Last inbound byte (ms since `born`). The keepalive below pings C2 on
+        // an idle uplink so NAT/WG/conntrack state stays warm and a half-open
+        // path is detected in seconds, not discovered by the next HQ spawn
+        // (owner spawn after ~28 min idle sat ~23 s before reaching the node).
+        let born = std::time::Instant::now();
+        let last_rx = Arc::new(AtomicU64::new(0));
 
         // Ingress into per-channel queues (never blocks the producer on TCP).
         let state_in = Arc::clone(&out_state);
@@ -222,6 +233,7 @@ impl NodeUplink {
         let wake_rd = Arc::clone(&wake);
         let credits_rd = Arc::clone(&credits);
         let credit_pulse_rd = Arc::clone(&credit_pulse);
+        let last_rx_rd = Arc::clone(&last_rx);
         let reader = tokio::spawn(async move {
             let mut buf = vec![0u8; 128 * 1024];
             let mut filled = 0usize;
@@ -231,6 +243,7 @@ impl NodeUplink {
                     break;
                 }
                 filled += n;
+                last_rx_rd.store(born.elapsed().as_millis() as u64, Ordering::SeqCst);
                 loop {
                     match Frame::decode(&buf[..filled]) {
                         Ok((frame, used)) => {
@@ -287,6 +300,33 @@ impl NodeUplink {
             kill(&alive_rd, &dead_rd, &reader_routes);
         });
 
+        let ka_tx = enq_tx.clone();
+        let alive_ka = Arc::clone(&alive);
+        let dead_ka = Arc::clone(&dead);
+        let routes_ka = Arc::clone(&routes);
+        let keepalive = tokio::spawn(async move {
+            let mut nonce = 0u64;
+            let mut tick = tokio::time::interval(UPLINK_PING_EVERY);
+            tick.tick().await;
+            loop {
+                tick.tick().await;
+                if !alive_ka.load(Ordering::SeqCst) {
+                    break;
+                }
+                let now = born.elapsed().as_millis() as u64;
+                let idle = now.saturating_sub(last_rx.load(Ordering::SeqCst));
+                if idle > UPLINK_DEAD_AFTER.as_millis() as u64 {
+                    tracing::warn!(idle_ms = idle, "uplink silent past keepalive deadline; reconnecting");
+                    kill(&alive_ka, &dead_ka, &routes_ka);
+                    break;
+                }
+                nonce = nonce.wrapping_add(1);
+                if ka_tx.send((0, SendPrio::Control, Frame::ping(nonce))).is_err() {
+                    break;
+                }
+            }
+        });
+
         Ok(Arc::new(Self {
             enqueue: enq_tx,
             routes,
@@ -295,7 +335,7 @@ impl NodeUplink {
             journal,
             alive,
             dead,
-            tasks: vec![ingress, writer, reader],
+            tasks: vec![ingress, writer, reader, keepalive],
         }))
     }
 
