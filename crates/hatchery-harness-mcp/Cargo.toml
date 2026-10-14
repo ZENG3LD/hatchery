@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-harness-mcp"
-version = "0.2.13"
+version = "0.2.14"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
@@ -21,7 +21,7 @@ name = "acp_fixture_agent"
 path = "src/bin/acp_fixture_agent.rs"
 
 [dependencies]
-hatchery-harness-client = { version = "0.2.13", path = "../hatchery-harness-client" }
+hatchery-harness-client = { version = "0.2.14", path = "../hatchery-harness-client" }
 gate4agent-node-protocol = { version = "0.5.2" }
 gate4agent-node-wire = { version = "0.5.2" }
 serde = { version = "1", features = ["derive"] }
@@ -29,13 +29,13 @@ serde_json = "1"
 thiserror = "2"
 
 [dev-dependencies]
-hatchery-c2 = { version = "0.2.13", path = "../hatchery-c2" }
-hatchery-c2-client = { version = "0.2.13", path = "../hatchery-c2-client" }
-hatchery-harness-engine = { version = "0.2.13", path = "../hatchery-harness-engine" }
-hatchery-harness-protocol = { version = "0.2.13", path = "../hatchery-harness-protocol" }
-hatchery-harness-service = { version = "0.2.13", path = "../hatchery-harness-service" }
-hatchery-node = { version = "0.2.13", path = "../hatchery-node", features = ["fixture"] }
-hatchery-observation-service = { version = "0.2.13", path = "../hatchery-observation-service" }
+hatchery-c2 = { version = "0.2.14", path = "../hatchery-c2" }
+hatchery-c2-client = { version = "0.2.14", path = "../hatchery-c2-client" }
+hatchery-harness-engine = { version = "0.2.14", path = "../hatchery-harness-engine" }
+hatchery-harness-protocol = { version = "0.2.14", path = "../hatchery-harness-protocol" }
+hatchery-harness-service = { version = "0.2.14", path = "../hatchery-harness-service" }
+hatchery-node = { version = "0.2.14", path = "../hatchery-node", features = ["fixture"] }
+hatchery-observation-service = { version = "0.2.14", path = "../hatchery-observation-service" }
 gate4agent-testkit = { version = "0.5.2" }
 gate4agent-types = { version = "0.5.2" }
 tokio = { version = "1", features = ["full"] }
