@@ -192,20 +192,62 @@ pub struct NoiseTransport {
 }
 
 impl NoiseTransport {
+    /// Encrypt one plaintext. Up to [`NOISE_MAX_PLAINTEXT`] bytes this is a single Noise
+    /// message (wire-identical to older peers). Larger plaintexts are split into Noise
+    /// messages, each prefixed with its u32 BE length; the result is always longer than
+    /// one Noise message can be, so [`Self::decrypt`] tells the two forms apart by size.
     pub fn encrypt(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        if plaintext.len() <= NOISE_MAX_PLAINTEXT {
+            return self.encrypt_one(plaintext);
+        }
+        let mut out = Vec::with_capacity(plaintext.len() + plaintext.len() / NOISE_MAX_PLAINTEXT * 20 + 20);
+        for chunk in plaintext.chunks(NOISE_MAX_PLAINTEXT) {
+            let ct = self.encrypt_one(chunk)?;
+            out.extend_from_slice(&(ct.len() as u32).to_be_bytes());
+            out.extend_from_slice(&ct);
+        }
+        Ok(out)
+    }
+
+    pub fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+        if ciphertext.len() <= NOISE_MAX_MESSAGE {
+            return self.decrypt_one(ciphertext);
+        }
+        let mut out = Vec::with_capacity(ciphertext.len());
+        let mut rest = ciphertext;
+        while !rest.is_empty() {
+            if rest.len() < 4 {
+                return Err(noise_err(snow::Error::Input));
+            }
+            let n = u32::from_be_bytes([rest[0], rest[1], rest[2], rest[3]]) as usize;
+            if n == 0 || n > NOISE_MAX_MESSAGE || rest.len() < 4 + n {
+                return Err(noise_err(snow::Error::Input));
+            }
+            out.extend_from_slice(&self.decrypt_one(&rest[4..4 + n])?);
+            rest = &rest[4 + n..];
+        }
+        Ok(out)
+    }
+
+    fn encrypt_one(&mut self, plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let mut buf = vec![0u8; plaintext.len() + 16];
         let n = self.state.write_message(plaintext, &mut buf).map_err(noise_err)?;
         buf.truncate(n);
         Ok(buf)
     }
 
-    pub fn decrypt(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
+    fn decrypt_one(&mut self, ciphertext: &[u8]) -> Result<Vec<u8>, CryptoError> {
         let mut buf = vec![0u8; ciphertext.len()];
         let n = self.state.read_message(ciphertext, &mut buf).map_err(noise_err)?;
         buf.truncate(n);
         Ok(buf)
     }
 }
+
+/// Largest Noise transport message (ciphertext incl. tag).
+pub const NOISE_MAX_MESSAGE: usize = 65_535;
+/// Largest plaintext carried by one Noise transport message.
+pub const NOISE_MAX_PLAINTEXT: usize = NOISE_MAX_MESSAGE - 16;
 
 /// Result of a nested seal for tests / one-shot helpers.
 pub struct NestedSeal {
@@ -395,6 +437,35 @@ mod tests {
         assert!(!inner.windows(plain.len()).any(|w| w == plain));
         let mut hq_tx = sealed.hq_transport;
         assert_eq!(core_open_inner(&mut hq_tx, &inner).unwrap(), plain);
+    }
+
+    fn transport_pair() -> (NoiseTransport, NoiseTransport) {
+        let hq = HqRecipientSecret::from_seed([11u8; 32]);
+        let mut init = NoiseInitiator::new(hq.public_bytes()).unwrap();
+        let msg1 = init.write_message1().unwrap();
+        let (msg2, resp) = NoiseResponder::new(&hq).unwrap().complete(&msg1).unwrap();
+        (init.read_message2(&msg2).unwrap(), resp)
+    }
+
+    #[test]
+    fn large_plaintexts_are_chunked_and_small_stay_single_message() {
+        let (mut a, mut b) = transport_pair();
+        for len in [0usize, 1, NOISE_MAX_PLAINTEXT, NOISE_MAX_PLAINTEXT + 1, 300_000] {
+            let plain: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
+            let ct = a.encrypt(&plain).unwrap();
+            if len <= NOISE_MAX_PLAINTEXT {
+                assert_eq!(ct.len(), len + 16, "single message is wire-compatible");
+            } else {
+                assert!(ct.len() > NOISE_MAX_MESSAGE);
+            }
+            assert_eq!(b.decrypt(&ct).unwrap(), plain, "len {len}");
+            // And back the other way.
+            let back = b.encrypt(&plain).unwrap();
+            assert_eq!(a.decrypt(&back).unwrap(), plain);
+        }
+        let mut bad = a.encrypt(&vec![7u8; 100_000]).unwrap();
+        bad.truncate(bad.len() - 3);
+        assert!(b.decrypt(&bad).is_err());
     }
 
     #[test]
