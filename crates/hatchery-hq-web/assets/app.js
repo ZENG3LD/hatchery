@@ -119,16 +119,26 @@ const nodeStatus = (n) => `<span class="dot ${n && n.online ? 'ok' : ''}"></span
 function openNode(focus) {
   let d = $('#nodesdlg'); if (!d) { d = document.createElement('div'); d.id = 'nodesdlg'; document.body.appendChild(d); d.onclick = (e) => { if (e.target === d) d.remove(); }; }
   const ns = visibleNodes();
-  d.innerHTML = `<div class="ndlg"><div class="ndh"><h2>Nodes</h2><span class="grow"></span><button class="round" id="nclose">✕</button></div>
+  d.innerHTML = `<div class="ndlg"><div class="ndh"><h2>Fleet</h2><span class="grow"></span><button class="round" id="nclose">✕</button></div>
     ${ns.length ? ns.map((n) => `<div class="ncard2"><div class="nrow">${avatar(n.node_id, 'mid')}<div class="grow"><b>${esc(n.node_id)}</b><div class="sub">${nodeStatus(n)} · ${esc(n.kind || '')}${n.tunnel_ip ? ' · ' + esc(n.tunnel_ip) : ''} · ${(S.sessions[n.node_id] || []).filter((x) => x.live).length} live</div></div>
       <select data-prov="${esc(n.node_id)}">${provOptions(0)}</select><button class="btn blue" data-spawn="${esc(n.node_id)}"${n.online ? '' : ' disabled'}>Start</button></div>
-      <details${focus === n.node_id ? ' open' : ''}><summary>Environment</summary><div class="pcard">${envHtml(n)}</div></details></div>`).join('') : '<div class="pcard sub">No nodes connected.</div>'}
+      <div class="fsess" data-fs="${esc(n.node_id)}">${fleetSessions(n.node_id)}</div>
+      <details${focus === n.node_id || ns.length === 1 ? ' open' : ''}><summary>Environment & resources</summary><div class="pcard">${envHtml(n)}</div></details></div>`).join('') : '<div class="pcard sub">No nodes connected.</div>'}
     <div class="row" style="margin-top:12px"><button class="btn" id="nreattach">Reattach…</button><button class="btn" id="nenroll">Add a node (enrollment code)</button></div></div>`;
   $('#nclose').onclick = () => d.remove();
   $('#nenroll').onclick = () => { d.remove(); openPanel('status'); issueCode(); };
   $('#nreattach').onclick = () => reattachDialog(focus);
+  wireFleet(d);
+  // Refresh per-node session lists, then redraw them in place.
+  ns.filter((n) => n.online).forEach((n) => reconcileNode(n.node_id).then(() => { const el = d.querySelector(`[data-fs="${CSS.escape(n.node_id)}"]`); if (el) { el.innerHTML = fleetSessions(n.node_id); wireFleet(d); } }));
   d.querySelectorAll('[data-spawn]').forEach((b) => (b.onclick = () => { const sel = d.querySelector(`select[data-prov="${CSS.escape(b.dataset.spawn)}"]`); const opt = sel.selectedOptions[0]; d.remove(); startSession(b.dataset.spawn, opt.value, opt.dataset.parser); }));
 }
+function fleetSessions(node) {
+  const list = (S.nodeSessions || {})[node] || [];
+  if (!list.length) return '<div class="sub">No sessions.</div>';
+  return list.map((s) => `<div class="nrow fs-row"><span class="grow ell">${esc(s.label)} <span class="sub">${esc(String(s.status).split(' ')[0])}</span></span>${s.live ? `<button class="btn" data-fatt="${esc(node)}" data-inst="${s.instance_id}" data-prov="${esc(s.provider)}">Attach</button>` : ''}</div>`).join('');
+}
+function wireFleet(d) { d.querySelectorAll('[data-fatt]').forEach((b) => (b.onclick = () => { d.remove(); attachSession(b.dataset.fatt, b.dataset.inst, b.dataset.prov); })); }
 function renderNode() {}
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#nodesdlg')) $('#nodesdlg').remove(); });
 // Timeline cache: in-memory S.mail, mirrored to sessionStorage so a reload or chat switch renders instantly.
@@ -286,12 +296,12 @@ function menu(items, anchorLeft) {
 }
 document.addEventListener('click', (e) => { if (!e.target.closest('#menu') && !e.target.closest('#addbtn') && !e.target.closest('#plusbtn')) $('#menu').hidden = true; if (!e.target.closest('#acctmenu')) $('#acctmenu').hidden = true; });
 $('#addbtn').onclick = () => menu([
-  ['Nodes…', () => openNode()],
+  ['Fleet…', () => openNode()],
   ['Create a task…', () => { openPanel('tasks'); }],
   ['Issue enrollment code', issueCode],
   ['New browser on node…', () => { const n = visibleNodes().find((x) => x.online); if (n) startBrowser(n.node_id); else toast('No online node'); }],
 ]);
-$('#plusbtn').onclick = (e) => { e.stopPropagation(); menu([...visibleNodes().filter((n) => n.online).flatMap((n) => ['shell', 'claude'].map((p) => [`New ${p} on ${n.node_id}`, () => startSession(n.node_id, p)])), ['Reattach…', () => reattachDialog()], ['Nodes…', () => openNode()], ['Add a node (enrollment code)', () => { openPanel('status'); issueCode(); }]]); const m = $('#menu'); m.style.position = 'fixed'; m.style.left = '120px'; m.style.top = '54px'; m.style.bottom = 'auto'; };
+$('#plusbtn').onclick = (e) => { e.stopPropagation(); menu([...visibleNodes().filter((n) => n.online).flatMap((n) => ['shell', 'claude'].map((p) => [`New ${p} on ${n.node_id}`, () => startSession(n.node_id, p)])), ['Reattach…', () => reattachDialog()], ['Fleet…', () => openNode()], ['Add a node (enrollment code)', () => { openPanel('status'); issueCode(); }]]); const m = $('#menu'); m.style.position = 'fixed'; m.style.left = '120px'; m.style.top = '54px'; m.style.bottom = 'auto'; };
 // ---- account pill
 async function loadMe() {
   try { const r = await fetch('/api/me', { credentials: 'same-origin' }); const d = await r.json(); const u = d.user || {}; S.me = u; const nm = u.display_name || u.username || 'Account';
@@ -322,7 +332,7 @@ const LUC = {
 const ico = (k, sz = 16) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${LUC[k]}</svg>`;
 $('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); m.hidden = !m.hidden; if (m.hidden) return; m.className = 'pop amenu2'; m.innerHTML = '';
   const it = (ic, label, fn, right, chev) => { const b = document.createElement('button'); b.innerHTML = `<span class="ic">${ico(ic)}</span><span class="l">${esc(label)}</span>${right ? `<span class="r">${esc(right)}</span>` : ''}${chev ? `<span class="cv">${ico('chev', 16)}</span>` : ''}`; b.onclick = () => { m.hidden = true; fn(); }; m.appendChild(b); };
-  it('server', 'Nodes', () => openNode(), String(visibleNodes().filter((n) => n.online).length) + ' online', true);
+  it('server', 'Fleet', () => openNode(), String(visibleNodes().filter((n) => n.online).length) + ' online', true);
   it('gauge', 'Usage & plan', () => openSettings('usage'), '— % used', true);
   it('phone', 'Get the apps', () => toast('Apps: coming soon'));
   it('book', 'Support', () => toast('Support: coming soon'), '', true);
@@ -446,8 +456,23 @@ function renderInfo() {
   // PTY session: which node it runs on, and that node's environment.
   if (S.view === 'pty') {
     const id = S.sessionNode; const n = S.nodes.find((x) => x.node_id === id); const x = S.ptySession || {};
-    const kv = `<div class="kv"><span>Provider</span><span>${esc(x.provider || '')}</span></div><div class="kv"><span>Status</span><span>${x.live ? 'live' : x.detached ? 'detached' : 'ended'}</span></div><div class="kv"><span>Size</span><span>${term.cols}×${term.rows}</span></div>`;
-    root.innerHTML = sec('Session', `<div class="pcard">${kv}</div>`) + sec('Runs on node', `<div class="pcard"><div class="kv"><span>${esc(id || '')}</span><span>${nodeStatus(n)}</span></div></div>`) + sec('Environment', `<div class="pcard">${envHtml(n)}</div>`);
+    const lbl = x.label || (x.instance_id != null ? `${id}/${x.provider}#${x.instance_id}` : `${x.provider || ''} · ${id || ''}`);
+    const st = x.state === 'starting' ? 'starting' : x.ended ? 'ended' : x._ws ? 'live' : 'reconnecting';
+    const kv = `<div class="kv"><span>Session</span><span class="ell">${esc(lbl)}</span></div><div class="kv"><span>Status</span><span>${st}</span></div><div class="kv"><span>Size</span><span>${term.cols}×${term.rows}</span></div>`;
+    const lay = S.ptyLayout || 'native'; const link = $('#tlink').dataset.url;
+    const ctl = `<div class="tog cp-tog"><button data-cl="native" class="${lay === 'native' ? 'on' : ''}">PTY</button><button data-cl="chat" class="${lay === 'chat' ? 'on' : ''}">Chat view</button></div>
+      <div class="row cp-row"><button class="btn" data-c="paste">Paste</button>${link ? '<button class="btn blue" data-c="link" title="' + esc(link) + '">Open link</button>' : ''}<button class="btn" data-c="reattach">Reattach…</button><button class="btn red" data-c="stop"${x.ended ? ' disabled' : ''}>Stop</button></div>`;
+    const env = n && n.environment ? n.environment : null;
+    const brief = n ? `${nodeStatus(n)}${n.kind ? ' · ' + esc(n.kind) : ''}${(S.sessions[id] || []).filter((s) => !s.ended).length ? ' · ' + (S.sessions[id] || []).filter((s) => !s.ended).length + ' sessions' : ''}` : 'unknown';
+    root.innerHTML = sec('Session', `<div class="pcard">${kv}</div>`) + sec('Controls', `<div class="pcard">${ctl}</div>`)
+      + sec('Node', `<div class="pcard"><div class="kv"><span>${esc(id || '')}</span><span>${brief}</span></div><div class="row" style="margin-top:6px"><button class="btn" data-c="fleet">Open in Fleet →</button></div></div>`);
+    void env;
+    root.querySelectorAll('[data-cl]').forEach((b) => (b.onclick = () => { setPtyLayout(b.dataset.cl); renderInfo(); }));
+    root.querySelectorAll('[data-c]').forEach((b) => (b.onclick = () => {
+      const c = b.dataset.c;
+      if (c === 'paste') $('#tpaste').click(); else if (c === 'link') $('#tlink').click(); else if (c === 'stop') $('#tstop').click();
+      else if (c === 'reattach') reattachDialog(id); else if (c === 'fleet') openNode(id);
+    }));
     return;
   }
   const agent = S.chat && !isGroup(S.chat);
@@ -455,9 +480,10 @@ function renderInfo() {
   let h = sec('Details', `<div class="pcard">${kv}</div>`);
   // A chat is not owned by a node; offer a link to run a session on a node instead.
   const nodes = visibleNodes();
-  if (nodes.length) h += sec('Run on node', `<div class="pcard"><div class="chips">${nodes.map((n) => `<button class="chip" data-node="${esc(n.node_id)}"><span class="dot ${n.online ? 'ok' : ''}"></span>${esc(n.node_id)}</button>`).join('')}</div><div class="sub" style="margin-top:6px">Sessions run in a node environment, not in this chat.</div></div>`);
+  if (nodes.length) h += sec('Fleet', `<div class="pcard"><div class="kv"><span>${nodes.filter((n) => n.online).length}/${nodes.length} nodes online</span><button class="btn" id="pfleet">Open Fleet →</button></div></div>`);
+  if (false) h += sec('Run on node', `<div class="pcard"><div class="chips">${nodes.map((n) => `<button class="chip" data-node="${esc(n.node_id)}"><span class="dot ${n.online ? 'ok' : ''}"></span>${esc(n.node_id)}</button>`).join('')}</div><div class="sub" style="margin-top:6px">Sessions run in a node environment, not in this chat.</div></div>`);
   root.innerHTML = h + '<div id="p-activity" class="secs"></div>';
-  root.querySelectorAll('.chip[data-node]').forEach((b) => (b.onclick = () => openNode(b.dataset.node)));
+  if ($('#pfleet')) $('#pfleet').onclick = () => openNode();
   if (agent) renderActivity();
 }
 $('#headbtn').onclick = () => { if (S.panel) closePanel(); else openPanel('info'); };

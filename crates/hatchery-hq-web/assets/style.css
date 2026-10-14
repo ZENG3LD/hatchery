@@ -496,5 +496,10 @@ body.nodemode #composer{display:none}
 .bdtab[hidden]{display:none}
 /* right info panel as a hideable overlay over the center */
 #panel{position:fixed;top:0;right:0;bottom:0;z-index:40;box-shadow:-12px 0 40px #0008}
-#ptyview .termwrap{margin-right:66px}
 .ptybar .tog button{color:var(--txt);white-space:normal}
+
+/* no floating controls beside the terminal: controls live in the info panel */
+#ptyview .ptybar{display:none!important}
+.cp-tog{display:inline-flex;margin-bottom:8px}.cp-row{flex-wrap:wrap;gap:6px}.btn.red{color:#ff6b6b}
+.fsess{margin:6px 0 4px}.fs-row{padding:3px 0}
+.cp-tog button{white-space:nowrap;padding:4px 14px}
