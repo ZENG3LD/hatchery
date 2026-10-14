@@ -55,6 +55,8 @@ async fn main() {
     let mut harness_mcp_helper: Option<PathBuf> = None;
     let mut network_allowlist_catalog: Option<PathBuf> = None;
     let mut session_record_retention = SessionRecordRetentionConfig::default();
+    let mut plugin_root: Option<PathBuf> = None;
+    let mut plugin_keys: Option<PathBuf> = None;
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
     match raw_args.first().map(String::as_str) {
         // plugin verify|install|list|sign|keygen  (signed session plugins; see plugins.rs)
@@ -370,6 +372,12 @@ async fn main() {
                 .unwrap_or_else(|error| fail(&error));
                 managed_profiles.push((workspace_id, profile));
             }
+            "--plugin-root" => {
+                plugin_root = Some(PathBuf::from(required_value("--plugin-root", args.next())));
+            }
+            "--plugin-trusted-keys" => {
+                plugin_keys = Some(PathBuf::from(required_value("--plugin-trusted-keys", args.next())));
+            }
             "--history-root" => {
                 let value = required_value("--history-root", args.next());
                 history_roots.push(parse_history_root(&value));
@@ -633,6 +641,32 @@ async fn main() {
             .unwrap_or_else(|error| fail(&error.to_string()));
     }
     let server = NodeServer::new(config).unwrap_or_else(|error| fail(&error.to_string()));
+    // Signed plugins: load verified ones into provider homes so new sessions see them.
+    match (plugin_root.clone(), plugin_keys.clone()) {
+        (Some(root), Some(keys)) => {
+            let trusted = hatchery_node::plugins::load_trusted_keys(&keys).unwrap_or_else(|e| fail(&e));
+            let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| fail("--plugin-root needs HOME"));
+            tokio::spawn(async move {
+                let mut last = None;
+                loop {
+                    let (root, trusted, home) = (root.clone(), trusted.clone(), home.clone());
+                    if let Ok((placed, skipped)) = tokio::task::spawn_blocking(move || hatchery_node::plugins::sync_into_home(&root, &trusted, &home)).await {
+                        let now = (placed, skipped.clone());
+                        if last.as_ref() != Some(&now) {
+                            tracing::info!(placed, skipped = skipped.len(), "plugins synced into provider homes");
+                            for why in &skipped {
+                                tracing::warn!(reason = %why, "plugin file skipped");
+                            }
+                            last = Some(now);
+                        }
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                }
+            });
+        }
+        (None, None) => {}
+        _ => fail("--plugin-root and --plugin-trusted-keys need each other"),
+    }
     // Node calls (mail.*, task.*): over the restream uplink when there is one (the restream
     // bridge publishes it), else the legacy signed HTTP call to C2.
     let uplink_keys = restream_uplink_early.map(|_| resolve_upstream_keys(enroll_state.as_deref()).unwrap_or_else(|e| fail(&e)));

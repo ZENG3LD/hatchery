@@ -278,3 +278,141 @@ mod tests {
         assert!(load_trusted_keys(&f).is_err());
     }
 }
+
+/// Provider config directory (relative to the provider HOME) a plugin's files land in.
+pub fn provider_dir(provider: &str) -> Option<&'static str> {
+    Some(match provider {
+        "claude" => ".claude",
+        "codex" => ".codex",
+        "kimi" => ".kimi",
+        "grok" => ".grok",
+        "gemini" => ".gemini",
+        _ => return None,
+    })
+}
+
+const MANAGED_LIST: &str = ".hatchery-plugins.json";
+
+/// Load verified plugins into provider homes so new sessions see them: each file goes to
+/// `<home>/<provider dir>/<path>` for every provider the plugin names (all known ones when
+/// it names none). Only files this sync placed are ever replaced or removed (tracked in
+/// `<home>/.hatchery-plugins.json`); an existing foreign file is left alone and reported.
+/// Tampered plugins are skipped. Returns (placed, skipped-with-reason).
+pub fn sync_into_home(root: &Path, trusted: &[VerifyingKey], home: &Path) -> (usize, Vec<String>) {
+    const ALL: &[&str] = &["claude", "codex", "kimi", "grok", "gemini"];
+    let list_path = home.join(MANAGED_LIST);
+    let previous: BTreeMap<String, String> = std::fs::read(&list_path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+    let mut managed: BTreeMap<String, String> = BTreeMap::new();
+    let mut skipped = Vec::new();
+    // Newest version per plugin name wins (lexicographic by version dir).
+    let mut chosen: BTreeMap<String, Installed> = BTreeMap::new();
+    for item in list(root, trusted) {
+        match item {
+            Ok(i) => {
+                if chosen.get(&i.name).is_none_or(|c| c.version < i.version) {
+                    chosen.insert(i.name.clone(), i);
+                }
+            }
+            Err((p, e)) => skipped.push(format!("{}: {e}", p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())),
+        }
+    }
+    for inst in chosen.values() {
+        let Ok(bytes) = std::fs::read(inst.path.join(MANIFEST)) else { continue };
+        let Ok(m) = serde_json::from_slice::<PluginManifest>(&bytes) else { continue };
+        let providers: Vec<&str> = if m.providers.is_empty() { ALL.to_vec() } else { m.providers.iter().map(String::as_str).collect() };
+        for p in providers {
+            let Some(dir) = provider_dir(p) else { continue };
+            for (rel, hash) in &m.files {
+                let target_rel = format!("{dir}/{rel}");
+                let target = home.join(&target_rel);
+                let ours = previous.contains_key(&target_rel) || managed.contains_key(&target_rel);
+                if target.exists() && !ours {
+                    if sha256_file(&target).ok().as_deref() != Some(hash.as_str()) {
+                        skipped.push(format!("{target_rel}: exists and is not managed"));
+                    }
+                    continue;
+                }
+                if sha256_file(&target).ok().as_deref() != Some(hash.as_str()) {
+                    let _ = std::fs::create_dir_all(target.parent().expect("parent"));
+                    if let Err(e) = std::fs::copy(inst.path.join(rel), &target) {
+                        skipped.push(format!("{target_rel}: {e}"));
+                        continue;
+                    }
+                }
+                managed.insert(target_rel, hash.clone());
+            }
+        }
+    }
+    // Remove files we placed earlier that no plugin provides any more (only if unchanged).
+    for (rel, hash) in &previous {
+        if !managed.contains_key(rel) {
+            let path = home.join(rel);
+            if sha256_file(&path).ok().as_deref() == Some(hash.as_str()) {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
+    }
+    let placed = managed.len();
+    let _ = std::fs::write(&list_path, serde_json::to_vec_pretty(&managed).unwrap_or_default());
+    (placed, skipped)
+}
+
+#[cfg(test)]
+mod sync_tests {
+    use super::*;
+
+    #[test]
+    fn sync_places_updates_and_removes_only_managed_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let (secret, public) = keygen();
+        let trusted = vec![VerifyingKey::from_bytes(&hex::decode(public).unwrap().try_into().unwrap()).unwrap()];
+        let pkg = dir.path().join("pkg");
+        std::fs::create_dir_all(pkg.join("skills/review")).unwrap();
+        std::fs::write(pkg.join("skills/review/SKILL.md"), b"v1").unwrap();
+        sign(&pkg, "kit", "1.0.0", vec!["claude".into()], &secret).unwrap();
+        let root = dir.path().join("plugins");
+        install(&pkg, &root, &trusted).unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(home.join(".claude/skills/mine")).unwrap();
+        std::fs::write(home.join(".claude/skills/mine/SKILL.md"), b"user").unwrap();
+
+        let (placed, skipped) = sync_into_home(&root, &trusted, &home);
+        assert_eq!((placed, skipped.len()), (1, 0));
+        assert_eq!(std::fs::read(home.join(".claude/skills/review/SKILL.md")).unwrap(), b"v1");
+        assert!(!home.join(".codex").exists());
+
+        // Newer version replaces our file.
+        std::fs::write(pkg.join("skills/review/SKILL.md"), b"v2").unwrap();
+        sign(&pkg, "kit", "1.1.0", vec!["claude".into()], &secret).unwrap();
+        install(&pkg, &root, &trusted).unwrap();
+        sync_into_home(&root, &trusted, &home);
+        assert_eq!(std::fs::read(home.join(".claude/skills/review/SKILL.md")).unwrap(), b"v2");
+
+        // Plugin gone -> our file removed; the user's own skill stays.
+        std::fs::remove_dir_all(&root).unwrap();
+        let (placed, _) = sync_into_home(&root, &trusted, &home);
+        assert_eq!(placed, 0);
+        assert!(!home.join(".claude/skills/review/SKILL.md").exists());
+        assert_eq!(std::fs::read(home.join(".claude/skills/mine/SKILL.md")).unwrap(), b"user");
+    }
+
+    #[test]
+    fn foreign_file_is_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let (secret, public) = keygen();
+        let trusted = vec![VerifyingKey::from_bytes(&hex::decode(public).unwrap().try_into().unwrap()).unwrap()];
+        let pkg = dir.path().join("pkg");
+        std::fs::create_dir_all(&pkg).unwrap();
+        std::fs::write(pkg.join("AGENTS.md"), b"plugin").unwrap();
+        sign(&pkg, "kit", "1.0.0", vec!["codex".into()], &secret).unwrap();
+        let root = dir.path().join("plugins");
+        install(&pkg, &root, &trusted).unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        std::fs::write(home.join(".codex/AGENTS.md"), b"mine").unwrap();
+        let (placed, skipped) = sync_into_home(&root, &trusted, &home);
+        assert_eq!(placed, 0);
+        assert!(skipped[0].contains("not managed"));
+        assert_eq!(std::fs::read(home.join(".codex/AGENTS.md")).unwrap(), b"mine");
+    }
+}
