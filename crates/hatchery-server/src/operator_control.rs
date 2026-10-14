@@ -60,6 +60,7 @@ pub struct NodeOperatorMesh {
     events: broadcast::Sender<hatchery_core::RoutedNodeEvent>,
     /// Fan-out of dig2browser frames / lifecycle events.
     browser: broadcast::Sender<BrowserStreamEvent>,
+    last_event_seq: Arc<Mutex<BTreeMap<(String, hatchery_core::NodeIncarnationId), u64>>>,
 }
 
 impl NodeOperatorMesh {
@@ -80,6 +81,7 @@ impl NodeOperatorMesh {
             topology,
             events,
             browser,
+            last_event_seq: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
@@ -122,6 +124,17 @@ impl NodeOperatorMesh {
         if matches!(event.event, hatchery_core::C2NodeEvent::TerminalFrame { .. }) {
             if let Some(at) = PTY_PROBE.lock().unwrap_or_else(|p| p.into_inner()).take() {
                 tracing::debug!(target: "pty_lat", core_us = at.elapsed().as_micros() as u64, "core: pty input enqueued to echo frame published");
+            }
+        }
+        // Gap diagnostics: the kernel runtime resyncs the node on any sequence gap.
+        {
+            let mut last = self.last_event_seq.lock().expect("last seq");
+            let key = (event.node_id.as_str().to_owned(), event.cursor.incarnation_id);
+            let prev = last.insert(key, event.cursor.sequence);
+            if let Some(prev) = prev {
+                if event.cursor.sequence > prev + 1 {
+                    tracing::info!(node = %event.node_id, prev, next = event.cursor.sequence, kind = format!("{:?}", event.event).split(|c: char| !c.is_alphanumeric()).next().unwrap_or("").to_owned(), "node event sequence gap");
+                }
             }
         }
         // Keep topology cursor fresh from live traffic.
@@ -359,7 +372,10 @@ where
                             break;
                         }
                     }
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!(skipped = n, "operator client lagged; node events dropped");
+                        continue;
+                    }
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
