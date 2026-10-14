@@ -522,10 +522,15 @@ body.nodemode #composer{display:none}
 #terminal .xterm,#terminal .xterm-screen{height:100%}
 #ptyview{padding:0!important;margin:0;background:#000}
 /* draggable browser drawer */
-.bdrawer{position:fixed;z-index:60;top:64px;right:16px;left:auto;width:400px;max-width:92vw;max-height:calc(100vh - 80px);background:#111;border:1px solid var(--line);border-radius:12px;box-shadow:-14px 10px 44px #000a;display:flex;flex-direction:column;overflow:hidden;transform:none;transition:width .2s,opacity .15s}
+.bdrawer{position:fixed;z-index:60;top:64px;right:16px;left:auto;width:400px;max-width:min(420px,92vw);max-height:calc(100vh - 80px);background:#111;border:1px solid var(--line);border-radius:12px;box-shadow:-14px 10px 44px #000a;display:flex;flex-direction:column;overflow:hidden;transform:none;transition:width .15s,height .15s,opacity .15s}
 .bdrawer.off,.bdrawer[hidden]{display:none!important}
-.bdrawer.big{width:min(960px,92vw);max-height:calc(100vh - 48px)}
-.bdrawer .bdbar{cursor:grab;user-select:none;touch-action:none}
+/* Expanded = centered modal, clamped to the viewport with margins */
+.bdrawer.big{left:50%;right:auto;top:50%;transform:translate(-50%,-50%);margin:0;border-radius:14px;box-shadow:0 24px 80px #000c;max-width:calc(100vw - 48px);max-height:calc(100vh - 48px)}
+.bdrawer.big.dragged{transform:none}
+.bdrawer .bdbar{cursor:grab;user-select:none;touch-action:none;flex:none}
 .bdrawer .bdbar.dragging{cursor:grabbing}
 .bdrawer .bdbar .grow{flex:1;min-width:0}
+.bdrawer #bdcanvas{flex:1;min-height:0;width:100%;height:100%;max-height:none;object-fit:contain}
+.bdscrim{position:fixed;inset:0;z-index:59;background:#0008;border:0;padding:0;cursor:default}
+.bdscrim[hidden]{display:none!important}
 .bdlat{display:none!important}
