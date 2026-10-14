@@ -421,8 +421,17 @@ async fn start_browser(
     let session = match &cmd.op {
         hatchery_core::BrowserClientOp::Start { session, .. }
         | hatchery_core::BrowserClientOp::Input { session, .. }
-        | hatchery_core::BrowserClientOp::Stop { session } => session.clone(),
+        | hatchery_core::BrowserClientOp::Stop { session }
+        | hatchery_core::BrowserClientOp::LocalServerStart { session, .. }
+        | hatchery_core::BrowserClientOp::LocalServerStop { session, .. }
+        | hatchery_core::BrowserClientOp::LocalServerList { session } => session.clone(),
     };
+    let is_local_server = matches!(
+        &cmd.op,
+        hatchery_core::BrowserClientOp::LocalServerStart { .. }
+            | hatchery_core::BrowserClientOp::LocalServerStop { .. }
+            | hatchery_core::BrowserClientOp::LocalServerList { .. }
+    );
     let link = { let guard = mesh.inner.lock().expect("mesh"); guard.get(&cmd.node_id).cloned() };
     let node_id = cmd.node_id.clone();
     let Some(link) = link else {
@@ -433,6 +442,13 @@ async fn start_browser(
         match sent {
             Err(e) => Some(BrowserStreamEvent::Error { node_id, session, message: format!("{e:?}") }),
             Ok(wait) => match wait.await {
+                Ok(reply) if is_local_server => Some(BrowserStreamEvent::LocalServer {
+                    node_id,
+                    session: reply.session,
+                    ok: reply.ok,
+                    message: reply.message,
+                    body: reply.body,
+                }),
                 Ok(reply) if reply.ok => None,
                 Ok(reply) => Some(BrowserStreamEvent::Error { node_id, session: reply.session, message: reply.message }),
                 Err(e) => Some(BrowserStreamEvent::Error { node_id, session, message: format!("{e:?}") }),
@@ -440,6 +456,7 @@ async fn start_browser(
         }
     })
 }
+
 
 #[allow(dead_code)]
 async fn dispatch_browser(
@@ -456,7 +473,10 @@ async fn dispatch_browser(
             session: match &cmd.op {
                 hatchery_core::BrowserClientOp::Start { session, .. }
                 | hatchery_core::BrowserClientOp::Input { session, .. }
-                | hatchery_core::BrowserClientOp::Stop { session } => session.clone(),
+                | hatchery_core::BrowserClientOp::Stop { session }
+                | hatchery_core::BrowserClientOp::LocalServerStart { session, .. }
+                | hatchery_core::BrowserClientOp::LocalServerStop { session, .. }
+                | hatchery_core::BrowserClientOp::LocalServerList { session } => session.clone(),
             },
             message: "node is not registered on core mesh".into(),
         });
@@ -473,7 +493,10 @@ async fn dispatch_browser(
             session: match &cmd.op {
                 hatchery_core::BrowserClientOp::Start { session, .. }
                 | hatchery_core::BrowserClientOp::Input { session, .. }
-                | hatchery_core::BrowserClientOp::Stop { session } => session.clone(),
+                | hatchery_core::BrowserClientOp::Stop { session }
+                | hatchery_core::BrowserClientOp::LocalServerStart { session, .. }
+                | hatchery_core::BrowserClientOp::LocalServerStop { session, .. }
+                | hatchery_core::BrowserClientOp::LocalServerList { session } => session.clone(),
             },
             message: err.to_string(),
         }),

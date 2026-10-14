@@ -156,6 +156,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "arc-swap"
+version = "1.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c049c0be4daef0b145cb3555416b3b8ef5b7888a38aea1a3a155801fe7b0810b"
+dependencies = [
+ "rustversion",
+]
+
+[[package]]
 name = "argon2"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -181,6 +190,18 @@ name = "ascii"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d92bec98840b8f03a5ff5413de5293bfcd8bf96467cf5452609f939ec6f5de16"
+
+[[package]]
+name = "async-compression"
+version = "0.4.50"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee19bd99b43e3691acbad4e840420a4881cea6c0b66a208125a824f8fd53f5a1"
+dependencies = [
+ "compression-codecs",
+ "compression-core",
+ "pin-project-lite",
+ "tokio",
+]
 
 [[package]]
 name = "async-trait"
@@ -611,6 +632,23 @@ dependencies = [
  "ryu",
  "static_assertions",
 ]
+
+[[package]]
+name = "compression-codecs"
+version = "0.4.45"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98fc98460ba0ad5317075d3632b8dfc45d0be8c4a49347c2a38272019717614a"
+dependencies = [
+ "compression-core",
+ "flate2",
+ "memchr",
+]
+
+[[package]]
+name = "compression-core"
+version = "0.4.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e8ccc4ea9f6acc32d102c0f6d471d11d913ad15f20c04de743374861fa1d414"
 
 [[package]]
 name = "const-oid"
@@ -1770,7 +1808,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-arcade-preview"
-version = "0.2.6"
+version = "0.2.8"
 dependencies = [
  "ab_glyph",
  "hatchery-arcade-engine",
@@ -1792,7 +1830,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-bidi-client"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "futures-util",
  "sha2",
@@ -1802,7 +1840,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-bidi-relay"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "futures-util",
  "sha2",
@@ -1812,7 +1850,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-build"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1832,7 +1870,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-c2"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1857,7 +1895,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-c2-client"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-node-wire",
@@ -1872,7 +1910,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-core"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
@@ -1923,7 +1961,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-enroll"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -1937,7 +1975,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-api"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "gate4agent-build-stamp",
  "hatchery-harness-protocol",
@@ -1948,7 +1986,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-client"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "hatchery-harness-api",
  "serde",
@@ -1958,7 +1996,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-delivery"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "gate4agent-node-protocol",
  "libc",
@@ -1969,7 +2007,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-engine"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "hatchery-harness-protocol",
  "serde",
@@ -1979,7 +2017,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-light"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-node-wire",
@@ -2001,7 +2039,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-mcp"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-node-wire",
@@ -2024,7 +2062,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-protocol"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "serde",
  "serde_json",
@@ -2033,7 +2071,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-service"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-node-protocol",
@@ -2067,7 +2105,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-hq-web"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2091,7 +2129,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-node"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "base64 0.22.1",
  "claude-session-restore",
@@ -2121,18 +2159,21 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tesserax",
+ "tesserax-http",
  "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite 0.26.2",
  "tracing",
  "tracing-subscriber",
+ "uuid",
  "vt100",
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "hatchery-observation-api"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -2143,7 +2184,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-engine"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -2157,7 +2198,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-protocol"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "serde",
  "serde_json",
@@ -2166,7 +2207,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-service"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -2180,7 +2221,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-store"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "hatchery-observation-api",
  "hatchery-observation-engine",
@@ -2192,7 +2233,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-server"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "async-trait",
  "gate4agent-node-protocol",
@@ -2219,7 +2260,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-session-events"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -2229,7 +2270,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-tui"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "crossterm",
  "gate4agent-build-stamp",
@@ -2320,6 +2361,12 @@ dependencies = [
  "http-body",
  "pin-project-lite",
 ]
+
+[[package]]
+name = "http-range-header"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9171a2ea8a68358193d15dd5d70c1c10a2afc3e7e4c5bc92bc9f025cebd7359c"
 
 [[package]]
 name = "httparse"
@@ -3078,6 +3125,16 @@ name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
+
+[[package]]
+name = "mime_guess"
+version = "2.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7c44f8e672c00fe5308fa235f821cb4198414e1c77935c1ab6948d3fd78550e"
+dependencies = [
+ "mime",
+ "unicase",
+]
 
 [[package]]
 name = "miniz_oxide"
@@ -4533,6 +4590,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "tesserax"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "640c4db485c62bd7766780d1ead5408545a259503fd951dbdb163f3c144ae3bd"
+dependencies = [
+ "arc-swap",
+ "axum",
+ "serde",
+ "serde_json",
+ "sha2",
+ "subtle",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "tesserax-http"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9541836cbc3c1ee5cb3a92e812edf534da75e2ab02bd047a756a37f7708861a4"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "futures-util",
+ "getrandom 0.3.4",
+ "serde",
+ "serde_json",
+ "tesserax",
+ "thiserror 2.0.21",
+ "tokio",
+ "tower-http",
+ "tower-layer",
+ "tower-service",
+ "tracing",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4831,12 +4926,22 @@ version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840"
 dependencies = [
+ "async-compression",
  "bitflags",
  "bytes",
+ "futures-core",
  "futures-util",
  "http",
  "http-body",
+ "http-body-util",
+ "http-range-header",
+ "httpdate",
+ "mime",
+ "mime_guess",
+ "percent-encoding",
  "pin-project-lite",
+ "tokio",
+ "tokio-util",
  "tower",
  "tower-layer",
  "tower-service",
@@ -4983,6 +5088,12 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
+
+[[package]]
+name = "unicase"
+version = "2.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "357cc3acc6a036009fd6c973ed009037c732d60d0b4f6c673e9041497482a28f"
 
 [[package]]
 name = "unicode-bidi"

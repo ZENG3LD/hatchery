@@ -1,6 +1,6 @@
 # Session-local server pool (design)
 
-Status: design only. No implementation yet.
+Status: implemented (v1). See `hatchery-node::local_server`, harness-mcp `local_server.*` tools, HQ sidebar.
 
 ## Goal
 

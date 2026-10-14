@@ -171,6 +171,7 @@ pub fn router(config: Config) -> (Router, Shared) {
         .route("/api/term", get(term_ws))
         .route("/api/sessions", get(api_sessions))
         .route("/api/browser", get(browser_ws))
+        .route("/api/local_server", axum::routing::post(api_local_server))
         .layer(middleware::from_fn_with_state(Arc::clone(&state), guard))
         .with_state(Arc::clone(&state));
     (app, state)
@@ -1289,5 +1290,92 @@ mod m4a_tests {
         assert!(!super::m4a_room_ok("--as"));
         assert!(!super::m4a_room_ok("a b"));
         assert!(!super::m4a_room_ok(""));
+    }
+}
+
+
+// ---------------------------------------------------------------------------------- session-local servers
+
+#[derive(Deserialize)]
+struct LocalServerBody {
+    node: String,
+    session: String,
+    op: String,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    root: Option<String>,
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(default)]
+    bin: Option<String>,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    open: bool,
+}
+
+async fn api_local_server(State(s): State<Shared>, body_bytes: axum::body::Bytes) -> Response {
+    use hatchery_core::{BrowserClientCommand, BrowserClientOp, BrowserStreamEvent};
+    let body: LocalServerBody = match serde_json::from_slice(&body_bytes) {
+        Ok(b) => b,
+        Err(e) => return (StatusCode::BAD_REQUEST, format!("bad json: {e}")).into_response(),
+    };
+    let control = match s.topology.get() {
+        Some(c) => c.clone(),
+        None => return (StatusCode::SERVICE_UNAVAILABLE, "operator control not ready").into_response(),
+    };
+    let op = match body.op.as_str() {
+        "list" => BrowserClientOp::LocalServerList { session: body.session.clone() },
+        "stop" => {
+            let Some(id) = body.id.clone() else {
+                return (StatusCode::BAD_REQUEST, "id required").into_response();
+            };
+            BrowserClientOp::LocalServerStop { session: body.session.clone(), id }
+        }
+        "start" => {
+            let Some(kind) = body.kind.clone() else {
+                return (StatusCode::BAD_REQUEST, "kind required").into_response();
+            };
+            BrowserClientOp::LocalServerStart {
+                session: body.session.clone(),
+                kind,
+                root: body.root.clone(),
+                cwd: body.cwd.clone(),
+                bin: body.bin.clone(),
+                open: body.open,
+                spa: Some(true),
+            }
+        }
+        _ => return (StatusCode::BAD_REQUEST, "op must be list|start|stop").into_response(),
+    };
+    let mut rx = s.browser_events.subscribe();
+    let cmd = BrowserClientCommand { node_id: body.node.clone(), op };
+    if let Err(e) = control.browser_command(cmd).await {
+        return (StatusCode::BAD_GATEWAY, format!("control: {e}")).into_response();
+    }
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    loop {
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if left.is_zero() {
+            return (StatusCode::GATEWAY_TIMEOUT, "local_server reply timed out").into_response();
+        }
+        match tokio::time::timeout(left, rx.recv()).await {
+            Ok(Ok(ev)) => match ev.as_ref() {
+                BrowserStreamEvent::LocalServer { node_id, session, ok, message, body: b }
+                    if node_id == &body.node && session == &body.session =>
+                {
+                    if *ok {
+                        let payload = b.clone().unwrap_or(json!({"ok": true}));
+                        return ([(header::CONTENT_TYPE, "application/json")], payload.to_string()).into_response();
+                    }
+                    return (StatusCode::BAD_REQUEST, [(header::CONTENT_TYPE, "application/json")], json!({"error": message}).to_string()).into_response();
+                }
+                _ => continue,
+            },
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => continue,
+            Ok(Err(_)) => return (StatusCode::BAD_GATEWAY, "event stream closed").into_response(),
+            Err(_) => return (StatusCode::GATEWAY_TIMEOUT, "local_server reply timed out").into_response(),
+        }
     }
 }

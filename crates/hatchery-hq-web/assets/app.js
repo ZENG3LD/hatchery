@@ -484,6 +484,7 @@ function renderInfo() {
       <div class="row cp-row"><button class="btn" data-c="paste">Paste</button>${link ? '<button class="btn blue" data-c="link" title="' + esc(link) + '">Open link</button>' : ''}<button class="btn" data-c="reattach">Reattach…</button><button class="btn red" data-c="stop"${x.ended ? ' disabled' : ''}>Stop</button></div>`;
     root.innerHTML = sec('Session', `<div class="pcard">${kv}</div>`) + sec('Controls', `<div class="pcard">${ctl}</div>`)
       + (x.instance_id != null ? sec('Browser', sessionBrowserHtml(id, x)) : '')
+      + (x.instance_id != null ? sec('Local servers', `<div class="pcard" id="pls"><div class="sub">Loading…</div></div>`) : '')
       + sec('AI services', aiServicesHtml());
     root.querySelectorAll('[data-cl]').forEach((b) => (b.onclick = () => { setPtyLayout(b.dataset.cl); renderInfo(); }));
     root.querySelectorAll('[data-c]').forEach((b) => (b.onclick = () => {
@@ -492,6 +493,7 @@ function renderInfo() {
       else if (c === 'reattach') reattachDialog(id);
     }));
     if (x.instance_id != null) wireSessionBrowser(root, id, x);
+    if (x.instance_id != null) renderLocalServers(id, x);
     wireAiServices(root);
     return;
   }
@@ -994,6 +996,38 @@ function sessionBrowserHtml(node, sess) {
   return `<div class="pcard pbrowser"><div class="sub">${live ? 'Session browser is bound to this PTY (own profile).' : 'Links clicked in the terminal open the session browser as a drawer.'}</div>
     <div class="row cp-row"><button class="btn" data-b="open">${label}</button>${live ? '<button class="btn red" data-b="stop">Close browser</button>' : ''}</div></div>`;
 }
+
+async function renderLocalServers(node, sess) {
+  const root = $('#pls'); if (!root) return;
+  const session = browserKey(sess);
+  let data;
+  try { data = await post('/api/local_server', { node, session, op: 'list' }); }
+  catch (e) { root.innerHTML = `<div class="sub">Local servers unavailable: ${esc(e.message)}</div>`; return; }
+  const rows = (data.instances || []).map((i) => `<div class="row cp-row" style="margin-top:6px"><span class="ell" title="${esc(i.url)}">${esc(i.kind)} · :${i.port}</span>
+    <button class="btn" data-ls="open" data-url="${esc(i.url)}">Open</button>
+    <button class="btn red" data-ls="stop" data-id="${esc(i.id)}">Stop</button></div>`).join('')
+    || '<div class="sub">No local servers running.</div>';
+  root.innerHTML = `<div class="sub">Loopback HTTP for this session (tesserax-http). Start a static preview from a directory on the node.</div>
+    <div class="row cp-row" style="margin-top:8px"><input id="lsroot" placeholder="/absolute/path/to/dist" style="flex:1"><button class="btn blue" data-ls="start">Start static</button></div>${rows}`;
+  root.querySelectorAll('[data-ls]').forEach((b) => (b.onclick = async () => {
+    try {
+      if (b.dataset.ls === 'start') {
+        const rootPath = ($('#lsroot') && $('#lsroot').value || '').trim();
+        if (!rootPath) { toast('Need an absolute directory path'); return; }
+        const r = await post('/api/local_server', { node, session, op: 'start', kind: 'static', root: rootPath, open: true });
+        toast('local server :' + r.port);
+        openSessionBrowser(node, sess, r.url);
+      } else if (b.dataset.ls === 'stop') {
+        await post('/api/local_server', { node, session, op: 'stop', id: b.dataset.id });
+        toast('stopped');
+      } else if (b.dataset.ls === 'open') {
+        openSessionBrowser(node, sess, b.dataset.url);
+      }
+      renderLocalServers(node, sess);
+    } catch (e) { toast('local server: ' + e.message); }
+  }));
+}
+
 function wireSessionBrowser(root, node, sess) {
   root.querySelectorAll('[data-b]').forEach((x) => (x.onclick = () => {
     if (x.dataset.b === 'stop') { stopBrowser(); return; }

@@ -44,6 +44,28 @@ pub enum BrowserClientOp {
     Stop {
         session: String,
     },
+    /// Session-local server pool (tesserax-http). Reply body carries JSON.
+    LocalServerStart {
+        session: String,
+        kind: String,
+        #[serde(default)]
+        root: Option<String>,
+        #[serde(default)]
+        cwd: Option<String>,
+        #[serde(default)]
+        bin: Option<String>,
+        #[serde(default)]
+        open: bool,
+        #[serde(default)]
+        spa: Option<bool>,
+    },
+    LocalServerStop {
+        session: String,
+        id: String,
+    },
+    LocalServerList {
+        session: String,
+    },
 }
 
 /// Node → HQ browser events (frames and lifecycle).
@@ -85,6 +107,16 @@ pub enum BrowserStreamEvent {
         session: String,
         message: String,
     },
+    /// Result of a LocalServer* control op (list/start/stop), for HQ sidebar.
+    LocalServer {
+        node_id: String,
+        session: String,
+        ok: bool,
+        #[serde(default)]
+        message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<serde_json::Value>,
+    },
 }
 
 /// Changed rectangle of a delta frame, in source-image pixels.
@@ -124,6 +156,9 @@ pub struct BrowserOpReply {
     pub session: String,
     #[serde(default)]
     pub message: String,
+    /// JSON body for local_server list/start replies (opaque to C2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<serde_json::Value>,
 }
 
 mod serde_bytes_b64 {
