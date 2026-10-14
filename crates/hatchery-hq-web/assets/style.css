@@ -205,7 +205,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:7px 8px;b
 .amenu{left:12px!important;bottom:58px;min-width:280px;padding:6px}
 .amenu .hd{padding:8px 10px 10px;border-bottom:1px solid #2b2b2b;margin-bottom:4px}.amenu .hd b{display:block;font-size:14px}.amenu .hd span{color:var(--sub);font-size:12.5px}
 .amenu button{gap:12px}.amenu .ic{width:18px;text-align:center;color:var(--sub)}.amenu .r{margin-left:auto;color:var(--sub);font-size:12px}.amenu hr{border:0;border-top:1px solid #2b2b2b;margin:4px 0}
-#settings{position:fixed;inset:0;background:#000a;z-index:70;display:grid;place-items:center}
+#settings,#support{position:fixed;inset:0;background:#000a;z-index:70;display:grid;place-items:center}
 .sdlg{width:min(900px,94vw);height:min(700px,88vh);background:#1b1b1b;border:1px solid #2c2c2c;border-radius:14px;display:flex;overflow:hidden;box-shadow:0 30px 80px #000c;position:relative}
 .snav{width:200px;flex:none;border-right:1px solid #262626;padding:12px 10px;display:flex;flex-direction:column;gap:2px;background:#161616}
 .snav button{display:flex;gap:10px;align-items:center;text-align:left;padding:8px 10px;border-radius:8px;font-size:13.5px;color:#d0d0d0}.snav button:hover{background:#222}.snav button.on{background:#2a2a2a;color:#fff}

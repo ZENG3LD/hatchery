@@ -130,7 +130,7 @@ function sbMenu(x, y, r) {
 }
 // ---- menus are invariant: one open at a time; any press outside, Escape, blur or resize closes all (with nested submenus)
 function closeMenus() { document.querySelector('#sbmenu')?.remove(); const a = $('#acctmenu'); if (a) a.hidden = true; const m = $('#menu'); if (m) m.hidden = true; subClose(0); }
-document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#sbmenu,#acctmenu,#menu,.subm,#acctbtn,#addbtn,#plusbtn')) closeMenus(); }, true);
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest('#sbmenu,#acctmenu,#menu,.subm,#acctbtn,#addbtn,#plusbtn,#support,#settings,#fleet,.modal')) closeMenus(); }, true);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenus(); });
 window.addEventListener('blur', () => closeMenus()); window.addEventListener('resize', () => closeMenus());
 
@@ -478,14 +478,10 @@ function formatTrace(r) {
   const d = r.detail && typeof r.detail === 'object' ? Object.entries(r.detail).map(([k, v]) => `${k}=${v}`).join(' ') : '';
   return `${new Date(r.ts).toISOString()}  ${r.cid}  ${r.component}  ${r.event}${d ? '  ' + d : ''}`;
 }
-async function openSupport() {
+function openSupport() {
+  closeMenus();
   let d = $('#support'); if (!d) { d = document.createElement('div'); d.id = 'support'; document.body.appendChild(d); d.onclick = (e) => { if (e.target === d) d.remove(); }; }
-  let server = [];
-  try { const r = await api('/api/support/traces'); server = r.traces || []; } catch (_) { server = []; }
-  const merge = [];
-  for (const r of server) merge.push({ ts: r.ts_ms || r.ts || 0, cid: r.cid || '-', component: r.component || 'hq-web', event: r.event || '', detail: r.detail || {} });
-  for (const r of PTY_TRACES) merge.push(r);
-  merge.sort((a, b) => a.ts - b.ts);
+  let merge = [];
   const renderList = (filter) => {
     const f = (filter || '').trim().toLowerCase();
     const rows = f ? merge.filter((r) => formatTrace(r).toLowerCase().includes(f)) : merge;
@@ -499,16 +495,28 @@ async function openSupport() {
       <button class="btn" id="supcopy">Copy</button>
       <button class="btn" id="supref">Refresh</button>
     </div>
-    <div class="pcard log" id="suplog" style="max-height:50vh;overflow:auto;font-family:ui-monospace,monospace;font-size:12px">${renderList('')}</div>
+    <div class="pcard log" id="suplog" style="max-height:50vh;overflow:auto;font-family:ui-monospace,monospace;font-size:12px"><div class="sub">Loading…</div></div>
   </div><button class="round sx" id="supx">✕</button></div>`;
-  const paint = () => { $('#suplog').innerHTML = renderList($('#supf').value); };
-  $('#supf').oninput = paint;
-  $('#supx').onclick = () => d.remove();
-  $('#supcopy').onclick = async () => {
-    const text = [...$('#suplog').querySelectorAll('.sup-line')].map((e) => e.textContent).join('\n');
+  const paint = () => { const l = d.querySelector('#suplog'); if (l) l.innerHTML = renderList(d.querySelector('#supf').value); };
+  d.querySelector('#supf').oninput = paint;
+  d.querySelector('#supx').onclick = () => d.remove();
+  d.querySelector('#supcopy').onclick = async () => {
+    const text = [...d.querySelectorAll('#suplog .sup-line')].map((e) => e.textContent).join('\n');
     try { await navigator.clipboard.writeText(text || ''); toast('Copied'); } catch (_) { toast('Copy failed'); }
   };
-  $('#supref').onclick = () => { d.remove(); openSupport(); };
+  d.querySelector('#supref').onclick = () => openSupport();
+  const load = async () => {
+    let server = [], err = '';
+    try { const r = await api('/api/support/traces'); server = (r && r.traces) || []; } catch (e) { err = String((e && e.message) || e || 'error'); }
+    merge = [];
+    for (const r of server) merge.push({ ts: r.ts_ms || r.ts || 0, cid: r.cid || '-', component: r.component || 'hq-web', event: r.event || '', detail: r.detail || {} });
+    for (const r of PTY_TRACES) merge.push(r);
+    merge.sort((a, b) => a.ts - b.ts);
+    if (!d.isConnected) return;
+    paint();
+    if (err) { const l = d.querySelector('#suplog'); if (l) l.insertAdjacentHTML('afterbegin', `<div class="sub">Server traces unavailable: ${esc(err)}</div>`); }
+  };
+  load();
 }
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && $('#support')) $('#support').remove(); });
 
