@@ -4,7 +4,7 @@
 
 use crate::messenger::{Messenger, MessengerError, OPERATOR};
 use crate::provision::{read_ledger, LedgerEntry, NodeStatus};
-use crate::tasks::TaskStore;
+use crate::tasks::{Refused, Session, TaskStore};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::sync::{Condvar, Mutex};
@@ -38,6 +38,26 @@ pub struct Hub {
     tasks: Mutex<TaskStore>,
     /// Bumped on every message sent; lets HQ long-poll for new mail instead of polling blindly.
     mail_signal: (Mutex<u64>, Condvar),
+}
+
+fn refused(r: Refused) -> HubError {
+    match r {
+        Refused::NotFound => HubError::new(404, "not found"),
+        Refused::Conflict(m) => HubError::new(409, m),
+        Refused::Invalid(m) => HubError::new(400, m),
+    }
+}
+
+fn int(e: crate::error::ServerError) -> HubError {
+    HubError::new(500, e.to_string())
+}
+
+fn opt_str<'a>(v: &'a Value, name: &str) -> Option<&'a str> {
+    v.get(name).and_then(Value::as_str)
+}
+
+fn query_param<'a>(query: &'a str, name: &str) -> Option<&'a str> {
+    query.split('&').find_map(|kv| kv.strip_prefix(name).and_then(|r| r.strip_prefix('='))).filter(|v| !v.is_empty())
 }
 
 fn str_field<'a>(v: &'a Value, name: &str) -> Result<&'a str, HubError> {
@@ -76,7 +96,7 @@ impl Hub {
     pub fn node_call(&self, node_id: &str, op: &str, payload: &Value) -> Result<Value, HubError> {
         let capability = match op.split_once('.').map(|p| p.0) {
             Some("mail") => "mail",
-            Some("task") => "tasks",
+            Some("task") | Some("run") => "tasks",
             _ => return Err(HubError::new(404, "unknown operation")),
         };
         if !self.admitted(node_id, capability) {
@@ -112,6 +132,20 @@ impl Hub {
                 let changed = self.tasks.lock().expect("tasks").set_status(id, status, Some(node_id)).map_err(|e| HubError::new(500, e.to_string()))?;
                 if changed { Ok(json!({ "ok": true })) } else { Err(HubError::new(403, "refused")) }
             }
+            // The run's own session closes it (decision 8); the run must live on this node.
+            "run.close" => {
+                let run_id = payload.get("run_id").and_then(Value::as_i64).ok_or_else(|| HubError::new(400, "missing field: run_id"))?;
+                let tasks = self.tasks.lock().expect("tasks");
+                let run = tasks.run(run_id).map_err(int)?.ok_or_else(|| HubError::new(404, "not found"))?;
+                if run.node_id != node_id {
+                    return Err(HubError::new(403, "refused"));
+                }
+                let run = tasks
+                    .close_run(run_id, str_field(payload, "status")?, "session", opt_str(payload, "session_id"), opt_str(payload, "branch"), opt_str(payload, "commit"), opt_str(payload, "result_message_id"))
+                    .map_err(int)?
+                    .map_err(refused)?;
+                Ok(json!({ "run": run }))
+            }
             _ => Err(HubError::new(404, "unknown operation")),
         }
     }
@@ -122,19 +156,90 @@ impl Hub {
         let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
         match (method, parts.as_slice()) {
             ("POST", ["v1", "tasks"]) => {
-                let assignee = body.get("assignee").and_then(Value::as_str);
+                let assignee = opt_str(body, "assignee");
                 if let Some(node) = assignee {
                     if !self.admitted(node, "tasks") {
                         return Err(HubError::new(403, "assignee does not hold the tasks capability"));
                     }
                 }
-                let task = self.tasks.lock().expect("tasks").create(str_field(body, "title")?, body.get("body").and_then(Value::as_str).unwrap_or(""), assignee).map_err(|e| HubError::new(500, e.to_string()))?;
-                Ok(json!({ "task": task }))
+                let tasks = self.tasks.lock().expect("tasks");
+                let op = opt_str(body, "op_id");
+                if let Some(done) = tasks.replay(op).map_err(int)? {
+                    return Ok(done);
+                }
+                let status = opt_str(body, "status");
+                if let Some(st) = status {
+                    if !matches!(st, "backlog" | "open" | "assigned") {
+                        return Err(HubError::new(400, "initial status must be backlog, open or assigned"));
+                    }
+                }
+                let task = tasks
+                    .create_full(str_field(body, "title")?, opt_str(body, "body").unwrap_or(""), assignee, opt_str(body, "role"), body.get("parent_id").and_then(Value::as_i64), status)
+                    .map_err(int)?;
+                let out = json!({ "task": task });
+                tasks.record(op, &out).map_err(int)?;
+                Ok(out)
             }
             ("GET", ["v1", "tasks"]) => {
-                let assignee = query.split('&').find_map(|kv| kv.strip_prefix("assignee="));
-                let tasks = self.tasks.lock().expect("tasks").list(assignee, false).map_err(|e| HubError::new(500, e.to_string()))?;
+                let roles: Option<Vec<String>> = query_param(query, "role").map(|r| r.split(',').map(str::to_owned).collect());
+                let tasks = self.tasks.lock().expect("tasks").list_filtered(query_param(query, "assignee"), roles.as_deref(), false).map_err(int)?;
                 Ok(json!({ "tasks": tasks }))
+            }
+            ("GET", ["v1", "tasks", id]) => {
+                let id: i64 = id.parse().map_err(|_| HubError::new(400, "bad id"))?;
+                let tasks = self.tasks.lock().expect("tasks");
+                let task = tasks.get(id).map_err(int)?.ok_or_else(|| HubError::new(404, "not found"))?;
+                Ok(json!({ "task": task, "runs": tasks.runs(id).map_err(int)? }))
+            }
+            ("POST", ["v1", "tasks", id, "move"]) => {
+                let id: i64 = id.parse().map_err(|_| HubError::new(400, "bad id"))?;
+                let tasks = self.tasks.lock().expect("tasks");
+                let op = opt_str(body, "op_id");
+                if let Some(done) = tasks.replay(op).map_err(int)? {
+                    return Ok(done);
+                }
+                let task = tasks
+                    .move_to(id, str_field(body, "status")?, body.get("expected_revision").and_then(Value::as_i64))
+                    .map_err(int)?
+                    .map_err(refused)?;
+                let out = json!({ "task": task });
+                tasks.record(op, &out).map_err(int)?;
+                Ok(out)
+            }
+            ("POST", ["v1", "tasks", id, "runs"]) => {
+                let id: i64 = id.parse().map_err(|_| HubError::new(400, "bad id"))?;
+                let run = self.tasks.lock().expect("tasks").start_run(id, str_field(body, "session_id")?).map_err(int)?.map_err(refused)?;
+                Ok(json!({ "run": run }))
+            }
+            ("POST", ["v1", "runs", id, "close"]) => {
+                let id: i64 = id.parse().map_err(|_| HubError::new(400, "bad id"))?;
+                let run = self
+                    .tasks
+                    .lock()
+                    .expect("tasks")
+                    .close_run(id, str_field(body, "status")?, "operator", None, opt_str(body, "branch"), opt_str(body, "commit"), opt_str(body, "result_message_id"))
+                    .map_err(int)?
+                    .map_err(refused)?;
+                Ok(json!({ "run": run }))
+            }
+            ("GET", ["v1", "sessions"]) => {
+                let sessions = self.tasks.lock().expect("tasks").sessions(query_param(query, "node")).map_err(int)?;
+                Ok(json!({ "sessions": sessions }))
+            }
+            // Record a real provider session (a provider conversation id); drafts are not recorded.
+            ("POST", ["v1", "sessions"]) => {
+                let session = Session {
+                    session_id: str_field(body, "session_id")?.to_owned(),
+                    node_id: str_field(body, "node_id")?.to_owned(),
+                    provider: str_field(body, "provider")?.to_owned(),
+                    workspace_id: opt_str(body, "workspace_id").map(str::to_owned),
+                    role: opt_str(body, "role").map(str::to_owned),
+                    state: opt_str(body, "state").unwrap_or("live").to_owned(),
+                    created_at_ms: 0,
+                    updated_at_ms: 0,
+                };
+                let session = self.tasks.lock().expect("tasks").upsert_session(&session).map_err(int)?;
+                Ok(json!({ "session": session }))
             }
             ("POST", ["v1", "tasks", id, "assign"]) => {
                 let id: i64 = id.parse().map_err(|_| HubError::new(400, "bad id"))?;
@@ -184,5 +289,40 @@ impl Hub {
             }
             _ => Err(HubError::new(404, "not found")),
         }
+    }
+}
+
+#[cfg(test)]
+mod task_api_tests {
+    use super::*;
+
+    #[test]
+    fn operator_task_create_move_cancel_and_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub = Hub::open(dir.path()).unwrap();
+        let op = |m: &str, p: &str, b: Value| hub.operator_call(m, p, &b);
+        let t = op("POST", "/v1/tasks", json!({"title": "port", "role": "dev", "status": "backlog", "op_id": "c1"})).unwrap();
+        let id = t["task"]["id"].as_i64().unwrap();
+        // Idempotent create.
+        assert_eq!(op("POST", "/v1/tasks", json!({"title": "port", "op_id": "c1"})).unwrap(), t);
+        assert_eq!(op("GET", "/v1/tasks?role=advisor", json!({})).unwrap()["tasks"].as_array().unwrap().len(), 0);
+        assert_eq!(op("GET", "/v1/tasks?role=dev", json!({})).unwrap()["tasks"].as_array().unwrap().len(), 1);
+        let moved = op("POST", &format!("/v1/tasks/{id}/move"), json!({"status": "open", "expected_revision": 1})).unwrap();
+        assert_eq!(moved["task"]["revision"], 2);
+        assert_eq!(op("POST", &format!("/v1/tasks/{id}/move"), json!({"status": "open", "expected_revision": 1})).unwrap_err().status, 409);
+        // Runs need a recorded real session.
+        assert_eq!(op("POST", &format!("/v1/tasks/{id}/runs"), json!({"session_id": "s1"})).unwrap_err().status, 400);
+        op("POST", "/v1/sessions", json!({"session_id": "s1", "node_id": "alpha", "provider": "codex"})).unwrap();
+        let run = op("POST", &format!("/v1/tasks/{id}/runs"), json!({"session_id": "s1"})).unwrap();
+        let rid = run["run"]["id"].as_i64().unwrap();
+        // Node path is gated by the ledger.
+        assert_eq!(hub.node_call("alpha", "run.close", &json!({"run_id": rid, "status": "done", "session_id": "s1"})).unwrap_err().status, 403);
+        let closed = op("POST", &format!("/v1/runs/{rid}/close"), json!({"status": "cancelled"})).unwrap();
+        assert_eq!(closed["run"]["closed_by"], "operator");
+        let got = op("GET", &format!("/v1/tasks/{id}"), json!({})).unwrap();
+        assert_eq!(got["task"]["status"], "cancelled");
+        assert_eq!(got["runs"].as_array().unwrap().len(), 1);
+        assert_eq!(op("POST", &format!("/v1/tasks/{id}/move"), json!({"status": "open"})).unwrap_err().status, 409);
+        assert_eq!(op("GET", "/v1/sessions?node=alpha", json!({})).unwrap()["sessions"].as_array().unwrap().len(), 1);
     }
 }
