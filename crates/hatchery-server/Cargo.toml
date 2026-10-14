@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-server"
-version = "0.2.9"
+version = "0.2.10"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
@@ -29,16 +29,16 @@ mail4agent-core = { version = "0.4.10", optional = true }
 mail4agent-api = { version = "0.4.10", optional = true }
 mail4agent-store-sqlite = { version = "0.4.10", optional = true }
 rusqlite = { version = "0.36", features = ["bundled"], optional = true }
-hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.9" }
-hatchery-core = { path = "../hatchery-core", version = "0.2.9" }
-hatchery-c2-client = { path = "../hatchery-c2-client", version = "0.2.9" }
+hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.10" }
+hatchery-core = { path = "../hatchery-core", version = "0.2.10" }
+hatchery-c2-client = { path = "../hatchery-c2-client", version = "0.2.10" }
 gate4agent-node-protocol = { version = "0.5.2" }
 gate4agent-node-wire = { version = "0.5.2" }
 gate4agent-types = { version = "0.5.2" }
-hatchery-harness-protocol = { path = "../hatchery-harness-protocol", version = "0.2.9", optional = true }
-hatchery-harness-engine = { path = "../hatchery-harness-engine", version = "0.2.9", optional = true }
-hatchery-harness-service = { path = "../hatchery-harness-service", version = "0.2.9", optional = true }
-hatchery-observation-service = { path = "../hatchery-observation-service", version = "0.2.9", optional = true }
+hatchery-harness-protocol = { path = "../hatchery-harness-protocol", version = "0.2.10", optional = true }
+hatchery-harness-engine = { path = "../hatchery-harness-engine", version = "0.2.10", optional = true }
+hatchery-harness-service = { path = "../hatchery-harness-service", version = "0.2.10", optional = true }
+hatchery-observation-service = { path = "../hatchery-observation-service", version = "0.2.10", optional = true }
 
 # musl/Alpine builds: Alpine ships no static libdbus, so build it from source
 # (pulled transitively via m4a-agent -> keyring).
@@ -59,4 +59,4 @@ memory = []
 [dev-dependencies]
 tempfile = "3"
 async-trait = "0.1"
-hatchery-c2 = { path = "../hatchery-c2", version = "0.2.9" }
+hatchery-c2 = { path = "../hatchery-c2", version = "0.2.10" }
