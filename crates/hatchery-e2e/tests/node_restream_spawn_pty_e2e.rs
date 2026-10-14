@@ -54,6 +54,7 @@ impl Drop for Tree {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn spawn_shell_pty_streams_bytes_over_drain() {
+    let _ = tracing_subscriber::fmt().with_env_filter(tracing_subscriber::EnvFilter::from_default_env()).with_test_writer().try_init();
     let tree = Tree::new();
     let node_id = NodeId::new("spawn-pty-node").unwrap();
     let ws = WorkspaceId::new("primary").unwrap();
@@ -109,6 +110,17 @@ async fn spawn_shell_pty_streams_bytes_over_drain() {
     };
     let mut route = route;
     route.expected_incarnation_id = spawned.incarnation_id;
+
+    // Spawn is accepted before the PTY is up: input sent right away can race the start
+    // (refused or stuck). Wait for the first terminal frame (the shell's prompt) first.
+    let ready_by = tokio::time::Instant::now() + Duration::from_secs(10);
+    while tokio::time::Instant::now() < ready_by {
+        match tokio::time::timeout(Duration::from_millis(500), events.recv()).await {
+            Ok(Some(ev)) if matches!(ev.event, C2NodeEvent::TerminalFrame { .. }) => break,
+            Ok(None) => break,
+            _ => continue,
+        }
+    }
 
     let marker = format!("HATCH_PTY_{}", std::process::id());
     let cmd = format!("echo {marker}\n");

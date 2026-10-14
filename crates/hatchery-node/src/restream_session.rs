@@ -444,11 +444,17 @@ fn kill(alive: &AtomicBool, dead: &Notify, routes: &Mutex<BTreeMap<u32, mpsc::Un
 
 /// Pick the highest-priority queued frame that may be sent now.
 fn pick_next(st: &mut OutState) -> Option<(u32, bool, Frame)> {
-    // Flatten candidates: (prio, channel, index)
+    // Candidates: (prio, channel, index). DATA frames of one channel are Noise ciphertexts
+    // encrypted in queue order, so only the channel's first DATA frame may go next
+    // (overtaking breaks the receiver's nonce sequence); non-DATA frames may go any time.
     let mut best: Option<(SendPrio, u32, usize)> = None;
     for (&ch, cq) in &st.chans {
+        let first_data = cq.q.iter().position(|it| matches!(it.frame.frame_type, FrameType::Data));
         for (i, item) in cq.q.iter().enumerate() {
             let needs_credit = matches!(item.frame.frame_type, FrameType::Data);
+            if needs_credit && Some(i) != first_data {
+                continue;
+            }
             if needs_credit {
                 match cq.credit {
                     Some(0) => continue,
@@ -556,28 +562,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pick_prefers_control_over_browser() {
+    fn pick_prefers_control_across_channels_but_keeps_data_order_within_one() {
         let mut st = OutState { chans: BTreeMap::new() };
-        let q = st.chans.entry(1).or_insert_with(ChanQ::new);
-        q.credit = Some(10);
-        q.q.push_back(Queued {
-            prio: SendPrio::Browser,
-            frame: Frame::data(1, 0, vec![1]).unwrap(),
-        });
-        q.q.push_back(Queued {
-            prio: SendPrio::Control,
-            frame: Frame::data(1, 0, vec![2]).unwrap(),
-        });
-        q.q.push_back(Queued {
-            prio: SendPrio::Pty,
-            frame: Frame::data(1, 0, vec![3]).unwrap(),
-        });
-        let (_, _, f) = pick_next(&mut st).unwrap();
-        assert_eq!(f.payload, vec![2]);
-        let (_, _, f) = pick_next(&mut st).unwrap();
-        assert_eq!(f.payload, vec![3]);
-        let (_, _, f) = pick_next(&mut st).unwrap();
-        assert_eq!(f.payload, vec![1]);
+        let a = st.chans.entry(1).or_insert_with(ChanQ::new);
+        a.credit = Some(10);
+        a.q.push_back(Queued { prio: SendPrio::Browser, frame: Frame::data(1, 0, vec![1]).unwrap() });
+        a.q.push_back(Queued { prio: SendPrio::Control, frame: Frame::data(1, 0, vec![2]).unwrap() });
+        let b = st.chans.entry(2).or_insert_with(ChanQ::new);
+        b.credit = Some(10);
+        b.q.push_back(Queued { prio: SendPrio::Pty, frame: Frame::data(2, 0, vec![3]).unwrap() });
+        // Channel 2's Pty beats channel 1's head (Browser); channel 1 stays in order.
+        let order: Vec<u8> = std::iter::from_fn(|| pick_next(&mut st).map(|(_, _, f)| f.payload[0])).collect();
+        assert_eq!(order, vec![3, 1, 2]);
     }
 
     #[test]
@@ -586,12 +582,12 @@ mod tests {
         let q = st.chans.entry(2).or_insert_with(ChanQ::new);
         q.credit = None;
         q.q.push_back(Queued {
-            prio: SendPrio::Mail,
-            frame: Frame::data(2, 0, vec![9]).unwrap(),
-        });
-        q.q.push_back(Queued {
             prio: SendPrio::Control,
             frame: Frame::data(2, 0, vec![1]).unwrap(),
+        });
+        q.q.push_back(Queued {
+            prio: SendPrio::Mail,
+            frame: Frame::data(2, 0, vec![9]).unwrap(),
         });
         let (_, _, f) = pick_next(&mut st).unwrap();
         assert_eq!(f.payload, vec![1]);
