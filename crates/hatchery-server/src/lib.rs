@@ -15,6 +15,8 @@ pub mod node_controller;
 pub mod drain_consumer;
 #[cfg(feature = "harness")]
 pub mod kernel;
+#[cfg(feature = "harness")]
+pub mod kernel_runtime;
 pub mod operator_control;
 pub mod mesh_runtime;
 #[cfg(feature = "m4a")]

@@ -32,6 +32,7 @@ async fn main() {
 
     let mesh = match mesh_runtime::MeshConfig::from_env(&config.data_dir) {
         Ok(Some(mesh_cfg)) => {
+            start_kernel_runtime(&config, &hub, &mesh_cfg);
             let m4a_handler = m4a_drain_handler(&hub);
             Some(mesh_runtime::MeshRuntime::start_with_m4a(mesh_cfg, m4a_handler))
         }
@@ -53,6 +54,37 @@ async fn main() {
     supervisor.stop_all();
     serving.abort();
 }
+
+#[cfg(feature = "harness")]
+fn start_kernel_runtime(config: &ServerConfig, hub: &HubHandle, mesh: &mesh_runtime::MeshConfig) {
+    use hatchery_server::kernel_runtime::{self, KernelRuntimeConfig, RemoteKernel};
+    let cfg = match KernelRuntimeConfig::from_env() {
+        Ok(Some(cfg)) => cfg,
+        Ok(None) => return,
+        Err(error) => {
+            tracing::error!(%error, "kernel runtime not started");
+            return;
+        }
+    };
+    let Some(hub) = hub else {
+        tracing::error!("kernel runtime needs the hub; not started");
+        return;
+    };
+    // Close the in-process store before the runtime opens the same databases.
+    hub.use_remote_kernel(RemoteKernel::new(cfg.bind, cfg.credential.clone()));
+    let (_keep, rx) = tokio::sync::watch::channel(false);
+    std::mem::forget(_keep);
+    tokio::spawn(kernel_runtime::run(
+        config.data_dir.clone(),
+        mesh.operator_listen.clone(),
+        mesh.operator_token.clone(),
+        cfg,
+        rx,
+    ));
+}
+
+#[cfg(not(feature = "harness"))]
+fn start_kernel_runtime(_: &ServerConfig, _: &HubHandle, _: &mesh_runtime::MeshConfig) {}
 
 #[cfg(feature = "m4a")]
 async fn open_hub(config: &ServerConfig) -> HubHandle {

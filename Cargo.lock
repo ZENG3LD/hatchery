@@ -2243,6 +2243,7 @@ dependencies = [
  "hatchery-c2-client",
  "hatchery-core",
  "hatchery-enroll",
+ "hatchery-harness-api",
  "hatchery-harness-engine",
  "hatchery-harness-protocol",
  "hatchery-harness-service",

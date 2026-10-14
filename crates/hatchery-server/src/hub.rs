@@ -40,14 +40,29 @@ pub struct Hub {
     mail_signal: (Mutex<u64>, Condvar),
     /// hq-core task kernel (former harness), when built in and its databases open.
     #[cfg(feature = "harness")]
-    kernel: Option<Mutex<crate::kernel::Kernel>>,
+    kernel: Mutex<KernelSlot>,
 }
 
 fn str_field<'a>(v: &'a Value, name: &str) -> Result<&'a str, HubError> {
     v.get(name).and_then(Value::as_str).ok_or_else(|| HubError::new(400, format!("missing field: {name}")))
 }
 
+#[cfg(feature = "harness")]
+enum KernelSlot {
+    None,
+    /// Store-only kernel opened in-process (no runtime).
+    Local(crate::kernel::Kernel),
+    /// The kernel runtime owns the databases; requests are forwarded to it.
+    Remote(crate::kernel_runtime::RemoteKernel),
+}
+
 impl Hub {
+    /// Hand the kernel databases to the runtime: closes the in-process store first.
+    #[cfg(feature = "harness")]
+    pub fn use_remote_kernel(&self, remote: crate::kernel_runtime::RemoteKernel) {
+        *self.kernel.lock().expect("kernel") = KernelSlot::Remote(remote);
+    }
+
     pub fn open(data_dir: &Path) -> Result<Self, crate::error::ServerError> {
         Ok(Self {
             data_dir: data_dir.to_owned(),
@@ -55,13 +70,13 @@ impl Hub {
             tasks: Mutex::new(TaskStore::open(data_dir)?),
             mail_signal: (Mutex::new(0), Condvar::new()),
             #[cfg(feature = "harness")]
-            kernel: match crate::kernel::Kernel::open(data_dir) {
-                Ok(k) => Some(Mutex::new(k)),
+            kernel: Mutex::new(match crate::kernel::Kernel::open(data_dir) {
+                Ok(k) => KernelSlot::Local(k),
                 Err(err) => {
                     tracing::warn!(error = %err, "task kernel unavailable");
-                    None
+                    KernelSlot::None
                 }
-            },
+            }),
         })
     }
 
@@ -133,8 +148,27 @@ impl Hub {
         let parts: Vec<&str> = path.trim_matches('/').split('/').collect();
         #[cfg(feature = "harness")]
         if let ["v1", "kernel", rest @ ..] = parts.as_slice() {
-            let Some(kernel) = &self.kernel else { return Err(HubError::new(503, "task kernel unavailable")) };
-            return kernel.lock().expect("kernel").call(method, rest, body).map_err(|e| HubError::new(e.status, e.message));
+            let slot = self.kernel.lock().expect("kernel");
+            let result = match (&*slot, method, rest) {
+                (KernelSlot::Remote(r), "POST", ["operator"]) => {
+                    let r = r.clone();
+                    drop(slot);
+                    r.call(body)
+                }
+                (KernelSlot::Remote(_), _, _) => {
+                    return Err(HubError::new(409, "kernel runs as a runtime; use POST /v1/kernel/operator"))
+                }
+                (KernelSlot::Local(_), "POST", ["operator"]) => {
+                    return Err(HubError::new(409, "kernel runtime not running"))
+                }
+                (KernelSlot::Local(_), _, _) => {
+                    let mut slot = slot;
+                    let KernelSlot::Local(k) = &mut *slot else { unreachable!() };
+                    k.call(method, rest, body)
+                }
+                (KernelSlot::None, _, _) => return Err(HubError::new(503, "task kernel unavailable")),
+            };
+            return result.map_err(|e| HubError::new(e.status, e.message));
         }
         match (method, parts.as_slice()) {
             ("POST", ["v1", "tasks"]) => {
