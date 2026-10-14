@@ -580,8 +580,12 @@ async fn main() {
     // bridge publishes it), else the legacy signed HTTP call to C2.
     let uplink_keys = restream_uplink_early.map(|_| resolve_upstream_keys(enroll_state.as_deref()).unwrap_or_else(|e| fail(&e)));
     let node_calls = node_id_for_door.clone().map(|id| {
-        let legacy = match (door_c2, call_home_identity_for_door.clone()) {
-            (Some(c2), Some(identity)) => Some((c2, identity)),
+        // Legacy signed HTTP node calls only for nodes WITHOUT a restream uplink:
+        // C2 answers 410 "use restreamer uplink" to an uplinked node, so falling
+        // back there just spammed the log every wake tick while the m4a channel
+        // was (re)opening.
+        let legacy = match (uplink_keys, door_c2, call_home_identity_for_door.clone()) {
+            (None, Some(c2), Some(identity)) => Some((c2, identity)),
             _ => None,
         };
         hatchery_node::uplink_calls::NodeCalls::new(id, uplink_keys, legacy)
@@ -1158,9 +1162,15 @@ async fn node_mail_wake(
 ) {
     let seen = std::sync::Arc::new(std::sync::Mutex::new(hatchery_node::wake_pipeline::MailSeen::load(seen_path)));
     tracing::info!("node-mail wake on");
+    // Warn once per outage (ok -> failing), not every 10 s tick.
+    let mut failing = false;
     loop {
         match calls.call("mail.inbox", &serde_json::json!({"limit": 256})).await {
             Ok(inbox) => {
+                if failing {
+                    tracing::info!("node-mail wake: inbox reachable again");
+                    failing = false;
+                }
                 let (policy, seen, hint) = (std::sync::Arc::clone(&policy), std::sync::Arc::clone(&seen), door_hint.clone());
                 let outcomes = tokio::task::spawn_blocking(move || {
                     let mut seen = seen.lock().unwrap_or_else(|p| p.into_inner());
@@ -1178,7 +1188,14 @@ async fn node_mail_wake(
                     }
                 }
             }
-            Err(e) => tracing::warn!(reason = ?e, "node-mail wake: inbox unavailable"),
+            Err(e) => {
+                if !failing {
+                    tracing::warn!(reason = ?e, "node-mail wake: inbox unavailable (will retry quietly)");
+                    failing = true;
+                } else {
+                    tracing::debug!(reason = ?e, "node-mail wake: inbox still unavailable");
+                }
+            }
         }
         tokio::time::sleep(std::time::Duration::from_secs(10)).await;
     }
