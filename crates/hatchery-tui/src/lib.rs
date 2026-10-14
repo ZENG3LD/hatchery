@@ -1,3 +1,4 @@
+pub mod hq_edge;
 pub mod app;
 pub mod client;
 pub mod control_plane;

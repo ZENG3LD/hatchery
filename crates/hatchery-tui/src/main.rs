@@ -129,6 +129,18 @@ fn parse_args() -> Result<RunOptions, String> {
 #[tokio::main]
 async fn main() {
     hatchery_tui::diagnostics::install_panic_hook();
+    // `hq ...`: hq-edge wrapper over the new hq-core API (tasks, sessions, routing, signals).
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().map(String::as_str) == Some("hq") {
+        match hatchery_tui::hq_edge::run(&argv[1..]) {
+            Ok(text) => print!("{text}"),
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
     let options = match parse_args() {
         Ok(options) => options,
         Err(message) => {
