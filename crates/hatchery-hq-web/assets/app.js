@@ -874,6 +874,22 @@ function syncBrowserBar(b) {
 function latText() { const l = S.lat; if (!l) return 'No click measured yet'; return `${l.total} ms total · client↔hq ${l.client_hq} · hq ${l.hq_proc} · core+C2 ${l.net} · node ${l.node} (cdp ${l.cdp}, →frame ${l.to_frame}, ${l.src})`; }
 function updateLatReadout() { const el = $('#plat'); if (el) el.textContent = latText(); }
 // Right-side overlay drawer: mini (fitted slide-in) or expanded; never embedded in the info panel.
+function clampDrawer(w) {
+  const m = 24; const r = w.getBoundingClientRect();
+  let left = r.left, top = r.top;
+  const maxL = Math.max(m, innerWidth - r.width - m);
+  const maxT = Math.max(m, innerHeight - r.height - m);
+  left = Math.min(maxL, Math.max(m, left));
+  top = Math.min(maxT, Math.max(m, top));
+  w.style.left = left + 'px'; w.style.top = top + 'px'; w.style.right = 'auto';
+}
+function browserScrim() {
+  let s = $('#bdscrim'); if (s) return s;
+  s = document.createElement('button'); s.id = 'bdscrim'; s.className = 'bdscrim'; s.type = 'button'; s.title = 'Collapse browser'; s.hidden = true;
+  s.onclick = () => showBrowserDrawer('mini');
+  document.body.appendChild(s);
+  return s;
+}
 function browserDrawer() {
   let w = $('#bdrawer'); if (w) return w;
   w = document.createElement('div'); w.id = 'bdrawer'; w.className = 'bdrawer'; w.hidden = true;
@@ -887,16 +903,22 @@ function browserDrawer() {
   bar.onpointerdown = (e) => {
     if (e.target.closest('button,input')) return;
     e.preventDefault(); bar.setPointerCapture(e.pointerId); bar.classList.add('dragging');
-    const r = w.getBoundingClientRect(); const ox = e.clientX - r.left, oy = e.clientY - r.top;
+    // Leaving centered-transform mode: pin current rect, then drag in left/top coords.
+    const r0 = w.getBoundingClientRect();
+    w.classList.add('dragged');
+    w.style.left = r0.left + 'px'; w.style.top = r0.top + 'px'; w.style.right = 'auto'; w.style.transform = 'none';
+    const ox = e.clientX - r0.left, oy = e.clientY - r0.top;
     bar.onpointermove = (ev) => {
-      const maxL = innerWidth - Math.min(r.width, 120), maxT = innerHeight - 80;
-      let left = Math.max(8, Math.min(maxL, ev.clientX - ox));
-      let top = Math.max(8, Math.min(maxT, ev.clientY - oy));
-      w.style.left = left + 'px'; w.style.top = top + 'px'; w.style.right = 'auto';
+      const r = w.getBoundingClientRect();
+      const m = 24;
+      let left = ev.clientX - ox, top = ev.clientY - oy;
+      left = Math.min(Math.max(m, innerWidth - r.width - m), Math.max(m, left));
+      top = Math.min(Math.max(m, innerHeight - r.height - m), Math.max(m, top));
+      w.style.left = left + 'px'; w.style.top = top + 'px';
     };
-    bar.onpointerup = () => { bar.onpointermove = null; bar.classList.remove('dragging'); };
+    bar.onpointerup = () => { bar.onpointermove = null; bar.classList.remove('dragging'); clampDrawer(w); };
   };
-  wireCanvas($('#bdcanvas')); addEventListener('resize', fitBrowser);
+  wireCanvas($('#bdcanvas')); addEventListener('resize', () => { fitBrowser(); const d = $('#bdrawer'); if (d && !d.hidden) clampDrawer(d); });
   return w;
 }
 function navBrowser(v) { let u = String(v || '').trim(); if (!u) return; if (!/^https?:\/\//i.test(u)) u = 'https://' + u; if (S.browserSession) S.browserSession.url = u; bsend({ t: 'nav', url: u }); }
@@ -904,14 +926,45 @@ function fitBrowser() {
   const w = $('#bdrawer'); if (!w || w.hidden) return;
   const s = S.browserSession || {}; const vw = s.vw || 1280, vh = s.vh || 720;
   const big = w.classList.contains('big');
-  const aw = big ? innerWidth - 120 : Math.min(420, innerWidth * 0.42);
-  const ah = big ? innerHeight - 64 - 48 : Math.min(innerHeight - 80, aw * vh / vw + 56);
-  w.style.width = Math.max(280, Math.min(aw, (ah - 56) * vw / vh)) + 'px';
+  const barH = 40, margin = big ? 48 : 80;
+  if (big) {
+    // Centered modal: size to viewport with margins, keep frame aspect ratio.
+    const maxW = Math.max(320, innerWidth - margin);
+    const maxH = Math.max(240, innerHeight - margin);
+    let width = maxW, height = width * vh / vw + barH;
+    if (height > maxH) { height = maxH; width = (height - barH) * vw / vh; }
+    w.style.width = Math.round(width) + 'px';
+    w.style.height = Math.round(height) + 'px';
+    if (!w.classList.contains('dragged')) {
+      w.style.left = ''; w.style.top = ''; w.style.right = ''; w.style.transform = '';
+    } else {
+      clampDrawer(w);
+    }
+  } else {
+    w.style.height = '';
+    const aw = Math.min(420, innerWidth * 0.42);
+    const ah = Math.min(innerHeight - margin, aw * vh / vw + barH);
+    w.style.width = Math.max(280, Math.min(aw, (ah - barH) * vw / vh)) + 'px';
+    if (!w.dataset.miniPos) {
+      w.style.top = '64px'; w.style.right = '16px'; w.style.left = 'auto'; w.style.transform = 'none';
+    }
+    clampDrawer(w);
+  }
 }
 function showBrowserDrawer(mode) {
   const w = browserDrawer();
+  const scrim = browserScrim();
   w.hidden = false; w.classList.remove('off');
-  if (mode === 'big') w.classList.add('big'); else w.classList.remove('big');
+  if (mode === 'big') {
+    w.classList.add('big'); w.classList.remove('dragged');
+    w.style.left = ''; w.style.top = ''; w.style.right = ''; w.style.transform = '';
+    scrim.hidden = false;
+  } else {
+    w.classList.remove('big'); w.classList.remove('dragged');
+    scrim.hidden = true;
+    w.style.height = ''; w.style.transform = 'none';
+    if (!w.style.left || w.style.left === '') { w.style.top = '64px'; w.style.right = '16px'; w.style.left = 'auto'; }
+  }
   const sz = $('#bdsize'); if (sz) { sz.title = mode === 'big' ? 'Collapse' : 'Expand'; sz.textContent = mode === 'big' ? '⤡' : '⤢'; }
   fitBrowser(); syncBrowserBar(S.browserSession || {});
   const b = S.browserSession; if (b) paintBrowser(b);
@@ -921,7 +974,8 @@ function setBrowserBig(on) { showBrowserDrawer(on ? 'big' : 'mini'); }
 function hideBrowserOverlay(stop) {
   // Drawer controls never stop the browser; `stop` is ignored. Close lives in the sidebar.
   void stop;
-  const w = $('#bdrawer'); if (w) { w.hidden = true; w.classList.add('off'); }
+  const w = $('#bdrawer'); if (w) { w.hidden = true; w.classList.add('off'); w.classList.remove('big','dragged'); }
+  const s = $('#bdscrim'); if (s) s.hidden = true;
   if (S.panel && S.tab === 'info') renderInfo();
 }
 function stopBrowser() {
