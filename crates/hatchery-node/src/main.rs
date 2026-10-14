@@ -10,7 +10,7 @@ use hatchery_node::{
 };
 use gate4agent_types::AdapterId;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 const NODE_TOKEN_ENV: &str = "GATE4AGENT_NODE_TOKEN";
@@ -57,6 +57,63 @@ async fn main() {
     let mut session_record_retention = SessionRecordRetentionConfig::default();
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
     match raw_args.first().map(String::as_str) {
+        // plugin verify|install|list|sign|keygen  (signed session plugins; see plugins.rs)
+        Some("plugin") => {
+            use hatchery_node::plugins;
+            let a: Vec<&str> = raw_args[1..].iter().map(String::as_str).collect();
+            let opt = |name: &str| a.iter().position(|x| *x == name).and_then(|i| a.get(i + 1)).map(|s| PathBuf::from(*s));
+            let keys = || {
+                let f = opt("--trusted-keys").unwrap_or_else(|| fail("--trusted-keys FILE is required"));
+                plugins::load_trusted_keys(&f).unwrap_or_else(|e| fail(&e))
+            };
+            match a.first().copied() {
+                Some("verify") => {
+                    let pkg = a.get(1).unwrap_or_else(|| fail("plugin verify PKG_DIR --trusted-keys FILE"));
+                    let (m, signer) = plugins::verify(Path::new(pkg), &keys()).unwrap_or_else(|e| fail(&e));
+                    println!("ok {} {} signer={}", m.name, m.version, signer);
+                }
+                Some("install") => {
+                    let pkg = a.get(1).unwrap_or_else(|| fail("plugin install PKG_DIR --root DIR --trusted-keys FILE"));
+                    let root = opt("--root").unwrap_or_else(|| fail("--root DIR is required"));
+                    let i = plugins::install(Path::new(pkg), &root, &keys()).unwrap_or_else(|e| fail(&e));
+                    println!("installed {} {} signer={}", i.name, i.version, i.signer);
+                }
+                Some("list") => {
+                    let root = opt("--root").unwrap_or_else(|| fail("--root DIR is required"));
+                    for item in plugins::list(&root, &keys()) {
+                        match item {
+                            Ok(i) => println!("ok {} {} signer={}", i.name, i.version, i.signer),
+                            Err((p, e)) => println!("INVALID {} {}", p.display(), e),
+                        }
+                    }
+                }
+                Some("sign") => {
+                    // plugin sign PKG_DIR NAME VERSION --key SECRET_FILE [--providers a,b]
+                    let (Some(pkg), Some(name), Some(version)) = (a.get(1), a.get(2), a.get(3)) else {
+                        fail("plugin sign PKG_DIR NAME VERSION --key SECRET_FILE [--providers a,b]")
+                    };
+                    let key_file = opt("--key").unwrap_or_else(|| fail("--key SECRET_FILE is required"));
+                    let secret = std::fs::read_to_string(&key_file).unwrap_or_else(|e| fail(&e.to_string()));
+                    let providers = opt("--providers").map(|p| p.to_string_lossy().split(',').map(str::to_owned).collect()).unwrap_or_default();
+                    let public = plugins::sign(Path::new(pkg), name, version, providers, &secret).unwrap_or_else(|e| fail(&e));
+                    println!("signed {name} {version} public={public}");
+                }
+                Some("keygen") => {
+                    // plugin keygen OUT_SECRET_FILE  (0600; prints only the public key)
+                    let out = a.get(1).unwrap_or_else(|| fail("plugin keygen OUT_SECRET_FILE"));
+                    let (secret, public) = plugins::keygen();
+                    let mut o = std::fs::OpenOptions::new();
+                    o.write(true).create_new(true);
+                    #[cfg(unix)]
+                    std::os::unix::fs::OpenOptionsExt::mode(&mut o, 0o600);
+                    use std::io::Write;
+                    o.open(out).and_then(|mut f| f.write_all(secret.as_bytes())).unwrap_or_else(|e| fail(&e.to_string()));
+                    println!("public={public}");
+                }
+                _ => fail("plugin verify|install|list|sign|keygen"),
+            }
+            return;
+        }
         Some("exec-as") => {
             // exec-as USER -- program args...  (used by --run-as for provider sessions)
             let user = raw_args.get(1).cloned().unwrap_or_else(|| fail("exec-as needs a user"));

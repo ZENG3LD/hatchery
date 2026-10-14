@@ -9,6 +9,7 @@ mod harness_mcp_proxy;
 mod bundle_provider;
 
 mod git_worktree;
+pub mod plugins;
 
 mod host_directory_browser;
 

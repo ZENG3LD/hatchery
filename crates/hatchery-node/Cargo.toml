@@ -15,6 +15,10 @@ name = "gate4agent-node"
 path = "src/main.rs"
 
 [dependencies]
+ed25519-dalek = "2"
+sha2 = "0.10"
+hex = "0.4"
+getrandom = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.12" }
 hatchery-core = { path = "../hatchery-core", version = "0.2.12" }

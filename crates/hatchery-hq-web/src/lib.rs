@@ -243,12 +243,72 @@ pub async fn upstream(addr: SocketAddr, method: &str, path: &str, bearer: Option
     Ok((status, raw[split + 4..].to_vec()))
 }
 
+/// Host path prefixes the edge never shows (node layout stays on the node).
+const HOST_PATH_PREFIXES: &[&str] = &["/home/", "/root/", "/Users/", "/var/", "/tmp/", "/opt/", "/srv/", "/mnt/", "/run/", "/etc/", "/usr/", "/workspace/"];
+/// JSON keys holding terminal payloads: not rewritten.
+const PAYLOAD_KEYS: &[&str] = &["bytes", "data", "frame", "chunk", "screen", "text_frame"];
+
+/// Replace host paths in free text with `…/<last component>`.
+pub fn redact_host_paths(text: &str) -> String {
+    let is_start = |i: usize| -> bool {
+        let rest = &text[i..];
+        let posix = HOST_PATH_PREFIXES.iter().any(|p| rest.starts_with(p));
+        let win = rest.len() > 3 && rest.as_bytes()[0].is_ascii_alphabetic() && &rest[1..3] == ":\\";
+        let boundary = i == 0 || !text.as_bytes()[i - 1].is_ascii_alphanumeric() && text.as_bytes()[i - 1] != b'/' && text.as_bytes()[i - 1] != b'.';
+        (posix || win) && boundary
+    };
+    let mut out = String::with_capacity(text.len());
+    let mut i = 0;
+    while i < text.len() {
+        if text.is_char_boundary(i) && is_start(i) {
+            let end = text[i..]
+                .find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | ',' | ')' | ']' | '}' | '`' | ';'))
+                .map(|n| i + n)
+                .unwrap_or(text.len());
+            let path = text[i..end].trim_end_matches(['/', '\\', '.', ':']);
+            let last = path.rsplit(['/', '\\']).find(|c| !c.is_empty()).unwrap_or("");
+            out.push_str("…/");
+            out.push_str(last);
+            out.push_str(&text[i + path.len()..end]);
+            i = end;
+        } else {
+            let ch = text[i..].chars().next().expect("char");
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    out
+}
+
+/// Redact host paths in every string of a JSON value, except terminal payloads.
+pub fn redact_value(v: &mut Value) {
+    match v {
+        Value::String(s) if s.contains('/') || s.contains('\\') => *s = redact_host_paths(s),
+        Value::Array(a) => a.iter_mut().for_each(redact_value),
+        Value::Object(m) => {
+            for (k, val) in m.iter_mut() {
+                if !PAYLOAD_KEYS.contains(&k.as_str()) {
+                    redact_value(val);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 fn json_reply(status: u16, body: Vec<u8>) -> Response {
+    let body = match serde_json::from_slice::<Value>(&body) {
+        Ok(mut v) => {
+            redact_value(&mut v);
+            v.to_string().into_bytes()
+        }
+        Err(_) => body,
+    };
     (StatusCode::from_u16(status).unwrap_or(StatusCode::BAD_GATEWAY), [(header::CONTENT_TYPE, "application/json")], body).into_response()
 }
 
 fn err(status: StatusCode, msg: &str) -> Response {
-    (status, [(header::CONTENT_TYPE, "application/json")], json!({ "error": msg }).to_string()).into_response()
+    (status, [(header::CONTENT_TYPE, "application/json")], json!({ "error": redact_host_paths(msg) }).to_string()).into_response()
 }
 
 fn safe_rest(rest: &str) -> bool {
@@ -460,13 +520,15 @@ pub fn spawn_topology_watcher(state: Shared) {
                             biased;
                             ev = harness.recv() => {
                                 let Some(ev) = ev else { break; };
-                                if let Ok(v) = serde_json::to_value(&ev) {
+                                if let Ok(mut v) = serde_json::to_value(&ev) {
+                                    redact_value(&mut v);
                                     let _ = state.node_events.send(std::sync::Arc::new(v));
                                 }
                             }
                             ev = regular.recv() => {
                                 let Some(ev) = ev else { break; };
-                                if let Ok(v) = serde_json::to_value(&ev) {
+                                if let Ok(mut v) = serde_json::to_value(&ev) {
+                                    redact_value(&mut v);
                                     let _ = state.node_events.send(std::sync::Arc::new(v));
                                 }
                             }
@@ -582,7 +644,7 @@ fn push_support_trace(s: &Shared, cid: &str, component: &str, event: &str, detai
 
 async fn api_support_traces(State(s): State<Shared>) -> Response {
     let traces: Vec<Value> = s.support_traces.lock().ok().map(|q| q.iter().cloned().collect()).unwrap_or_default();
-    (StatusCode::OK, Json(json!({ "traces": traces }))).into_response()
+    json_reply(200, json!({ "traces": traces }).to_string().into_bytes())
 }
 
 async fn term_ws(State(s): State<Shared>, Query(q): Query<TermQuery>, ws: WebSocketUpgrade) -> Response {
@@ -665,7 +727,7 @@ struct GitQuery {
 async fn api_git(State(s): State<Shared>, Query(q): Query<GitQuery>) -> Response {
     use gate4agent_node_protocol::NodeRequest;
     use hatchery_core::{C2NodeResponse, NodeId, NodeRoute};
-    let fail = |code: StatusCode, msg: String| (code, Json(json!({ "error": msg }))).into_response();
+    let fail = |code: StatusCode, msg: String| err(code, &msg);
     let request: Result<NodeRequest, String> = (|| {
         let v = if q.kind == "diff" {
             let mode = match q.rev.as_deref().unwrap_or("working") {
@@ -694,8 +756,8 @@ async fn api_git(State(s): State<Shared>, Query(q): Query<GitQuery>) -> Response
     use gate4agent_node_protocol::NodeIncarnationId;
     let route = NodeRoute { node_id: node, expected_incarnation_id: NodeIncarnationId::from_bytes([0; 16]) };
     match control.request(route, request).await.map(|r| r.response) {
-        Ok(Ok(C2NodeResponse::GitHistoryRead { page, .. })) => (StatusCode::OK, Json(json!({ "history": page }))).into_response(),
-        Ok(Ok(C2NodeResponse::GitDiffRead { diff, .. })) => (StatusCode::OK, Json(json!({ "diff": diff }))).into_response(),
+        Ok(Ok(C2NodeResponse::GitHistoryRead { page, .. })) => json_reply(200, json!({ "history": page }).to_string().into_bytes()),
+        Ok(Ok(C2NodeResponse::GitDiffRead { diff, .. })) => json_reply(200, json!({ "diff": diff }).to_string().into_bytes()),
         Ok(Ok(other)) => fail(StatusCode::BAD_GATEWAY, format!("unexpected reply: {other:?}")),
         Ok(Err(e)) => fail(StatusCode::BAD_GATEWAY, format!("node refused: {e:?}")),
         Err(e) => fail(StatusCode::BAD_GATEWAY, e.to_string()),
@@ -714,7 +776,7 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
         .unwrap_or("nocid")
         .to_owned();
     let say = |kind: &str, text: String| {
-        json!({ "type": kind, "text": text, "cid": cid.as_str() }).to_string()
+        json!({ "type": kind, "text": redact_host_paths(&text), "cid": cid.as_str() }).to_string()
     };
     tracing::info!(%cid, node = %q.node, provider = %q.provider, attach = q.session.is_some(), "pty session begin");
     push_support_trace(&s, &cid, "hq-web", "begin", json!({ "node": q.node, "provider": q.provider, "attach": q.session.is_some() }));
@@ -1722,6 +1784,18 @@ async fn api_local_server(State(s): State<Shared>, body_bytes: axum::body::Bytes
 #[cfg(test)]
 mod worktree_git_tests {
     use super::*;
+
+    #[test]
+    fn host_paths_are_redacted() {
+        assert_eq!(redact_host_paths("cwd /home/box/hatchery-box/worktrees/mw-1 ok"), "cwd …/mw-1 ok");
+        assert_eq!(redact_host_paths("\"/var/lib/x/db\": nope"), "\"…/db\": nope");
+        assert_eq!(redact_host_paths("C:\\Users\\me\\repo is"), "…/repo is");
+        assert_eq!(redact_host_paths("http://h/home/x and a/home/b"), "http://h/home/x and a/home/b");
+        assert_eq!(redact_host_paths("feat/x src/main.rs"), "feat/x src/main.rs");
+        let mut v = json!({ "root": "/home/a/ws", "bytes": "/home/a/raw", "list": ["/tmp/q/r"] });
+        redact_value(&mut v);
+        assert_eq!(v, json!({ "root": "…/ws", "bytes": "/home/a/raw", "list": ["…/r"] }));
+    }
 
     #[test]
     fn managed_worktree_spawn_request_is_well_formed() {
