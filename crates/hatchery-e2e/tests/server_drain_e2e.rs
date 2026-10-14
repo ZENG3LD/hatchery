@@ -239,3 +239,113 @@ async fn operator_control_routes_through_core_node_controller() {
     let _ = stop.send(true);
     let _ = edge.stop.send(true);
 }
+
+fn echo_handler() -> CoreHandler {
+    Arc::new(|_n: &str, _k, plain: &[u8]| Some([&b"echo:"[..], plain].concat()))
+}
+
+fn consume_with_cursor(edge: &Edge, recipient: &HqRecipientSecret, dir: Option<std::path::PathBuf>) -> watch::Sender<bool> {
+    let (stop, rx) = watch::channel(false);
+    let consumer = DrainConsumer::new(
+        DrainClient::new(edge.drain, CORE_TOKEN),
+        recipient.clone(),
+        NodeStream { node_id: "node-r".into(), channel_id: 3, kind: ChannelKind::M4a },
+        echo_handler(),
+    )
+    .with_cursor_dir(dir);
+    tokio::spawn(consumer.run(rx));
+    stop
+}
+
+/// Core restarts repeatedly while the node re-handshakes; replayed (stale) Handshake1
+/// frames must not be answered, so every new node session completes.
+async fn restart_cycles(persist: bool) {
+    let recipient = HqRecipientSecret::generate();
+    let edge = edge(&recipient).await;
+    let dir = tempfile::tempdir().unwrap();
+    let cursor_dir = persist.then(|| dir.path().join("cursors"));
+    for round in 0..5u8 {
+        // Node reconnects while core is down: its Handshake1 sits in C2's buffer.
+        let keys = edge.keys;
+        let addr = edge.node;
+        let pending = tokio::spawn(async move {
+            NodeSession::connect(addr, "node-r", 3, ChannelKind::M4a, keys, None, Duration::from_secs(8)).await
+        });
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        // Fresh core process (new consumer, cursor from disk only when persisted).
+        let stop = consume_with_cursor(&edge, &recipient, cursor_dir.clone());
+        let mut s = pending.await.unwrap().unwrap_or_else(|e| panic!("round {round}: handshake failed: {e}"));
+        let body = format!("round {round}");
+        s.send(body.as_bytes()).await.unwrap();
+        let reply = s.recv(Duration::from_secs(5)).await.unwrap();
+        assert_eq!(reply, [&b"echo:"[..], body.as_bytes()].concat(), "round {round}");
+        let _ = stop.send(true);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    if persist {
+        let stored = hatchery_server::drain_consumer::CursorStore::new(&dir.path().join("cursors"), "node-r", 3).load();
+        assert!(stored > 0, "cursor persisted");
+    }
+    let _ = edge.stop.send(true);
+}
+
+/// While core is down the node retries its handshake several times; when core comes back
+/// with no cursor the backlog holds stale Handshake1 frames. Only the newest is answered.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stale_handshakes_in_backlog_are_not_answered() {
+    let recipient = HqRecipientSecret::generate();
+    let edge = edge(&recipient).await;
+    for _ in 0..3 {
+        let stale = NodeSession::connect(edge.node, "node-r", 3, ChannelKind::M4a, edge.keys, None, Duration::from_millis(200)).await;
+        assert!(stale.is_err(), "no core yet");
+    }
+    let keys = edge.keys;
+    let addr = edge.node;
+    let pending = tokio::spawn(async move {
+        NodeSession::connect(addr, "node-r", 3, ChannelKind::M4a, keys, None, Duration::from_secs(8)).await
+    });
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let stop = consume_with_cursor(&edge, &recipient, None);
+    let mut s = pending.await.unwrap().expect("newest handshake answered");
+    s.send(b"after backlog").await.unwrap();
+    assert_eq!(s.recv(Duration::from_secs(5)).await.unwrap(), b"echo:after backlog".to_vec());
+    let _ = stop.send(true);
+    let _ = edge.stop.send(true);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn core_restarts_with_persisted_cursor() {
+    restart_cycles(true).await;
+}
+
+/// The node keeps its uplink and old keys across a core restart; core nudges it so the
+/// node's session fails, it reconnects, and the new session works.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn node_with_stale_keys_is_nudged_to_rehandshake() {
+    let recipient = HqRecipientSecret::generate();
+    let edge = edge(&recipient).await;
+    let dir = tempfile::tempdir().unwrap();
+    let cursors = Some(dir.path().to_path_buf());
+    let stop = consume_with_cursor(&edge, &recipient, cursors.clone());
+    let mut old = NodeSession::connect(edge.node, "node-r", 3, ChannelKind::M4a, edge.keys, None, Duration::from_secs(5)).await.unwrap();
+    old.send(b"one").await.unwrap();
+    assert_eq!(old.recv(Duration::from_secs(5)).await.unwrap(), b"echo:one".to_vec());
+    let _ = stop.send(true);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    for round in 0..3 {
+        let stop = consume_with_cursor(&edge, &recipient, cursors.clone());
+        old.send(b"after restart").await.unwrap();
+        let err = old.recv(Duration::from_secs(8)).await.unwrap_err();
+        assert!(!err.contains("timeout"), "round {round}: node told to drop keys, got {err}");
+        drop(old);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let mut fresh = NodeSession::connect(edge.node, "node-r", 3, ChannelKind::M4a, edge.keys, None, Duration::from_secs(5)).await.unwrap();
+        fresh.send(b"two").await.unwrap();
+        assert_eq!(fresh.recv(Duration::from_secs(5)).await.unwrap(), b"echo:two".to_vec());
+        let _ = stop.send(true);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        old = fresh;
+    }
+    drop(old);
+    let _ = edge.stop.send(true);
+}

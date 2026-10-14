@@ -262,7 +262,8 @@ impl MeshRuntime {
                 },
                 link.clone().handler(),
             )
-            .with_outbound(outbound);
+            .with_outbound(outbound)
+            .with_cursor_dir(crate::drain_consumer::CursorStore::dir_from_env());
             let sd = shutdown.clone();
             tasks.push(tokio::spawn(async move {
                 consumer.run(sd).await;
@@ -287,7 +288,8 @@ impl MeshRuntime {
                         kind: ChannelKind::M4a,
                     },
                     handler,
-                );
+                )
+                .with_cursor_dir(crate::drain_consumer::CursorStore::dir_from_env());
                 let sd = shutdown.clone();
                 tasks.push(tokio::spawn(async move {
                     consumer.run(sd).await;
