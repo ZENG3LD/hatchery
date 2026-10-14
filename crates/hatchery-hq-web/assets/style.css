@@ -73,8 +73,8 @@ body.ptymode #composer,body.statusmode #composer{display:none}
 #ptyview{position:absolute;inset:0;display:none;flex-direction:column;background:var(--bg);z-index:2}
 #ptyview.on{display:flex}
 .ptybar{display:flex;gap:8px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);flex:none}
-.termwrap{flex:1;min-height:0;overflow:auto;padding:14px 16px}
-#terminal{background:#000;border-radius:10px;padding:8px;border:1px solid var(--line);width:max-content;max-width:none}
+ .termwrap{flex:1;min-height:0;overflow:hidden;padding:0}
+#terminal{background:#000;border-radius:0;padding:0;border:0;width:100%;max-width:none;height:100%}
 /* status view */
 #statusview{display:none;padding:24px max(20px,calc((100% - 860px)/2))}
 body.statusmode #statusview{display:block}body.statusmode #chat{display:none}
@@ -454,7 +454,7 @@ body.nodemode #composer{display:none}
 .ptychat-screen{white-space:pre-wrap;background:var(--el);color:var(--txt);border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:12px;font:13px/1.45 ui-monospace,Menlo,Consolas,monospace}
 
 /* round 23: full-center fitted PTY, Nodes modal */
-.termwrap{display:flex;flex-direction:column;overflow:hidden;padding:10px 12px 12px}
+ .termwrap{display:flex;flex-direction:column;overflow:hidden;padding:0}
 #terminal{flex:1;min-height:0;width:auto;max-width:none;box-sizing:border-box}
 #terminal .xterm{height:100%}
 #terminal .xterm-viewport{overflow-y:hidden}
@@ -514,3 +514,18 @@ body.nodemode #composer{display:none}
 #head{z-index:30}
 #ptyview,#chat,#body{padding-top:0!important}
 .termwrap{padding-top:0}
+
+
+/* edge-to-edge PTY: no frame, padding, or gaps; pill still floats above */
+.termwrap{padding:0!important;margin:0;border:0;border-radius:0;overflow:hidden}
+#terminal{padding:0!important;margin:0;border:0!important;border-radius:0!important;background:#000;width:100%!important;height:100%;max-width:none}
+#terminal .xterm,#terminal .xterm-screen{height:100%}
+#ptyview{padding:0!important;margin:0;background:#000}
+/* draggable browser drawer */
+.bdrawer{position:fixed;z-index:60;top:64px;right:16px;left:auto;width:400px;max-width:92vw;max-height:calc(100vh - 80px);background:#111;border:1px solid var(--line);border-radius:12px;box-shadow:-14px 10px 44px #000a;display:flex;flex-direction:column;overflow:hidden;transform:none;transition:width .2s,opacity .15s}
+.bdrawer.off,.bdrawer[hidden]{display:none!important}
+.bdrawer.big{width:min(960px,92vw);max-height:calc(100vh - 48px)}
+.bdrawer .bdbar{cursor:grab;user-select:none;touch-action:none}
+.bdrawer .bdbar.dragging{cursor:grabbing}
+.bdrawer .bdbar .grow{flex:1;min-width:0}
+.bdlat{display:none!important}
