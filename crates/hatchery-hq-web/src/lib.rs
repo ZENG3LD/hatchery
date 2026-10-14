@@ -137,15 +137,22 @@ pub struct AppState {
     pub node_events: broadcast::Sender<std::sync::Arc<Value>>,
     /// Dig2browser frames / lifecycle from the held operator control.
     pub browser_events: broadcast::Sender<std::sync::Arc<hatchery_core::BrowserStreamEvent>>,
+    /// Draft PTY kill timers: key = "node/workspace/instance". A live term WS
+    /// cancels the entry; closing the last view arms a short reconnect grace
+    /// then Stop+browser-kill. Today every PTY is a draft (no provider session id).
+    pub draft_kills: std::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<()>>>,
 }
 
 type Shared = Arc<AppState>;
+
+/// Reconnect grace for draft PTYs after the last HQ term WS drops.
+const DRAFT_RECONNECT_GRACE: std::time::Duration = std::time::Duration::from_secs(4);
 
 pub fn router(config: Config) -> (Router, Shared) {
     let (events, _) = broadcast::channel(256);
     let (node_events, _) = broadcast::channel(1024);
     let (browser_events, _) = broadcast::channel(256);
-    let state = Arc::new(AppState { config, events, topology: std::sync::OnceLock::new(), node_events, browser_events });
+    let state = Arc::new(AppState { config, events, topology: std::sync::OnceLock::new(), node_events, browser_events, draft_kills: std::sync::Mutex::new(std::collections::HashMap::new()) });
     let base = state.config.base_path.clone();
     let index: &'static str = Box::leak(index_html(&base).into_boxed_str());
     let mut app = Router::new()
@@ -601,8 +608,12 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
     let instance_id = session.session.instance_id.0;
     let session_key = serde_json::to_string(&session).unwrap_or_default();
     let label = format!("{}/{}#{}", q.node, if provider_label.is_empty() { "session" } else { &provider_label }, instance_id);
-    tracing::info!(node = %q.node, provider = %provider_label, %instance_id, attach = q.session.is_some(), "terminal session ready from web HQ");
-    let _ = socket
+    // Every PTY today is a *draft* (no provider conversation / session-id yet).
+    // Claiming the draft key cancels any pending kill from a brief reload gap.
+    let draft_key = format!("{}/{}/{}", q.node, session.workspace_id.as_str(), instance_id);
+    cancel_draft_kill(&s, &draft_key);
+    tracing::info!(node = %q.node, provider = %provider_label, %instance_id, attach = q.session.is_some(), "terminal draft ready from web HQ");
+    if socket
         .send(Message::text(
             json!({
                 "type": "spawned",
@@ -616,7 +627,12 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
             })
             .to_string(),
         ))
-        .await;
+        .await
+        .is_err()
+    {
+        schedule_draft_kill(s.clone(), control.clone(), route.clone(), session.clone(), q.node.clone(), draft_key);
+        return Err("client disconnected before draft bind".into());
+    }
     if let Some(f) = initial_frame {
         let bytes: Vec<u8> = f
             .get("formatted")
@@ -745,10 +761,53 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
             }
         }
     }
-    if !q.keep {
-        let _ = control.request(route, NodeRequest::Stop { session, force: true }).await;
-    }
+    // Draft: arm a short reconnect grace, then Stop the PTY and its bound browser.
+    // A new /api/term attach to the same draft_key cancels the timer (page reload).
+    // Real provider-session survival (resume by session id) is future work — until
+    // then keep is ignored for durability; drafts never outlive their HQ view.
+    let _ = q.keep; // kept for API compat; drafts always schedule kill
+    schedule_draft_kill(s, control, route, session, q.node, draft_key);
     Ok(())
+}
+
+fn cancel_draft_kill(s: &Shared, key: &str) {
+    if let Ok(mut map) = s.draft_kills.lock() {
+        if let Some(tx) = map.remove(key) {
+            let _ = tx.send(());
+        }
+    }
+}
+
+fn schedule_draft_kill(
+    s: Shared,
+    control: hatchery_c2_client::C2ReconnectingHandle,
+    route: hatchery_core::NodeRoute,
+    session: gate4agent_node_protocol::SessionAddress,
+    node: String,
+    key: String,
+) {
+    cancel_draft_kill(&s, &key);
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    if let Ok(mut map) = s.draft_kills.lock() {
+        map.insert(key.clone(), tx);
+    }
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = rx => {
+                tracing::info!(%key, "draft kill cancelled (reattached)");
+            }
+            _ = tokio::time::sleep(DRAFT_RECONNECT_GRACE) => {
+                if let Ok(mut map) = s.draft_kills.lock() { map.remove(&key); }
+                tracing::info!(%key, "draft reconnect grace elapsed; stopping PTY + browser");
+                let _ = control.request(route, gate4agent_node_protocol::NodeRequest::Stop { session: session.clone(), force: true }).await;
+                let br = format!("pty-{}-{}", session.workspace_id.as_str(), session.session.instance_id.0);
+                let _ = control.browser_command(hatchery_core::BrowserClientCommand {
+                    node_id: node,
+                    op: hatchery_core::BrowserClientOp::Stop { session: br },
+                }).await;
+            }
+        }
+    });
 }
 
 fn parse_session_address(raw: &str, default_workspace: &str) -> Result<gate4agent_node_protocol::SessionAddress, String> {

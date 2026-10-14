@@ -434,17 +434,18 @@ const LUC = {
   server: '<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01M6 18h.01"/>',
   git: '<circle cx="5" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M5 8v8M5 8c0 4 6 4 6 8M19 8v2a4 4 0 0 1-4 4H11"/>',
   spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/>',
+  star: '<path d="m12 3 2.5 6.5L21 10l-5 4.2L17.5 21 12 17.3 6.5 21 8 14.2 3 10l6.5-.5L12 3z"/>',
 };
 const ico = (k, sz = 16) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${LUC[k]}</svg>`;
 // PTY providers only (no browser, no test fixtures); narrowed to the CLIs the node reports when it reports any.
-function ptyProviders(n) { const clis = ((n.machine && n.machine.provider_clis) || []).map((c) => c.id); return PROVIDERS.filter((p) => p.v !== 'browser' && !p.parser && (p.v === 'shell' || !clis.length || clis.includes(p.v))); }
+function ptyProviders(n) { const clis = ((n.machine && n.machine.provider_clis) || []).map((c) => c.id); return PROVIDERS.filter((p) => p.v !== 'browser' && p.v !== 'shell' && !p.parser && (!clis.length || clis.includes(p.v))); }
 // One favourite node (localStorage): its row under Fleet opens a submenu of PTY providers for that node.
 const favNode = () => { try { return localStorage.getItem('hq.favNode') || ''; } catch (_) { return ''; } };
 const setFavNode = (id) => { try { if (id) localStorage.setItem('hq.favNode', id); else localStorage.removeItem('hq.favNode'); } catch (_) {} };
-const ptySub = (n) => () => [{ head: true, label: 'Открыть PTY на ' + n.node_id }, ...(n.online ? ptyProviders(n).map((p) => ({ ic: p.v === 'shell' ? 'term' : 'spark', label: p.label || p.v, fn: () => startSession(n.node_id, p.v) })) : [{ label: 'Нода офлайн', dim: true }])];
+const ptySub = (n) => () => n.online ? ptyProviders(n).map((p) => ({ ic: 'spark', label: p.label || p.v, fn: () => startSession(n.node_id, p.v) })) : [{ label: 'Нода офлайн', dim: true }];
 $('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); const was = !m.hidden; closeMenus(); if (was) return; m.hidden = false; m.className = 'pop amenu2'; m.innerHTML = '';
   m.appendChild(menuRow({ ic: 'server', label: 'Fleet', right: String(visibleNodes().filter((n) => n.online).length) + ' online', fn: () => openNode() }, 0));
-  { const fav = visibleNodes().find((n) => n.node_id === favNode()); if (fav) { const b = menuRow({ ic: 'term', label: fav.node_id, right: fav.online ? '' : 'offline', sub: ptySub(fav) }, 0); b.classList.add('favrow'); b.querySelector('.ic').textContent = '★'; m.appendChild(b); } }
+  { const fav = visibleNodes().find((n) => n.node_id === favNode()); if (fav) m.appendChild(menuRow({ ic: 'star', label: fav.node_id, right: fav.online ? '' : 'offline', sub: ptySub(fav) }, 0)); }
   m.appendChild(menuRow({ ic: 'gauge', label: 'Usage & plan', right: '— % used', fn: () => openSettings('usage') }, 0));
   m.appendChild(menuRow({ ic: 'phone', label: 'Get the apps', fn: () => toast('Apps: coming soon') }, 0));
   m.appendChild(menuRow({ ic: 'book', label: 'Support', fn: () => toast('Support: coming soon') }, 0));
@@ -716,7 +717,9 @@ function paint(sess, onRendered) {
 // Open a socket for a session: spawn (provider) or attach (session id). Returns the sess object.
 function connectSession(node, sess, { provider, parser, attach } = {}) {
   const rows = term.rows || 30, cols = term.cols || 110;
-  const q = new URLSearchParams({ node, rows, cols, keep: 'true' });
+  // keep=true only after sessionize (server also treats spawn as provisional until attach completes).
+  // Draft PTY: never keep on disconnect. Real provider-session survival is future work.
+  const q = new URLSearchParams({ node, rows, cols, keep: 'false' });
   if (attach) q.set('session', attach); else q.set('provider', provider);
   if (parser) q.set('parser', parser);
   const sock = new WebSocket(wsUrl('/api/term', q)); sess._ws = sock; sess.state = sess.state || 'starting';
@@ -773,6 +776,8 @@ function attachSession(node, idText, provider) {
 }
 // Reconcile the sidebar with the node's live sessions: add missing (attach), drop gone ones.
 async function reconcileNode(node) {
+  // Drafts are not sessions: never promote a live node PTY into the sidebar.
+  // Only sync status for tabs this HQ already opened; drop ones the node exited.
   let list; try { list = (await api('/api/sessions?node=' + encodeURIComponent(node))).sessions || []; } catch (_) { return; }
   const live = list.filter((s) => s.live);
   const arr = (S.sessions[node] ||= []);
@@ -780,12 +785,7 @@ async function reconcileNode(node) {
     if (x.kind === 'browser' || x.state === 'starting' || x.ended) continue;
     const on = live.find((s) => s.instance_id === x.instance_id);
     if (!on) endSession(node, x, 'exited');
-    else if (!x._ws) connectSession(node, x, { attach: `${on.workspace_id}/${on.instance_id}` });
-  }
-  for (const s of live) {
-    if (arr.some((x) => x.instance_id === s.instance_id && !x.ended)) continue;
-    const sess = { provider: s.provider, id: `${node}:${s.workspace_id}:${s.instance_id}`, instance_id: s.instance_id, workspace_id: s.workspace_id, live: false, state: 'starting', label: s.label };
-    recordSession(node, sess); connectSession(node, sess, { attach: `${s.workspace_id}/${s.instance_id}` });
+    else if (!x._ws) connectSession(node, x, { attach: `${on.workspace_id}/${on.instance_id}` }); // brief reconnect of OUR tab
   }
   S.nodeSessions = S.nodeSessions || {}; S.nodeSessions[node] = list;
   renderSidebar();
@@ -1230,3 +1230,11 @@ $('#chat').addEventListener('click', (e) => {
 if (new URLSearchParams(location.search).has('test') || localStorage.getItem('hq.test') === '1') {
   window.hq = { startSession, startBrowser, attachSession, hideBrowserOverlay, stopSession, openSessionBrowser, openNodeBrowser, setBrowserBig, S };
 }
+
+// Drafts die with the page: stop every open PTY on unload (provider-session resume is future work).
+window.addEventListener('pagehide', () => {
+  for (const arr of Object.values(S.sessions || {})) for (const x of arr) {
+    if (x.ended || x.kind === 'browser') continue;
+    try { if (x._ws && x._ws.readyState === 1) x._ws.send(JSON.stringify({ t: 'stop' })); } catch (_) {}
+  }
+});

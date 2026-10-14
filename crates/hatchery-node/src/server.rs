@@ -248,6 +248,11 @@ const AUTH_FRAME_TIMEOUT_MS: u64 = 5_000;
 const FRAME_BODY_TIMEOUT_MS: u64 = 5_000;
 const CONNECTION_SHUTDOWN_GRACE_MS: u64 = 250;
 const SPAWN_DISPATCH_TIMEOUT_MS: u64 = 2_000;
+/// Fresh Spawn stays provisional until HQ successfully attaches (first Resize /
+/// TerminalBytes). If attach never lands within this grace, the node kills the
+/// PTY and clears its bound browser station — so a reload mid-spawn cannot leave
+/// an orphan CLI with no sidebar tab.
+const PROVISIONAL_SPAWN_GRACE_MS: u64 = 5_000; // draft reconnect grace; HQ also kills drafts on WS close
 /// How often `drive_runtime_until_shutdown`'s loop re-evaluates the session
 /// record retention policy (`NodeServerConfig::session_record_retention`).
 /// A sweep cadence, not a policy value -- the policy itself lives entirely
@@ -2610,6 +2615,7 @@ async fn drive_runtime_until_shutdown(
         .set(runtime.shell_efficiency_profile());
     let mut shutdown_started = None;
     let mut last_retention_sweep = Instant::now();
+    let mut last_provisional_reap = Instant::now();
     loop {
         // Every phase below is timed unconditionally -- see
         // `drive_loop_profile`'s own doc comment for why an always-on,
@@ -2755,6 +2761,13 @@ async fn drive_runtime_until_shutdown(
         if last_retention_sweep.elapsed() >= SESSION_RECORD_RETENTION_SWEEP_PERIOD {
             shared.retire_unavailable_session_records().await;
             last_retention_sweep = Instant::now();
+        }
+        // Provisional Spawn grace: kill PTYs that never got an HQ attach.
+        if last_provisional_reap.elapsed() >= Duration::from_secs(2) {
+            for address in shared.take_due_provisional_spawns() {
+                shared.reap_provisional_spawn(address).await;
+            }
+            last_provisional_reap = Instant::now();
         }
 
         // Fast-poll for 300ms after PTY input so its echo is read and published
@@ -3160,6 +3173,9 @@ struct NodeShared {
     managed_spawn_replays:
         Mutex<BTreeMap<SpawnIdempotencyKey, ManagedWorktreeSpawnReplayRecordV10>>,
     controller: Mutex<Option<ControllerLease>>,
+    /// Fresh spawns waiting for their first successful HQ attach. Removed on
+    /// Resize/TerminalBytes (sessionize) or when the grace reaper stops them.
+    provisional_spawns: Mutex<BTreeMap<AgentInstanceId, (SessionAddress, Instant)>>,
     history: Mutex<NodeEventHistory>,
     event_tx: broadcast::Sender<NodeEventEnvelope>,
     terminal_event_tx: broadcast::Sender<Arc<Vec<NodeEventEnvelope>>>,
@@ -4049,6 +4065,7 @@ impl NodeShared {
             }),
             managed_spawn_replays: Mutex::new(BTreeMap::new()),
             controller: Mutex::new(None),
+            provisional_spawns: Mutex::new(BTreeMap::new()),
             history: Mutex::new(NodeEventHistory::new(record_providers)),
             event_tx,
             terminal_event_tx,
@@ -11220,6 +11237,70 @@ impl NodeShared {
         released
     }
 
+    /// Mark a fresh Spawn as provisional and arm the grace reaper. A session is
+    /// sessionized (removed from this map) on the first Resize/TerminalBytes —
+    /// that is HQ successfully attaching. Until then a disconnect/reload that
+    /// never attaches, or the grace timeout, kills the PTY.
+    fn mark_spawn_provisional(&self, address: SessionAddress) {
+        let id = address.session.instance_id;
+        self.provisional_spawns
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(id, (address, Instant::now()));
+        tracing::info!(
+            node_id = %self.node_id,
+            instance_id = id.0,
+            grace_ms = PROVISIONAL_SPAWN_GRACE_MS,
+            "draft spawn; waiting for HQ view",
+        );
+    }
+
+    fn sessionize_spawn(&self, instance_id: AgentInstanceId) {
+        let removed = self
+            .provisional_spawns
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&instance_id);
+        if removed.is_some() {
+            tracing::info!(
+                node_id = %self.node_id,
+                instance_id = instance_id.0,
+                "draft spawn claimed by HQ view",
+            );
+        }
+    }
+
+    fn take_due_provisional_spawns(&self) -> Vec<SessionAddress> {
+        let grace = Duration::from_millis(PROVISIONAL_SPAWN_GRACE_MS);
+        let mut map = self
+            .provisional_spawns
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let due: Vec<AgentInstanceId> = map
+            .iter()
+            .filter(|(_, (_, at))| at.elapsed() >= grace)
+            .map(|(id, _)| *id)
+            .collect();
+        due.into_iter()
+            .filter_map(|id| map.remove(&id).map(|(addr, _)| addr))
+            .collect()
+    }
+
+    async fn reap_provisional_spawn(&self, address: SessionAddress) {
+        let instance_id = address.session.instance_id;
+        tracing::warn!(
+            node_id = %self.node_id,
+            instance_id = instance_id.0,
+            workspace = %address.workspace_id,
+            "draft spawn never viewed; stopping PTY",
+        );
+        let _ = self.dispatch(ControlCommand::Stop {
+            instance_id,
+            force: true,
+        });
+        let _ = self.remove_session(&address).await;
+    }
+
     fn require_controller(&self, connection_id: u64, role: ClientRole) -> Result<(), NodeFailure> {
         if role != ClientRole::Operator {
             return Err(failure(NodeFailureCode::ObserverReadOnly, "observer connections are read-only"));
@@ -16139,7 +16220,10 @@ async fn process_request_inner(shared: &NodeShared, connection_id: u64, role: Cl
                 .spawn_session(workspace_id.clone(), provider.clone(), mode, terminal_size, initial_prompt)
                 .await
             {
-                Ok(session) => Ok(NodeResponse::SpawnAccepted { session }),
+                Ok(session) => {
+                    shared.mark_spawn_provisional(session.clone());
+                    Ok(NodeResponse::SpawnAccepted { session })
+                }
                 Err(err) => {
                     tracing::warn!(
                         %provider,
@@ -16407,6 +16491,7 @@ async fn process_request_inner(shared: &NodeShared, connection_id: u64, role: Cl
         }
         NodeRequest::TerminalBytes { session, bytes } => {
             controlled_session(shared, connection_id, role, &session)?;
+            shared.sessionize_spawn(session.session.instance_id);
             let action = terminal_bytes_action(bytes)?;
             shared
                 .dispatch_input_bounded(&session, action)
@@ -16422,6 +16507,7 @@ async fn process_request_inner(shared: &NodeShared, connection_id: u64, role: Cl
         }
         NodeRequest::Resize { session, size } => {
             controlled_session(shared, connection_id, role, &session)?;
+            shared.sessionize_spawn(session.session.instance_id);
             if !size.is_valid() {
                 return Err(failure(NodeFailureCode::InvalidRequest, "terminal size is invalid"));
             }
@@ -16440,6 +16526,7 @@ async fn process_request_inner(shared: &NodeShared, connection_id: u64, role: Cl
         }
         NodeRequest::Stop { session, force } => {
             controlled_session(shared, connection_id, role, &session)?;
+            shared.sessionize_spawn(session.session.instance_id);
             shared.dispatch(ControlCommand::Stop { instance_id: session.session.instance_id, force })?;
             Ok(NodeResponse::Accepted)
         }
