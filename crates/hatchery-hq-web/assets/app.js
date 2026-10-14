@@ -303,7 +303,7 @@ $('#addbtn').onclick = () => menu([
   ['Create a task…', () => { openPanel('tasks'); }],
   ['Issue enrollment code', issueCode],
 ]);
-$('#plusbtn').onclick = (e) => { e.stopPropagation(); menu([...visibleNodes().filter((n) => n.online).flatMap((n) => ['shell', 'claude'].map((p) => [`New ${p} on ${n.node_id}`, () => startSession(n.node_id, p)])), ['Reattach…', () => reattachDialog()], ['Fleet…', () => openNode()], ['Add a node (enrollment code)', () => { openPanel('status'); issueCode(); }]]); const m = $('#menu'); m.style.position = 'fixed'; m.style.left = '120px'; m.style.top = '54px'; m.style.bottom = 'auto'; };
+$('#plusbtn').onclick = (e) => { e.stopPropagation(); menu([...visibleNodes().filter((n) => n.online).flatMap((n) => ['shell', 'claude'].map((p) => [`New ${p} on ${n.node_id}`, () => startSession(n.node_id, p)])), ['Reattach…', () => reattachDialog()], ['Fleet…', () => openNode()], ['Add a node (enrollment code)', () => { openNode(); setTimeout(issueCode, 0); }]]); const m = $('#menu'); m.style.position = 'fixed'; m.style.left = '120px'; m.style.top = '54px'; m.style.bottom = 'auto'; };
 // ---- account pill
 async function loadMe() {
   try { const r = await fetch('/api/me', { credentials: 'same-origin' }); const d = await r.json(); const u = d.user || {}; S.me = u; const nm = u.display_name || u.username || 'Account';
@@ -330,6 +330,8 @@ const LUC = {
   check: '<path d="M3 5h.01M3 12h.01M3 19h.01M8 5h13M8 12h13M8 19h13"/>',
   folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
   server: '<rect width="20" height="8" x="2" y="2" rx="2"/><rect width="20" height="8" x="2" y="14" rx="2"/><path d="M6 6h.01M6 18h.01"/>',
+  git: '<circle cx="5" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M5 8v8M5 8c0 4 6 4 6 8M19 8v2a4 4 0 0 1-4 4H11"/>',
+  spark: '<path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/>',
 };
 const ico = (k, sz = 16) => `<svg viewBox="0 0 24 24" width="${sz}" height="${sz}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${LUC[k]}</svg>`;
 $('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); m.hidden = !m.hidden; if (m.hidden) return; m.className = 'pop amenu2'; m.innerHTML = '';
@@ -402,7 +404,7 @@ async function renderStatus() {
 }
 
 // ---- right panel: chat info + all status / control
-const TABS = [['info', 'Overview', 'info'], ['tasks', 'Tasks', 'check'], ['library', 'Files', 'folder'], ['status', 'Fleet', 'server']];
+const TABS = [['info', 'Overview', 'info'], ['tasks', 'Tasks', 'check'], ['library', 'Files', 'folder'], ['git', 'Git', 'git']];
 function renderPanelHead() { if (S.view === 'pty' && S.ptySession) { const x = S.ptySession; $('#panelav').innerHTML = avatar('pty:' + x.id, 'mid'); $('#panelname').textContent = x.provider; $('#panelsub').textContent = 'on ' + S.sessionNode; return; } if (!S.chat) return; $('#panelav').innerHTML = avatar(S.chat, 'mid'); $('#panelname').textContent = chatName(S.chat); $('#panelsub').textContent = ''; }
 function openPanel(tab) { S.panel = true; localStorage.setItem('hq.panel', '1'); $('#panel').classList.add('open'); syncHead(); renderPanelHead(); setTab(tab || S.tab); }
 function closePanel() { S.panel = false; localStorage.setItem('hq.panel', ''); $('#panel').classList.remove('open'); syncHead(); }
@@ -444,52 +446,69 @@ $('#rzl').onpointerdown = (e) => {
 };
 dragger($('#rzr'), '--pw', 'hq.pw', 320, () => Math.min(640, innerWidth * 0.4), true);
 function setTab(tab) {
-  if (tab === 'computer' || tab === 'browser') tab = 'info';
+  if (tab === 'computer' || tab === 'browser' || tab === 'status') tab = 'info';
   if (!TABS.some(([id]) => id === tab)) tab = 'info';
   S.tab = tab; localStorage.setItem('hq.tab', tab); $('#ptabs').innerHTML = '';
   for (const [id, label, ic] of TABS) { const b = document.createElement('button'); b.innerHTML = `${ico(ic, 15)}<span class="l">${esc(label)}</span>`; b.title = label; b.setAttribute('role', 'tab'); b.className = id === tab ? 'on' : ''; b.onclick = () => setTab(id); $('#ptabs').appendChild(b); }
   document.querySelectorAll('.ptab').forEach((t) => t.classList.toggle('on', t.id === 'p-' + tab));
   $('#pbody').scrollTop = 0;
-  if (tab === 'info') renderInfo(); if (tab === 'status') renderStatus(); if (tab === 'tasks') renderTasksTab(); if (tab === 'library') renderLibraryTab();
+  if (tab === 'info') renderInfo(); if (tab === 'tasks') renderTasksTab(); if (tab === 'library') renderLibraryTab(); if (tab === 'git') renderGitTab();
 }
 const sec = (title, body, right = '') => `<section class="psec"><div class="sech"><span>${esc(title)}</span>${right}</div>${body}</section>`;
+function aiServicesHtml() {
+  const mem = !!(S.sessionServices && S.sessionServices.memory4agents);
+  return `<div class="pcard"><div class="sub">Per-session AI services. Backend wiring for memory4agents is not exposed yet — toggles are local stubs.</div>
+    <div class="srow" style="margin-top:8px"><span>memory4agents</span><button class="sw${mem ? ' on' : ''}" data-svc="memory4agents" title="Stub: no backend yet"></button></div>
+    <div class="sub" style="margin-top:6px">Other services will appear here when the node kit exposes them.</div></div>`;
+}
+function wireAiServices(root) {
+  root.querySelectorAll('[data-svc]').forEach((b) => (b.onclick = () => {
+    S.sessionServices = S.sessionServices || {};
+    const k = b.dataset.svc; S.sessionServices[k] = !S.sessionServices[k];
+    localStorage.setItem('hq.svc.' + (S.ptySession?.id || S.chat || 'default'), JSON.stringify(S.sessionServices));
+    toast(k + (S.sessionServices[k] ? ' on (stub)' : ' off') + ' — backend not wired');
+    renderInfo();
+  }));
+}
 function renderInfo() {
   const root = $('#p-info');
-  // PTY session: which node it runs on, and that node's environment.
   if (S.view === 'pty') {
-    const id = S.sessionNode; const n = S.nodes.find((x) => x.node_id === id); const x = S.ptySession || {};
+    const id = S.sessionNode; const x = S.ptySession || {};
+    try { S.sessionServices = JSON.parse(localStorage.getItem('hq.svc.' + (x.id || id)) || '{}'); } catch (_) { S.sessionServices = {}; }
     const lbl = x.label || (x.instance_id != null ? `${id}/${x.provider}#${x.instance_id}` : `${x.provider || ''} · ${id || ''}`);
     const st = x.state === 'starting' ? 'starting' : x.ended ? 'ended' : x._ws ? 'live' : 'reconnecting';
-    const kv = `<div class="kv"><span>Session</span><span class="ell">${esc(lbl)}</span></div><div class="kv"><span>Status</span><span>${st}</span></div><div class="kv"><span>Size</span><span>${term.cols}×${term.rows}</span></div>`;
+    const kv = `<div class="kv"><span>Session</span><span class="ell">${esc(lbl)}</span></div><div class="kv"><span>Status</span><span>${st}</span></div><div class="kv"><span>Size</span><span>${term.cols}×${term.rows}</span></div><div class="kv"><span>Node</span><span>${esc(id || '')}</span></div>`;
     const lay = S.ptyLayout || 'native'; const link = $('#tlink').dataset.url;
     const ctl = `<div class="tog cp-tog"><button data-cl="native" class="${lay === 'native' ? 'on' : ''}">PTY</button><button data-cl="chat" class="${lay === 'chat' ? 'on' : ''}">Chat view</button></div>
-      <div class="sub plat">PTY input latency: <span id="ptylat">${platText(x)}</span></div>
       <div class="row cp-row"><button class="btn" data-c="paste">Paste</button>${link ? '<button class="btn blue" data-c="link" title="' + esc(link) + '">Open link</button>' : ''}<button class="btn" data-c="reattach">Reattach…</button><button class="btn red" data-c="stop"${x.ended ? ' disabled' : ''}>Stop</button></div>`;
-    const env = n && n.environment ? n.environment : null;
-    const brief = n ? `${nodeStatus(n)}${n.kind ? ' · ' + esc(n.kind) : ''}${(S.sessions[id] || []).filter((s) => !s.ended).length ? ' · ' + (S.sessions[id] || []).filter((s) => !s.ended).length + ' sessions' : ''}` : 'unknown';
     root.innerHTML = sec('Session', `<div class="pcard">${kv}</div>`) + sec('Controls', `<div class="pcard">${ctl}</div>`)
       + (x.instance_id != null ? sec('Browser', sessionBrowserHtml(id, x)) : '')
-      + sec('Node', `<div class="pcard"><div class="kv"><span>${esc(id || '')}</span><span>${brief}</span></div><div class="row" style="margin-top:6px"><button class="btn" data-c="fleet">Open in Fleet →</button></div></div>`);
-    void env;
+      + sec('AI services', aiServicesHtml());
     root.querySelectorAll('[data-cl]').forEach((b) => (b.onclick = () => { setPtyLayout(b.dataset.cl); renderInfo(); }));
     root.querySelectorAll('[data-c]').forEach((b) => (b.onclick = () => {
       const c = b.dataset.c;
       if (c === 'paste') $('#tpaste').click(); else if (c === 'link') $('#tlink').click(); else if (c === 'stop') $('#tstop').click();
-      else if (c === 'reattach') reattachDialog(id); else if (c === 'fleet') openNode(id);
+      else if (c === 'reattach') reattachDialog(id);
     }));
     if (x.instance_id != null) wireSessionBrowser(root, id, x);
+    wireAiServices(root);
     return;
   }
   const agent = S.chat && !isGroup(S.chat);
+  try { S.sessionServices = JSON.parse(localStorage.getItem('hq.svc.' + (S.chat || 'default')) || '{}'); } catch (_) { S.sessionServices = {}; }
   let kv = agent ? `<div class="kv"><span>Kind</span><span>${esc(chatKind(S.chat) || 'chat')}</span></div>` : `<div class="kv"><span>Room</span><span class="ell">${esc(chatName(S.chat))}</span></div>`;
-  let h = sec('Details', `<div class="pcard">${kv}</div>`);
-  // A chat is not owned by a node; offer a link to run a session on a node instead.
-  const nodes = visibleNodes();
-  if (nodes.length) h += sec('Fleet', `<div class="pcard"><div class="kv"><span>${nodes.filter((n) => n.online).length}/${nodes.length} nodes online</span><button class="btn" id="pfleet">Open Fleet →</button></div></div>`);
-  if (false) h += sec('Run on node', `<div class="pcard"><div class="chips">${nodes.map((n) => `<button class="chip" data-node="${esc(n.node_id)}"><span class="dot ${n.online ? 'ok' : ''}"></span>${esc(n.node_id)}</button>`).join('')}</div><div class="sub" style="margin-top:6px">Sessions run in a node environment, not in this chat.</div></div>`);
+  let h = sec('Details', `<div class="pcard">${kv}</div>`) + sec('AI services', aiServicesHtml());
   root.innerHTML = h + '<div id="p-activity" class="secs"></div>';
-  if ($('#pfleet')) $('#pfleet').onclick = () => openNode();
+  wireAiServices(root);
   if (agent) renderActivity();
+}
+function renderGitTab() {
+  const root = $('#p-git');
+  const node = S.sessionNode || '';
+  root.innerHTML = sec('Git', `<div class="pcard"><div class="sub">Session worktree status will appear here when the node exposes a git summary for this session.</div>
+    <div class="kv" style="margin-top:8px"><span>Node</span><span>${esc(node || '—')}</span></div>
+    <div class="kv"><span>Session</span><span class="ell">${esc((S.ptySession && S.ptySession.label) || S.chat || '—')}</span></div>
+    <div class="sub" style="margin-top:8px">Backend not wired yet (no git API on HQ).</div></div>`);
 }
 $('#headbtn').onclick = () => { if (S.panel) closePanel(); else openPanel('info'); };
 $('#closepanel').onclick = closePanel;
@@ -857,12 +876,25 @@ function updateLatReadout() { const el = $('#plat'); if (el) el.textContent = la
 function browserDrawer() {
   let w = $('#bdrawer'); if (w) return w;
   w = document.createElement('div'); w.id = 'bdrawer'; w.className = 'bdrawer'; w.hidden = true;
-  w.innerHTML = `<div class="bdbar"><span id="bdtitle" class="sub"></span><input id="bdurl" placeholder="https://…"><button class="ibtn" id="bdsize" title="Expand">⤢</button><button class="ibtn" id="bdhide" title="Hide">›</button><button class="ibtn" id="bdclose" title="Close browser">✕</button></div><canvas id="bdcanvas" tabindex="0"></canvas><div class="sub plat bdlat">Input latency: <span id="plat">No click measured yet</span></div>`;
+  w.innerHTML = `<div class="bdbar"><span id="bdtitle" class="sub"></span><input id="bdurl" placeholder="https://…"><span class="grow"></span><button class="ibtn" id="bdsize" title="Expand">⤢</button><button class="ibtn" id="bdhide" title="Hide browser">–</button></div><canvas id="bdcanvas" tabindex="0"></canvas>`;
   document.body.appendChild(w);
   $('#bdsize').onclick = () => { const big = w.classList.contains('big'); showBrowserDrawer(big ? 'mini' : 'big'); };
   $('#bdhide').onclick = () => hideBrowserOverlay(false);
-  $('#bdclose').onclick = () => hideBrowserOverlay(true);
   $('#bdurl').onkeydown = (e) => { if (e.key === 'Enter') navBrowser($('#bdurl').value); };
+  // Drag by the title bar; never stops the browser (stop lives in the right sidebar).
+  const bar = w.querySelector('.bdbar');
+  bar.onpointerdown = (e) => {
+    if (e.target.closest('button,input')) return;
+    e.preventDefault(); bar.setPointerCapture(e.pointerId); bar.classList.add('dragging');
+    const r = w.getBoundingClientRect(); const ox = e.clientX - r.left, oy = e.clientY - r.top;
+    bar.onpointermove = (ev) => {
+      const maxL = innerWidth - Math.min(r.width, 120), maxT = innerHeight - 80;
+      let left = Math.max(8, Math.min(maxL, ev.clientX - ox));
+      let top = Math.max(8, Math.min(maxT, ev.clientY - oy));
+      w.style.left = left + 'px'; w.style.top = top + 'px'; w.style.right = 'auto';
+    };
+    bar.onpointerup = () => { bar.onpointermove = null; bar.classList.remove('dragging'); };
+  };
   wireCanvas($('#bdcanvas')); addEventListener('resize', fitBrowser);
   return w;
 }
@@ -886,8 +918,9 @@ function showBrowserDrawer(mode) {
 }
 function setBrowserBig(on) { showBrowserDrawer(on ? 'big' : 'mini'); }
 function hideBrowserOverlay(stop) {
+  // Drawer controls never stop the browser; `stop` is ignored. Close lives in the sidebar.
+  void stop;
   const w = $('#bdrawer'); if (w) { w.hidden = true; w.classList.add('off'); }
-  if (stop) stopBrowser();
   if (S.panel && S.tab === 'info') renderInfo();
 }
 function stopBrowser() {
@@ -904,8 +937,7 @@ function sessionBrowserHtml(node, sess) {
   const shown = !!(live && $('#bdrawer') && !$('#bdrawer').hidden);
   const label = !live ? 'Open browser' : shown ? 'Hide browser' : 'Show browser';
   return `<div class="pcard pbrowser"><div class="sub">${live ? 'Session browser is bound to this PTY (own profile).' : 'Links clicked in the terminal open the session browser as a drawer.'}</div>
-    <div class="row cp-row"><button class="btn" data-b="open">${label}</button>${live ? '<button class="btn red" data-b="stop">Close</button>' : ''}</div>
-    <div class="sub plat">Input latency: <span id="plat">${esc(latText())}</span></div></div>`;
+    <div class="row cp-row"><button class="btn" data-b="open">${label}</button>${live ? '<button class="btn red" data-b="stop">Close browser</button>' : ''}</div></div>`;
 }
 function wireSessionBrowser(root, node, sess) {
   root.querySelectorAll('[data-b]').forEach((x) => (x.onclick = () => {
