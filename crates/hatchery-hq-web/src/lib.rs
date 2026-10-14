@@ -183,6 +183,7 @@ pub fn router(config: Config) -> (Router, Shared) {
         .route("/api/library/{name}", get(api_library_file))
         .route("/api/events", get(api_events))
         .route("/api/term", get(term_ws))
+        .route("/api/git", get(api_git))
         .route("/api/support/traces", get(api_support_traces))
         .route("/api/sessions", get(api_sessions))
         .route("/api/browser", get(browser_ws))
@@ -548,6 +549,11 @@ struct TermQuery {
     /// Browser-generated correlation id for one spawn/attach attempt (opaque).
     #[serde(default)]
     cid: Option<String>,
+    /// Spawn in a fresh node-managed git worktree: `PROFILE@REVISION` of a managed
+    /// worktree profile configured on the node. The node creates the branch and
+    /// worktree and cleans it when the session releases it.
+    #[serde(default)]
+    worktree: Option<String>,
 }
 fn d_rows() -> u16 { 30 }
 fn d_cols() -> u16 { 110 }
@@ -598,6 +604,101 @@ fn collect_frames(v: &Value, out: &mut Vec<Value>) {
         }
         Value::Array(a) => a.iter().for_each(|x| collect_frames(x, out)),
         _ => {}
+    }
+}
+
+/// Build a `SpawnManagedWorktreeV2` for the node's built-in spawn profile with
+/// provider and size overridden. `wt` is `PROFILE@REVISION`.
+fn managed_worktree_spawn(
+    node: &str,
+    workspace: &str,
+    provider: &str,
+    size: gate4agent_types::TerminalSize,
+    wt: &str,
+    cid: &str,
+) -> Result<gate4agent_node_protocol::NodeRequest, String> {
+    let (profile, revision) = wt.split_once('@').ok_or("worktree must be PROFILE@REVISION")?;
+    let nonce: u64 = rand_nonce();
+    let request = json!({
+        "spawn_spec": {
+            "target": { "node_id": node, "workspace_id": workspace },
+            "profile_id": "default",
+            "expected_profile_revision": "builtin-v1",
+            "overrides": {
+                "provider": { "kind": "set", "value": provider },
+                "terminal_size": { "kind": "set", "value": { "rows": size.rows, "columns": size.columns } },
+            },
+            "deadline_ms": 30000,
+            "idempotency_key": format!("hq-{cid}-{nonce:016x}"),
+        },
+        "worktree_profile_id": profile,
+        "expected_profile_revision": revision,
+    });
+    let request: gate4agent_node_protocol::ManagedWorktreeSpawnRequestV2 =
+        serde_json::from_value(request).map_err(|e| format!("bad worktree spawn: {e}"))?;
+    Ok(gate4agent_node_protocol::NodeRequest::SpawnManagedWorktreeV2 { request })
+}
+
+fn rand_nonce() -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+    h.finish()
+}
+
+#[derive(Deserialize)]
+struct GitQuery {
+    node: String,
+    workspace: String,
+    /// `history` (default) or `diff`.
+    #[serde(default)]
+    kind: String,
+    /// For diff: `working` (default), `staged`, or a commit id.
+    #[serde(default)]
+    rev: Option<String>,
+    #[serde(default)]
+    limit: Option<u16>,
+}
+
+/// Read git history or a diff from a node workspace on request (core keeps only
+/// branch + commit; the node owns the repository).
+async fn api_git(State(s): State<Shared>, Query(q): Query<GitQuery>) -> Response {
+    use gate4agent_node_protocol::NodeRequest;
+    use hatchery_core::{C2NodeResponse, NodeId, NodeRoute};
+    let fail = |code: StatusCode, msg: String| (code, Json(json!({ "error": msg }))).into_response();
+    let request: Result<NodeRequest, String> = (|| {
+        let v = if q.kind == "diff" {
+            let mode = match q.rev.as_deref().unwrap_or("working") {
+                "working" => json!({ "kind": "working" }),
+                "staged" => json!({ "kind": "staged" }),
+                rev => json!({ "kind": "commit", "revision": rev }),
+            };
+            json!({ "kind": "read-git-diff", "workspace_id": q.workspace, "request": { "mode": mode, "path": null } })
+        } else {
+            json!({ "kind": "read-git-history", "workspace_id": q.workspace, "before": null, "limit": q.limit.unwrap_or(30).clamp(1, 100) })
+        };
+        serde_json::from_value(v).map_err(|e| e.to_string())
+    })();
+    let request = match request {
+        Ok(r) => r,
+        Err(e) => return fail(StatusCode::BAD_REQUEST, e),
+    };
+    let node = match NodeId::new(q.node.clone()) {
+        Ok(n) => n,
+        Err(e) => return fail(StatusCode::BAD_REQUEST, e.to_string()),
+    };
+    let control = match dial_term_operator(&s.config).await {
+        Ok(h) => h,
+        Err(e) => return fail(StatusCode::BAD_GATEWAY, e),
+    };
+    use gate4agent_node_protocol::NodeIncarnationId;
+    let route = NodeRoute { node_id: node, expected_incarnation_id: NodeIncarnationId::from_bytes([0; 16]) };
+    match control.request(route, request).await.map(|r| r.response) {
+        Ok(Ok(C2NodeResponse::GitHistoryRead { page, .. })) => (StatusCode::OK, Json(json!({ "history": page }))).into_response(),
+        Ok(Ok(C2NodeResponse::GitDiffRead { diff, .. })) => (StatusCode::OK, Json(json!({ "diff": diff }))).into_response(),
+        Ok(Ok(other)) => fail(StatusCode::BAD_GATEWAY, format!("unexpected reply: {other:?}")),
+        Ok(Err(e)) => fail(StatusCode::BAD_GATEWAY, format!("node refused: {e:?}")),
+        Err(e) => fail(StatusCode::BAD_GATEWAY, e.to_string()),
     }
 }
 
@@ -670,19 +771,17 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
         tracing::info!(%cid, node = %q.node, %provider, "pty spawn requested");
         push_support_trace(&s, &cid, "hq-web", "spawn_requested", json!({ "node": q.node, "provider": provider }));
         let spawn_t0 = std::time::Instant::now();
-        let spawned = control
-            .request_with_correlation(
-                route.clone(),
-                NodeRequest::Spawn {
-                    workspace_id: WorkspaceId::new(workspace.clone()).map_err(|e| e.to_string())?,
-                    provider: AgentId::new(provider.to_owned()).map_err(|e| e.to_string())?,
-                    mode: SessionMode::Pty,
-                    terminal_size: size,
-                    initial_prompt: None,
-                },
-                Some(cid.clone()),
-            )
-            .await;
+        let request = match q.worktree.as_deref().map(str::trim).filter(|w| !w.is_empty()) {
+            Some(wt) => managed_worktree_spawn(&q.node, &workspace, provider, size, wt, &cid)?,
+            None => NodeRequest::Spawn {
+                workspace_id: WorkspaceId::new(workspace.clone()).map_err(|e| e.to_string())?,
+                provider: AgentId::new(provider.to_owned()).map_err(|e| e.to_string())?,
+                mode: SessionMode::Pty,
+                terminal_size: size,
+                initial_prompt: None,
+            },
+        };
+        let spawned = control.request_with_correlation(route.clone(), request, Some(cid.clone())).await;
         let spawned = match spawned {
             Ok(r) => r,
             Err(e) => {
@@ -693,8 +792,17 @@ async fn term_session(mut socket: WebSocket, s: Shared, q: TermQuery) -> Result<
                 return Err(text);
             }
         };
-        let session = match spawned.response {
-            Ok(C2NodeResponse::SpawnAccepted { session }) => {
+        let accepted = match spawned.response {
+            Ok(C2NodeResponse::SpawnAccepted { session }) => Ok(session),
+            Ok(C2NodeResponse::ManagedWorktreeSpawnAccepted { receipt }) => {
+                tracing::info!(%cid, worktree = %receipt.lease.workspace_id.as_str(), "managed worktree spawned");
+                push_support_trace(&s, &cid, "hq-web", "worktree_spawned", json!({ "worktree": receipt.lease.workspace_id.as_str() }));
+                Ok(receipt.spawn.session)
+            }
+            other => Err(other),
+        };
+        let session = match accepted {
+            Ok(session) => {
                 route.expected_incarnation_id = spawned.incarnation_id;
                 tracing::info!(
                     %cid,
@@ -1582,6 +1690,31 @@ async fn api_local_server(State(s): State<Shared>, body_bytes: axum::body::Bytes
             Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => continue,
             Ok(Err(_)) => return (StatusCode::BAD_GATEWAY, "event stream closed").into_response(),
             Err(_) => return (StatusCode::GATEWAY_TIMEOUT, "local_server reply timed out").into_response(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod worktree_git_tests {
+    use super::*;
+
+    #[test]
+    fn managed_worktree_spawn_request_is_well_formed() {
+        let size = gate4agent_types::TerminalSize { rows: 30, columns: 100 };
+        let req = managed_worktree_spawn("hatchery-box", "repo", "codex", size, "hq@r1", "cid1").unwrap();
+        let gate4agent_node_protocol::NodeRequest::SpawnManagedWorktreeV2 { request } = req else { panic!("variant") };
+        assert_eq!(request.worktree_profile_id.as_str(), "hq");
+        assert!(managed_worktree_spawn("n", "w", "codex", size, "no-rev", "c").is_err());
+    }
+
+    #[test]
+    fn git_read_requests_deserialize() {
+        for v in [
+            json!({ "kind": "read-git-diff", "workspace_id": "repo", "request": { "mode": { "kind": "working" }, "path": null } }),
+            json!({ "kind": "read-git-diff", "workspace_id": "repo", "request": { "mode": { "kind": "commit", "revision": "0123456789abcdef0123456789abcdef01234567" }, "path": null } }),
+            json!({ "kind": "read-git-history", "workspace_id": "repo", "before": null, "limit": 30 }),
+        ] {
+            serde_json::from_value::<gate4agent_node_protocol::NodeRequest>(v.clone()).unwrap_or_else(|e| panic!("{v}: {e}"));
         }
     }
 }
