@@ -29,6 +29,17 @@ async fn main() {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+    #[cfg(unix)]
+    {
+        let mut homes: Vec<std::path::PathBuf> = std::env::var_os("HOME").map(Into::into).into_iter().collect();
+        if let Some(extra) = std::env::var_os("HATCHERY_PROVIDER_HOMES") {
+            homes.extend(std::env::split_paths(&extra));
+        }
+        let shim = homes.first().cloned().unwrap_or_else(std::env::temp_dir).join(".hatchery-provider-bin");
+        for (provider, bin) in hatchery_node::provider_inventory::install_shims(&shim, &homes) {
+            tracing::info!(%provider, bin = %bin.display(), "provider binary resolved via alias");
+        }
+    }
     let mut endpoint = default_node_endpoint()
         .and_then(|path| {
             path.into_os_string()

@@ -166,7 +166,7 @@ pub fn detect(provider: &str) -> Option<ProviderInfo> {
             (bin, "help", m)
         }
         "kimi" => {
-            let bin = which("kimi")?;
+            let bin = which("kimi").filter(|b| usable(b))?;
             let m = home().and_then(|h| std::fs::read_to_string(h.join(".kimi/config.toml")).ok()).map(|s| parse_kimi_config(&s)).unwrap_or_default();
             (bin, "config", m)
         }
@@ -212,5 +212,108 @@ mod tests {
     fn parses_kimi_config() {
         let m = parse_kimi_config("default_model = \"k2\"\n[models.k1]\nprovider = \"x\"\n[models.\"k2\"]\n");
         assert_eq!(m.iter().map(|x| (x.id.as_str(), x.default)).collect::<Vec<_>>(), [("k1", false), ("k2", true)]);
+    }
+}
+
+/// Binary names a provider may be installed under, in preference order. The canonical id
+/// (what g4a launches) comes first. Override per provider with `HATCHERY_PROVIDER_BIN_<ID>`
+/// (absolute path or a name on PATH).
+pub fn aliases(provider: &str) -> &'static [&'static str] {
+    match provider {
+        "kimi" => &["kimi", "kimi-cli", "kimi-code"],
+        "claude" => &["claude", "claude-code"],
+        "codex" => &["codex"],
+        "grok" => &["grok"],
+        _ => &[],
+    }
+}
+
+/// A candidate is usable only if `--version` answers and it is not a retired stub
+/// (kimi-cli 1.x prints "no longer maintained" and does nothing).
+fn usable(bin: &Path) -> bool {
+    let Some(out) = run(bin, &["--version"], Duration::from_secs(5)) else { return false };
+    let help = run(bin, &["--help"], Duration::from_secs(5)).unwrap_or_default();
+    !out.trim().is_empty() && !help.contains("no longer maintained") && !out.contains("no longer maintained")
+}
+
+/// Resolve the binary for `provider`: override env, then each alias on PATH, then the
+/// vendor's own install dirs under `extra_homes`.
+pub fn resolve_binary(provider: &str, extra_homes: &[PathBuf]) -> Option<PathBuf> {
+    let key = format!("HATCHERY_PROVIDER_BIN_{}", provider.to_ascii_uppercase());
+    if let Some(v) = std::env::var_os(&key).filter(|v| !v.is_empty()) {
+        let p = PathBuf::from(&v);
+        let p = if p.is_absolute() { Some(p) } else { which(&p.to_string_lossy()) };
+        return p.filter(|p| usable(p));
+    }
+    for name in aliases(provider) {
+        if let Some(p) = which(name).filter(|p| usable(p)) {
+            return Some(p);
+        }
+    }
+    let vendor_dirs: &[&str] = match provider {
+        "kimi" => &[".kimi-code/bin/kimi"],
+        "claude" => &[".claude/local/claude", ".local/bin/claude"],
+        _ => &[],
+    };
+    extra_homes
+        .iter()
+        .flat_map(|h| vendor_dirs.iter().map(move |d| h.join(d)))
+        .find(|p| p.is_file() && usable(p))
+}
+
+/// Make every resolvable provider launchable under its canonical name: a node-private shim
+/// dir with `<id> -> <resolved binary>` symlinks, prepended to PATH (children inherit it).
+#[cfg(unix)]
+pub fn install_shims(shim_dir: &Path, extra_homes: &[PathBuf]) -> Vec<(String, PathBuf)> {
+    let mut done = Vec::new();
+    if std::fs::create_dir_all(shim_dir).is_err() {
+        return done;
+    }
+    for p in PROVIDERS {
+        let link = shim_dir.join(p);
+        let _ = std::fs::remove_file(&link);
+        // Already launchable under its own name and usable: nothing to do.
+        if which(p).filter(|b| usable(b)).is_some() {
+            continue;
+        }
+        if let Some(bin) = resolve_binary(p, extra_homes) {
+            if std::os::unix::fs::symlink(&bin, &link).is_ok() {
+                done.push((p.to_string(), bin));
+            }
+        }
+    }
+    let old = std::env::var_os("PATH").unwrap_or_default();
+    let mut parts = vec![shim_dir.to_path_buf()];
+    parts.extend(std::env::split_paths(&old).filter(|d| d != shim_dir));
+    if let Ok(joined) = std::env::join_paths(parts) {
+        std::env::set_var("PATH", joined);
+    }
+    done
+}
+
+#[cfg(all(test, unix))]
+mod alias_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn script(dir: &Path, name: &str, body: &str) -> PathBuf {
+        let p = dir.join(name);
+        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p
+    }
+
+    #[test]
+    fn retired_stub_is_skipped_and_vendor_install_is_found() {
+        let d = std::env::temp_dir().join(format!("alias-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("home/.kimi-code/bin")).unwrap();
+        let stub = script(&d, "kimi-cli", "echo 'kimi-cli is no longer maintained.'");
+        assert!(!usable(&stub));
+        let real = script(&d.join("home/.kimi-code/bin"), "kimi", "echo 2.1.1");
+        assert!(usable(&real));
+        // PATH may already carry a real kimi on dev boxes; either way the stub is never chosen.
+        let got = resolve_binary("kimi", &[d.join("home")]).expect("kimi resolved");
+        assert_ne!(got, stub);
     }
 }
