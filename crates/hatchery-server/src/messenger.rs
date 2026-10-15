@@ -198,6 +198,17 @@ impl Messenger {
         self.engine.ack(&reader, &id, unix_ms()).map(|_| ()).map_err(map_mail)
     }
 
+    /// A session identity issued by the m4a signer becomes its own mailbox participant.
+    pub fn ensure_session_participant(&mut self, nick: &str) -> Result<(), MessengerError> {
+        if self.registered.contains(nick) {
+            return Ok(());
+        }
+        let id = pid(nick)?;
+        let _ = self.engine.register_participant(id, Some(nick.to_owned()), ParticipantPermissions { may_send: true, may_read: true, operator: false });
+        self.registered.insert(nick.to_owned());
+        Ok(())
+    }
+
     pub fn is_registered(&mut self, who: &str) -> bool {
         self.sync().is_ok() && self.registered.contains(who)
     }

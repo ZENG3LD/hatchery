@@ -1481,6 +1481,12 @@ impl gate4agent_runtime_native::NativeChildEnvironmentResolver
 impl NodeServer {
     /// The letter-wake handle for the door, when m4a accounts are on. `token` is what callers
     /// must present.
+    /// Turn on the m4a signer proxy for PTY spawns (replaces `M4A_SESSION_CAP`).
+    #[cfg(unix)]
+    pub fn set_signer_proxy(&self, proxy: Arc<crate::m4a_signer_proxy::SignerProxy>) -> bool {
+        self.shared.signer_proxy.set(proxy).is_ok()
+    }
+
     pub fn wake_handle(&self, token: String, policy: Arc<crate::wake_pipeline::WakePolicy>) -> Option<node_wake::NodeWake> {
         self.shared.m4a_accounts.as_ref()?;
         Some(node_wake::NodeWake::new(Arc::clone(&self.shared), token, policy))
@@ -3194,6 +3200,10 @@ struct NodeShared {
     m4a_accounts: Option<crate::m4a_accounts::M4aSessionAccounts>,
     /// nick -> the session that holds that m4a account (for letter wakes).
     m4a_live: Mutex<BTreeMap<String, (AgentInstanceId, AgentId)>>,
+    /// m4a signer proxy (option A): when set, PTY sessions get a process-bound handle
+    /// instead of a bearer capability.
+    #[cfg(unix)]
+    signer_proxy: std::sync::OnceLock<Arc<crate::m4a_signer_proxy::SignerProxy>>,
     materializations: Mutex<BTreeMap<MaterializationId, MaterializationOwnershipRecord>>,
     spawn_idempotency: Mutex<SpawnIdempotencyCache>,
     managed_spawn_replays:
@@ -3861,8 +3871,43 @@ impl SpawnPreparer for NodeShared {
         };
         // Per-session m4a account: own nick + capability for this PTY child only, on its own
         // overlay or appended to the overlay the spawn already carries.
-        let environment_overlay = match (mode, self.m4a_accounts.as_ref(), crate::m4a_accounts::m4a_provider(provider.as_str())) {
-            (SessionMode::Pty, Some(accounts), Some(m4a_provider)) => {
+        #[cfg(unix)]
+        // `HATCHERY_M4A_SIGNER_SHELL=1` also gives operator shells an identity (live canaries).
+        let signer_provider = crate::m4a_accounts::m4a_provider(provider.as_str()).or_else(|| {
+            (provider.as_str() == "shell" && std::env::var_os("HATCHERY_M4A_SIGNER_SHELL").is_some_and(|v| v == "1")).then_some("shell")
+        });
+        let signer_identity = match (mode, self.signer_proxy.get(), signer_provider) {
+            (SessionMode::Pty, Some(proxy), Some(m4a_provider)) => {
+                let session_key = format!("{}-{}", self.incarnation_id, instance_id.0);
+                let uid = unsafe { libc_geteuid() };
+                let handle = proxy.reserve(&session_key, m4a_provider, uid);
+                let sock = std::env::var_os(crate::m4a_signer_proxy::SOCKET_ENV).unwrap_or_default();
+                tracing::info!(provider = %provider, instance_id = ?instance_id, "m4a signer handle reserved at spawn");
+                Some(vec![
+                    gate4agent_catalog::EnvMutation { key: std::ffi::OsString::from(crate::m4a_signer_proxy::HANDLE_ENV), value: Some(std::ffi::OsString::from(handle)) },
+                    gate4agent_catalog::EnvMutation { key: std::ffi::OsString::from(crate::m4a_signer_proxy::SOCKET_ENV), value: Some(sock) },
+                    gate4agent_catalog::EnvMutation { key: std::ffi::OsString::from("M4A_SESSION_ID"), value: Some(std::ffi::OsString::from(session_key)) },
+                ])
+            }
+            _ => None,
+        };
+        #[cfg(not(unix))]
+        let signer_identity: Option<Vec<gate4agent_catalog::EnvMutation>> = None;
+        let environment_overlay = match (mode, self.m4a_accounts.as_ref(), crate::m4a_accounts::m4a_provider(provider.as_str()), signer_identity) {
+            (SessionMode::Pty, _, _, Some(identity)) => {
+                let merged = match environment_overlay {
+                    None => NativeInstanceLaunchOverlay::new_session_identity(provider.clone(), identity).map(PreparedNativeLaunchOverlay::Instance),
+                    Some(PreparedNativeLaunchOverlay::Instance(mut overlay)) => {
+                        overlay.append_session_identity(identity).map(|()| PreparedNativeLaunchOverlay::Instance(overlay))
+                    }
+                    Some(PreparedNativeLaunchOverlay::Environment(mut overlay)) => {
+                        overlay.append_session_identity(identity).map(|()| PreparedNativeLaunchOverlay::Environment(overlay))
+                    }
+                }
+                .map_err(|_| failure(NodeFailureCode::BackendOperationFailed, "m4a signer handle overlay is invalid"))?;
+                Some(merged)
+            }
+            (SessionMode::Pty, Some(accounts), Some(m4a_provider), None) => {
                 let session_key = format!("{}-{}", self.incarnation_id, instance_id.0);
                 match accounts.provision(m4a_provider, &session_key) {
                     Ok(account) => {
@@ -3891,7 +3936,7 @@ impl SpawnPreparer for NodeShared {
                     }
                 }
             }
-            (SessionMode::Pty, Some(_), None) => {
+            (SessionMode::Pty, Some(_), None, _) => {
                 tracing::warn!(provider = %provider, instance_id = ?instance_id, "m4a session account not assigned: provider has no m4a mapping");
                 environment_overlay
             }
@@ -4085,6 +4130,8 @@ impl NodeShared {
             session_environment_materializer,
             m4a_accounts: crate::m4a_accounts::M4aSessionAccounts::from_env(),
             m4a_live: Mutex::new(BTreeMap::new()),
+            #[cfg(unix)]
+            signer_proxy: std::sync::OnceLock::new(),
             materializations: Mutex::new(
                 materializations
                     .into_iter()
@@ -10293,6 +10340,10 @@ impl NodeShared {
         // family's level discipline forbids at INFO.
         match &event.event {
             ControlEventKind::Running { process_id } => {
+                #[cfg(unix)]
+                if let (Some(proxy), Some(pid)) = (self.signer_proxy.get(), process_id) {
+                    proxy.attach_pid(&format!("{}-{}", self.incarnation_id, address.session.instance_id.0), *pid);
+                }
                 tracing::info!(
                     node_id = %self.node_id,
                     workspace_id = %address.workspace_id,
@@ -10302,6 +10353,14 @@ impl NodeShared {
                 );
             }
             ControlEventKind::Exited { exit_code, forced } => {
+                #[cfg(unix)]
+                if let Some(proxy) = self.signer_proxy.get().cloned() {
+                    let key = format!("{}-{}", self.incarnation_id, address.session.instance_id.0);
+                    if proxy.has_session(&key) {
+                        // Revoke at core off the event path (blocking uplink call).
+                        std::thread::spawn(move || proxy.release(&key));
+                    }
+                }
                 tracing::info!(
                     node_id = %self.node_id,
                     workspace_id = %address.workspace_id,
@@ -27869,3 +27928,9 @@ mod provisional_spawn_tests {
     }
 }
 
+
+#[cfg(unix)]
+extern "C" {
+    #[link_name = "geteuid"]
+    fn libc_geteuid() -> u32;
+}

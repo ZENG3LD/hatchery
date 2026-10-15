@@ -15,6 +15,10 @@ impl CoreSigner for InProcCore {
         let sig = s.sign(token, op, payload).map_err(|e| e.to_string())?;
         Ok(SignedReply { nick: sig.nick, public_key_hex: hex::encode(sig.public_key), signature_hex: hex::encode(sig.signature) })
     }
+    fn provision(&self, provider: &str, session: &str) -> Result<(String, String), String> {
+        let p = self.0.lock().unwrap().provision("box", provider, session, default_rights(), None).map_err(|e| e.to_string())?;
+        Ok((p.nick, p.token))
+    }
 }
 
 const ROLE: &str = "M4A_THREAT_CLIENT";
@@ -27,6 +31,7 @@ fn client_role() {
     match request(std::path::Path::new(&sock), &handle, RIGHT_SEND, b"letter").unwrap() {
         ProxyResponse::Signed(s) => println!("RESULT=signed:{}", s.nick),
         ProxyResponse::Refused { reason } => println!("RESULT=refused:{reason}"),
+        ProxyResponse::Sent { result } => println!("RESULT=sent:{}", result["from"].as_str().unwrap_or("")),
     }
 }
 
@@ -43,6 +48,7 @@ async fn neighbour_shell_cannot_sign_as_another_session() {
     std::fs::create_dir_all(&dir).unwrap();
     let human = HumanKey::from_bytes([9; 32]);
     let mut signer = Signer::init(dir.join("store"), &human).unwrap();
+    signer.register_node("box", &human).unwrap();
     let a = signer.provision("box", "codex", "sess-a", default_rights(), None).unwrap();
     let b = signer.provision("box", "claude-code", "sess-b", default_rights(), None).unwrap();
     let proxy = Arc::new(SignerProxy::new(Arc::new(InProcCore(Mutex::new(signer)))));
@@ -73,6 +79,17 @@ async fn run_scenarios(proxy: &Arc<SignerProxy>, sock: &std::path::Path, a_nick:
     let stolen = release(c_b, &ha);
     assert!(stolen.starts_with("refused:NotInSession"), "{stolen}");
     let _ = release(c_root_a, "none");
+
+    // 5. Lazy path as wired at spawn: reserve before the PTY exists (refused until running),
+    //    attach the PTY pid, first request provisions the identity at core.
+    let h = proxy.reserve("sess-c", "codex", uid);
+    let (c, pid) = spawn_waiting(sock);
+    let early = proxy.sign_for_peer(&h, pid, uid, RIGHT_SEND, b"x");
+    assert!(early.is_err(), "no pid attached yet");
+    proxy.attach_pid("sess-c", pid);
+    let got = release(c, &h);
+    assert!(got.starts_with("signed:codex-"), "{got}");
+    assert_ne!(got, format!("signed:{a_nick}"));
 
     // 4. After stop, even the session's own process is refused.
     let (c, pid) = spawn_waiting(sock);
