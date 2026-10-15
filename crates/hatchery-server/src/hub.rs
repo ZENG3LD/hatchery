@@ -665,6 +665,7 @@ fn signer_dir(data_dir: &Path) -> Result<PathBuf, crate::error::ServerError> {
 
 fn signer_err(e: hatchery_m4a_signer::SignerError) -> HubError {
     use hatchery_m4a_signer::SignerError::*;
+    tracing::warn!(error = ?e, "m4a signer refused a node call");
     match e {
         Locked => HubError::new(423, "signer locked"),
         WrongHumanKey | HumanApprovalRequired => HubError::new(401, "human key required"),
