@@ -23,6 +23,7 @@ members = [
     "crates/hatchery-c2-client",
     "crates/hatchery-c2",
     "crates/hatchery-node",
+    "crates/hatchery-m4a-signer",
     "crates/hatchery-server",
     "crates/hatchery-e2e",
 ]
@@ -50,6 +51,7 @@ default-members = [
     "crates/hatchery-c2-client",
     "crates/hatchery-c2",
     "crates/hatchery-node",
+    "crates/hatchery-m4a-signer",
     "crates/hatchery-server",
     "crates/hatchery-e2e",
 ]
