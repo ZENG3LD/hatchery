@@ -24,6 +24,11 @@ use rand_core::{OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, Zeroizing};
 
+/// Salt the browser passes to the passkey PRF extension (`prf.eval.first`).
+pub const PRF_SALT: &[u8] = b"hatchery/m4a-account-root/v1";
+
+pub mod keyring;
+
 pub const RIGHT_SEND: &str = "send_as";
 pub const RIGHT_RECV: &str = "recv_inbox";
 pub const RIGHT_RUN_CLOSE: &str = "run_close";
@@ -60,6 +65,21 @@ impl HumanKey {
     pub fn from_bytes(b: [u8; 32]) -> Self {
         Self(Zeroizing::new(b))
     }
+    /// From the WebAuthn PRF output of the human's account passkey (evaluated by the
+    /// authenticator in the browser with salt [`PRF_SALT`]). The signer never sees the passkey,
+    /// only this derived secret, and only for the unlock call.
+    pub fn from_passkey_prf(prf_output: &[u8]) -> Self {
+        let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(b"hatchery-passkey-prf/v1"), prf_output);
+        let mut out = Zeroizing::new([0u8; 32]);
+        hk.expand(b"account-root", &mut *out).expect("hkdf length");
+        Self(out)
+    }
+    fn derive(&self, label: &[u8]) -> Zeroizing<[u8; 32]> {
+        let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(b"hatchery-m4a-signer/v1"), &*self.0);
+        let mut out = Zeroizing::new([0u8; 32]);
+        hk.expand(label, &mut *out).expect("hkdf length");
+        out
+    }
     fn kek(&self) -> Zeroizing<[u8; 32]> {
         let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(b"hatchery-m4a-signer/v1"), &*self.0);
         let mut out = Zeroizing::new([0u8; 32]);
@@ -95,6 +115,10 @@ impl Drop for Identity {
 
 #[derive(Serialize, Deserialize, Default)]
 struct Store {
+    #[serde(default)]
+    account: String,
+    #[serde(default)]
+    nodes: BTreeSet<String>,
     root: Option<Vec<u8>>,
     approval_tag: String,
     /// session id -> identity
@@ -129,6 +153,8 @@ pub struct Signature {
 pub struct Signer {
     path: PathBuf,
     unlocked: Option<(Store, Zeroizing<[u8; 32]>)>,
+    /// Account root of the key tree (account -> node -> session), in memory while unlocked.
+    tree: Option<Zeroizing<[u8; 32]>>,
 }
 
 impl Signer {
@@ -140,19 +166,21 @@ impl Signer {
         }
         let root = KeyPair::new();
         let store = Store {
+            account: String::new(),
+            nodes: BTreeSet::new(),
             root: Some(root.private().to_bytes().to_vec()),
             approval_tag: human.approval_tag(),
             sessions: BTreeMap::new(),
             seq: 0,
         };
-        let mut s = Self { path, unlocked: Some((store, human.kek())) };
+        let mut s = Self { path, unlocked: Some((store, human.kek())), tree: Some(human.derive(b"tree-root")) };
         s.persist()?;
         Ok(s)
     }
 
     /// Open a sealed store; it stays locked until [`Signer::unlock`].
     pub fn open(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into(), unlocked: None }
+        Self { path: path.into(), unlocked: None, tree: None }
     }
 
     pub fn is_unlocked(&self) -> bool {
@@ -172,11 +200,60 @@ impl Signer {
         let pt = Zeroizing::new(pt);
         let store: Store = serde_json::from_slice(&pt).map_err(|_| SignerError::Store("corrupt".into()))?;
         self.unlocked = Some((store, kek));
+        self.tree = Some(human.derive(b"tree-root"));
         Ok(())
     }
 
     pub fn lock(&mut self) {
         self.unlocked = None;
+        self.tree = None;
+    }
+
+    /// Bind this store to an account id (once, at enrollment).
+    pub fn set_account(&mut self, account: &str) -> Result<(), SignerError> {
+        let (store, _) = self.unlocked.as_mut().ok_or(SignerError::Locked)?;
+        if !store.account.is_empty() && store.account != account {
+            return Err(SignerError::Denied("store belongs to another account".into()));
+        }
+        store.account = account.to_owned();
+        self.persist()
+    }
+
+    pub fn account(&self) -> Result<String, SignerError> {
+        Ok(self.unlocked.as_ref().ok_or(SignerError::Locked)?.0.account.clone())
+    }
+
+    /// Add a node branch under this account (human key per operation).
+    pub fn register_node(&mut self, node: &str, human: &HumanKey) -> Result<(), SignerError> {
+        self.check_approval(Some(human))?;
+        let (store, _) = self.unlocked.as_mut().ok_or(SignerError::Locked)?;
+        store.nodes.insert(node.to_owned());
+        self.persist()
+    }
+
+    fn require_node(&self, node: &str) -> Result<(), SignerError> {
+        let (store, _) = self.unlocked.as_ref().ok_or(SignerError::Locked)?;
+        // A store with no node branches yet (single-human dev setups) accepts any node.
+        if store.nodes.is_empty() || store.nodes.contains(node) {
+            Ok(())
+        } else {
+            Err(SignerError::Denied(format!("node {node} is not in this account's tree")))
+        }
+    }
+
+    /// Session key = HKDF(HKDF(account root, node), session): the tree account -> node -> session.
+    fn session_seed(&self, node: &str, session: &str) -> Result<[u8; 32], SignerError> {
+        let tree = self.tree.as_ref().ok_or(SignerError::Locked)?;
+        let node_key = {
+            let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(b"node"), &**tree);
+            let mut k = Zeroizing::new([0u8; 32]);
+            hk.expand(node.as_bytes(), &mut *k).expect("hkdf");
+            k
+        };
+        let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(b"session"), &*node_key);
+        let mut out = [0u8; 32];
+        hk.expand(session.as_bytes(), &mut out).expect("hkdf");
+        Ok(out)
     }
 
     fn persist(&mut self) -> Result<(), SignerError> {
@@ -257,16 +334,18 @@ impl Signer {
         rights: BTreeSet<String>,
         parent: Option<String>,
     ) -> Result<Provisioned, SignerError> {
+        self.require_node(node)?;
+        let seed = self.session_seed(node, session)?;
         let root = self.root()?;
         let (store, _) = self.unlocked.as_mut().ok_or(SignerError::Locked)?;
+        let account = store.account.clone();
         // Respawn of the same session: keep identity, rotate token (old one revoked).
         let ident = match store.sessions.get_mut(session) {
             Some(id) if id.retired => return Err(SignerError::Retired),
             Some(id) => id,
             None => {
                 store.seq += 1;
-                let mut secret = [0u8; 32];
-                OsRng.fill_bytes(&mut secret);
+                let secret = seed;
                 let nick = format!("{}-{}", short(provider), store.seq);
                 store.sessions.insert(
                     session.to_owned(),
@@ -286,7 +365,13 @@ impl Signer {
         };
         ident.rights = rights.clone();
         let nick = ident.nick.clone();
-        let mut b = biscuit!(r#"session({session}); nick({nick}); node({node});"#, session = session, nick = nick.as_str(), node = node);
+        let mut b = biscuit!(
+            r#"account({account}); session({session}); nick({nick}); node({node});"#,
+            account = account.as_str(),
+            session = session,
+            nick = nick.as_str(),
+            node = node
+        );
         for r in &rights {
             b = b.fact(biscuit_auth::macros::fact!(r#"right({r}, {nick})"#, r = r.as_str(), nick = nick.as_str())).map_err(|_| SignerError::BadToken)?;
         }
