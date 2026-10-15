@@ -48,6 +48,7 @@ fn a_token_cannot_be_rerouted_into_another_humans_branch() {
     let mut k = Keyring::new(&d);
     k.enroll("alice", &alice()).unwrap();
     k.enroll("bob", &bob()).unwrap();
+    k.branch("alice").unwrap().register_node("n", &alice()).unwrap();
     let a = k.provision("alice", "n", "codex", "a1", default_rights(), None).unwrap();
     // Verifying Alice's token inside Bob's branch fails: different Biscuit root.
     assert!(k.branch("bob").unwrap().sign(&a.token, RIGHT_SEND, b"m").is_err());
@@ -58,9 +59,25 @@ fn key_tree_is_deterministic_per_account_node_session_and_distinct_across_humans
     let mut k = Keyring::new(dir("tree"));
     k.enroll("alice", &alice()).unwrap();
     k.enroll("bob", &bob()).unwrap();
+    k.branch("alice").unwrap().register_node("n", &alice()).unwrap();
+    k.branch("bob").unwrap().register_node("n", &bob()).unwrap();
     let a = k.provision("alice", "n", "codex", "same", default_rights(), None).unwrap();
     let b = k.provision("bob", "n", "codex", "same", default_rights(), None).unwrap();
     assert_ne!(a.public_key, b.public_key, "same node/session ids under two humans -> different keys");
     let a2 = k.provision("alice", "n", "codex", "other", default_rights(), None).unwrap();
     assert_ne!(a.public_key, a2.public_key);
+}
+
+#[test]
+fn a_node_cannot_use_another_nodes_capability_and_unregistered_nodes_get_nothing() {
+    let mut k = Keyring::new(dir("nodes"));
+    k.enroll("alice", &alice()).unwrap();
+    assert!(k.provision("alice", "stranger", "codex", "x", default_rights(), None).is_err());
+    k.branch("alice").unwrap().register_node("n1", &alice()).unwrap();
+    k.branch("alice").unwrap().register_node("n2", &alice()).unwrap();
+    let a = k.provision("alice", "n1", "codex", "a1", default_rights(), None).unwrap();
+    assert!(k.sign_from_node("n1", &a.token, RIGHT_SEND, b"m").is_ok());
+    assert!(k.sign_from_node("n2", &a.token, RIGHT_SEND, b"m").is_err());
+    assert_eq!(k.account_for_node("n2").as_deref(), Some("alice"));
+    assert_eq!(k.account_for_node("stranger"), None);
 }

@@ -21,6 +21,17 @@ pub const SOCKET_ENV: &str = "M4A_SIGNER_SOCK";
 /// The hq-core signer as seen from the node (in production: a call over the C2 uplink).
 pub trait CoreSigner: Send + Sync {
     fn sign(&self, token: &str, op: &str, payload: &[u8]) -> Result<SignedReply, String>;
+    /// Identity for a fresh session: (nick, token). Default: not supported.
+    fn provision(&self, _provider: &str, _session: &str) -> Result<(String, String), String> {
+        Err("provision not supported".into())
+    }
+    /// Signer-signed letter delivered by core from the token's own nick.
+    fn send(&self, _token: &str, _letter: &serde_json::Value) -> Result<serde_json::Value, String> {
+        Err("send not supported".into())
+    }
+    fn revoke(&self, _session: &str) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -48,9 +59,12 @@ impl ProcTree for LinuxProc {
 
 struct Binding {
     session: String,
+    provider: String,
     nick: String,
+    /// 0 until the PTY child is running (requests before that are refused).
     root_pid: u32,
     uid: u32,
+    /// Empty until the first request provisions the identity at core.
     token: Zeroizing<String>,
 }
 
@@ -87,9 +101,75 @@ impl SignerProxy {
         b.retain(|_, v| v.session != session);
         b.insert(
             handle.clone(),
-            Binding { session: session.to_owned(), nick: nick.to_owned(), root_pid, uid, token: Zeroizing::new(token) },
+            Binding { session: session.to_owned(), provider: String::new(), nick: nick.to_owned(), root_pid, uid, token: Zeroizing::new(token) },
         );
         handle
+    }
+
+    /// At spawn, before the PTY exists: a handle for its env; identity is provisioned lazily.
+    pub fn reserve(&self, session: &str, provider: &str, uid: u32) -> String {
+        let h = self.bind(session, "", 0, uid, String::new());
+        if let Some(b) = self.bindings.lock().unwrap_or_else(|p| p.into_inner()).get_mut(&h) {
+            b.provider = provider.to_owned();
+        }
+        h
+    }
+
+    /// The PTY child is running: bind the handle to its process tree.
+    pub fn attach_pid(&self, session: &str, pid: u32) {
+        for b in self.bindings.lock().unwrap_or_else(|p| p.into_inner()).values_mut() {
+            if b.session == session && b.root_pid == 0 {
+                b.root_pid = pid;
+            }
+        }
+    }
+
+    pub fn has_session(&self, session: &str) -> bool {
+        self.bindings.lock().unwrap_or_else(|p| p.into_inner()).values().any(|b| b.session == session)
+    }
+
+    /// Stop: drop the handle and revoke at core.
+    pub fn release(&self, session: &str) {
+        if self.has_session(session) {
+            self.unbind(session);
+            if let Err(e) = self.core.revoke(session) {
+                tracing::warn!(error = %e, "m4a signer revoke failed");
+            }
+        }
+    }
+
+    /// Authorize the peer and return (token, nick), provisioning at core on first use.
+    fn authorize(&self, handle: &str, peer_pid: u32, peer_uid: u32) -> Result<(Zeroizing<String>, String), Refusal> {
+        let (session, provider, token, nick) = {
+            let b = self.bindings.lock().unwrap_or_else(|p| p.into_inner());
+            let v = b.iter().find(|(h, _)| ct_eq(h.as_bytes(), handle.as_bytes())).map(|(_, v)| v).ok_or(Refusal::UnknownHandle)?;
+            if v.uid != peer_uid {
+                return Err(Refusal::WrongUser);
+            }
+            if v.root_pid == 0 || !self.in_tree(v.root_pid, peer_pid) {
+                return Err(Refusal::NotInSession);
+            }
+            (v.session.clone(), v.provider.clone(), v.token.clone(), v.nick.clone())
+        };
+        if !token.is_empty() {
+            return Ok((token, nick));
+        }
+        let (nick, token) = self.core.provision(&provider, &session).map_err(Refusal::Upstream)?;
+        let mut b = self.bindings.lock().unwrap_or_else(|p| p.into_inner());
+        let v = b.get_mut(handle).ok_or(Refusal::UnknownHandle)?;
+        v.token = Zeroizing::new(token.clone());
+        v.nick = nick.clone();
+        Ok((Zeroizing::new(token), nick))
+    }
+
+    /// Send a letter as the peer's own session (core signs and delivers).
+    pub fn send_for_peer(&self, handle: &str, peer_pid: u32, peer_uid: u32, letter: &serde_json::Value) -> Result<serde_json::Value, Refusal> {
+        let (token, nick) = self.authorize(handle, peer_pid, peer_uid)?;
+        let out = self.core.send(&token, letter).map_err(Refusal::Upstream)?;
+        if out.get("from").and_then(|v| v.as_str()) != Some(nick.as_str()) {
+            return Err(Refusal::Upstream("core answered for another nick".into()));
+        }
+        Ok(out)
     }
 
     /// Session stopped: its handle stops working at once.
@@ -112,18 +192,7 @@ impl SignerProxy {
 
     /// Authorize a peer (kernel-reported pid/uid) presenting `handle`, then ask core to sign.
     pub fn sign_for_peer(&self, handle: &str, peer_pid: u32, peer_uid: u32, op: &str, payload: &[u8]) -> Result<SignedReply, Refusal> {
-        let (token, nick) = {
-            let b = self.bindings.lock().unwrap_or_else(|p| p.into_inner());
-            let found = b.iter().find(|(h, _)| ct_eq(h.as_bytes(), handle.as_bytes())).map(|(_, v)| v);
-            let v = found.ok_or(Refusal::UnknownHandle)?;
-            if v.uid != peer_uid {
-                return Err(Refusal::WrongUser);
-            }
-            if !self.in_tree(v.root_pid, peer_pid) {
-                return Err(Refusal::NotInSession);
-            }
-            (v.token.clone(), v.nick.clone())
-        };
+        let (token, nick) = self.authorize(handle, peer_pid, peer_uid)?;
         let reply = self.core.sign(&token, op, payload).map_err(Refusal::Upstream)?;
         if reply.nick != nick {
             return Err(Refusal::Upstream("core answered for another nick".into()));
@@ -152,6 +221,7 @@ pub struct ProxyRequest {
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ProxyResponse {
     Signed(SignedReply),
+    Sent { result: serde_json::Value },
     Refused { reason: String },
 }
 
@@ -181,11 +251,16 @@ pub async fn serve(proxy: Arc<SignerProxy>, listener: tokio::net::UnixListener) 
                         let proxy = proxy.clone();
                         let uid = cred.uid();
                         let res = tokio::task::spawn_blocking(move || {
-                            proxy.sign_for_peer(&req.handle, pid as u32, uid, &req.op, &payload)
+                            if req.op == "send" {
+                                let letter: serde_json::Value = serde_json::from_slice(&payload).map_err(|_| Refusal::Upstream("bad letter".into()))?;
+                                proxy.send_for_peer(&req.handle, pid as u32, uid, &letter).map(|result| ProxyResponse::Sent { result })
+                            } else {
+                                proxy.sign_for_peer(&req.handle, pid as u32, uid, &req.op, &payload).map(ProxyResponse::Signed)
+                            }
                         })
                         .await;
                         match res {
-                            Ok(Ok(s)) => ProxyResponse::Signed(s),
+                            Ok(Ok(r)) => r,
                             Ok(Err(e)) => {
                                 tracing::warn!(peer_pid = pid, reason = ?e, "m4a signer proxy refused a request");
                                 ProxyResponse::Refused { reason: format!("{e:?}") }
@@ -251,5 +326,40 @@ mod tests {
         let ha2 = p.bind("sb", "b", 200, 1000, "tok-b".into());
         assert_eq!(p.sign_for_peer(&hb, 200, 1000, "send_as", b"x"), Err(Refusal::UnknownHandle), "rebind kills the old handle");
         assert!(p.sign_for_peer(&ha2, 200, 1000, "send_as", b"x").is_ok());
+    }
+}
+
+/// Core signer over the node-call channel (Noise over the uplink, opaque to C2; core takes
+/// the node id from the stream). Called from blocking threads only.
+pub struct UplinkCoreSigner {
+    calls: crate::uplink_calls::NodeCalls,
+    rt: tokio::runtime::Handle,
+}
+
+impl UplinkCoreSigner {
+    pub fn new(calls: crate::uplink_calls::NodeCalls, rt: tokio::runtime::Handle) -> Self {
+        Self { calls, rt }
+    }
+    fn call(&self, op: &str, payload: serde_json::Value) -> Result<serde_json::Value, String> {
+        self.rt.block_on(self.calls.call(op, &payload)).map_err(|e| format!("{e:?}"))
+    }
+}
+
+impl CoreSigner for UplinkCoreSigner {
+    fn sign(&self, token: &str, op: &str, payload: &[u8]) -> Result<SignedReply, String> {
+        let v = self.call("signer.sign", serde_json::json!({ "token": token, "op": op, "payload_hex": hex::encode(payload) }))?;
+        serde_json::from_value(v).map_err(|e| e.to_string())
+    }
+    fn provision(&self, provider: &str, session: &str) -> Result<(String, String), String> {
+        let v = self.call("signer.provision", serde_json::json!({ "provider": provider, "session": session }))?;
+        Ok((v["nick"].as_str().ok_or("no nick")?.to_owned(), v["token"].as_str().ok_or("no token")?.to_owned()))
+    }
+    fn send(&self, token: &str, letter: &serde_json::Value) -> Result<serde_json::Value, String> {
+        let mut p = letter.clone();
+        p["token"] = serde_json::Value::String(token.to_owned());
+        self.call("signer.send", p)
+    }
+    fn revoke(&self, session: &str) -> Result<(), String> {
+        self.call("signer.revoke", serde_json::json!({ "session": session })).map(|_| ())
     }
 }

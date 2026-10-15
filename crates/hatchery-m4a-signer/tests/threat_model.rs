@@ -13,7 +13,7 @@ fn human() -> HumanKey {
 #[test]
 fn locked_signer_neither_provisions_nor_signs_and_wrong_human_key_cannot_unlock() {
     let p = tmp("locked");
-    let mut s = Signer::init(&p, &human()).unwrap();
+    let mut s = Signer::init(&p, &human()).unwrap(); for n in ["n1", "box", "n"] { s.register_node(n, &human()).unwrap(); }
     let a = s.provision("n1", "codex", "sa", default_rights(), None).unwrap();
     s.lock();
     assert_eq!(s.sign(&a.token, RIGHT_SEND, b"x").unwrap_err(), SignerError::Locked);
@@ -27,7 +27,7 @@ fn locked_signer_neither_provisions_nor_signs_and_wrong_human_key_cannot_unlock(
 #[test]
 fn sealed_store_on_disk_contains_no_key_material() {
     let p = tmp("disk");
-    let mut s = Signer::init(&p, &human()).unwrap();
+    let mut s = Signer::init(&p, &human()).unwrap(); for n in ["n1", "box", "n"] { s.register_node(n, &human()).unwrap(); }
     let a = s.provision("n1", "codex", "sa", default_rights(), None).unwrap();
     let raw = std::fs::read(&p).unwrap();
     assert!(!raw.windows(a.nick.len()).any(|w| w == a.nick.as_bytes()), "store must be sealed");
@@ -40,7 +40,7 @@ fn sealed_store_on_disk_contains_no_key_material() {
 
 #[test]
 fn a_session_signs_only_as_itself_never_as_its_neighbour() {
-    let mut s = Signer::init(tmp("neigh"), &human()).unwrap();
+    let mut s = Signer::init(tmp("neigh"), &human()).unwrap(); for n in ["n1", "box", "n"] { s.register_node(n, &human()).unwrap(); }
     let a = s.provision("n1", "codex", "sa", default_rights(), None).unwrap();
     let b = s.provision("n1", "claude-code", "sb", default_rights(), None).unwrap();
     let sig = s.sign(&a.token, RIGHT_SEND, b"hello").unwrap();
@@ -62,7 +62,7 @@ fn a_session_signs_only_as_itself_never_as_its_neighbour() {
 
 #[test]
 fn respawn_rotates_and_stop_revokes_the_capability() {
-    let mut s = Signer::init(tmp("rot"), &human()).unwrap();
+    let mut s = Signer::init(tmp("rot"), &human()).unwrap(); for n in ["n1", "box", "n"] { s.register_node(n, &human()).unwrap(); }
     let first = s.provision("n1", "codex", "sa", default_rights(), None).unwrap();
     let second = s.provision("n1", "codex", "sa", default_rights(), None).unwrap();
     assert_eq!(first.nick, second.nick, "same session keeps its nick");
@@ -74,7 +74,7 @@ fn respawn_rotates_and_stop_revokes_the_capability() {
 
 #[test]
 fn child_sessions_need_spawn_child_get_new_identity_and_no_wider_rights() {
-    let mut s = Signer::init(tmp("child"), &human()).unwrap();
+    let mut s = Signer::init(tmp("child"), &human()).unwrap(); for n in ["n1", "box", "n"] { s.register_node(n, &human()).unwrap(); }
     // spawn_child needs the human key.
     let mut with_spawn = default_rights();
     with_spawn.insert(RIGHT_SPAWN_CHILD.into());
@@ -106,7 +106,7 @@ fn child_sessions_need_spawn_child_get_new_identity_and_no_wider_rights() {
 
 #[test]
 fn retire_needs_the_human_key() {
-    let mut s = Signer::init(tmp("retire"), &human()).unwrap();
+    let mut s = Signer::init(tmp("retire"), &human()).unwrap(); for n in ["n1", "box", "n"] { s.register_node(n, &human()).unwrap(); }
     let a = s.provision("n1", "codex", "sa", default_rights(), None).unwrap();
     assert!(s.retire("sa", &HumanKey::from_bytes([2; 32])).is_err());
     s.retire("sa", &human()).unwrap();

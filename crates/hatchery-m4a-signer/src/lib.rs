@@ -233,8 +233,7 @@ impl Signer {
 
     fn require_node(&self, node: &str) -> Result<(), SignerError> {
         let (store, _) = self.unlocked.as_ref().ok_or(SignerError::Locked)?;
-        // A store with no node branches yet (single-human dev setups) accepts any node.
-        if store.nodes.is_empty() || store.nodes.contains(node) {
+        if store.nodes.contains(node) {
             Ok(())
         } else {
             Err(SignerError::Denied(format!("node {node} is not in this account's tree")))
@@ -417,6 +416,24 @@ impl Signer {
         let key = SigningKey::from_bytes(&ident.secret);
         let msg = domain_message(&nick, op, payload);
         Ok(Signature { nick, public_key: key.verifying_key().to_bytes(), signature: key.sign(&msg).to_bytes() })
+    }
+
+    pub fn has_node(&self, node: &str) -> bool {
+        self.unlocked.as_ref().is_some_and(|(s, _)| s.nodes.contains(node))
+    }
+
+    /// [`Signer::sign`], and the session must live on `node` (the node the call came from,
+    /// as authenticated by the transport): a node cannot use another node's capability.
+    pub fn sign_from_node(&self, node: &str, token: &str, op: &str, payload: &[u8]) -> Result<Signature, SignerError> {
+        let (session, _) = self.verify(token, op)?;
+        self.session_on_node(&session, node)?;
+        self.sign(token, op, payload)
+    }
+
+    pub fn session_on_node(&self, session: &str, node: &str) -> Result<(), SignerError> {
+        let (store, _) = self.unlocked.as_ref().ok_or(SignerError::Locked)?;
+        let i = store.sessions.get(session).ok_or(SignerError::UnknownSession)?;
+        if i.node == node { Ok(()) } else { Err(SignerError::Denied("session is on another node".into())) }
     }
 
     /// Session stopped: its capability stops working (identity kept for history).

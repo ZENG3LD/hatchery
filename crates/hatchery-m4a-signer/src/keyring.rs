@@ -69,6 +69,16 @@ impl Keyring {
         Ok(src[start..end].to_owned())
     }
 
+    /// The unlocked account whose tree contains `node`.
+    pub fn account_for_node(&self, node: &str) -> Option<String> {
+        self.accounts.iter().find(|(_, s)| s.has_node(node)).map(|(a, _)| a.clone())
+    }
+
+    pub fn sign_from_node(&self, node: &str, token: &str, op: &str, payload: &[u8]) -> Result<Signature, SignerError> {
+        let account = Self::account_of(token)?;
+        self.accounts.get(&account).ok_or(SignerError::Locked)?.sign_from_node(node, token, op, payload)
+    }
+
     pub fn sign(&self, token: &str, op: &str, payload: &[u8]) -> Result<Signature, SignerError> {
         let account = Self::account_of(token)?;
         self.accounts.get(&account).ok_or(SignerError::Locked)?.sign(token, op, payload)

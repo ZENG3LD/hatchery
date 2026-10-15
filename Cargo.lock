@@ -2120,6 +2120,8 @@ dependencies = [
  "hatchery-c2-client",
  "hatchery-core",
  "hatchery-enroll",
+ "hatchery-m4a-signer",
+ "hex",
  "libdbus-sys",
  "m4a-agent",
  "mail4agent-api",
