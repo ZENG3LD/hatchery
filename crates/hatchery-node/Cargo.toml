@@ -42,7 +42,7 @@ gate4agent-handle = { version = "0.5.2" }
 gate4agent-node-core = { version = "0.5.2" }
 gate4agent-node-protocol = { version = "0.5.4" }
 gate4agent-node-wire = { version = "0.5.4" }
-gate4agent-runtime-native = { version = "0.5.2" }
+gate4agent-runtime-native = { version = "0.5.4" }
 gate4agent-wake = { version = "0.5.2", default-features = false, features = ["wake-routine", "wake-kimi"] }
 gate4agent-testkit = { optional = true, version = "0.5.2" }
 gate4agent-types = { version = "0.5.2" }
