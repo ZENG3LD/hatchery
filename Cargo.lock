@@ -2023,6 +2023,7 @@ dependencies = [
  "hatchery-build",
  "hatchery-core",
  "hatchery-enroll",
+ "hatchery-m4a-signer",
  "hex",
  "image",
  "kimi-session-restore",
@@ -2044,6 +2045,7 @@ dependencies = [
  "uuid",
  "vt100",
  "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]

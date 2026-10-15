@@ -50,6 +50,8 @@ pub mod restream_g4a_bridge;
 #[cfg(feature = "d2b")]
 pub mod browser_capture;
 pub mod m4a_accounts;
+#[cfg(unix)]
+pub mod m4a_signer_proxy;
 pub mod door;
 #[cfg(feature = "local-server")]
 pub mod local_server;
