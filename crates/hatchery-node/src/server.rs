@@ -209,6 +209,7 @@ use tokio::task::{AbortHandle, JoinSet};
 use tokio::time::{sleep, timeout};
 
 mod http_api;
+pub mod backend_paths;
 pub mod node_wake;
 
 tokio::task_local! {
@@ -3201,6 +3202,8 @@ struct NodeShared {
     /// Fresh spawns waiting for their first successful HQ attach. Removed on
     /// Resize/TerminalBytes (sessionize) or when the grace reaper stops them.
     provisional_spawns: Mutex<BTreeMap<AgentInstanceId, (SessionAddress, Instant)>>,
+    /// ACP launch options waiting for the agent to advertise its config options.
+    pending_acp_options: Mutex<BTreeMap<AgentInstanceId, (Option<String>, Option<String>)>>,
     history: Mutex<NodeEventHistory>,
     event_tx: broadcast::Sender<NodeEventEnvelope>,
     terminal_event_tx: broadcast::Sender<Arc<Vec<NodeEventEnvelope>>>,
@@ -4094,6 +4097,7 @@ impl NodeShared {
             managed_spawn_replays: Mutex::new(BTreeMap::new()),
             controller: Mutex::new(None),
             provisional_spawns: Mutex::new(BTreeMap::new()),
+            pending_acp_options: Mutex::new(BTreeMap::new()),
             history: Mutex::new(NodeEventHistory::new(record_providers)),
             event_tx,
             terminal_event_tx,
@@ -10372,6 +10376,7 @@ impl NodeShared {
             }
             _ => {}
         }
+        self.apply_pending_acp_options(&address, &event);
         let stream_chunk = agent_stream_chunk(&event);
         self.publish(NodeEvent::Control {
             address: address.clone(),
@@ -11282,6 +11287,41 @@ impl NodeShared {
     /// only when HQ attaches (Resize / TerminalBytes) — that is *not* a
     /// provider session; it only cancels the orphan timer. Disconnect/reload
     /// draft kills are owned by HQ and arm only on a real client WS close.
+    /// ACP path of launch options: once the agent advertises its config options, write the
+    /// pending model / effort through session/set_config_option (session/set_model when the
+    /// agent has no model option). Gaps are logged, never forced.
+    fn apply_pending_acp_options(&self, address: &SessionAddress, event: &ControlEvent) {
+        let ControlEventKind::ProviderEvent { event: ProviderEvent::ConfigOptionsUpdated { options }, .. } = &event.event else {
+            return;
+        };
+        let id = address.session.instance_id;
+        let Some((model, effort)) = self.pending_acp_options.lock().unwrap_or_else(|p| p.into_inner()).remove(&id) else {
+            return;
+        };
+        let advertised: Vec<(String, Option<String>, Vec<String>)> = options
+            .iter()
+            .map(|o| (o.id.clone(), o.category.clone(), o.choices.iter().map(|c| c.value_json.clone()).collect()))
+            .collect();
+        let (writes, set_model, effort_gap) =
+            backend_paths::acp_option_writes(&advertised, model.as_deref(), effort.as_deref());
+        if set_model {
+            if let Some(model_id) = model.clone() {
+                if let Err(e) = self.dispatch(ControlCommand::SetSessionModel { instance_id: id, model_id }) {
+                    tracing::warn!(instance_id = id.0, message = %e.message, "acp set_model failed");
+                }
+            }
+        }
+        for (option_id, value_json) in writes {
+            if let Err(e) = self.dispatch(ControlCommand::SetSessionConfigOption { instance_id: id, option_id, value_json }) {
+                tracing::warn!(instance_id = id.0, message = %e.message, "acp set_config_option failed");
+            }
+        }
+        if effort_gap {
+            tracing::warn!(instance_id = id.0, effort = ?effort, "acp agent advertises no matching thought_level option; effort not applied");
+        }
+        tracing::info!(instance_id = id.0, model = ?model, effort = ?effort, "launch options applied over acp");
+    }
+
     fn mark_spawn_provisional(&self, address: SessionAddress) {
         let id = address.session.instance_id;
         self.provisional_spawns
@@ -16291,12 +16331,33 @@ async fn process_request_inner(shared: &NodeShared, connection_id: u64, role: Cl
             if let Some(prompt) = initial_prompt.as_deref() {
                 validate_node_text("spawn initial prompt", prompt)?;
             }
+            let plan = backend_paths::plan_launch_options(
+                provider.as_str(),
+                mode,
+                options.model.is_some(),
+                options.effort.is_some(),
+            )
+            .map_err(|r| {
+                tracing::warn!(%provider, reason = %r.message, "launch option path refused");
+                failure(NodeFailureCode::InvalidRequest, "launch option path refused")
+            })?;
             let selection = spawn_selection(&options)?;
+            let pty_selection = match plan {
+                backend_paths::LaunchOptionsPlan::PtyFlags => selection,
+                _ => None,
+            };
             let spawned = SPAWN_SESSION_OPTIONS
-                .scope(selection, shared.spawn_session(workspace_id.clone(), provider.clone(), mode, terminal_size, initial_prompt))
+                .scope(pty_selection, shared.spawn_session(workspace_id.clone(), provider.clone(), mode, terminal_size, initial_prompt))
                 .await;
             match spawned {
                 Ok(session) => {
+                    if plan == backend_paths::LaunchOptionsPlan::AcpAfterSpawn {
+                        shared
+                            .pending_acp_options
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .insert(session.session.instance_id, (options.model.clone(), options.effort.clone()));
+                    }
                     shared.mark_spawn_provisional(session.clone());
                     tracing::info!(%provider, model = ?options.model, effort = ?options.effort, "session spawned with launch options");
                     Ok(NodeResponse::SpawnAccepted { session })

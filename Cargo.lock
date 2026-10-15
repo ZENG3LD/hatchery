@@ -1143,9 +1143,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-adapters"
-version = "0.5.2"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b8caa8e5c835b49d82246de4050c03df94d48c6c1cf821a7855fcfc3c00d056"
+checksum = "5e20cf01a27e2949ec8e196013710ca6f2bdaee9fb0ca528f2b1858cf410dc41"
 dependencies = [
  "gate4agent-types",
  "serde_json",
