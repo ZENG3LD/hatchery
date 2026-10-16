@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-m4a-signer"
-version = "0.2.14"
+version = "0.2.15"
 edition = "2021"
 repository = "https://github.com/ZENG3LD/hatchery"
 description = "hq-core m4a signer: per-session keys that never leave the signer, sealed by a human key, Biscuit capabilities with attenuation for child sessions"
