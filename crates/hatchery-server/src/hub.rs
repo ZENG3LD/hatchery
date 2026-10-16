@@ -296,7 +296,10 @@ impl Hub {
                 let proof = Proof { hub: self, node: node_id, token };
                 let (m4a_nick, room, event) = link
                     .deliver(&sig.nick, &sig.public_key, &proof, to, body)
-                    .map_err(|e| HubError::new(if e.0 >= 400 && e.0 < 600 { e.0 } else { 502 }, e.1))?;
+                    .map_err(|e| {
+                        tracing::warn!(node = node_id, nick = %sig.nick, status = e.0, error = %e.1, "m4a delivery failed");
+                        HubError::new(if e.0 >= 400 && e.0 < 600 { e.0 } else { 502 }, e.1)
+                    })?;
                 tracing::info!(node = node_id, nick = %sig.nick, m4a = %m4a_nick, "signed letter delivered to m4a");
                 Ok(json!({ "message_id": event, "room": room, "from": m4a_nick, "signature_hex": hex::encode(sig.signature), "public_key_hex": hex::encode(sig.public_key) }))
             }
