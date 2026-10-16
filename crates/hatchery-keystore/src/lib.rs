@@ -472,6 +472,22 @@ impl Signer {
         self.verify(token, &any)
     }
 
+    /// Sign an m4a key-proof statement (`m4a-key-login-v1` / `m4a-key-enroll-v1`) with the
+    /// token's own session key, so the session's m4a account is proven by the same key that
+    /// never leaves the keystore. Any other message is refused: this cannot sign letters or
+    /// arbitrary bytes. The session must live on `node`.
+    pub fn sign_m4a_keyproof(&self, node: &str, token: &str, message: &[u8]) -> Result<Signature, SignerError> {
+        if !(message.starts_with(b"m4a-key-login-v1\n") || message.starts_with(b"m4a-key-enroll-v1\n")) {
+            return Err(SignerError::Denied("not an m4a key proof".into()));
+        }
+        let (session, nick) = self.verify(token, grants::M4A_SEND)?;
+        self.session_on_node(&session, node)?;
+        let (store, _) = self.unlocked.as_ref().ok_or(SignerError::Locked)?;
+        let ident = store.sessions.get(&session).ok_or(SignerError::UnknownSession)?;
+        let key = kt::KeyHandle::from_seed(&ident.secret);
+        Ok(Signature { nick, public_key: key.public_key(), signature: key.sign(message) })
+    }
+
     pub fn has_node(&self, node: &str) -> bool {
         self.unlocked.as_ref().is_some_and(|(s, _)| s.nodes.contains(node))
     }

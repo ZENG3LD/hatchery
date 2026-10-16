@@ -38,6 +38,26 @@ impl Keyring {
         self.accounts.insert(account, s).map_err(|_| SignerError::Denied("bad account id".into()))
     }
 
+    /// Whether `account` already has a sealed branch on disk.
+    pub fn exists(&self, account: &str) -> bool {
+        self.path(account).map(|p| p.exists()).unwrap_or(false)
+    }
+
+    /// Lock every other unlocked account that holds one of `account`'s nodes, so that node's
+    /// sessions get their identities from `account` alone. Returns the accounts locked.
+    pub fn take_nodes(&mut self, account: &str, nodes: &[String]) -> Vec<String> {
+        let others: Vec<String> = self
+            .accounts
+            .iter()
+            .filter(|(a, s)| a.as_str() != account && nodes.iter().any(|n| s.has_node(n)))
+            .map(|(a, _)| a.clone())
+            .collect();
+        for a in &others {
+            self.accounts.remove(a);
+        }
+        others
+    }
+
     pub fn lock(&mut self, account: &str) {
         self.accounts.remove(account);
     }
@@ -67,6 +87,11 @@ impl Keyring {
     pub fn sign(&self, token: &str, op: &str, payload: &[u8]) -> Result<Signature, SignerError> {
         let account = Self::account_of(token)?;
         self.accounts.get(&account).ok_or(SignerError::Locked)?.sign(token, op, payload)
+    }
+
+    pub fn sign_m4a_keyproof(&self, node: &str, token: &str, message: &[u8]) -> Result<Signature, SignerError> {
+        let account = Self::account_of(token)?;
+        self.accounts.get(&account).ok_or(SignerError::Locked)?.sign_m4a_keyproof(node, token, message)
     }
 
     pub fn delegate(&self, token: &str, transport: &str) -> Result<String, SignerError> {

@@ -9,6 +9,8 @@ pub mod m4a;
 pub mod memory;
 #[cfg(feature = "m4a")]
 pub mod hub;
+#[cfg(feature = "m4a")]
+pub mod m4a_link;
 pub mod node_controller;
 pub mod drain_consumer;
 pub mod operator_control;
