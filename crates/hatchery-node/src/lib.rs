@@ -36,6 +36,7 @@ mod dig2_station_lease;
 #[cfg(feature = "dig2-station-probe")]
 mod dig2_station_probe;
 pub mod kit;
+pub mod local_infra;
 #[cfg(feature = "wireguard")]
 pub(crate) use gate4agent_node_core::kit_wireguard;
 mod network_allowlist_catalog;

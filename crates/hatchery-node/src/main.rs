@@ -552,6 +552,26 @@ async fn main() {
     let restream_uplink_early = restream_uplink.or_else(|| {
         std::env::var("HATCHERY_RESTREAM_UPLINK").ok().and_then(|v| v.parse().ok())
     });
+    // Reuse, never replace: a node already serving this ops address keeps
+    // running and this process steps aside (graceful handoff is spec-only).
+    match hatchery_node::local_infra::probe(api_listen, "gate4agent-node", std::time::Duration::from_secs(2)) {
+        hatchery_node::local_infra::Probe::Ours(info) => {
+            tracing::info!(
+                %api_listen,
+                version = info.version.as_deref().unwrap_or("?"),
+                pid = info.pid.unwrap_or(0),
+                "a gate4agent-node already serves this address; reusing it, not starting a second"
+            );
+            if info.older_than(env!("CARGO_PKG_VERSION")) {
+                tracing::warn!(minimum = env!("CARGO_PKG_VERSION"), "running node is older; graceful handoff not available yet, stop it yourself to upgrade");
+            }
+            std::process::exit(0);
+        }
+        hatchery_node::local_infra::Probe::Foreign(detail) => {
+            tracing::warn!(%api_listen, %detail, "ops address held by something that is not gate4agent-node; choose another --api-listen");
+        }
+        hatchery_node::local_infra::Probe::Free => {}
+    }
     let config = NodeServerConfig::new(endpoint, token, node_id, workspaces)
         .and_then(|config| config.with_state_path(&state_path))
         .and_then(|config| config.with_api_listen(api_listen))

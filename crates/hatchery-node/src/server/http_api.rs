@@ -124,6 +124,8 @@ fn health_body(shared: &NodeShared) -> Value {
         "version": env!("CARGO_PKG_VERSION"),
         "build_stamp": BUILD_STAMP,
         "started_at_unix_ms": shared.started_at_unix_ms,
+        // Graceful control verbs (spec local-infra-reuse); none yet.
+        "capabilities": [],
     })
 }
 

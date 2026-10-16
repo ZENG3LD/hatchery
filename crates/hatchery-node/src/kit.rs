@@ -103,54 +103,16 @@ pub fn courier_bind() -> Result<std::net::SocketAddr, String> {
     raw.parse().map_err(|error| format!("{COURIER_BIND_ENV}={raw:?} is invalid: {error}"))
 }
 
-/// Decide [`CourierPlan`] for `addr`: free port -> own; held -> `GET /health`
-/// must answer `"service":"mail4agent"` to attach, anything else is foreign.
-pub fn plan_courier(addr: std::net::SocketAddr, probe_timeout: std::time::Duration) -> CourierPlan {
-    if addr.port() == 0 {
-        return CourierPlan::Own(addr);
-    }
-    match std::net::TcpListener::bind(addr) {
-        Ok(listener) => {
-            drop(listener);
-            return CourierPlan::Own(addr);
-        }
-        Err(error) if error.kind() != std::io::ErrorKind::AddrInUse => {
-            return CourierPlan::Foreign { addr, detail: format!("cannot bind: {error}") };
-        }
-        Err(_) => {}
-    }
-    match probe_courier_health(addr, probe_timeout) {
-        Ok(version) => CourierPlan::Attach { addr, version },
-        Err(detail) => CourierPlan::Foreign { addr, detail },
-    }
-}
+/// Oldest courier version the node treats as current (the linked mail4agent).
+pub const COURIER_MIN_VERSION: &str = "0.4.14";
 
-/// Minimal HTTP/1.1 `GET /health` against a loopback courier.
-fn probe_courier_health(
-    addr: std::net::SocketAddr,
-    timeout: std::time::Duration,
-) -> Result<Option<String>, String> {
-    use std::io::{Read, Write};
-    let mut stream = std::net::TcpStream::connect_timeout(&addr, timeout).map_err(|e| format!("connect: {e}"))?;
-    let _ = stream.set_read_timeout(Some(timeout));
-    let _ = stream.set_write_timeout(Some(timeout));
-    stream
-        .write_all(format!("GET /health HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").as_bytes())
-        .map_err(|e| format!("write: {e}"))?;
-    let mut raw = Vec::new();
-    let _ = stream.take(64 * 1024).read_to_end(&mut raw);
-    let text = String::from_utf8_lossy(&raw);
-    let (head, body) = text.split_once("\r\n\r\n").ok_or_else(|| "no HTTP response".to_owned())?;
-    if !head.starts_with("HTTP/1.1 200") && !head.starts_with("HTTP/1.0 200") {
-        return Err(format!("health status: {}", head.lines().next().unwrap_or("")));
+/// Decide [`CourierPlan`] for `addr` via [`crate::local_infra::probe`].
+pub fn plan_courier(addr: std::net::SocketAddr, probe_timeout: std::time::Duration) -> CourierPlan {
+    match crate::local_infra::probe(addr, "mail4agent", probe_timeout) {
+        crate::local_infra::Probe::Free => CourierPlan::Own(addr),
+        crate::local_infra::Probe::Ours(info) => CourierPlan::Attach { addr, version: info.version },
+        crate::local_infra::Probe::Foreign(detail) => CourierPlan::Foreign { addr, detail },
     }
-    let start = body.find('{').ok_or_else(|| "health body is not JSON".to_owned())?;
-    let json: serde_json::Value = serde_json::from_str(body[start..].trim_end_matches(|c: char| c != '}'))
-        .map_err(|e| format!("health JSON: {e}"))?;
-    if json.get("service").and_then(|v| v.as_str()) != Some("mail4agent") {
-        return Err("health does not name mail4agent".to_owned());
-    }
-    Ok(json.get("version").and_then(|v| v.as_str()).map(str::to_owned))
 }
 
 #[cfg(feature = "m4a")]
@@ -167,6 +129,10 @@ pub fn start_or_attach_mailbox() -> Option<MailboxHandle> {
     match plan_courier(addr, std::time::Duration::from_secs(2)) {
         CourierPlan::Attach { addr, version } => {
             tracing::info!(%addr, version = version.as_deref().unwrap_or("?"), "mail4agent courier already running; attached, not starting our own");
+            let info = crate::local_infra::ServiceInfo { version, ..Default::default() };
+            if crate::local_infra::upgrade_plan(&info, COURIER_MIN_VERSION) != crate::local_infra::Upgrade::NotNeeded {
+                tracing::warn!(%addr, minimum = COURIER_MIN_VERSION, "running courier is older; kept as is (graceful handoff not available yet)");
+            }
             None
         }
         CourierPlan::Foreign { addr, detail } => {
