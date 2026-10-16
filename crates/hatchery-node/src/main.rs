@@ -273,6 +273,14 @@ async fn main() {
             // Provider sessions run as this unprivileged user; the node keeps the keys.
             "--run-as" => run_as = Some(required_value("--run-as", args.next())),
             "--endpoint" => endpoint = required_value("--endpoint", args.next()),
+            // mail4agent courier bind (same as MAIL4AGENT_BIND). `127.0.0.1:0` = any free port.
+            "--m4a-bind" => {
+                let value = required_value("--m4a-bind", args.next());
+                let _: std::net::SocketAddr = value
+                    .parse()
+                    .unwrap_or_else(|error| fail(&format!("--m4a-bind is invalid: {error}")));
+                std::env::set_var(hatchery_node::kit::COURIER_BIND_ENV, value);
+            }
             "--api-listen" => {
                 let value = required_value("--api-listen", args.next());
                 api_listen = value
@@ -637,21 +645,11 @@ async fn main() {
         let _linked = hatchery_node::force_link();
         tracing::info!(cores = ?hatchery_node::linked_core_names(), "node kit");
     }
-    // Automatic mailbox: same daemon as the standalone mail4agent binary.
+    // Automatic mailbox: same daemon as the standalone mail4agent binary,
+    // unless a courier already holds the port. A missing mailbox never
+    // takes the node down.
     #[cfg(feature = "m4a")]
-    {
-        let mailbox = hatchery_node::start_mailbox().unwrap_or_else(|error| {
-            fail(&format!("mail4agent mailbox: {error}"))
-        });
-        // The daemon runs on its own thread; a bootstrap refusal or a bind
-        // failure ends it within moments. Report that instead of "started".
-        std::thread::sleep(std::time::Duration::from_millis(750));
-        if mailbox.is_finished() {
-            let error = mailbox.join().err().map_or_else(|| "mailbox exited".to_owned(), |e| e.to_string());
-            fail(&format!("mail4agent mailbox: {error}"));
-        }
-        tracing::info!("node kit mailbox started");
-    }
+    let _mailbox = hatchery_node::kit::start_or_attach_mailbox();
     #[cfg(feature = "wireguard")]
     if let Some(wg) = hatchery_node::node_wg_from_env().unwrap_or_else(|error| fail(&error)) {
         tracing::info!(
