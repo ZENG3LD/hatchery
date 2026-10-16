@@ -345,7 +345,7 @@ async fn api_server(State(s): State<Shared>, Path(rest): Path<String>, method: M
         return err(StatusCode::SERVICE_UNAVAILABLE, "server API is not configured");
     };
     let first = rest.split(['/', '?']).next().unwrap_or_default();
-    if !safe_rest(&rest) || !matches!(first, "mail" | "tasks" | "runs" | "sessions" | "signals" | "routing") || !matches!(method, Method::GET | Method::POST) {
+    if !safe_rest(&rest) || !matches!(first, "tasks" | "runs" | "sessions" | "signals" | "routing") || !matches!(method, Method::GET | Method::POST) {
         return err(StatusCode::NOT_FOUND, "not found");
     }
     if rest == "mail/sent" {
@@ -496,31 +496,6 @@ async fn api_events(State(s): State<Shared>) -> Sse<impl futures_util::Stream<It
     let rx = s.events.subscribe();
     let stream = tokio_stream::wrappers::BroadcastStream::new(rx).filter_map(|m| async move { m.ok().map(|data| Ok(Event::default().data(data))) });
     Sse::new(stream).keep_alive(KeepAlive::new().interval(Duration::from_secs(15)))
-}
-
-/// Background wake-up: long-polls the server for operator mail and pushes an event to every
-/// open page the moment a message lands (no blind polling in the browser).
-pub fn spawn_mail_watcher(state: Shared) {
-    let (Some(addr), Some(token)) = (state.config.server, state.config.server_token.clone()) else { return };
-    tokio::spawn(async move {
-        let mut since = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-        loop {
-            let body = json!({ "since_ms": since, "timeout_secs": 25 }).to_string();
-            match upstream(addr, "POST", "/v1/mail/wait", Some(&token), body.as_bytes(), Duration::from_secs(40)).await {
-                Ok((200, reply)) => {
-                    let woke_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64;
-                    if let Some(msgs) = serde_json::from_slice::<Value>(&reply).ok().and_then(|v| v["messages"].as_array().cloned()) {
-                        for m in msgs {
-                            since = since.max(m["created_at_ms"].as_u64().unwrap_or(0));
-                            tracing::info!(from = %m["from"], subject = %m["subject"], latency_ms = woke_ms.saturating_sub(m["created_at_ms"].as_u64().unwrap_or(woke_ms)), "HQ woken by mail");
-                            let _ = state.events.send(json!({ "type": "mail", "woke_at_ms": woke_ms, "message": m }).to_string());
-                        }
-                    }
-                }
-                _ => tokio::time::sleep(Duration::from_secs(3)).await,
-            }
-        }
-    });
 }
 
 /// Establish one held, self-reconnecting operator control connection and

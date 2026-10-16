@@ -1,7 +1,7 @@
-//! Agent-facing tools for mail and tasks, served through the node's loopback door.
+//! Agent-facing task tools, served through the node's loopback door. Letters are not here: m4a is
+//! the only messenger (agents use `m4a-send` / their m4a client).
 //!
-//! Agents see ordinary tools (`g4a_mail_send`, `g4a_mail_inbox`, `g4a_mail_ack`, `g4a_tasks`,
-//! `g4a_task_update`). The adapter forwards to the node over loopback; the node signs the call
+//! Agents see ordinary tools (`g4a_tasks`, `g4a_task_update`). The adapter forwards to the node over loopback; the node signs the call
 //! with an identity key the agent never sees, and the hub applies the node's status. The tools
 //! exist only when `HATCHERY_NODE_DOOR` names a loopback address.
 
@@ -17,11 +17,6 @@ const IO_TIMEOUT: Duration = Duration::from_secs(60);
 fn tools() -> Vec<(&'static str, &'static str, &'static str, Value)> {
     let s = |props: Value, req: &[&str]| json!({"type":"object","properties":props,"required":req,"additionalProperties":false});
     vec![
-        ("g4a_mail_send", "mail.send", "Send a message to another participant (a node name) or to a room (`room:NAME`).",
-            s(json!({"to":{"type":"string"},"subject":{"type":"string"},"body":{"type":"string"},"idempotency_key":{"type":"string"}}), &["to","subject","body"])),
-        ("g4a_mail_inbox", "mail.inbox", "List messages addressed to this machine.",
-            s(json!({"since_ms":{"type":"integer"},"limit":{"type":"integer"}}), &[])),
-        ("g4a_mail_ack", "mail.ack", "Mark a message as read.", s(json!({"message_id":{"type":"string"}}), &["message_id"])),
         ("g4a_tasks", "task.list", "List open tasks assigned to this machine.", s(json!({}), &[])),
         ("g4a_task_update", "task.update", "Set the state of one of your tasks (`in_progress` or `done`).",
             s(json!({"id":{"type":"integer"},"status":{"type":"string","enum":["in_progress","done"]}}), &["id","status"])),
@@ -47,7 +42,7 @@ impl WorkDoor {
             .into_iter()
             .map(|(name, _, description, schema)| {
                 json!({"name": name, "description": description, "inputSchema": schema,
-                       "annotations": {"readOnlyHint": name == "g4a_mail_inbox" || name == "g4a_tasks", "destructiveHint": false, "openWorldHint": false}})
+                       "annotations": {"readOnlyHint": name == "g4a_tasks", "destructiveHint": false, "openWorldHint": false}})
             })
             .collect()
     }
@@ -110,7 +105,7 @@ mod tests {
             s.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n{\"error\":\"refused\"}").unwrap();
         });
         let door = WorkDoor::new(addr).unwrap();
-        assert!(door.call("g4a_mail_inbox", json!({})).is_err());
+        assert!(door.call("g4a_tasks", json!({})).is_err());
         assert!(door.call("g4a_nothing", json!({})).is_err());
         assert!(WorkDoor::new("10.0.0.1:1".parse().unwrap()).is_none());
     }

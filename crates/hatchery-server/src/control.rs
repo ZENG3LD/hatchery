@@ -138,7 +138,7 @@ fn v1(method: &str, path: &str, head: &str, body: &[u8], token: Option<&str>, hu
         return ("401 Unauthorized", json!({ "error": "unauthorized" }).to_string());
     }
     let Some(hub) = hub else {
-        return ("404 Not Found", json!({ "error": "messenger is not enabled" }).to_string());
+        return ("404 Not Found", json!({ "error": "hub is not enabled" }).to_string());
     };
     let value: serde_json::Value = if body.is_empty() { json!({}) } else {
         match serde_json::from_slice(body) {
@@ -162,7 +162,7 @@ fn v1(method: &str, path: &str, head: &str, body: &[u8], token: Option<&str>, hu
 
 #[cfg(not(feature = "m4a"))]
 fn v1(_: &str, _: &str, _: &str, _: &[u8], _: Option<&str>, _: &HubHandle) -> (&'static str, String) {
-    ("404 Not Found", json!({ "error": "messenger is not built in" }).to_string())
+    ("404 Not Found", json!({ "error": "hub is not built in" }).to_string())
 }
 
 pub fn route(head: &str, supervisor: &Supervisor, token: Option<&str>) -> (&'static str, String) {

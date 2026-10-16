@@ -325,12 +325,8 @@ async function loadThread1(id) {
       const sig = JSON.stringify(S.mail[id]); if (sig === S.sig?.[id]) return; (S.sig = S.sig || {})[id] = sig;
       saveCache(); if (S.chat === id) renderChat(); renderSidebar(); return;
     }
-    if (isGroup(id)) { const d = await post('/api/s/mail/inbox'); msgs = d.messages.filter((m) => m.to === id); }
-    else { const d = await post('/api/s/mail/thread', { node: id }); msgs = d.messages; }
-    let sent = []; try { sent = (await post('/api/s/mail/sent', { to: id })).messages; } catch (_) {}
-    const have = new Set(msgs.map((m) => m.message_id));
-    for (const m of sent) if (!m.message_id || !have.has(m.message_id)) { if (!msgs.some((x) => x.from === m.from && x.body === m.body && Math.abs(x.created_at_ms - m.created_at_ms) < 5000)) msgs.push(m); }
-    S.mail[id] = msgs.sort((a, b) => a.created_at_ms - b.created_at_ms);
+    // m4a is the only messenger: chats that are not m4a rooms have no letters.
+    msgs = S.mail[id] || []; S.mail[id] = msgs;
   } catch (_) { S.mail[id] = S.mail[id] || []; }
   if (S.chat === id) renderChat(); renderSidebar();
 }
@@ -422,15 +418,12 @@ async function send() {
   try {
     if (!(S.target === 'agent' && S.session)) {
       const to = S.chat; const l = { ts: Date.now(), text, pending: true }; (S.local[S.chat] ||= []).push(l); renderChat(); $('#chat').scrollTop = 1e9;
-      try { if (String(to).startsWith('m4a:')) { const rt = S.replyTo && S.replyTo.chat === to ? S.replyTo.id : undefined; setReply(null); await post('/api/s/m4a/send', { room: to.slice(4), text, reply_to: rt }); } else await post('/api/s/mail/send', { to, subject: '-', body: text }); l.pending = false; l.sent = true; } catch (e) { l.pending = false; l.failed = true; renderChat(); toast('Not sent: ' + e.message); return; }
+      try { if (String(to).startsWith('m4a:')) { const rt = S.replyTo && S.replyTo.chat === to ? S.replyTo.id : undefined; setReply(null); await post('/api/s/m4a/send', { room: to.slice(4), text, reply_to: rt }); } else throw new Error('letters go through m4a rooms only'); l.pending = false; l.sent = true; } catch (e) { l.pending = false; l.failed = true; renderChat(); toast('Not sent: ' + e.message); return; }
       renderChat(); await loadThread(); return;
     }
     if (S.target === 'agent' && S.session) {
       addLocal(S.chat, { text, tag: `to agent (${S.sessionProv})` });
       tsend({ t: 'prompt', text }); S.promptAt = Date.now(); S.working[S.chat] = Date.now() + 30000; setTimeout(renderChat, 25100); renderChat();
-    } else {
-      await post('/api/s/mail/send', { to: S.chat, subject: '-', body: text });
-      S.working[S.chat] = Date.now() + 20000; await loadThread(); setTimeout(renderChat, 20100);
     }
   } catch (e) { addLocal(S.chat, { sys: true, text: 'Not sent: ' + e.message }); }
 }
@@ -518,7 +511,6 @@ function favRow(m) {
 $('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); const was = !m.hidden; closeMenus(); if (was) return; m.hidden = false; m.className = 'pop amenu2'; m.innerHTML = '';
   m.appendChild(menuRow({ ic: 'server', label: 'Fleet', right: String(visibleNodes().filter((n) => n.online).length) + ' online', fn: () => openNode() }, 0));
   favRow(m);
-  m.appendChild(menuRow({ ic: 'gear', label: 'Unlock keys (passkey)', fn: unlockKeystore }, 0));
   m.appendChild(menuRow({ ic: 'gauge', label: 'Usage & plan', right: '— % used', fn: () => openSettings('usage') }, 0));
   m.appendChild(menuRow({ ic: 'phone', label: 'Get the apps', fn: () => toast('Apps: coming soon') }, 0));
   m.appendChild(menuRow({ ic: 'book', label: 'Support', fn: () => openSupport() }, 0));
@@ -526,26 +518,8 @@ $('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); 
   m.insertAdjacentHTML('beforeend', '<hr>');
   m.appendChild(menuRow({ ic: 'userplus', label: 'Add account', fn: () => toast('Multiple accounts: coming soon') }, 0));
   m.appendChild(menuRow({ ic: 'logout', label: 'Sign out', fn: signOut }, 0)); };
-// ---- Keystore unlock: the account passkey's WebAuthn PRF (evaluated by the authenticator in this
-// browser) unlocks the core keystore root for this operator's own branch. The salt is the keystore's
-// v1 PRF salt (hatchery-keystore legacy_v1::PRF_SALT). The output goes only to the core keystore.
-const KEYSTORE_PRF_SALT = 'hatchery/m4a-account-root/v1';
-async function unlockKeystore() {
-  closeMenus();
-  try {
-    if (!window.PublicKeyCredential) throw new Error('passkeys are not available in this browser');
-    const challenge = crypto.getRandomValues(new Uint8Array(32));
-    const cred = await navigator.credentials.get({ publicKey: { challenge, rpId: location.hostname, userVerification: 'required', timeout: 60000,
-      extensions: { prf: { eval: { first: new TextEncoder().encode(KEYSTORE_PRF_SALT) } } } } });
-    const out = cred.getClientExtensionResults()?.prf?.results?.first;
-    if (!out) throw new Error('this passkey does not support PRF (keystore unlock needs it)');
-    const prf_hex = Array.from(new Uint8Array(out), (b) => b.toString(16).padStart(2, '0')).join('');
-    const r = await fetch('/api/s/keystore/unlock', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ prf_hex }) });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || r.statusText);
-    toast(j.enrolled ? `Keys created and unlocked (${(j.nodes || []).length} nodes)` : `Keys unlocked (${(j.nodes || []).length} nodes)`);
-  } catch (e) { toast('Keystore: ' + (e.message || e)); }
-}
+// Keystore unlock happens at sign-in: the gate's passkey assertion carries the PRF extension and
+// posts its output to /api/s/keystore/unlock. There is no separate unlock action here.
 // ---- Support: operator-only spawn traces (never shown in sidebar/tabs)
 const PTY_TRACES = [];
 const PTY_TRACE_MAX = 400;
@@ -1330,19 +1304,13 @@ function wireSessionBrowser(root, node, sess) {
 const es = new EventSource('/api/events');
 es.onmessage = (m) => {
   const d = JSON.parse(m.data);
-  if (d.type === 'mail') {
-    const msg = d.message; window.lastWake = d;
-    logEv(`mail from ${msg.from}`);
-    S.working[msg.from] = 0;
-    if (S.chat === msg.from || isGroup(S.chat)) loadThread(); else { S.mail[msg.from] = (S.mail[msg.from] || []).concat([msg]); renderSidebar(); }
-  }
 };
 S.ptyLayout = localStorage.getItem('hq.ptylayout') || 'native';
 setTab('info');
-api('/api/config').then(async (c) => { S.chats = c.chats && c.chats.length ? c.chats : [{ label: 'general', target: 'room:general' }];
+api('/api/config').then(async (c) => { S.chats = (c.chats || []).filter((x) => String(x.target).startsWith('m4a:'));
   if (c.m4a) { S.m4a = c.m4a; try { const d = await post('/api/s/m4a/rooms', {}); const rows = Array.isArray(d.result) ? d.result : d.result.rooms || [];
     const rooms = rows.map((r) => { const rid = r.room_id || r.id || r.room; const label = r.title || r.name || r.alias || rid; return { label, target: 'm4a:' + rid, kind: (c.m4a.groups || []).includes(label) || r.kind === 'group' || r.kind === 'channel' ? 'group' : 'dm' }; }).filter((r) => r.target !== 'm4a:undefined');
-    S.chats = [...rooms, ...S.chats.filter((x) => !String(x.target).startsWith('room:'))]; } catch (e) { toast('m4a: ' + e.message); } } }).catch(() => { S.chats = [{ label: 'general', target: 'room:general' }]; }).then(loadNodes).then(() => {
+    S.chats = [...rooms, ...S.chats.filter((x) => !String(x.target).startsWith('room:'))]; } catch (e) { toast('m4a: ' + e.message); } } }).catch(() => { S.chats = []; }).then(loadNodes).then(() => {
     const nodeHash = decodeURIComponent((location.hash.match(/^#\/node\/(.+)$/) || [])[1] || '');
     const chatHash = decodeURIComponent((location.hash.match(/^#\/chat\/(.+)$/) || [])[1] || '');
     const want = nodeHash || chatHash || localStorage.getItem('hq.chat');

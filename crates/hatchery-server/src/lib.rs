@@ -18,13 +18,11 @@ pub mod mesh_runtime;
 #[cfg(feature = "m4a")]
 pub mod node_sink;
 #[cfg(feature = "m4a")]
-pub mod messenger;
 #[cfg(feature = "m4a")]
 pub mod provision;
 #[cfg(feature = "m4a")]
 pub mod tasks;
 pub mod routing;
-pub mod m4a_gateway;
 pub mod subservice;
 pub mod supervisor;
 
