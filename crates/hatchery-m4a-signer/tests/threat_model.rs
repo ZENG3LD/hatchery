@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use hatchery_m4a_signer::*;
 
 fn tmp(name: &str) -> std::path::PathBuf {

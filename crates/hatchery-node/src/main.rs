@@ -757,18 +757,18 @@ async fn main() {
         });
         // m4a signer proxy (option A): sessions get a process-bound handle, core signs.
         #[cfg(unix)]
-        if let Some(sock) = std::env::var_os(hatchery_node::m4a_signer_proxy::SOCKET_ENV).filter(|v| !v.is_empty()) {
+        if let Some(sock) = std::env::var_os(hatchery_node::keystore_proxy::SOCKET_ENV).filter(|v| !v.is_empty()) {
             let sock = PathBuf::from(sock);
             let _ = std::fs::remove_file(&sock);
             match tokio::net::UnixListener::bind(&sock) {
                 Ok(l) => {
                     use std::os::unix::fs::PermissionsExt;
                     let _ = std::fs::set_permissions(&sock, std::fs::Permissions::from_mode(0o600));
-                    let core = hatchery_node::m4a_signer_proxy::UplinkCoreSigner::new(calls.clone(), tokio::runtime::Handle::current());
-                    let proxy = std::sync::Arc::new(hatchery_node::m4a_signer_proxy::SignerProxy::new(std::sync::Arc::new(core)));
+                    let core = hatchery_node::keystore_proxy::UplinkCoreSigner::new(calls.clone(), tokio::runtime::Handle::current());
+                    let proxy = std::sync::Arc::new(hatchery_node::keystore_proxy::SignerProxy::new(std::sync::Arc::new(core)));
                     if server.set_signer_proxy(proxy.clone()) {
                         tracing::info!("m4a signer proxy on (sessions get handles, no capabilities)");
-                        tokio::spawn(hatchery_node::m4a_signer_proxy::serve(proxy, l));
+                        tokio::spawn(hatchery_node::keystore_proxy::serve(proxy, l));
                     }
                 }
                 Err(e) => tracing::warn!(error = %e, "m4a signer proxy socket bind failed; proxy off"),

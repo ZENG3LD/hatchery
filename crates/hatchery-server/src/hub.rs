@@ -35,7 +35,7 @@ impl From<MessengerError> for HubError {
 pub struct Hub {
     data_dir: PathBuf,
     /// m4a signer: per-human key trees, unlocked by each human's passkey PRF secret.
-    signer: Mutex<hatchery_m4a_signer::keyring::Keyring>,
+    signer: Mutex<hatchery_keystore::keyring::Keyring>,
     messenger: Mutex<Messenger>,
     tasks: Mutex<TaskStore>,
     /// Bumped on every message sent; lets HQ long-poll for new mail instead of polling blindly.
@@ -142,7 +142,7 @@ impl Hub {
     pub fn open(data_dir: &Path) -> Result<Self, crate::error::ServerError> {
         Ok(Self {
             data_dir: data_dir.to_owned(),
-            signer: Mutex::new(hatchery_m4a_signer::keyring::Keyring::new(signer_dir(data_dir)?)),
+            signer: Mutex::new(hatchery_keystore::keyring::Keyring::new(signer_dir(data_dir)?)),
             messenger: Mutex::new(Messenger::open(data_dir)?),
             tasks: Mutex::new(TaskStore::open(data_dir)?),
             mail_signal: (Mutex::new(0), Condvar::new()),
@@ -258,25 +258,25 @@ impl Hub {
             }
             // A fresh session on this node gets its identity from the account tree that owns
             // the node. The token goes back to the node's proxy, never into the PTY.
-            "signer.provision" => {
+            "signer.provision" | "keystore.provision" => {
                 let mut k = self.signer.lock().expect("signer");
                 let account = k.account_for_node(node_id).ok_or_else(|| HubError::new(423, "signer locked for this node's account"))?;
                 let p = k
-                    .provision(&account, node_id, str_field(payload, "provider")?, str_field(payload, "session")?, hatchery_m4a_signer::default_rights(), None)
+                    .provision(&account, node_id, str_field(payload, "provider")?, str_field(payload, "session")?, hatchery_keystore::default_rights(), None)
                     .map_err(signer_err)?;
                 Ok(json!({ "nick": p.nick, "token": p.token, "public_key": hex::encode(p.public_key) }))
             }
-            "signer.sign" => {
+            "signer.sign" | "keystore.sign" => {
                 let payload_bytes = hex::decode(str_field(payload, "payload_hex")?).map_err(|_| HubError::new(400, "bad payload"))?;
                 let sig = self.signer.lock().expect("signer").sign_from_node(node_id, str_field(payload, "token")?, str_field(payload, "op")?, &payload_bytes).map_err(signer_err)?;
                 Ok(json!({ "nick": sig.nick, "public_key_hex": hex::encode(sig.public_key), "signature_hex": hex::encode(sig.signature) }))
             }
             // Signer-signed letter: core signs as the token's own nick and delivers from that nick.
-            "signer.send" => {
+            "signer.send" | "keystore.send" => {
                 let (to, subject, body) = (str_field(payload, "to")?, str_field(payload, "subject")?, str_field(payload, "body")?);
                 let canonical = serde_json::to_vec(&json!({ "to": to, "subject": subject, "body": body })).map_err(|_| HubError::new(500, "encode"))?;
-                let sig = self.signer.lock().expect("signer").sign_from_node(node_id, str_field(payload, "token")?, hatchery_m4a_signer::RIGHT_SEND, &canonical).map_err(signer_err)?;
-                if !hatchery_m4a_signer::verify_signature(&sig, hatchery_m4a_signer::RIGHT_SEND, &canonical) {
+                let sig = self.signer.lock().expect("signer").sign_from_node(node_id, str_field(payload, "token")?, hatchery_keystore::RIGHT_SEND, &canonical).map_err(signer_err)?;
+                if !hatchery_keystore::verify_signature(&sig, hatchery_keystore::RIGHT_SEND, &canonical) {
                     return Err(HubError::new(500, "signature check failed"));
                 }
                 let key = payload.get("idempotency_key").and_then(Value::as_str).map(str::to_owned);
@@ -289,7 +289,7 @@ impl Hub {
                 tracing::info!(node = node_id, nick = %sig.nick, "signer-signed letter accepted");
                 Ok(json!({ "message_id": id, "from": sig.nick, "signature_hex": hex::encode(sig.signature), "public_key_hex": hex::encode(sig.public_key) }))
             }
-            "signer.revoke" => {
+            "signer.revoke" | "keystore.revoke" => {
                 let session = str_field(payload, "session")?;
                 let mut k = self.signer.lock().expect("signer");
                 let account = k.account_for_node(node_id).ok_or_else(|| HubError::new(423, "signer locked"))?;
@@ -307,12 +307,12 @@ impl Hub {
     fn signer_operator(&self, op: &str, body: &Value) -> Result<Value, HubError> {
         let account = str_field(body, "account")?;
         let mut k = self.signer.lock().expect("signer");
-        let human = || -> Result<hatchery_m4a_signer::HumanKey, HubError> {
+        let human = || -> Result<hatchery_keystore::HumanKey, HubError> {
             let prf = hex::decode(str_field(body, "prf_hex")?).map_err(|_| HubError::new(400, "bad prf"))?;
             if prf.len() < 32 {
                 return Err(HubError::new(400, "prf output too short"));
             }
-            Ok(hatchery_m4a_signer::HumanKey::from_passkey_prf(&prf))
+            Ok(hatchery_keystore::HumanKey::from_passkey_prf(&prf))
         };
         match op {
             "enroll" => k.enroll(account, &human()?).map_err(signer_err)?,
@@ -576,7 +576,7 @@ mod task_api_tests {
         hub.operator_call("POST", "/v1/signer/lock", &json!({"account": "owner"})).unwrap();
         assert!(hub.signer.lock().unwrap().account_for_node("alpha").is_none());
         hub.operator_call("POST", "/v1/signer/unlock", &json!({"account": "owner", "prf_hex": prf})).unwrap();
-        let p = hub.signer.lock().unwrap().provision("owner", "alpha", "codex", "s1", hatchery_m4a_signer::default_rights(), None).unwrap();
+        let p = hub.signer.lock().unwrap().provision("owner", "alpha", "codex", "s1", hatchery_keystore::default_rights(), None).unwrap();
         let mut m = hub.messenger.lock().unwrap();
         m.ensure_session_participant(&p.nick).unwrap();
         m.ensure_session_participant("peer-1").unwrap();
@@ -663,8 +663,8 @@ fn signer_dir(data_dir: &Path) -> Result<PathBuf, crate::error::ServerError> {
     Ok(d)
 }
 
-fn signer_err(e: hatchery_m4a_signer::SignerError) -> HubError {
-    use hatchery_m4a_signer::SignerError::*;
+fn signer_err(e: hatchery_keystore::SignerError) -> HubError {
+    use hatchery_keystore::SignerError::*;
     tracing::warn!(error = ?e, "m4a signer refused a node call");
     match e {
         Locked => HubError::new(423, "signer locked"),

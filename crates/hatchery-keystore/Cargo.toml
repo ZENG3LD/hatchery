@@ -1,0 +1,27 @@
+[package]
+name = "hatchery-keystore"
+version = "0.2.16"
+edition = "2021"
+repository = "https://github.com/ZENG3LD/hatchery"
+description = "Hatchery keystore (hq-core authority): account -> node -> session key tree on tesserax-keytree, non-exportable session keys, grants per transport, attenuated delegation to m4a and g4a"
+license = "MIT"
+
+[dependencies]
+tesserax-keytree = "0.1.2"
+# Consumers define their grant names; the keystore (authority) issues them.
+m4a-keys = "0.4.13"
+gatekeys = { package = "gate4agent-keys", version = "0.5.5" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+zeroize = "1"
+
+[dev-dependencies]
+biscuit-auth = "6"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+hkdf = "0.12"
+sha2 = "0.10"
+chacha20poly1305 = "0.10"
+rand_core = { version = "0.6", features = ["getrandom"] }
+tempfile = "3"
+# 0.2.15 as published, to prove byte compatibility of stores, tokens and signatures.
+signer-v0215 = { package = "hatchery-m4a-signer", version = "=0.2.15" }

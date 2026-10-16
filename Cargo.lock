@@ -1360,6 +1360,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "gate4agent-keys"
+version = "0.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61fb0e6481808937a35acb2206f5eaf729f726c3ed63836848948f7a842c439d"
+dependencies = [
+ "tesserax-keytree",
+]
+
+[[package]]
 name = "gate4agent-node-core"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1708,7 +1717,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-bidi-client"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "futures-util",
  "sha2 0.10.9",
@@ -1718,7 +1727,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-bidi-relay"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "futures-util",
  "sha2 0.10.9",
@@ -1728,7 +1737,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-build"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1748,7 +1757,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-c2"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1773,7 +1782,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-c2-client"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-node-wire",
@@ -1788,7 +1797,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-core"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
@@ -1838,7 +1847,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-enroll"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -1852,7 +1861,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-api"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "gate4agent-build-stamp",
  "hatchery-harness-protocol",
@@ -1863,7 +1872,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-client"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "hatchery-harness-api",
  "serde",
@@ -1873,7 +1882,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-delivery"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "gate4agent-node-protocol",
  "libc",
@@ -1884,7 +1893,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-engine"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "hatchery-harness-protocol",
  "serde",
@@ -1894,7 +1903,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-mcp"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-node-wire",
@@ -1917,7 +1926,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-protocol"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "serde",
  "serde_json",
@@ -1926,7 +1935,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-service"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-node-protocol",
@@ -1960,7 +1969,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-hq-web"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -1983,8 +1992,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "hatchery-keystore"
+version = "0.2.16"
+dependencies = [
+ "biscuit-auth",
+ "chacha20poly1305",
+ "ed25519-dalek",
+ "gate4agent-keys",
+ "hatchery-m4a-signer 0.2.15",
+ "hkdf",
+ "m4a-keys",
+ "rand_core 0.6.4",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tesserax-keytree",
+ "zeroize",
+]
+
+[[package]]
 name = "hatchery-m4a-signer"
 version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c94c10b2ef20f4f6bbb83937190b7b15e1c4c37828b93302034068bd315c685d"
 dependencies = [
  "biscuit-auth",
  "chacha20poly1305",
@@ -1999,8 +2030,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hatchery-m4a-signer"
+version = "0.2.16"
+dependencies = [
+ "biscuit-auth",
+ "hatchery-keystore",
+]
+
+[[package]]
 name = "hatchery-node"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "base64 0.22.1",
  "claude-session-restore",
@@ -2023,7 +2062,7 @@ dependencies = [
  "hatchery-build",
  "hatchery-core",
  "hatchery-enroll",
- "hatchery-m4a-signer",
+ "hatchery-keystore",
  "hex",
  "image",
  "kimi-session-restore",
@@ -2050,7 +2089,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-api"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -2061,7 +2100,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-engine"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -2075,7 +2114,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-protocol"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "serde",
  "serde_json",
@@ -2084,7 +2123,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-service"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -2098,7 +2137,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-store"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "hatchery-observation-api",
  "hatchery-observation-engine",
@@ -2110,7 +2149,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-server"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "async-trait",
  "gate4agent-node-protocol",
@@ -2120,7 +2159,7 @@ dependencies = [
  "hatchery-c2-client",
  "hatchery-core",
  "hatchery-enroll",
- "hatchery-m4a-signer",
+ "hatchery-keystore",
  "hex",
  "libdbus-sys",
  "m4a-agent",
@@ -2140,7 +2179,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-session-events"
-version = "0.2.15"
+version = "0.2.16"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -2695,6 +2734,15 @@ dependencies = [
  "sha2 0.10.9",
  "tungstenite 0.29.0",
  "zeroize",
+]
+
+[[package]]
+name = "m4a-keys"
+version = "0.4.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae9a517864de50f5288cb579a27b397c3c8b212f2c8c41f15e5208802cf19cbe"
+dependencies = [
+ "tesserax-keytree",
 ]
 
 [[package]]
@@ -4276,6 +4324,22 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "tesserax-keytree"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d11e0f3f2b5fac1f2d0f68ebf3d4b1bff4f339b4473726fdefdf606b4af7dc4a"
+dependencies = [
+ "biscuit-auth",
+ "chacha20poly1305",
+ "ed25519-dalek",
+ "hex",
+ "hkdf",
+ "rand_core 0.6.4",
+ "sha2 0.10.9",
+ "zeroize",
 ]
 
 [[package]]

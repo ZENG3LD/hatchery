@@ -24,6 +24,7 @@ members = [
     "crates/hatchery-c2",
     "crates/hatchery-node",
     "crates/hatchery-m4a-signer",
+    "crates/hatchery-keystore",
     "crates/hatchery-server",
     "crates/hatchery-e2e",
 ]
@@ -52,12 +53,13 @@ default-members = [
     "crates/hatchery-c2",
     "crates/hatchery-node",
     "crates/hatchery-m4a-signer",
+    "crates/hatchery-keystore",
     "crates/hatchery-server",
     "crates/hatchery-e2e",
 ]
 
 [workspace.package]
-version = "0.2.15"
+version = "0.2.16"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
