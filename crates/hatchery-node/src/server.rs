@@ -2870,23 +2870,39 @@ async fn wait_for_ctrl_signal() -> Result<(), NodeServerError> {
 /// for something nobody can verify runs.
 /// Host interactive shell for HQ terminal attach (no provider CLI, no network).
 fn shell_host_spec() -> AgentSpec {
+    // Windows nodes (incl. MSYS-hosted) have no `/bin/bash` for Win32 Path::is_file;
+    // fleet inventory on op-box resolves `bash` to the WSL stub at
+    // `/c/Windows/system32/bash`, which is not a host shell. Use ComSpec/cmd.
+    #[cfg(windows)]
+    let (detect_command, program, fixed_args, process_name) = {
+        let program = std::env::var("ComSpec").unwrap_or_else(|_| {
+            r"C:\Windows\System32\cmd.exe".to_owned()
+        });
+        ("cmd".to_owned(), program, Vec::<String>::new(), "cmd".to_owned())
+    };
+    #[cfg(not(windows))]
+    let (detect_command, program, fixed_args, process_name) = (
+        "bash".to_owned(),
+        "/bin/bash".to_owned(),
+        vec!["-i".to_owned()],
+        "bash".to_owned(),
+    );
     AgentSpec {
         id: AgentId::new("shell").expect("shell agent id"),
         revision: "hatchery:shell-pty-1".to_owned(),
         display_name: "Host shell".to_owned(),
         detection: DetectionSpec {
-            command: "bash".to_owned(),
-            aliases: vec!["sh".to_owned(), "shell".to_owned()],
+            command: detect_command,
+            aliases: vec!["sh".to_owned(), "shell".to_owned(), "cmd".to_owned()],
             required_commands: Vec::new(),
             unsupported_platforms: Vec::new(),
         },
         launch: LaunchSpec {
-            // Absolute path so admission does not depend on PATH.
-            program: "/bin/bash".to_owned(),
-            fixed_args: vec!["-i".to_owned()],
+            program,
+            fixed_args,
         },
         expected_processes: vec![ProcessMatcher::Exact {
-            name: "bash".to_owned(),
+            name: process_name,
         }],
         prompt: PromptSpec {
             initial: InitialPromptMode::None,
