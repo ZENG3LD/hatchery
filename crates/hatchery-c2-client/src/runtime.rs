@@ -2383,6 +2383,11 @@ async fn control_owner<E>(
     let mut regular_event_channel_full_logged = false;
     let mut loss_reason = C2ConnectionLossReason::Shutdown;
     loop {
+        // Each frame arm pre-sets `Protocol` before validating, so a frame that
+        // passed must not leave that label behind: a later break for any other
+        // reason (caller shutdown, closed command queue) was being logged as a
+        // "protocol violation". Reset per iteration.
+        loss_reason = C2ConnectionLossReason::Shutdown;
         tokio::select! {
             browser_cmd = browser_commands.recv() => {
                 let Some(browser_cmd) = browser_cmd else { break; };

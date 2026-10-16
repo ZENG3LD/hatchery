@@ -13181,7 +13181,7 @@ async fn call_home_loop(
                 // its own restart. Reconnect immediately rather than
                 // serving the backoff a peer that is plainly there.
                 failures = 0;
-                tracing::info!(node_id = %shared.node_id, %relay, "call-home connection closed");
+                tracing::info!(node_id = %shared.node_id, %relay, "call-home connection closed; redialling");
             }
             Err(error) => {
                 failures = failures.saturating_add(1);
@@ -13192,15 +13192,39 @@ async fn call_home_loop(
                     attempt = failures,
                     "call-home connection failed",
                 );
-                let backoff = CALL_HOME_BACKOFFS_MS
-                    [failures.saturating_sub(1).min(CALL_HOME_BACKOFFS_MS.len() - 1)];
+                let backoff = call_home_backoff(failures);
                 tokio::select! {
-                    _ = sleep(Duration::from_millis(backoff)) => {}
+                    _ = sleep(backoff) => {}
                     _ = shared.shutdown_notify.notified() => return Ok(()),
                 }
             }
         }
     }
+}
+
+/// Idle time before the first keepalive probe on a call-home socket.
+const CALL_HOME_KEEPALIVE_IDLE: Duration = Duration::from_secs(15);
+/// Interval between keepalive probes once the link has gone quiet.
+const CALL_HOME_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
+
+fn call_home_keepalive() -> socket2::TcpKeepalive {
+    let keepalive = socket2::TcpKeepalive::new()
+        .with_time(CALL_HOME_KEEPALIVE_IDLE)
+        .with_interval(CALL_HOME_KEEPALIVE_INTERVAL);
+    #[cfg(not(windows))]
+    let keepalive = keepalive.with_retries(3);
+    keepalive
+}
+
+fn enable_call_home_keepalive(stream: &tokio::net::TcpStream) -> std::io::Result<()> {
+    socket2::SockRef::from(stream).set_tcp_keepalive(&call_home_keepalive())
+}
+
+/// Backoff for the `attempt`-th consecutive failure (1-based), capped.
+fn call_home_backoff(attempt: usize) -> Duration {
+    Duration::from_millis(
+        CALL_HOME_BACKOFFS_MS[attempt.saturating_sub(1).min(CALL_HOME_BACKOFFS_MS.len() - 1)],
+    )
 }
 
 /// One call-home attempt: connect, name this node, then serve.
@@ -13217,6 +13241,14 @@ async fn dial_relay_and_serve(
     // the traffic is small request/response frames, and coalescing them
     // adds latency to every one.
     let _ = stream.set_nodelay(true);
+    // A relay that vanishes without a FIN/RST reaching us (tunnel drop,
+    // relay-side socket kill whose RST was lost) would otherwise leave this
+    // socket ESTABLISHED forever: the node mostly reads, so nothing ever
+    // fails and the reconnect loop never runs. Kernel keepalive turns that
+    // half-open link into a read error within a bounded time.
+    if let Err(error) = enable_call_home_keepalive(&stream) {
+        tracing::warn!(cause = %error, "could not enable TCP keepalive on the call-home socket");
+    }
     gate4agent_node_wire::write_call_home_announce(&mut stream, &shared.node_id)
         .await
         .map_err(|error| NodeServerError::Handshake(error.to_string()))?;
@@ -27949,4 +27981,34 @@ mod provisional_spawn_tests {
 extern "C" {
     #[link_name = "geteuid"]
     fn libc_geteuid() -> u32;
+}
+
+#[cfg(test)]
+mod call_home_link_tests {
+    use super::*;
+
+    #[test]
+    fn call_home_backoff_is_capped_and_monotonic() {
+        let mut last = Duration::ZERO;
+        for attempt in 1..20 {
+            let next = call_home_backoff(attempt);
+            assert!(next >= last);
+            assert!(next <= Duration::from_secs(8));
+            last = next;
+        }
+        assert_eq!(call_home_backoff(0), Duration::from_millis(500));
+    }
+
+    #[tokio::test]
+    async fn call_home_socket_gets_keepalive() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (client, _server) = tokio::join!(tokio::net::TcpStream::connect(addr), listener.accept());
+        let client = client.unwrap();
+        enable_call_home_keepalive(&client).unwrap();
+        let sock = socket2::SockRef::from(&client);
+        assert!(sock.keepalive().unwrap());
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        assert_eq!(sock.tcp_keepalive_time().unwrap(), CALL_HOME_KEEPALIVE_IDLE);
+    }
 }
