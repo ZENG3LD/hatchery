@@ -6,9 +6,11 @@
 //! again, runs a configured recipe, hashes the artifact and signs a receipt with a key that
 //! never leaves the host.
 
+#[cfg(unix)]
 pub mod host;
 pub mod http;
 pub mod wire;
 
+#[cfg(unix)]
 pub use host::{serve, Admission, BuildError, BuildHost, C2Admission, Recipe, Recipes, Signer};
 pub use wire::{BuildReceipt, BuildResponse, HostRequest, ReceiptError, SignedBuildRequest};

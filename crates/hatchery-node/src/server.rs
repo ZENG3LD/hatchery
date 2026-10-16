@@ -3876,6 +3876,7 @@ impl SpawnPreparer for NodeShared {
         let signer_provider = crate::m4a_accounts::m4a_provider(provider.as_str()).or_else(|| {
             (provider.as_str() == "shell" && std::env::var_os("HATCHERY_M4A_SIGNER_SHELL").is_some_and(|v| v == "1")).then_some("shell")
         });
+        #[cfg(unix)]
         let signer_identity = match (mode, self.signer_proxy.get(), signer_provider) {
             (SessionMode::Pty, Some(proxy), Some(m4a_provider)) => {
                 let session_key = format!("{}-{}", self.incarnation_id, instance_id.0);

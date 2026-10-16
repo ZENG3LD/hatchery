@@ -298,6 +298,17 @@ async fn run_bridge_underlay_accept(
     local_bridge: SocketAddr,
     shared: Arc<NodeShared>,
 ) -> io::Result<()> {
+    // The public accept entry is async only on Linux. Other platforms refuse.
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (underlay, local_bridge, shared);
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "mesh underlay accept is linux-only",
+        ));
+    }
+    #[cfg(target_os = "linux")]
+    {
     use gate4agent_node_wire::mesh_underlay::{
         accept_peer_on, serve_bridge_tcp_relay, underlay_to_io, MeshUnderlayRole,
         UnderlayAuthToken, UnderlayTransportKey,
@@ -341,6 +352,7 @@ async fn run_bridge_underlay_accept(
                 }
             }
         }
+    }
     }
 }
 
