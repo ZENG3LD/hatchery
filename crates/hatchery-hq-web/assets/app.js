@@ -378,11 +378,13 @@ function renderChat() {
     const rxs = meta && meta.message_id ? rxOf(meta) : [];
     if (rxs.length) { const tot = rxs.reduce((a, r) => a + r.count, 0); d.classList.add('hasrx');
       rx = `<div class="rx${rxs.some((r) => r.me) ? ' mine' : ''}" data-tip="${esc(JSON.stringify(rxs.map((r) => [r.key, r.by])))}">${rxs.map((r) => `<button class="rpill${r.me ? ' mine' : ''}" data-key="${esc(r.key)}"${r.mine ? ` data-mine="${esc(r.mine)}"` : ''}>${esc(r.key)}</button><span class="rw">${esc(r.by.map((n) => n === myNick() ? 'You' : n).join(', '))}</span>`).join('')}${tot > 1 ? `<span class="rn">${tot}</span>` : ''}</div>`; }
-    const acts = meta && meta.message_id && String(S.chat).startsWith('m4a:') ? `<div class="macts"><button data-act="react" title="React">${ico('smile')}</button><button data-act="reply" title="Reply">${ico('reply')}</button><button data-act="more" title="More">${ico('dots')}</button></div>` : '';
-    const t = `<span class="ts" title="${esc(new Date(ts).toLocaleString())}">${fmtTime(ts).slice(0, 5)}</span>`;
-    const label = group && !mine && from && from !== prevFrom ? `<div class="hdr"><button class="who nick" data-nick="${esc(from)}" style="color:${colorOf(from)}">${esc(from)}</button>${t}</div>` : '';
+    // Time sits outside the bubble, beside the hover actions on their far side; no tooltip.
+    const t = `<span class="mts">${fmtTime(ts).slice(0, 5)}</span>`;
+    const btns = meta && meta.message_id && String(S.chat).startsWith('m4a:') ? `<button data-act="react" title="React">${ico('smile')}</button><button data-act="reply" title="Reply">${ico('reply')}</button><button data-act="more" title="More">${ico('dots')}</button>` : '';
+    const acts = `<div class="macts">${btns}${t}</div>`;
+    const label = group && !mine && from && from !== prevFrom ? `<div class="hdr"><button class="who nick" data-nick="${esc(from)}" style="color:${colorOf(from)}">${esc(from)}</button></div>` : '';
     if (label) d.classList.add('first');
-    d.innerHTML = (label ? `${label}${rq}${linkify(html)}` : `${t.replace('class="ts"', 'class="ts in"')}${rq}${linkify(html)}`) + rx + acts;
+    d.innerHTML = (label ? `${label}${rq}${linkify(html)}` : `${rq}${linkify(html)}`) + rx + acts;
     prevFrom = mine ? OPERATOR : from; box.appendChild(d);
   };
   for (let k = 0; k < items.length; k++) {

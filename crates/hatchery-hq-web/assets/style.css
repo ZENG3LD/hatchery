@@ -553,3 +553,7 @@ body.rail .sbsec,body.rail .sbhidden{display:none}
 .amenu2 button.dim{color:#7a7a7a}.amenu2 button.dim .ic{color:#5f5f5f}
 
 .bdrawer.docked{border-top:0;border-right:0;border-radius:0 0 0 12px;margin:0}
+/* Message time lives outside the bubble, past the hover actions (far side from the bubble). */
+.macts{align-items:center}
+.macts .mts{font-size:11px;color:#7a7a7a;white-space:nowrap;padding:0 6px;user-select:none}
+.msg.me .macts .mts{order:-1}
