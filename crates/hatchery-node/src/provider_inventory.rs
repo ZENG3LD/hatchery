@@ -6,7 +6,8 @@
 //! - grok: `grok models` (text list; `*` marks the default).
 //! - claude: the model aliases its `--help` names for `--model`, plus `model` from
 //!   `~/.claude/settings.json`.
-//! - kimi: `[models.<alias>]` and `default_model` from `~/.kimi/config.toml`.
+//! - kimi: `[models.<alias>]` and `default_model` from `~/.kimi/config.toml`
+//!   or `~/.kimi-code/config.toml`.
 
 use serde::Serialize;
 use std::io::Read;
@@ -35,7 +36,12 @@ pub const PROVIDERS: &[&str] = &["claude", "codex", "grok", "kimi"];
 
 fn which(bin: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).map(|d| d.join(bin)).find(|p| p.is_file())
+    // Windows PATHEXT. Prefer a real launcher over an extensionless npm shim
+    // in the same directory: `Command` cannot execute that shim.
+    let exts: &[&str] = if cfg!(windows) { &[".exe", ".cmd", ".bat", ""] } else { &[""] };
+    std::env::split_paths(&path).find_map(|dir| {
+        exts.iter().map(|ext| dir.join(format!("{bin}{ext}"))).find(|p| p.is_file())
+    })
 }
 
 /// Run `bin args` with a deadline; stdout as text (stderr dropped, no stdin).
@@ -137,25 +143,52 @@ pub fn parse_kimi_config(toml_text: &str) -> Vec<ModelInfo> {
 }
 
 fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .filter(|p| !p.as_os_str().is_empty())
 }
 
-/// Detect one provider; `None` when its CLI is not on PATH.
+fn provider_homes() -> Vec<PathBuf> {
+    let mut homes = Vec::new();
+    if let Some(h) = home() {
+        homes.push(h);
+    }
+    if let Some(extra) = std::env::var_os("HATCHERY_PROVIDER_HOMES") {
+        homes.extend(std::env::split_paths(&extra));
+    }
+    homes
+}
+
+fn kimi_config_text() -> Option<String> {
+    let home = home()?;
+    for rel in [".kimi/config.toml", ".kimi-code/config.toml"] {
+        if let Ok(text) = std::fs::read_to_string(home.join(rel)) {
+            if !text.is_empty() {
+                return Some(text);
+            }
+        }
+    }
+    None
+}
+
+/// Detect one provider; `None` when its CLI is not on PATH and not in a standard install directory.
 pub fn detect(provider: &str) -> Option<ProviderInfo> {
+    let homes = provider_homes();
     let deadline = Duration::from_secs(20);
     let (bin, source, models) = match provider {
         "codex" => {
-            let bin = which("codex")?;
+            let bin = resolve_binary(provider, &homes)?;
             let m = run(&bin, &["debug", "models"], deadline).map(|s| parse_codex(&s)).unwrap_or_default();
             (bin, "cli", m)
         }
         "grok" => {
-            let bin = which("grok")?;
+            let bin = resolve_binary(provider, &homes)?;
             let m = run(&bin, &["models"], deadline).map(|s| parse_grok(&s)).unwrap_or_default();
             (bin, "cli", m)
         }
         "claude" => {
-            let bin = which("claude")?;
+            let bin = resolve_binary(provider, &homes)?;
             let mut m = run(&bin, &["--help"], deadline).map(|s| parse_claude_help(&s)).unwrap_or_default();
             if let Some(set) = home().and_then(|h| std::fs::read(h.join(".claude/settings.json")).ok()).and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok()) {
                 if let Some(id) = set.get("model").and_then(|x| x.as_str()).filter(|s| ok_id(s)) {
@@ -168,8 +201,8 @@ pub fn detect(provider: &str) -> Option<ProviderInfo> {
             (bin, "help", m)
         }
         "kimi" => {
-            let bin = which("kimi").filter(|b| usable(b))?;
-            let m = home().and_then(|h| std::fs::read_to_string(h.join(".kimi/config.toml")).ok()).map(|s| parse_kimi_config(&s)).unwrap_or_default();
+            let bin = resolve_binary(provider, &homes)?;
+            let m = kimi_config_text().map(|s| parse_kimi_config(&s)).unwrap_or_default();
             (bin, "config", m)
         }
         _ => return None,
@@ -186,6 +219,7 @@ pub fn detect_all() -> Vec<ProviderInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
 
     #[test]
     fn parses_codex_catalog() {
@@ -212,8 +246,38 @@ mod tests {
 
     #[test]
     fn parses_kimi_config() {
-        let m = parse_kimi_config("default_model = \"k2\"\n[models.k1]\nprovider = \"x\"\n[models.\"k2\"]\n");
-        assert_eq!(m.iter().map(|x| (x.id.as_str(), x.default)).collect::<Vec<_>>(), [("k1", false), ("k2", true)]);
+        let m = parse_kimi_config(
+            "default_model = \"k2\"\n[models.k1]\nprovider = \"x\"\n[models.\"k2\"]\n[models.\"kimi-code/k3\"]\n",
+        );
+        assert_eq!(
+            m.iter().map(|x| (x.id.as_str(), x.default)).collect::<Vec<_>>(),
+            [("k1", false), ("k2", true)]
+        );
+    }
+
+    #[test]
+    fn typical_install_dirs_are_relative_to_any_home() {
+        let home = Path::new("/tmp/any-user");
+        let dirs: Vec<PathBuf> = TYPICAL_REL.iter().map(|rel| home.join(rel)).collect();
+        assert!(dirs.iter().any(|d| d.ends_with(Path::new(".local").join("bin"))));
+        assert!(dirs.iter().any(|d| d.ends_with(Path::new(".grok").join("bin"))));
+        assert!(dirs.iter().any(|d| d.ends_with(Path::new(".kimi-code").join("bin"))));
+        assert!(dirs.iter().any(|d| d.ends_with(Path::new(".claude").join("local"))));
+        assert!(dirs.iter().any(|d| d.ends_with(Path::new("AppData").join("Roaming").join("npm"))));
+    }
+
+    /// npm ships an extensionless shim next to `codex.cmd`. `Command` cannot run the shim.
+    #[cfg(windows)]
+    #[test]
+    fn cmd_wins_over_extensionless_shim_in_the_same_directory() {
+        let d = std::env::temp_dir().join(format!("hatchery-prov-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("codex"), b"shim").unwrap();
+        std::fs::write(d.join("codex.cmd"), b"@echo off\r\necho 1.2.3\r\n").unwrap();
+        let got = find_named("codex", &[d.clone()]).expect("codex.cmd");
+        let _ = std::fs::remove_dir_all(&d);
+        assert_eq!(got, d.join("codex.cmd"));
     }
 }
 
@@ -238,8 +302,74 @@ fn usable(bin: &Path) -> bool {
     !out.trim().is_empty() && !help.contains("no longer maintained") && !out.contains("no longer maintained")
 }
 
-/// Resolve the binary for `provider`: override env, then each alias on PATH, then the
-/// vendor's own install dirs under `extra_homes`.
+/// Per-user directories a provider CLI is installed into. Relative to the home
+/// directory, the same list on every machine.
+const TYPICAL_REL: &[&str] = &[
+    ".local/bin",
+    ".claude/local",
+    ".grok/bin",
+    ".kimi-code/bin",
+    ".npm-global/bin",
+    ".volta/bin",
+    "AppData/Roaming/npm",
+    "scoop/shims",
+];
+
+fn push_unique(dirs: &mut Vec<PathBuf>, dir: PathBuf) {
+    if dir.as_os_str().is_empty() || dirs.iter().any(|d| d == &dir) {
+        return;
+    }
+    dirs.push(dir);
+}
+
+/// `PATH`, then the standard per-user install directories. No host-specific paths.
+pub(crate) fn search_dirs(extra_homes: &[PathBuf]) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            push_unique(&mut dirs, dir);
+        }
+    }
+    let mut homes = Vec::new();
+    if let Some(h) = home() {
+        homes.push(h);
+    }
+    for h in extra_homes {
+        if !homes.iter().any(|e| e == h) {
+            homes.push(h.clone());
+        }
+    }
+    for h in &homes {
+        for rel in TYPICAL_REL {
+            push_unique(&mut dirs, h.join(rel));
+        }
+    }
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        push_unique(&mut dirs, PathBuf::from(appdata).join("npm"));
+    }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        push_unique(&mut dirs, PathBuf::from(local).join("Microsoft").join("WinGet").join("Links"));
+    }
+    dirs
+}
+
+/// First usable `name` in `dirs`. On Windows, `.exe` then `.cmd` then `.bat`, and the
+/// extensionless npm shim only after those: `Command` cannot execute the shim.
+fn find_named(name: &str, dirs: &[PathBuf]) -> Option<PathBuf> {
+    let exts: &[&str] = if cfg!(windows) { &[".exe", ".cmd", ".bat", ""] } else { &[""] };
+    for dir in dirs {
+        for ext in exts {
+            let p = dir.join(format!("{name}{ext}"));
+            if p.is_file() && usable(&p) {
+                return Some(p);
+            }
+        }
+    }
+    None
+}
+
+/// Resolve the binary for `provider`: optional `HATCHERY_PROVIDER_BIN_<ID>`, then each
+/// alias on PATH and in the standard install directories.
 pub fn resolve_binary(provider: &str, extra_homes: &[PathBuf]) -> Option<PathBuf> {
     let key = format!("HATCHERY_PROVIDER_BIN_{}", provider.to_ascii_uppercase());
     if let Some(v) = std::env::var_os(&key).filter(|v| !v.is_empty()) {
@@ -247,20 +377,8 @@ pub fn resolve_binary(provider: &str, extra_homes: &[PathBuf]) -> Option<PathBuf
         let p = if p.is_absolute() { Some(p) } else { which(&p.to_string_lossy()) };
         return p.filter(|p| usable(p));
     }
-    for name in aliases(provider) {
-        if let Some(p) = which(name).filter(|p| usable(p)) {
-            return Some(p);
-        }
-    }
-    let vendor_dirs: &[&str] = match provider {
-        "kimi" => &[".kimi-code/bin/kimi"],
-        "claude" => &[".claude/local/claude", ".local/bin/claude"],
-        _ => &[],
-    };
-    extra_homes
-        .iter()
-        .flat_map(|h| vendor_dirs.iter().map(move |d| h.join(d)))
-        .find(|p| p.is_file() && usable(p))
+    let dirs = search_dirs(extra_homes);
+    aliases(provider).iter().find_map(|name| find_named(name, &dirs))
 }
 
 /// Make every resolvable provider launchable under its canonical name: a node-private shim

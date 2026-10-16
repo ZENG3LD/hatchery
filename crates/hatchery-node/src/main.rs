@@ -134,10 +134,13 @@ async fn main() {
                 Some(i) => &raw_args[i + 1..],
                 None => fail("exec-as needs `--` before the program"),
             };
+            #[cfg(unix)]
             match hatchery_node::isolation::exec_as(&user, rest) {
                 Ok(never) => match never {},
                 Err(message) => fail(&message),
             }
+            #[cfg(not(unix))]
+            fail("exec-as is linux-only");
         }
         // drop-privileges --user USER -- program args...  (root, once; see isolation::drop_privileges)
         Some("drop-privileges") => {
@@ -149,10 +152,13 @@ async fn main() {
                 Some(i) => &raw_args[i + 1..],
                 None => fail("drop-privileges needs `--` before the program"),
             };
+            #[cfg(unix)]
             match hatchery_node::isolation::drop_privileges(&user, rest) {
                 Ok(never) => match never {},
                 Err(message) => fail(&message),
             }
+            #[cfg(not(unix))]
+            fail("drop-privileges is linux-only");
         }
         // net-up --enroll-state DIR [--wg-key FILE] [--interface IF] [--kill-switch]  (root)
         Some("net-up") => {
@@ -169,10 +175,13 @@ async fn main() {
                 }
             }
             let dir = dir.unwrap_or_else(|| fail("--enroll-state is required"));
+            #[cfg(unix)]
             match hatchery_node::isolation::net_up(&dir, key.as_deref(), &iface, ks) {
                 Ok(()) => println!("net-up ok interface={iface} kill_switch={ks}"),
                 Err(message) => fail(&message),
             }
+            #[cfg(not(unix))]
+            fail("net-up is linux-only");
             return;
         }
         // call --c2-enroll ADDR --state-dir DIR --op mail.send --payload JSON
@@ -523,7 +532,10 @@ async fn main() {
             .unwrap_or_else(|error| fail(&error.to_string()));
     }
     let node_id_for_door = Some(node_id.to_string());
-    let state_path = default_state_path(&node_id).unwrap_or_else(|error| fail(&error.to_string()));
+    let state_path = match std::env::var_os("GATE4AGENT_NODE_STATE") {
+        Some(value) if !value.is_empty() => PathBuf::from(value),
+        _ => default_state_path(&node_id).unwrap_or_else(|error| fail(&error.to_string())),
+    };
     let endpoint_for_bridge = endpoint.clone();
     let token_for_bridge = token.clone();
     let node_id_for_bridge = node_id.to_string();
@@ -740,7 +752,8 @@ async fn main() {
                 if last.as_ref() != Some(&payload) {
                     match inv_calls.call("task.provider_inventory", &payload).await {
                         Ok(_) => {
-                            tracing::info!(providers = providers.len(), "provider inventory sent");
+                            let models = providers.iter().map(|p| format!("{}:{}", p.provider, p.models.len())).collect::<Vec<_>>().join(",");
+                            tracing::info!(providers = providers.len(), %models, "provider inventory sent");
                             last = Some(payload);
                         }
                         Err(e) => tracing::warn!(error = ?e, "provider inventory not delivered"),
@@ -1171,9 +1184,7 @@ mod tests {
 
 fn random_token() -> Result<String, String> {
     let mut bytes = [0_u8; 32];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut bytes))
-        .map_err(|error| format!("cannot create a local token: {error}"))?;
+    getrandom::fill(&mut bytes).map_err(|error| format!("cannot create a local token: {error}"))?;
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 

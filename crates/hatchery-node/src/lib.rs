@@ -52,7 +52,8 @@ pub mod browser_capture;
 pub mod m4a_accounts;
 #[cfg(unix)]
 pub mod keystore_proxy;
-/// 0.2.15 name of [`keystore_proxy`].
+/// 0.2.15 name of [`keystore_proxy`]. Unix only, same as the proxy itself.
+#[cfg(unix)]
 pub mod m4a_signer_proxy {
     pub use super::keystore_proxy::*;
 }

@@ -113,8 +113,17 @@ impl Drop for NodeUplink {
 
 impl NodeUplink {
     pub async fn connect(uplink: SocketAddr, journal: Option<Arc<UplinkJournal>>) -> Result<Arc<Self>, String> {
-        let stream = TcpStream::connect(uplink).await.map_err(|e| e.to_string())?;
-        let _ = stream.set_nodelay(true);
+        let dial = uplink;
+        let std_stream = tokio::task::spawn_blocking(move || std::net::TcpStream::connect(dial))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+        let _ = std_stream.set_nodelay(true);
+        // current_thread runtime. A blocking socket here stalls the only
+        // worker inside the first read, so the OPEN writer and the handshake
+        // timeout never run. Windows does not flip this in `from_std`.
+        std_stream.set_nonblocking(true).map_err(|e| e.to_string())?;
+        let stream = TcpStream::from_std(std_stream).map_err(|e| e.to_string())?;
         let (mut rd, mut wr) = stream.into_split();
         let (enq_tx, mut enq_rx) = mpsc::unbounded_channel::<(u32, SendPrio, Frame)>();
         let routes: Arc<Mutex<BTreeMap<u32, mpsc::UnboundedSender<Vec<u8>>>>> = Arc::default();
