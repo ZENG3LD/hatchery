@@ -89,6 +89,11 @@ impl Keyring {
         self.accounts.get(&account).ok_or(SignerError::Locked)?.sign(token, op, payload)
     }
 
+    pub fn m4a_vault_key(&self, node: &str, token: &str) -> Result<zeroize::Zeroizing<[u8; 32]>, SignerError> {
+        let account = Self::account_of(token)?;
+        self.accounts.get(&account).ok_or(SignerError::Locked)?.m4a_vault_key(node, token)
+    }
+
     pub fn sign_m4a_keyproof(&self, node: &str, token: &str, message: &[u8]) -> Result<Signature, SignerError> {
         let account = Self::account_of(token)?;
         self.accounts.get(&account).ok_or(SignerError::Locked)?.sign_m4a_keyproof(node, token, message)

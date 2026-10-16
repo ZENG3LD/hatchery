@@ -7,6 +7,8 @@
 //! - The first letter enrolls the account: an admin invite for the session's nick from the m4a
 //!   product server, then `m4a-key-enroll-v1` signed by the same key.
 //! - Letters go as a 1:1 room (`is_direct`) with the recipient, reused afterwards.
+//! - [`M4aLink::deliver_e2e`] sends end-to-end encrypted (Olm/Megolm) through the m4a client
+//!   engine; its vault master key and identity key are rooted in the keystore, per session.
 //!
 //! Configuration (env, no defaults that name a deployment):
 //! `HATCHERY_M4A_PRODUCT_URL` (http base of the m4a product server) and
@@ -53,10 +55,6 @@ pub struct M4aLink {
     state_path: PathBuf,
 }
 
-/// What the keystore must do for the link: sign a key-proof message as the session.
-pub trait ProofSigner {
-    fn sign_proof(&self, message: &[u8]) -> Result<[u8; 64], LinkError>;
-}
 
 pub fn key_id_of(public_key: &[u8]) -> String {
     format!("k{}", &hex::encode(Sha256::digest(public_key))[..32])
@@ -138,80 +136,107 @@ impl M4aLink {
         }
     }
 
-    /// Log in (enrolling first if needed) as the session's own m4a account. Returns (m4a nick, token).
-    fn session_login(&self, st: &mut State, nick: &str, public_key: &[u8; 32], signer: &dyn ProofSigner) -> Result<(String, String), LinkError> {
-        let key_id = key_id_of(public_key);
-        if let Some(a) = st.accounts.get(nick).filter(|a| a.key_id == key_id) {
-            let c = self.ok("POST", "/product/v1/login/key/challenge", None, Some(&json!({ "key_id": key_id })))?;
-            let s = |k: &str| c.get(k).and_then(Value::as_str).unwrap_or("").to_owned();
-            let msg = login_message(&s("audience"), &key_id, &s("challenge_id"), &s("nonce"), c.get("expires_ms").and_then(Value::as_i64).unwrap_or(0));
-            let sig = signer.sign_proof(&msg)?;
-            let v = self.ok("POST", "/product/v1/login/key", None, Some(&json!({ "key_id": key_id, "challenge_id": s("challenge_id"), "signature": b64(&sig) })))?;
-            let token = v.get("token").and_then(Value::as_str).ok_or_else(|| e(502, "no token"))?.to_owned();
-            return Ok((a.m4a_nick.clone(), token));
+}
+
+/// Signs a key-proof statement as the session, inside the keystore (never exported).
+pub type ExternalSign = Box<dyn Fn(&[u8]) -> Result<[u8; 64], String> + Send + Sync>;
+
+/// The session's m4a client vault: a file vault under a master key derived from the session's
+/// keystore secret, plus the session's identity key, which stays in the keystore and only signs.
+struct HostVault {
+    file: m4a_agent::FileVault,
+    session: String,
+    public_key: [u8; 32],
+    sign: ExternalSign,
+}
+
+impl m4a_agent::KeyVault for HostVault {
+    fn get(&self, label: &str) -> m4a_agent::error::Result<Option<zeroize::Zeroizing<Vec<u8>>>> {
+        self.file.get(label)
+    }
+    fn put(&self, label: &str, value: &[u8]) -> m4a_agent::error::Result<()> {
+        self.file.put(label, value)
+    }
+    fn delete(&self, label: &str) -> m4a_agent::error::Result<bool> {
+        self.file.delete(label)
+    }
+    fn labels(&self) -> m4a_agent::error::Result<Vec<String>> {
+        self.file.labels()
+    }
+    fn kind(&self) -> &'static str {
+        "file+keystore"
+    }
+    fn external_identity(&self, session_id: &str) -> Option<[u8; 32]> {
+        (session_id == self.session).then_some(self.public_key)
+    }
+    fn sign_external(&self, session_id: &str, msg: &[u8]) -> m4a_agent::error::Result<[u8; 64]> {
+        if session_id != self.session {
+            return Err(m4a_agent::AgentError::Vault("not this session's key".into()));
         }
-        let admin = std::env::var(&self.admin_var).ok().filter(|v| !v.is_empty()).ok_or_else(|| e(503, "m4a admin bearer not configured"))?;
-        let inv = self.ok("POST", "/product/v1/admin/invite", Some(&admin), Some(&json!({ "nick": nick })))?;
-        let code = inv.get("invite").and_then(Value::as_str).ok_or_else(|| e(502, "no invite"))?.to_owned();
-        let audience = inv.get("audience").and_then(Value::as_str).unwrap_or("").to_owned();
-        let pk = b64(public_key);
-        let sig = signer.sign_proof(&enroll_message(&audience, &code, &pk, &key_id))?;
-        let v = self.ok("POST", "/product/v1/enroll", None, Some(&json!({ "invite": code, "public_key": pk, "signature": b64(&sig), "label": "hatchery-session", "nick": nick })))?;
-        let m4a_nick = v.get("nick").and_then(Value::as_str).ok_or_else(|| e(502, "no nick"))?.to_owned();
-        let token = v.get("token").and_then(Value::as_str).ok_or_else(|| e(502, "no token"))?.to_owned();
-        st.accounts.insert(nick.to_owned(), Account { m4a_nick: m4a_nick.clone(), key_id, rooms: BTreeMap::new() });
-        self.save(st)?;
-        Ok((m4a_nick, token))
+        (self.sign)(msg).map_err(m4a_agent::AgentError::Vault)
+    }
+}
+
+impl M4aLink {
+    fn sessions_root(&self) -> PathBuf {
+        self.state_path.parent().unwrap_or(Path::new(".")).join("m4a-sessions")
     }
 
-    /// Post `text` from the session `nick` to the m4a account `to`. Returns (m4a nick, room, event).
-    pub fn deliver(&self, nick: &str, public_key: &[u8; 32], signer: &dyn ProofSigner, to: &str, text: &str) -> Result<(String, String, String), LinkError> {
-        let mut st = self.load();
-        let (m4a_nick, token) = self.session_login(&mut st, nick, public_key, signer)?;
-        let who = self.ok("GET", "/_matrix/client/v3/account/whoami", Some(&token), None)?;
-        let me = who.get("user_id").and_then(Value::as_str).ok_or_else(|| e(502, "whoami"))?.to_owned();
-        let server = me.split_once(':').map(|(_, s)| s.to_owned()).ok_or_else(|| e(502, "user id"))?;
-        let bare = to.trim_start_matches('@');
-        let target = if bare.contains(':') { format!("@{bare}") } else { format!("@{bare}:{server}") };
-        let known = st.accounts.get(nick).and_then(|a| a.rooms.get(&target).cloned());
-        let room = match known {
-            Some(r) => r,
-            None => {
-                let v = self.ok("POST", "/_matrix/client/v3/createRoom", Some(&token), Some(&json!({ "is_direct": true, "invite": [target], "preset": "trusted_private_chat" })))?;
-                let r = v.get("room_id").and_then(Value::as_str).ok_or_else(|| e(502, "no room"))?.to_owned();
-                let path = format!("/_matrix/client/v3/user/{}/account_data/m.direct", urlenc(&me));
-                let mut direct = self.call("GET", &path, Some(&token), None).ok().filter(|(s, _)| *s == 200).map(|(_, v)| v).unwrap_or_else(|| json!({}));
-                if let Some(obj) = direct.as_object_mut() {
-                    let list = obj.entry(target.clone()).or_insert_with(|| json!([]));
-                    if let Some(a) = list.as_array_mut() {
-                        a.push(json!(r));
-                    }
+    /// End-to-end encrypted letter (Olm/Megolm, the m4a client engine) from the session `nick`
+    /// to `to`. Each session has its own root, vault and device: one session never opens another
+    /// session's keys. Returns (m4a nick, room, event).
+    pub fn deliver_e2e(&self, nick: &str, public_key: [u8; 32], vault_key: zeroize::Zeroizing<[u8; 32]>, sign: ExternalSign, to: &str, text: &str) -> Result<(String, String, String), LinkError> {
+        use mail4agent_messenger_shell::{store_key, HostSession, MachineClient};
+        use m4a_agent::{BackendKind, IdentityStore, KeyVault};
+        let url = format!("http://{}", self.host);
+        let root = self.sessions_root().join(nick);
+        std::fs::create_dir_all(root.join(".m4a-agent")).map_err(|x| e(500, x.kind().to_string()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o700));
+        }
+        let file = m4a_agent::FileVault::open(root.join(".m4a-agent").join("vault.enc"), Box::new(m4a_agent::StaticMasterKey(zeroize::Zeroizing::new(vault_key.to_vec()))))
+            .map_err(|x| e(500, format!("session vault: {x}")))?;
+        let vault: std::sync::Arc<dyn KeyVault> = std::sync::Arc::new(HostVault { file, session: nick.to_owned(), public_key, sign });
+        store_key::install_vault(&root, vault.clone());
+        let result = (|| {
+            let ids = IdentityStore::new(vault.clone());
+            let mut id = ids.resolve(nick, BackendKind::Server, &url).map_err(|x| e(500, format!("identity: {x}")))?;
+            let mut st = self.load();
+            // An account this session already enrolled with the same keystore key is reused.
+            if !id.enrolled {
+                if let Some(a) = st.accounts.get(nick).filter(|a| a.key_id == id.key_id).cloned() {
+                    id.enrolled = true;
+                    ids.adopt_nick(&mut id, &a.m4a_nick).map_err(|x| e(500, x.to_string()))?;
+                    ids.save(&id).map_err(|x| e(500, x.to_string()))?;
                 }
-                let _ = self.call("PUT", &path, Some(&token), Some(&direct));
-                if let Some(a) = st.accounts.get_mut(nick) {
-                    a.rooms.insert(target.clone(), r.clone());
-                }
-                self.save(&st)?;
-                r
             }
-        };
-        let txn = hex::encode(Sha256::digest(format!("{nick}\0{room}\0{text}\0{}", now_ms()).as_bytes()));
-        let path = format!("/_matrix/client/v3/rooms/{}/send/m.room.message/{}", urlenc(&room), &txn[..24]);
-        let v = self.ok("PUT", &path, Some(&token), Some(&json!({ "msgtype": "m.text", "body": text })))?;
-        let event = v.get("event_id").and_then(Value::as_str).unwrap_or("").to_owned();
-        let _ = self.call("POST", "/product/v1/logout", Some(&token), Some(&json!({})));
-        Ok((m4a_nick, room, event))
+            let mut hs = HostSession::new(nick, nick).with_tier(BackendKind::Server);
+            hs.store_root = Some(root.clone());
+            if !id.enrolled {
+                let admin = std::env::var(&self.admin_var).ok().filter(|v| !v.is_empty()).ok_or_else(|| e(503, "m4a admin bearer not configured"))?;
+                let inv = self.ok("POST", "/product/v1/admin/invite", Some(&admin), Some(&json!({ "nick": nick })))?;
+                let code = inv.get("invite").and_then(Value::as_str).ok_or_else(|| e(502, "no invite"))?.to_owned();
+                hs = hs.with_invite(code);
+            }
+            let mut client = MachineClient::open(&url, &root, vec![hs]).map_err(|x| e(502, format!("m4a client: {x}")))?;
+            let reply = client.send_blocking(nick, to, text, std::time::Duration::from_secs(120));
+            drop(client);
+            let id = ids.resolve(nick, BackendKind::Server, &url).map_err(|x| e(500, format!("identity: {x}")))?;
+            let m4a_nick = id.nick.clone().unwrap_or_else(|| nick.to_owned());
+            if !st.accounts.contains_key(nick) && id.enrolled {
+                st.accounts.insert(nick.to_owned(), Account { m4a_nick: m4a_nick.clone(), key_id: id.key_id.clone(), rooms: BTreeMap::new() });
+                self.save(&st)?;
+            }
+            if !reply.ok {
+                return Err(e(502, reply.error.unwrap_or_else(|| "m4a send failed".into())));
+            }
+            Ok((m4a_nick, reply.room.unwrap_or_default(), reply.event_id.unwrap_or_default()))
+        })();
+        store_key::remove_vault(&root);
+        result
     }
-}
-
-fn now_ms() -> u128 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis()
-}
-
-fn urlenc(s: &str) -> String {
-    s.bytes()
-        .map(|b| if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') { (b as char).to_string() } else { format!("%{b:02X}") })
-        .collect()
 }
 
 fn dechunk(b: &[u8]) -> Vec<u8> {
@@ -242,7 +267,6 @@ mod tests {
         assert!(m.starts_with(b"m4a-key-enroll-v1\na\n"));
         assert!(m.ends_with(b"\nk1\nPK\n"));
         assert_eq!(key_id_of(&[0u8; 32]).len(), 33);
-        assert_eq!(urlenc("!r:s"), "%21r%3As");
         assert_eq!(dechunk(b"3\r\nabc\r\n0\r\n\r\n"), b"abc");
     }
 }

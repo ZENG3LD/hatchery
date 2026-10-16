@@ -97,7 +97,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -108,7 +108,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -608,7 +608,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.59.0",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -983,7 +983,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.3",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -996,6 +996,12 @@ dependencies = [
  "quote",
  "syn 3.0.9",
 ]
+
+[[package]]
+name = "dunce"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
 
 [[package]]
 name = "ecdsa"
@@ -1092,7 +1098,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1547,13 +1553,15 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-wake"
-version = "0.5.2"
+version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fcf8baef6246f05e4d07a1290c164b6d067190c0ce45e31c971749d97aca2805"
+checksum = "e1c8e765ebb5755f2d1241cc8e410e3bb36974f5f41c418eb67c7059727b30c9"
 dependencies = [
+ "dunce",
  "reqwest",
  "serde",
  "serde_json",
+ "siphasher",
  "thiserror 2.0.21",
  "tokio",
  "tungstenite 0.29.0",
@@ -2166,6 +2174,7 @@ dependencies = [
  "m4a-agent",
  "mail4agent-api",
  "mail4agent-core",
+ "mail4agent-messenger-shell",
  "mail4agent-store-sqlite",
  "rusqlite",
  "serde",
@@ -2177,6 +2186,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "zeroize",
 ]
 
 [[package]]
@@ -2718,9 +2728,9 @@ dependencies = [
 
 [[package]]
 name = "m4a-agent"
-version = "0.4.10"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb97a8298acdda9b6d17b30651d0b6284dbb02abadece96f1f8eb42cebdbb420"
+checksum = "ec90512cf89b182dd13f19073780ac0a1b6aba442d76be0f83a55eaf4f7c912b"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -2740,18 +2750,18 @@ dependencies = [
 
 [[package]]
 name = "m4a-keys"
-version = "0.4.13"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae9a517864de50f5288cb579a27b397c3c8b212f2c8c41f15e5208802cf19cbe"
+checksum = "d8421f0ee4145537ffe3119ff2cf0bf9b1e33da4da1f3d28742b9d7c94eab41e"
 dependencies = [
  "tesserax-keytree",
 ]
 
 [[package]]
 name = "m4a-seam"
-version = "0.4.10"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7627c09aebdbbd8ba6bbba0dab1c28fd2947e745c4c11f1e7fae2dfbabbd97d6"
+checksum = "8c7c30ffd5dbf8a9f2724a1bee32244af2f23fdfcddcb1289bba5e45622e3e86"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -2764,9 +2774,9 @@ dependencies = [
 
 [[package]]
 name = "mail4agent"
-version = "0.4.10"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9222fd308e00add7ea0f54df998040c1c841d4d6d658e2a2a7f7040b0fee0d0a"
+checksum = "6de0ed7bb4903a10987d2c4558819a0369f4680c5a808f9b8515a06fda24b103"
 dependencies = [
  "axum",
  "clap",
@@ -2792,9 +2802,9 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-api"
-version = "0.4.10"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfc732e7190fa2b37519bebe873554292c95af30edaf835c64e52b7b96f99463"
+checksum = "e24cbb68502dc738d554b0865be37317da28a5f0a1bc5c85db110ef668ecb815"
 dependencies = [
  "serde",
  "serde_json",
@@ -2802,9 +2812,9 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-attest"
-version = "0.4.10"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6298c40898413427d448faa57f356ce04128426b5e91ec82f4aa60b8c3dbef22"
+checksum = "934090a4804cd025283a25899b1692d3c8edd8599d84627b01cbd195b3ef5c86"
 dependencies = [
  "libc",
  "sysinfo",
@@ -2814,9 +2824,9 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-client"
-version = "0.4.10"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c334417b6d0e0ed174635519572bb50cf15812ca09af918e5573194ea1275650"
+checksum = "095a274433829c21f9dc9290b4d46b86e676425aaa3add397334d40d1c86aa7e"
 dependencies = [
  "mail4agent-api",
  "reqwest",
@@ -2828,9 +2838,9 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-core"
-version = "0.4.10"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6b735b3a471532f0a9a52f2bc9cbc155e91adbd454622d1e038afc158595667"
+checksum = "3b2df2ca71b408dc6600a0d48f2c584d1248642488801b2e5f990773ea92ae0e"
 dependencies = [
  "getrandom 0.2.17",
  "hex",
@@ -2846,9 +2856,9 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-messenger"
-version = "0.4.10"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31e12ca7aa24baec7a8d8f89d24838736dd4d083e9fce9f1ebadecee051e33cc"
+checksum = "d7219594ea1eb8411f30f2675a1dfd92a6c1161654bb5b99b43f92ec898d88db"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -2862,10 +2872,37 @@ dependencies = [
 ]
 
 [[package]]
-name = "mail4agent-store-sqlite"
-version = "0.4.10"
+name = "mail4agent-messenger-shell"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3daafa888b6474c251d3b994229187670b196c8e2141cdde8ea0d3f11c1168fd"
+checksum = "e2628384da9b8e746034996c57cfca84380d23299fccfc63e591e1556bc8087f"
+dependencies = [
+ "axum",
+ "gate4agent-wake",
+ "libc",
+ "m4a-agent",
+ "m4a-keys",
+ "m4a-seam",
+ "mail4agent-messenger",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "tokio",
+ "toml",
+ "tower",
+ "tungstenite 0.29.0",
+ "windows-sys 0.59.0",
+ "zeroize",
+]
+
+[[package]]
+name = "mail4agent-store-sqlite"
+version = "0.4.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56835589a61dedc847dd821ed01e778c9c062b00c2cab22404622f011a74ef68"
 dependencies = [
  "mail4agent-api",
  "mail4agent-core",
@@ -2879,9 +2916,9 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-vodozemac"
-version = "0.4.10"
+version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42f9a6744904ed4d11d7a94e310df02e052ddff3aa11f66b91605f1e8e955d71"
+checksum = "354e60a4516221a51bfc67056f3c1351b280b324af3ab5bd16be42b7f583c267"
 dependencies = [
  "aes",
  "arrayvec",
@@ -3063,7 +3100,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3481,7 +3518,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3804,7 +3841,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4115,6 +4152,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
 
 [[package]]
+name = "siphasher"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56199f7ddabf13fe5074ce809e7d3f42b42ae711800501b5b16ea82ad029c39d"
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4150,7 +4193,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4287,7 +4330,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

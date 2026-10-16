@@ -25,8 +25,8 @@ hatchery-observation-engine = { version = "0.2.16", path = "../hatchery-observat
 hatchery-observation-protocol = { version = "0.2.16", path = "../hatchery-observation-protocol" }
 hatchery-observation-service = { version = "0.2.16", path = "../hatchery-observation-service" }
 # HQ messenger surface: the harness consumes mail4agent as a client dependency.
-mail4agent-client = { version = "0.4.10" }
-mail4agent-api = { version = "0.4.10" }
+mail4agent-client = { version = "0.4.14" }
+mail4agent-api = { version = "0.4.14" }
 gate4agent-types = { version = "0.5.2" }
 rusqlite = { version = "0.36", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }

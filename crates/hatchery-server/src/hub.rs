@@ -35,7 +35,7 @@ impl From<MessengerError> for HubError {
 pub struct Hub {
     data_dir: PathBuf,
     /// m4a signer: per-human key trees, unlocked by each human's passkey PRF secret.
-    signer: Mutex<hatchery_keystore::keyring::Keyring>,
+    signer: std::sync::Arc<Mutex<hatchery_keystore::keyring::Keyring>>,
     messenger: Mutex<Messenger>,
     tasks: Mutex<TaskStore>,
     /// Bumped on every message sent; lets HQ long-poll for new mail instead of polling blindly.
@@ -144,7 +144,7 @@ impl Hub {
     pub fn open(data_dir: &Path) -> Result<Self, crate::error::ServerError> {
         Ok(Self {
             data_dir: data_dir.to_owned(),
-            signer: Mutex::new(hatchery_keystore::keyring::Keyring::new(signer_dir(data_dir)?)),
+            signer: std::sync::Arc::new(Mutex::new(hatchery_keystore::keyring::Keyring::new(signer_dir(data_dir)?))),
             messenger: Mutex::new(Messenger::open(data_dir)?),
             tasks: Mutex::new(TaskStore::open(data_dir)?),
             mail_signal: (Mutex::new(0), Condvar::new()),
@@ -282,20 +282,17 @@ impl Hub {
                 if !hatchery_keystore::verify_signature(&sig, hatchery_keystore::RIGHT_SEND, &canonical) {
                     return Err(HubError::new(500, "signature check failed"));
                 }
-                // Into the real m4a, as the session's own m4a account (key-proof by the same key).
+                // Into the real m4a, end-to-end encrypted, as the session's own m4a account
+                // (identity key and vault master key rooted in the keystore).
                 let link = self.link.as_ref().ok_or_else(|| HubError::new(503, "m4a link not configured"))?;
-                struct Proof<'a> { hub: &'a Hub, node: &'a str, token: &'a str }
-                impl crate::m4a_link::ProofSigner for Proof<'_> {
-                    fn sign_proof(&self, message: &[u8]) -> Result<[u8; 64], crate::m4a_link::LinkError> {
-                        self.hub.signer.lock().expect("signer").sign_m4a_keyproof(self.node, self.token, message)
-                            .map(|s| s.signature)
-                            .map_err(|e| crate::m4a_link::LinkError(403, format!("{e}")))
-                    }
-                }
-                let token = str_field(payload, "token")?;
-                let proof = Proof { hub: self, node: node_id, token };
+                let token = str_field(payload, "token")?.to_owned();
+                let vault_key = self.signer.lock().expect("signer").m4a_vault_key(node_id, &token).map_err(signer_err)?;
+                let (signer, node) = (self.signer.clone(), node_id.to_owned());
+                let sign: crate::m4a_link::ExternalSign = Box::new(move |m: &[u8]| {
+                    signer.lock().expect("signer").sign_m4a_keyproof(&node, &token, m).map(|s| s.signature).map_err(|e| e.to_string())
+                });
                 let (m4a_nick, room, event) = link
-                    .deliver(&sig.nick, &sig.public_key, &proof, to, body)
+                    .deliver_e2e(&sig.nick, sig.public_key, vault_key, sign, to, body)
                     .map_err(|e| {
                         tracing::warn!(node = node_id, nick = %sig.nick, status = e.0, error = %e.1, "m4a delivery failed");
                         HubError::new(if e.0 >= 400 && e.0 < 600 { e.0 } else { 502 }, e.1)

@@ -488,6 +488,18 @@ impl Signer {
         Ok(Signature { nick, public_key: key.public_key(), signature: key.sign(message) })
     }
 
+    /// The 32-byte master key of this session's m4a client vault (E2E device state, store keys),
+    /// derived from the session's keystore secret. Only the session's own token on its own node
+    /// gets it; another session's vault cannot be opened with it.
+    pub fn m4a_vault_key(&self, node: &str, token: &str) -> Result<zeroize::Zeroizing<[u8; 32]>, SignerError> {
+        let (session, nick) = self.verify(token, grants::M4A_SEND)?;
+        self.session_on_node(&session, node)?;
+        let (store, _) = self.unlocked.as_ref().ok_or(SignerError::Locked)?;
+        let ident = store.sessions.get(&session).ok_or(SignerError::UnknownSession)?;
+        let k = kt::Secret::from_bytes(ident.secret).derive(b"hatchery/m4a-vault/v1", nick.as_bytes());
+        Ok(zeroize::Zeroizing::new(*k.expose_secret()))
+    }
+
     pub fn has_node(&self, node: &str) -> bool {
         self.unlocked.as_ref().is_some_and(|(s, _)| s.nodes.contains(node))
     }
