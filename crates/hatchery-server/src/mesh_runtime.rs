@@ -39,6 +39,8 @@ pub struct MeshConfig {
     pub operator_listen: String,
     pub operator_token: String,
     pub node_ids: Vec<String>,
+    /// Data dir whose enroll ledger adds trusted nodes (None in tests that list nodes only).
+    pub data_dir: Option<std::path::PathBuf>,
     pub recipient: HqRecipientSecret,
 }
 
@@ -58,15 +60,12 @@ impl MeshConfig {
             return Err(format!("{OPERATOR_LISTEN_ENV} is empty"));
         }
         let node_ids = std::env::var(NODE_IDS_ENV)
-            .map_err(|_| format!("{NODE_IDS_ENV} is required with {DRAIN_ADDR_ENV}"))?
+            .unwrap_or_default()
             .split(',')
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_owned)
             .collect::<Vec<_>>();
-        if node_ids.is_empty() {
-            return Err(format!("{NODE_IDS_ENV} must list at least one node id"));
-        }
 
         let drain_token_var =
             std::env::var(DRAIN_TOKEN_VAR_ENV).unwrap_or_else(|_| DEFAULT_DRAIN_TOKEN_VAR.into());
@@ -84,6 +83,7 @@ impl MeshConfig {
             operator_listen,
             operator_token,
             node_ids,
+            data_dir: Some(data_dir.to_path_buf()),
             recipient,
         }))
     }
@@ -208,6 +208,97 @@ async fn bootstrap_cursor(
     tracing::warn!(%node_id, "core mesh cursor bootstrap gave up");
 }
 
+
+/// What a node's drain consumers need; shared by startup and the ledger watcher.
+#[derive(Clone)]
+struct NodeCtx {
+    mesh: NodeOperatorMesh,
+    drain_addr: std::net::SocketAddr,
+    drain_token: String,
+    recipient: HqRecipientSecret,
+    m4a_handler: Option<crate::drain_consumer::CoreHandler>,
+    shutdown: watch::Receiver<bool>,
+}
+
+fn spawn_node(ctx: &NodeCtx, node_id: &String, tasks: &mut Vec<tokio::task::JoinHandle<()>>) {
+            let (events_tx, mut events_rx) = mpsc::unbounded_channel();
+    let (browser_tx, mut browser_rx) = mpsc::unbounded_channel::<BrowserStreamEvent>();
+    let (link, outbound) = OperatorLink::new_with_browser(Some(events_tx), Some(browser_tx));
+    ctx.mesh.register(node_id, link.clone());
+    // Forward node-initiated g4a events (PTY frames, etc.) onto the
+    // operator broadcast bus so every HQ client sees live bytes.
+    let mesh_ev = ctx.mesh.clone();
+    tasks.push(tokio::spawn(async move {
+        while let Some(msg) = events_rx.recv().await {
+            if let G4aMessage::Event(ev) = msg {
+                mesh_ev.publish_event(ev);
+            }
+        }
+    }));
+    let mesh_br = ctx.mesh.clone();
+    tasks.push(tokio::spawn(async move {
+        while let Some(ev) = browser_rx.recv().await {
+            mesh_br.publish_browser(ev);
+        }
+    }));
+    let consumer = DrainConsumer::new(
+        DrainClient::new(ctx.drain_addr, ctx.drain_token.clone()),
+        ctx.recipient.clone(),
+        NodeStream {
+            node_id: node_id.clone(),
+            channel_id: G4A_CONTROL_CHANNEL,
+            kind: ChannelKind::G4aControl,
+        },
+        link.clone().handler(),
+    )
+    .with_outbound(outbound)
+    .with_cursor_dir(crate::drain_consumer::CursorStore::dir_from_env());
+    let sd = ctx.shutdown.clone();
+    tasks.push(tokio::spawn(async move {
+        consumer.run(sd).await;
+    }));
+
+    // Learn incarnation once the Noise session is up so HQ Spawn has a cursor.
+    let mesh_boot = ctx.mesh.clone();
+    let link_boot = link.clone();
+    let boot_id = node_id.clone();
+    let sd = ctx.shutdown.clone();
+    tasks.push(tokio::spawn(async move {
+        bootstrap_cursor(mesh_boot, link_boot, boot_id, sd).await;
+    }));
+
+    if let Some(handler) = ctx.m4a_handler.clone() {
+        let consumer = DrainConsumer::new(
+            DrainClient::new(ctx.drain_addr, ctx.drain_token.clone()),
+            ctx.recipient.clone(),
+            NodeStream {
+                node_id: node_id.clone(),
+                channel_id: M4A_CHANNEL,
+                kind: ChannelKind::M4a,
+            },
+            handler,
+        )
+        .with_cursor_dir(crate::drain_consumer::CursorStore::dir_from_env());
+        let sd = ctx.shutdown.clone();
+        tasks.push(tokio::spawn(async move {
+            consumer.run(sd).await;
+        }));
+    }
+        }
+
+/// Nodes core drains: the env list plus every trusted or member node of the enroll ledger.
+fn wanted_nodes(env: &[String], data_dir: Option<&std::path::Path>) -> Vec<String> {
+    let mut out = env.to_vec();
+    if let Some(dir) = data_dir {
+        for e in crate::provision::read_ledger(dir).unwrap_or_default() {
+            if matches!(e.status, crate::provision::NodeStatus::Member | crate::provision::NodeStatus::Trusted) && !out.contains(&e.node_id) {
+                out.push(e.node_id);
+            }
+        }
+    }
+    out
+}
+
 impl MeshRuntime {
     pub fn start(config: MeshConfig) -> Self {
         Self::start_with_m4a(config, None)
@@ -231,74 +322,45 @@ impl MeshRuntime {
             }
         }));
 
-        for node_id in &config.node_ids {
-            let (events_tx, mut events_rx) = mpsc::unbounded_channel();
-            let (browser_tx, mut browser_rx) = mpsc::unbounded_channel::<BrowserStreamEvent>();
-            let (link, outbound) = OperatorLink::new_with_browser(Some(events_tx), Some(browser_tx));
-            mesh.register(node_id, link.clone());
-            // Forward node-initiated g4a events (PTY frames, etc.) onto the
-            // operator broadcast bus so every HQ client sees live bytes.
-            let mesh_ev = mesh.clone();
+        let ctx = NodeCtx {
+            mesh: mesh.clone(),
+            drain_addr: config.drain_addr,
+            drain_token: config.drain_token.clone(),
+            recipient: config.recipient.clone(),
+            m4a_handler: m4a_handler.clone(),
+            shutdown: shutdown.clone(),
+        };
+        let mut started = wanted_nodes(&config.node_ids, config.data_dir.as_deref());
+        for node_id in &started {
+            spawn_node(&ctx, node_id, &mut tasks);
+        }
+        // A node trusted after startup gets its consumers without a core restart.
+        if let Some(dir) = config.data_dir.clone() {
+            let env = config.node_ids.clone();
+            let ctx = ctx.clone();
+            let mut sd = shutdown.clone();
+            let mut seen = started.clone();
             tasks.push(tokio::spawn(async move {
-                while let Some(msg) = events_rx.recv().await {
-                    if let G4aMessage::Event(ev) = msg {
-                        mesh_ev.publish_event(ev);
+                let mut own = Vec::new();
+                loop {
+                    tokio::select! {
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(10)) => {}
+                        _ = sd.changed() => break,
+                    }
+                    for node_id in wanted_nodes(&env, Some(&dir)) {
+                        if !seen.contains(&node_id) {
+                            tracing::info!(%node_id, "core mesh: trusted node added from the enroll ledger");
+                            spawn_node(&ctx, &node_id, &mut own);
+                            seen.push(node_id);
+                        }
                     }
                 }
+                for t in own { t.abort(); }
             }));
-            let mesh_br = mesh.clone();
-            tasks.push(tokio::spawn(async move {
-                while let Some(ev) = browser_rx.recv().await {
-                    mesh_br.publish_browser(ev);
-                }
-            }));
-            let consumer = DrainConsumer::new(
-                DrainClient::new(config.drain_addr, config.drain_token.clone()),
-                config.recipient.clone(),
-                NodeStream {
-                    node_id: node_id.clone(),
-                    channel_id: G4A_CONTROL_CHANNEL,
-                    kind: ChannelKind::G4aControl,
-                },
-                link.clone().handler(),
-            )
-            .with_outbound(outbound)
-            .with_cursor_dir(crate::drain_consumer::CursorStore::dir_from_env());
-            let sd = shutdown.clone();
-            tasks.push(tokio::spawn(async move {
-                consumer.run(sd).await;
-            }));
-
-            // Learn incarnation once the Noise session is up so HQ Spawn has a cursor.
-            let mesh_boot = mesh.clone();
-            let link_boot = link.clone();
-            let boot_id = node_id.clone();
-            let sd = shutdown.clone();
-            tasks.push(tokio::spawn(async move {
-                bootstrap_cursor(mesh_boot, link_boot, boot_id, sd).await;
-            }));
-
-            if let Some(handler) = m4a_handler.clone() {
-                let consumer = DrainConsumer::new(
-                    DrainClient::new(config.drain_addr, config.drain_token.clone()),
-                    config.recipient.clone(),
-                    NodeStream {
-                        node_id: node_id.clone(),
-                        channel_id: M4A_CHANNEL,
-                        kind: ChannelKind::M4a,
-                    },
-                    handler,
-                )
-                .with_cursor_dir(crate::drain_consumer::CursorStore::dir_from_env());
-                let sd = shutdown.clone();
-                tasks.push(tokio::spawn(async move {
-                    consumer.run(sd).await;
-                }));
-            }
         }
-
+        started.sort();
         tracing::info!(
-            nodes = config.node_ids.len(),
+            nodes = started.len(),
             listen = %config.operator_listen,
             "core operator mesh started (drain consumers registered)"
         );
