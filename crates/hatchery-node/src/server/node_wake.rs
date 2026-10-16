@@ -81,7 +81,7 @@ impl NodeWake {
     /// log (it never carries the letter text).
     pub async fn wake(&self, letter: NodeLetter) -> Result<&'static str, String> {
         let (sessions, addresses) = self.snapshot();
-        let wake = WakeLetter { body: &letter.body, from_nick: &letter.from, event_id: &letter.event_id, room: None };
+        let wake = WakeLetter { body: &letter.body, from_nick: &letter.from, event_id: &letter.event_id, room: None, reaction: None };
         match plan_hosted_wake(&sessions, &letter.nick, &wake) {
             HostedWake::Submit { nick, prompt } => {
                 let prompt = if self.policy.deliver_body { prompt } else { crate::wake_pipeline::wake_line(&letter.from, &letter.event_id) };

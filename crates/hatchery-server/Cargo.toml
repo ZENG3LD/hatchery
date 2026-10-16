@@ -18,6 +18,8 @@ path = "src/main.rs"
 
 [dependencies]
 hex = "0.4"
+base64 = "0.22"
+sha2 = "0.10"
 hatchery-keystore = { path = "../hatchery-keystore", version = "0.2.16" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -26,10 +28,13 @@ toml = "0.8"
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-m4a-agent = { version = "0.4.10", optional = true }
-mail4agent-core = { version = "0.4.10", optional = true }
-mail4agent-api = { version = "0.4.10", optional = true }
-mail4agent-store-sqlite = { version = "0.4.10", optional = true }
+m4a-agent = { version = "0.4.14" }
+# E2E session letters: per-session Olm/Megolm client of the real m4a (vault and identity rooted in the keystore).
+mail4agent-messenger-shell = { version = "0.4.14", default-features = false, features = ["tier-server"] }
+zeroize = "1"
+mail4agent-core = { version = "0.4.14", optional = true }
+mail4agent-api = { version = "0.4.14", optional = true }
+mail4agent-store-sqlite = { version = "0.4.14", optional = true }
 rusqlite = { version = "0.36", features = ["bundled"], optional = true }
 hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.16" }
 hatchery-core = { path = "../hatchery-core", version = "0.2.16" }
@@ -48,7 +53,7 @@ libdbus-sys = { version = "0.2", features = ["vendored"] }
 default = ["kit"]
 kit = ["m4a", "memory"]
 # m4a: key vault of the node-side messenger (m4a-agent 0.4); master key from env.
-m4a = ["dep:m4a-agent", "dep:mail4agent-core", "dep:mail4agent-api", "dep:mail4agent-store-sqlite", "dep:rusqlite"]
+m4a = ["dep:mail4agent-core", "dep:mail4agent-api", "dep:mail4agent-store-sqlite", "dep:rusqlite"]
 # memory4agent-server (crates.io memory4agent 0.3) as an on-demand loopback process.
 memory = []
 

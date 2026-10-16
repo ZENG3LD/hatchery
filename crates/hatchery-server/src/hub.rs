@@ -35,12 +35,14 @@ impl From<MessengerError> for HubError {
 pub struct Hub {
     data_dir: PathBuf,
     /// m4a signer: per-human key trees, unlocked by each human's passkey PRF secret.
-    signer: Mutex<hatchery_keystore::keyring::Keyring>,
+    signer: std::sync::Arc<Mutex<hatchery_keystore::keyring::Keyring>>,
     messenger: Mutex<Messenger>,
     tasks: Mutex<TaskStore>,
     /// Bumped on every message sent; lets HQ long-poll for new mail instead of polling blindly.
     mail_signal: (Mutex<u64>, Condvar),
     advice: Mutex<crate::routing::AdviceGate>,
+    /// The real m4a: where session letters go (no separate messenger for sessions).
+    link: Option<crate::m4a_link::M4aLink>,
 }
 
 fn refused(r: Refused) -> HubError {
@@ -142,11 +144,12 @@ impl Hub {
     pub fn open(data_dir: &Path) -> Result<Self, crate::error::ServerError> {
         Ok(Self {
             data_dir: data_dir.to_owned(),
-            signer: Mutex::new(hatchery_keystore::keyring::Keyring::new(signer_dir(data_dir)?)),
+            signer: std::sync::Arc::new(Mutex::new(hatchery_keystore::keyring::Keyring::new(signer_dir(data_dir)?))),
             messenger: Mutex::new(Messenger::open(data_dir)?),
             tasks: Mutex::new(TaskStore::open(data_dir)?),
             mail_signal: (Mutex::new(0), Condvar::new()),
             advice: Mutex::new(Default::default()),
+            link: crate::m4a_link::M4aLink::from_env(data_dir),
         })
     }
 
@@ -279,15 +282,29 @@ impl Hub {
                 if !hatchery_keystore::verify_signature(&sig, hatchery_keystore::RIGHT_SEND, &canonical) {
                     return Err(HubError::new(500, "signature check failed"));
                 }
-                let key = payload.get("idempotency_key").and_then(Value::as_str).map(str::to_owned);
-                let id = {
-                    let mut m = self.messenger.lock().expect("messenger");
-                    m.ensure_session_participant(&sig.nick)?;
-                    m.send(&sig.nick, to, subject, body, key)?
-                };
-                self.bump_mail();
-                tracing::info!(node = node_id, nick = %sig.nick, "signer-signed letter accepted");
-                Ok(json!({ "message_id": id, "from": sig.nick, "signature_hex": hex::encode(sig.signature), "public_key_hex": hex::encode(sig.public_key) }))
+                // Into the real m4a, end-to-end encrypted, as the session's own m4a account
+                // (identity key and vault master key rooted in the keystore).
+                let link = self.link.as_ref().ok_or_else(|| HubError::new(503, "m4a link not configured"))?;
+                let token = str_field(payload, "token")?.to_owned();
+                let vault_key = self.signer.lock().expect("signer").m4a_vault_key(node_id, &token).map_err(signer_err)?;
+                let (signer, node) = (self.signer.clone(), node_id.to_owned());
+                let sign: crate::m4a_link::ExternalSign = Box::new(move |m: &[u8]| {
+                    signer.lock().expect("signer").sign_m4a_keyproof(&node, &token, m).map(|s| s.signature).map_err(|e| e.to_string())
+                });
+                // E2E setup (login, key upload, peer join, Megolm share) can take longer than a
+                // node call may block, so delivery runs on its own thread; the outcome is logged.
+                // One delivery at a time: a session's store is opened by one client only.
+                static DELIVERY: Mutex<()> = Mutex::new(());
+                let (link, nick, node, to, body) = (link.clone(), sig.nick.clone(), node_id.to_owned(), to.to_owned(), body.to_owned());
+                let public_key = sig.public_key;
+                std::thread::spawn(move || {
+                    let _one = DELIVERY.lock().unwrap_or_else(|e| e.into_inner());
+                    match link.deliver_e2e(&nick, public_key, vault_key, sign, &to, &body) {
+                        Ok((m4a, room, event)) => tracing::info!(node = %node, nick = %nick, m4a = %m4a, room = %room, event = %event, "signed e2e letter delivered to m4a"),
+                        Err(e) => tracing::warn!(node = %node, nick = %nick, status = e.0, error = %e.1, "m4a delivery failed"),
+                    }
+                });
+                Ok(json!({ "queued": true, "from": sig.nick, "signature_hex": hex::encode(sig.signature), "public_key_hex": hex::encode(sig.public_key) }))
             }
             "signer.revoke" | "keystore.revoke" => {
                 let session = str_field(payload, "session")?;
@@ -322,7 +339,34 @@ impl Hub {
                 let h = human()?;
                 k.branch(account).map_err(signer_err)?.register_node(str_field(body, "node")?, &h).map_err(signer_err)?
             }
-            "status" => return Ok(json!({ "account": account, "unlocked": k.is_unlocked(account) })),
+            "status" => return Ok(json!({ "account": account, "unlocked": k.is_unlocked(account), "exists": k.exists(account) })),
+            // Browser passkey login (PRF evaluated in the human's browser): first time enrolls the
+            // account's branch, then every active node is put under it, and other accounts
+            // holding those nodes are locked (the passkey account replaces any bootstrap one).
+            "passkey" => {
+                let h = human()?;
+                let enrolled = if k.exists(account) { k.unlock(account, &h).map_err(signer_err)?; false } else { k.enroll(account, &h).map_err(signer_err)?; true };
+                let mut nodes: Vec<String> = read_ledger(&self.data_dir)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|e| matches!(e.status, NodeStatus::Member | NodeStatus::Trusted))
+                    .map(|e| e.node_id)
+                    .collect();
+                for n in std::env::var("HATCHERY_CORE_NODE_IDS").unwrap_or_default().split(',').map(str::trim).filter(|n| !n.is_empty()) {
+                    if !nodes.iter().any(|x| x == n) {
+                        nodes.push(n.to_owned());
+                    }
+                }
+                let b = k.branch(account).map_err(signer_err)?;
+                for n in &nodes {
+                    if !b.has_node(n) {
+                        b.register_node(n, &h).map_err(signer_err)?;
+                    }
+                }
+                let locked = k.take_nodes(account, &nodes);
+                tracing::info!(account, enrolled, nodes = nodes.len(), locked = locked.len(), "keystore unlocked by passkey");
+                return Ok(json!({ "ok": true, "unlocked": true, "enrolled": enrolled, "nodes": nodes, "locked_others": locked }));
+            }
             _ => return Err(HubError::new(404, "unknown signer operation")),
         }
         tracing::info!(account, op, "signer operator call");

@@ -61,3 +61,38 @@ fn delegation_is_attenuated() {
     assert!(s.provision_child(&d, "n", "codex", "c", BTreeSet::new()).is_err(), "delegated m4a cap cannot spawn");
     assert!(s.delegate(&p.token, "nosuch").is_err());
 }
+
+#[test]
+fn keyproof_signing_is_restricted() {
+    let dir = tempfile::tempdir().unwrap();
+    let human = hatchery_keystore::HumanKey::from_bytes([2; 32]);
+    let mut s = hatchery_keystore::Signer::init(dir.path().join("a"), &human).unwrap();
+    s.set_account("a").unwrap();
+    s.register_node("n", &human).unwrap();
+    s.register_node("m", &human).unwrap();
+    let p = s.provision("n", "codex", "s", hatchery_keystore::default_rights(), None).unwrap();
+    let msg = b"m4a-key-login-v1\naud\nkid\ncid\nnonce\n1\n";
+    let sig = s.sign_m4a_keyproof("n", &p.token, msg).unwrap();
+    assert_eq!(sig.public_key, p.public_key);
+    use ed25519_dalek::Verifier;
+    let vk = ed25519_dalek::VerifyingKey::from_bytes(&sig.public_key).unwrap();
+    assert!(vk.verify(msg, &ed25519_dalek::Signature::from_bytes(&sig.signature)).is_ok());
+    assert!(s.sign_m4a_keyproof("n", &p.token, b"hatchery-m4a/v1\0x").is_err(), "letters cannot be signed raw");
+    assert!(s.sign_m4a_keyproof("m", &p.token, msg).is_err(), "other node");
+}
+
+#[test]
+fn m4a_vault_keys_are_per_session_and_node_bound() {
+    let dir = tempfile::tempdir().unwrap();
+    let human = hatchery_keystore::HumanKey::from_bytes([3; 32]);
+    let mut s = hatchery_keystore::Signer::init(dir.path().join("a"), &human).unwrap();
+    s.set_account("a").unwrap();
+    s.register_node("n", &human).unwrap();
+    s.register_node("m", &human).unwrap();
+    let a = s.provision("n", "codex", "s1", hatchery_keystore::default_rights(), None).unwrap();
+    let b = s.provision("n", "codex", "s2", hatchery_keystore::default_rights(), None).unwrap();
+    let ka = s.m4a_vault_key("n", &a.token).unwrap();
+    assert_eq!(*ka, *s.m4a_vault_key("n", &a.token).unwrap(), "stable");
+    assert_ne!(*ka, *s.m4a_vault_key("n", &b.token).unwrap(), "a neighbour gets another key");
+    assert!(s.m4a_vault_key("m", &a.token).is_err(), "other node");
+}

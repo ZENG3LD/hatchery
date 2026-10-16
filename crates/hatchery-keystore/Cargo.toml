@@ -9,7 +9,7 @@ license = "MIT"
 [dependencies]
 tesserax-keytree = "0.1.2"
 # Consumers define their grant names; the keystore (authority) issues them.
-m4a-keys = "0.4.13"
+m4a-keys = "0.4.14"
 gatekeys = { package = "gate4agent-keys", version = "0.5.5" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

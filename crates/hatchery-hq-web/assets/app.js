@@ -518,6 +518,7 @@ function favRow(m) {
 $('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); const was = !m.hidden; closeMenus(); if (was) return; m.hidden = false; m.className = 'pop amenu2'; m.innerHTML = '';
   m.appendChild(menuRow({ ic: 'server', label: 'Fleet', right: String(visibleNodes().filter((n) => n.online).length) + ' online', fn: () => openNode() }, 0));
   favRow(m);
+  m.appendChild(menuRow({ ic: 'gear', label: 'Unlock keys (passkey)', fn: unlockKeystore }, 0));
   m.appendChild(menuRow({ ic: 'gauge', label: 'Usage & plan', right: '— % used', fn: () => openSettings('usage') }, 0));
   m.appendChild(menuRow({ ic: 'phone', label: 'Get the apps', fn: () => toast('Apps: coming soon') }, 0));
   m.appendChild(menuRow({ ic: 'book', label: 'Support', fn: () => openSupport() }, 0));
@@ -525,6 +526,26 @@ $('#acctbtn').onclick = (e) => { e.stopPropagation(); const m = $('#acctmenu'); 
   m.insertAdjacentHTML('beforeend', '<hr>');
   m.appendChild(menuRow({ ic: 'userplus', label: 'Add account', fn: () => toast('Multiple accounts: coming soon') }, 0));
   m.appendChild(menuRow({ ic: 'logout', label: 'Sign out', fn: signOut }, 0)); };
+// ---- Keystore unlock: the account passkey's WebAuthn PRF (evaluated by the authenticator in this
+// browser) unlocks the core keystore root for this operator's own branch. The salt is the keystore's
+// v1 PRF salt (hatchery-keystore legacy_v1::PRF_SALT). The output goes only to the core keystore.
+const KEYSTORE_PRF_SALT = 'hatchery/m4a-account-root/v1';
+async function unlockKeystore() {
+  closeMenus();
+  try {
+    if (!window.PublicKeyCredential) throw new Error('passkeys are not available in this browser');
+    const challenge = crypto.getRandomValues(new Uint8Array(32));
+    const cred = await navigator.credentials.get({ publicKey: { challenge, rpId: location.hostname, userVerification: 'required', timeout: 60000,
+      extensions: { prf: { eval: { first: new TextEncoder().encode(KEYSTORE_PRF_SALT) } } } } });
+    const out = cred.getClientExtensionResults()?.prf?.results?.first;
+    if (!out) throw new Error('this passkey does not support PRF (keystore unlock needs it)');
+    const prf_hex = Array.from(new Uint8Array(out), (b) => b.toString(16).padStart(2, '0')).join('');
+    const r = await fetch('/api/s/keystore/unlock', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ prf_hex }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    toast(j.enrolled ? `Keys created and unlocked (${(j.nodes || []).length} nodes)` : `Keys unlocked (${(j.nodes || []).length} nodes)`);
+  } catch (e) { toast('Keystore: ' + (e.message || e)); }
+}
 // ---- Support: operator-only spawn traces (never shown in sidebar/tabs)
 const PTY_TRACES = [];
 const PTY_TRACE_MAX = 400;

@@ -334,9 +334,12 @@ async fn api_c2(State(s): State<Shared>, Path(rest): Path<String>, method: Metho
 }
 
 /// Allowlisted pass-through to the hatchery-server control API (mail and tasks only).
-async fn api_server(State(s): State<Shared>, Path(rest): Path<String>, method: Method, body: axum::body::Bytes) -> Response {
+async fn api_server(State(s): State<Shared>, Path(rest): Path<String>, method: Method, headers: axum::http::HeaderMap, body: axum::body::Bytes) -> Response {
     if let Some(op) = rest.strip_prefix("m4a/") {
         return api_m4a(&s, op, &body).await;
+    }
+    if let Some(op) = rest.strip_prefix("keystore/") {
+        return api_keystore(&s, op, &method, &headers, &body).await;
     }
     let (Some(addr), Some(token)) = (s.config.server, s.config.server_token.as_deref()) else {
         return err(StatusCode::SERVICE_UNAVAILABLE, "server API is not configured");
@@ -357,6 +360,37 @@ async fn api_server(State(s): State<Shared>, Path(rest): Path<String>, method: M
             }
             json_reply(status, reply)
         }
+        Err(e) => err(StatusCode::BAD_GATEWAY, &e),
+    }
+}
+
+/// Keystore unlock by the operator's passkey. The account is the identity the edge passkey gate
+/// authenticated (`Remote-User`, set by forward_auth), never a field of the request, so a human
+/// can only open their own branch. The PRF output is evaluated in the browser by the passkey and
+/// only passes through here to the core keystore; it is not logged or stored.
+async fn api_keystore(s: &Shared, op: &str, method: &Method, headers: &axum::http::HeaderMap, body: &[u8]) -> Response {
+    let (Some(addr), Some(token)) = (s.config.server, s.config.server_token.as_deref()) else {
+        return err(StatusCode::SERVICE_UNAVAILABLE, "server API is not configured");
+    };
+    let Some(account) = headers.get("remote-user").and_then(|v| v.to_str().ok()).map(str::trim).filter(|a| {
+        !a.is_empty() && a.len() <= 128 && !a.starts_with('.') && a.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'@'))
+    }) else {
+        return err(StatusCode::UNAUTHORIZED, "no authenticated operator");
+    };
+    let req = match (op, method) {
+        ("status", &Method::GET) => json!({ "account": account }),
+        ("unlock", &Method::POST) => {
+            let prf = serde_json::from_slice::<Value>(body).ok().and_then(|v| v.get("prf_hex").and_then(Value::as_str).map(str::to_owned));
+            let Some(prf) = prf.filter(|p| p.len() >= 64 && p.len() <= 256 && p.bytes().all(|b| b.is_ascii_hexdigit())) else {
+                return err(StatusCode::BAD_REQUEST, "prf_hex required");
+            };
+            json!({ "account": account, "prf_hex": prf })
+        }
+        _ => return err(StatusCode::NOT_FOUND, "not found"),
+    };
+    let path = if op == "status" { "/v1/signer/status" } else { "/v1/signer/passkey" };
+    match upstream(addr, "POST", path, Some(token), req.to_string().as_bytes(), Duration::from_secs(20)).await {
+        Ok((status, reply)) => json_reply(status, reply),
         Err(e) => err(StatusCode::BAD_GATEWAY, &e),
     }
 }
