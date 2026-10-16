@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-server"
-version = "0.2.19"
+version = "0.2.20"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
@@ -20,7 +20,7 @@ path = "src/main.rs"
 hex = "0.4"
 base64 = "0.22"
 sha2 = "0.10"
-hatchery-keystore = { path = "../hatchery-keystore", version = "0.2.19" }
+hatchery-keystore = { path = "../hatchery-keystore", version = "0.2.20" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -33,9 +33,9 @@ m4a-agent = { version = "0.4.14" }
 mail4agent-messenger-shell = { version = "0.4.14", default-features = false, features = ["tier-server"] }
 zeroize = "1"
 rusqlite = { version = "0.36", features = ["bundled"], optional = true }
-hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.19" }
-hatchery-core = { path = "../hatchery-core", version = "0.2.19" }
-hatchery-c2-client = { path = "../hatchery-c2-client", version = "0.2.19" }
+hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.20" }
+hatchery-core = { path = "../hatchery-core", version = "0.2.20" }
+hatchery-c2-client = { path = "../hatchery-c2-client", version = "0.2.20" }
 gate4agent-node-protocol = { version = "0.5.4" }
 gate4agent-node-wire = { version = "0.5.4" }
 gate4agent-types = { version = "0.5.2" }
@@ -57,4 +57,4 @@ memory = []
 [dev-dependencies]
 tempfile = "3"
 async-trait = "0.1"
-hatchery-c2 = { path = "../hatchery-c2", version = "0.2.19" }
+hatchery-c2 = { path = "../hatchery-c2", version = "0.2.20" }
