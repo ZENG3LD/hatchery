@@ -49,6 +49,7 @@ struct State {
     accounts: BTreeMap<String, Account>,
 }
 
+#[derive(Clone)]
 pub struct M4aLink {
     host: String,
     admin_var: String,

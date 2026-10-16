@@ -291,14 +291,20 @@ impl Hub {
                 let sign: crate::m4a_link::ExternalSign = Box::new(move |m: &[u8]| {
                     signer.lock().expect("signer").sign_m4a_keyproof(&node, &token, m).map(|s| s.signature).map_err(|e| e.to_string())
                 });
-                let (m4a_nick, room, event) = link
-                    .deliver_e2e(&sig.nick, sig.public_key, vault_key, sign, to, body)
-                    .map_err(|e| {
-                        tracing::warn!(node = node_id, nick = %sig.nick, status = e.0, error = %e.1, "m4a delivery failed");
-                        HubError::new(if e.0 >= 400 && e.0 < 600 { e.0 } else { 502 }, e.1)
-                    })?;
-                tracing::info!(node = node_id, nick = %sig.nick, m4a = %m4a_nick, "signed letter delivered to m4a");
-                Ok(json!({ "message_id": event, "room": room, "from": m4a_nick, "signature_hex": hex::encode(sig.signature), "public_key_hex": hex::encode(sig.public_key) }))
+                // E2E setup (login, key upload, peer join, Megolm share) can take longer than a
+                // node call may block, so delivery runs on its own thread; the outcome is logged.
+                // One delivery at a time: a session's store is opened by one client only.
+                static DELIVERY: Mutex<()> = Mutex::new(());
+                let (link, nick, node, to, body) = (link.clone(), sig.nick.clone(), node_id.to_owned(), to.to_owned(), body.to_owned());
+                let public_key = sig.public_key;
+                std::thread::spawn(move || {
+                    let _one = DELIVERY.lock().unwrap_or_else(|e| e.into_inner());
+                    match link.deliver_e2e(&nick, public_key, vault_key, sign, &to, &body) {
+                        Ok((m4a, room, event)) => tracing::info!(node = %node, nick = %nick, m4a = %m4a, room = %room, event = %event, "signed e2e letter delivered to m4a"),
+                        Err(e) => tracing::warn!(node = %node, nick = %nick, status = e.0, error = %e.1, "m4a delivery failed"),
+                    }
+                });
+                Ok(json!({ "queued": true, "from": sig.nick, "signature_hex": hex::encode(sig.signature), "public_key_hex": hex::encode(sig.public_key) }))
             }
             "signer.revoke" | "keystore.revoke" => {
                 let session = str_field(payload, "session")?;
