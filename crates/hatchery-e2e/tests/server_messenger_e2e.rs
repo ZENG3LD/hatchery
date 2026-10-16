@@ -189,8 +189,6 @@ async fn mail_tasks_status_and_revocation_end_to_end() {
 
     // Neutral: nothing beyond lobby/heartbeat; every mail and task call is refused.
     for n in [&alpha, &beta, &gamma] {
-        assert!(refused(&call(&rig, n, "mail.send", json!({"to":"beta","subject":"s","body":"b"})).await));
-        assert!(refused(&call(&rig, n, "mail.inbox", json!({})).await));
         assert!(refused(&call(&rig, n, "task.list", json!({})).await));
     }
 
@@ -200,41 +198,10 @@ async fn mail_tasks_status_and_revocation_end_to_end() {
     wait_ledger(&rig.data, "alpha", "member").await;
     wait_ledger(&rig.data, "beta", "trusted").await;
 
-    // Mail A -> B, delivered, read, acknowledged. The sender is the authenticated node.
-    let sent = call(&rig, &alpha, "mail.send", json!({"to":"beta","subject":"hello","body":"from alpha to beta","idempotency_key":"k1"})).await.unwrap();
-    let id = sent["message_id"].as_str().unwrap().to_owned();
-    let again = call(&rig, &alpha, "mail.send", json!({"to":"beta","subject":"hello","body":"from alpha to beta","idempotency_key":"k1"})).await.unwrap();
-    assert_eq!(again["message_id"], id, "idempotent retry creates nothing new");
-    let inbox = call(&rig, &beta, "mail.inbox", json!({})).await.unwrap();
-    let msgs = inbox["messages"].as_array().unwrap();
-    assert_eq!(msgs.len(), 1);
-    assert_eq!(msgs[0]["from"], "alpha");
-    assert_eq!(msgs[0]["body"], "from alpha to beta");
-    // A payload cannot choose the sender.
-    let spoof = call(&rig, &alpha, "mail.send", json!({"to":"beta","subject":"s","body":"b","from":"beta"})).await.unwrap();
-    let inbox = call(&rig, &beta, "mail.inbox", json!({})).await.unwrap();
-    assert!(inbox["messages"].as_array().unwrap().iter().all(|m| m["from"] == "alpha"), "{spoof} {inbox}");
-    call(&rig, &beta, "mail.ack", json!({"message_id": id})).await.unwrap();
-    // The neutral node can neither be written to nor read for.
-    assert!(refused(&call(&rig, &beta, "mail.send", json!({"to":"gamma","subject":"s","body":"b"})).await));
-    assert!(refused(&call(&rig, &gamma, "mail.inbox", json!({})).await));
-
-    // Room mail follows the ledger rooms: both are in `general`.
-    call(&rig, &alpha, "mail.send", json!({"to":"room:general","subject":"all","body":"to the room"})).await.unwrap();
-    let inbox = call(&rig, &beta, "mail.inbox", json!({})).await.unwrap();
-    assert!(inbox["messages"].as_array().unwrap().iter().any(|m| m["body"] == "to the room"));
-
-    // Operator (HQ) mail both ways through the control API.
-    let (s, _) = http(&rig.control, "POST", "/v1/mail/send", Some(CONTROL), r#"{"to":"beta","subject":"hq","body":"hello from HQ"}"#).await;
-    assert_eq!(s, 200);
-    let inbox = call(&rig, &beta, "mail.inbox", json!({})).await.unwrap();
-    assert!(inbox["messages"].as_array().unwrap().iter().any(|m| m["from"] == "hatchery.operator" && m["body"] == "hello from HQ"));
-    call(&rig, &beta, "mail.send", json!({"to":"hatchery.operator","subject":"re","body":"reply"})).await.unwrap();
-    let (s, body) = http(&rig.control, "POST", "/v1/mail/inbox", Some(CONTROL), "{}").await;
-    assert_eq!(s, 200);
-    assert!(body["messages"].as_array().unwrap().iter().any(|m| m["from"] == "beta" && m["body"] == "reply"));
-    let (s, _) = http(&rig.control, "POST", "/v1/mail/send", None, r#"{"to":"beta","subject":"x","body":"x"}"#).await;
-    assert_eq!(s, 401, "operator routes need the control bearer");
+    // Core keeps no mailbox (m4a is the only messenger): mail ops and operator mail routes are gone.
+    assert!(call(&rig, &beta, "mail.inbox", json!({})).await.is_err());
+    let (s, _) = http(&rig.control, "POST", "/v1/mail/send", Some(CONTROL), r#"{"to":"beta","subject":"hq","body":"x"}"#).await;
+    assert_eq!(s, 404);
 
     // Tasks: only a trusted node (holds `tasks`) can be assigned; it sees exactly its own.
     let (s, _) = http(&rig.control, "POST", "/v1/tasks", Some(CONTROL), r#"{"title":"nope","assignee":"alpha"}"#).await;
@@ -257,8 +224,6 @@ async fn mail_tasks_status_and_revocation_end_to_end() {
     let data = rig.data.clone();
     tokio::task::spawn_blocking(move || {
         let reopened = Hub::open(&data).unwrap();
-        let after = reopened.node_call("beta", "mail.inbox", &json!({})).unwrap();
-        assert!(after["messages"].as_array().unwrap().len() >= 3);
         assert_eq!(reopened.operator_call("GET", "/v1/tasks", &json!({})).unwrap()["tasks"].as_array().unwrap().len(), 1);
     })
     .await
@@ -269,8 +234,8 @@ async fn mail_tasks_status_and_revocation_end_to_end() {
         use hatchery_enroll::call::SignedCall;
         let ts = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
         let payload = "{}".to_owned();
-        let msg = SignedCall::signing_bytes("beta", "mail.inbox", &payload, ts, "replaynonce1");
-        let signed = SignedCall { node_id: "beta".into(), op: "mail.inbox".into(), payload, ts_ms: ts, nonce: "replaynonce1".into(), signature: beta.identity.sign_bytes(&msg) };
+        let msg = SignedCall::signing_bytes("beta", "task.list", &payload, ts, "replaynonce1");
+        let signed = SignedCall { node_id: "beta".into(), op: "task.list".into(), payload, ts_ms: ts, nonce: "replaynonce1".into(), signature: beta.identity.sign_bytes(&msg) };
         let body = serde_json::to_string(&signed).unwrap();
         let (first, _) = http(&enroll_addr, "POST", "/v1/node-call", None, &body).await;
         let (second, _) = http(&enroll_addr, "POST", "/v1/node-call", None, &body).await;
@@ -284,15 +249,14 @@ async fn mail_tasks_status_and_revocation_end_to_end() {
     // Revoked is cut off: C2 refuses, and the server's own ledger check refuses a direct call too.
     let (s, _) = http(&api, "POST", "/v1/enroll/nodes/beta/revoke", Some(OPERATOR), "").await;
     assert_eq!(s, 200);
-    assert!(refused(&call(&rig, &beta, "mail.inbox", json!({})).await));
+    assert!(refused(&call(&rig, &beta, "task.list", json!({})).await));
     wait_ledger(&rig.data, "beta", "revoked").await;
-    let direct = http(&rig.control, "POST", "/v1/node-call", Some(CONTROL), r#"{"node_id":"beta","op":"mail.inbox","payload":{}}"#).await;
+    let direct = http(&rig.control, "POST", "/v1/node-call", Some(CONTROL), r#"{"node_id":"beta","op":"task.list","payload":{}}"#).await;
     assert_eq!(direct.0, 403);
-    assert!(refused(&call(&rig, &alpha, "mail.send", json!({"to":"beta","subject":"s","body":"b"})).await), "revoked node is no longer a mailbox");
     // Suspension also removes a member from the mailbox, and a status flip back restores it.
     set_status(&api, "alpha", "suspended").await;
     wait_ledger(&rig.data, "alpha", "suspended").await;
-    assert!(refused(&call(&rig, &alpha, "mail.inbox", json!({})).await));
+    assert!(refused(&call(&rig, &alpha, "task.list", json!({})).await));
 }
 
 /// The agent path: MCP tool -> node door (signs with the node identity) -> C2 -> hub. The agent

@@ -155,21 +155,11 @@ mod mail_and_tasks {
         let mut beta = node(&edge, "beta", 1).await;
         let mut gamma = node(&edge, "gamma", 1).await;
 
-        // Mail alpha -> beta; the sender is the stream's node, not the payload.
-        let sent = alpha
-            .call("mail.send", &json!({"to":"beta","subject":"s","body":"over the drain","from":"beta"}), t)
-            .await
-            .unwrap();
-        assert!(sent["message_id"].is_string());
-        let inbox = beta.call("mail.inbox", &json!({}), t).await.unwrap();
-        let msgs = inbox["messages"].as_array().unwrap();
-        assert_eq!(msgs.len(), 1);
-        assert_eq!(msgs[0]["from"], "alpha");
-        assert_eq!(msgs[0]["body"], "over the drain");
-        beta.call("mail.ack", &json!({"message_id": msgs[0]["id"].clone()}), t).await.ok();
-
+        // Core keeps no mailbox (m4a is the only messenger): mail ops are unknown.
+        assert!(alpha.call("mail.send", &json!({"to":"beta","subject":"s","body":"b"}), t).await.is_err());
         // Neutral node is refused by core's own ledger check.
-        assert!(gamma.call("mail.inbox", &json!({}), t).await.unwrap_err().contains("refused"));
+        assert!(gamma.call("task.list", &json!({}), t).await.unwrap_err().contains("refused"));
+        let _ = &mut beta;
 
         // Tasks: assigned via the operator side of the hub, read and closed by the node.
         let h = Arc::clone(&hub);

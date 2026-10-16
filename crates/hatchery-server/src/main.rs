@@ -64,16 +64,10 @@ async fn open_hub(config: &ServerConfig) -> HubHandle {
         {
             Ok(hub) => {
                 let hub = std::sync::Arc::new(hub);
-                // Core's own m4a: run.close letters to the operator mailbox.
-                let reader = std::sync::Arc::clone(&hub);
-                std::thread::spawn(move || loop {
-                    reader.poll_m4a();
-                    std::thread::sleep(std::time::Duration::from_secs(10));
-                });
                 Some(hub)
             }
             Err(error) => {
-                tracing::error!(%error, "messenger and tasks not started");
+                tracing::error!(%error, "tasks and keystore not started");
                 None
             }
         }

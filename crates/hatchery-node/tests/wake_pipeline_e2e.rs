@@ -95,7 +95,7 @@ fn node_mail_reaches_the_routine_once_through_g4a_and_history_is_not_replayed() 
     assert_eq!(body["from"], "operator");
     assert_eq!(body["to"], "web-bot");
     assert_eq!(body["event_id"], "m-1");
-    assert!(body["reply"].as_str().unwrap().contains("mail.send"));
+    assert!(body["reply"].as_str().unwrap().contains("m4a-send"));
 
     // Same inbox again (and after a restart): nothing new.
     assert!(node_mail_tick(&policy, &mut seen, &new, None).is_empty());

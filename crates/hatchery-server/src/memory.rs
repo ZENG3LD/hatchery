@@ -110,7 +110,7 @@ mod tests {
 
     fn fake_server(dir: &Path) -> PathBuf {
         let path = dir.join("fake-memory-server");
-        std::fs::write(&path, "#!/bin/sh\nenv > \"$MEMORY4AGENT_DATA_DIR/env.txt\"\nexec sleep 30\n").unwrap();
+        std::fs::write(&path, "#!/bin/sh\nenv > \"$MEMORY4AGENT_DATA_DIR/env.tmp\" && mv \"$MEMORY4AGENT_DATA_DIR/env.tmp\" \"$MEMORY4AGENT_DATA_DIR/env.txt\"\nexec sleep 30\n").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         path
     }
@@ -127,7 +127,8 @@ mod tests {
         assert_eq!(status.state, State::Running);
         let port = status.port.unwrap();
         assert!((MEMORY_PORT_MIN..=MEMORY_PORT_MAX).contains(&port));
-        for _ in 0..50 {
+        // The child writes env.tmp then renames it, so env.txt is never seen half-written.
+        for _ in 0..500 {
             if dir.path().join("memory/env.txt").exists() {
                 break;
             }

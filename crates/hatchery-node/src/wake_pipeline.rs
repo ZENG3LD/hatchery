@@ -386,10 +386,8 @@ pub fn node_mail_tick(policy: &WakePolicy, seen: &mut MailSeen, inbox: &Value, d
         let result = match route(policy, &to, SessionShape::None) {
             Route::Spawn(profile) => launch_spawn_profile(&profile).map(|()| 202),
             Route::Routine(target) => {
-                let reply = door_hint.map(|door| {
-                    let req = json!({"op": "mail.send", "payload": {"to": reply_to, "subject": format!("re: {subject}"), "body": "..."}});
-                    format!("curl -s -XPOST {door} -d '{}'", req.to_string().replace('\'', ""))
-                });
+                // Replies go through m4a (the only messenger), as the session's own account.
+                let reply = door_hint.map(|_| format!("m4a-send --to {} \"...\"", reply_to.replace(['\'', '"', '`', '$'], "")));
                 let letter = RoutineLetter {
                     to: to.clone(),
                     from: from.clone(),

@@ -2,13 +2,13 @@
 //! calls for mail and tasks. All state lives under the data dir; admission is always read from
 //! the P2 ledger, never from the request.
 
-use crate::messenger::{Messenger, MessengerError, OPERATOR};
+/// The operator's own principal in node/ledger checks (never a node id).
+pub const OPERATOR: &str = "hatchery.operator";
 use crate::provision::{read_ledger, LedgerEntry, NodeStatus};
 use crate::tasks::{Refused, Session, TaskStore};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::sync::{Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Mutex;
 
 #[derive(Debug)]
 pub struct HubError {
@@ -22,24 +22,11 @@ impl HubError {
     }
 }
 
-impl From<MessengerError> for HubError {
-    fn from(e: MessengerError) -> Self {
-        match e {
-            MessengerError::Forbidden => Self::new(403, "refused"),
-            MessengerError::Bad(m) => Self::new(400, m),
-            MessengerError::Internal(m) => Self::new(500, m),
-        }
-    }
-}
-
 pub struct Hub {
     data_dir: PathBuf,
     /// m4a signer: per-human key trees, unlocked by each human's passkey PRF secret.
     signer: std::sync::Arc<Mutex<hatchery_keystore::keyring::Keyring>>,
-    messenger: Mutex<Messenger>,
     tasks: Mutex<TaskStore>,
-    /// Bumped on every message sent; lets HQ long-poll for new mail instead of polling blindly.
-    mail_signal: (Mutex<u64>, Condvar),
     advice: Mutex<crate::routing::AdviceGate>,
     /// The real m4a: where session letters go (no separate messenger for sessions).
     link: Option<crate::m4a_link::M4aLink>,
@@ -93,46 +80,6 @@ impl Hub {
         Ok((cfg, state))
     }
 
-    /// Core's own m4a (the in-process mailbox engine): read `run.close` letters that nodes'
-    /// sessions sent to the operator mailbox and close the named run when the letter comes
-    /// from the run's node. Each letter is acknowledged once handled. Returns runs closed.
-    pub fn poll_m4a(&self) -> usize {
-        let letters = match self.messenger.lock().expect("messenger").inbox(OPERATOR, 0, 256) {
-            Ok(l) => l,
-            Err(e) => {
-                tracing::debug!(error = %e, "m4a reader: operator inbox unavailable");
-                return 0;
-            }
-        };
-        let mut closed = 0;
-        for letter in letters {
-            let Some(cmd) = crate::m4a_gateway::parse_close(&letter.body) else { continue };
-            let tasks = self.tasks.lock().expect("tasks");
-            let outcome = match tasks.run(cmd.run_id) {
-                Ok(Some(run)) if run.node_id == letter.from => {
-                    match tasks.close_run(run.id, &cmd.status, "session", Some(&run.session_id), cmd.branch.as_deref(), cmd.commit.as_deref(), Some(&letter.message_id)) {
-                        Ok(Ok(r)) => {
-                            closed += 1;
-                            tracing::info!(run = r.id, status = %r.status, "run closed by its session via m4a");
-                            "closed"
-                        }
-                        Ok(Err(why)) => {
-                            tracing::info!(run = run.id, ?why, "m4a run.close refused");
-                            "refused"
-                        }
-                        Err(_) => continue, // store error: retry next tick
-                    }
-                }
-                Ok(_) => "ignored",
-                Err(_) => continue,
-            };
-            drop(tasks);
-            tracing::debug!(outcome, "m4a run.close letter handled");
-            let _ = self.messenger.lock().expect("messenger").ack(OPERATOR, &letter.message_id);
-        }
-        closed
-    }
-
     /// Routing recommendation for `role` (operator API and node door).
     pub fn recommend(&self, role: &str) -> Result<Value, HubError> {
         let (cfg, state) = self.routing()?;
@@ -145,17 +92,10 @@ impl Hub {
         Ok(Self {
             data_dir: data_dir.to_owned(),
             signer: std::sync::Arc::new(Mutex::new(hatchery_keystore::keyring::Keyring::new(signer_dir(data_dir)?))),
-            messenger: Mutex::new(Messenger::open(data_dir)?),
             tasks: Mutex::new(TaskStore::open(data_dir)?),
-            mail_signal: (Mutex::new(0), Condvar::new()),
             advice: Mutex::new(Default::default()),
             link: crate::m4a_link::M4aLink::from_env(data_dir),
         })
-    }
-
-    fn bump_mail(&self) {
-        *self.mail_signal.0.lock().expect("signal") += 1;
-        self.mail_signal.1.notify_all();
     }
 
     fn entry(&self, node_id: &str) -> Option<LedgerEntry> {
@@ -174,7 +114,6 @@ impl Hub {
     /// policy; the hub checks the ledger again, independently.
     pub fn node_call(&self, node_id: &str, op: &str, payload: &Value) -> Result<Value, HubError> {
         let capability = match op.split_once('.').map(|p| p.0) {
-            Some("mail") => "mail",
             Some("task") | Some("run") => "tasks",
             Some("signer") => "mail",
             _ => return Err(HubError::new(404, "unknown operation")),
@@ -183,22 +122,6 @@ impl Hub {
             return Err(HubError::new(403, "refused"));
         }
         match op {
-            "mail.send" => {
-                let key = payload.get("idempotency_key").and_then(Value::as_str).map(str::to_owned);
-                let id = self.messenger.lock().expect("messenger").send(node_id, str_field(payload, "to")?, str_field(payload, "subject")?, str_field(payload, "body")?, key)?;
-                self.bump_mail();
-                Ok(json!({ "message_id": id }))
-            }
-            "mail.inbox" => {
-                let since = payload.get("since_ms").and_then(Value::as_u64).unwrap_or(0);
-                let limit = payload.get("limit").and_then(Value::as_u64).unwrap_or(50).min(256) as u16;
-                let mail = self.messenger.lock().expect("messenger").inbox(node_id, since, limit)?;
-                Ok(json!({ "messages": mail }))
-            }
-            "mail.ack" => {
-                self.messenger.lock().expect("messenger").ack(node_id, str_field(payload, "message_id")?)?;
-                Ok(json!({ "ok": true }))
-            }
             "task.list" => {
                 let tasks = self.tasks.lock().expect("tasks").list(Some(node_id), true).map_err(|e| HubError::new(500, e.to_string()))?;
                 Ok(json!({ "tasks": tasks }))
@@ -502,25 +425,6 @@ impl Hub {
                 let sessions = self.tasks.lock().expect("tasks").sessions(query_param(query, "node")).map_err(int)?;
                 Ok(json!({ "sessions": sessions }))
             }
-            // Wake a session: a letter from core's own m4a to the session's node, naming the
-            // session; the node wakes it and the session reads the letter from m4a.
-            ("POST", ["v1", "sessions", id, "wake"]) => {
-                let session = self.tasks.lock().expect("tasks").session(id).map_err(int)?.ok_or_else(|| HubError::new(404, "not found"))?;
-                let nick = self.tasks.lock().expect("tasks").session_nick(id).map_err(int)?;
-                let text = opt_str(body, "text").map(str::trim).filter(|t| !t.is_empty()).unwrap_or("wake: check your tasks and m4a inbox");
-                if text.len() > 16 * 1024 {
-                    return Err(HubError::new(400, "text too long"));
-                }
-                let subject = format!("wake {}", nick.as_deref().unwrap_or(&session.session_id));
-                let message_id = self
-                    .messenger
-                    .lock()
-                    .expect("messenger")
-                    .send(OPERATOR, &session.node_id, &subject, text, opt_str(body, "op_id").map(str::to_owned))
-                    .map_err(|e| HubError::new(409, e.to_string()))?;
-                self.bump_mail();
-                Ok(json!({ "woke": id, "via": "m4a", "message_id": message_id }))
-            }
             // Record a real provider session (a provider conversation id); drafts are not recorded.
             ("POST", ["v1", "sessions"]) => {
                 let session = Session {
@@ -562,40 +466,6 @@ impl Hub {
                 let id: i64 = id.parse().map_err(|_| HubError::new(400, "bad id"))?;
                 if self.tasks.lock().expect("tasks").set_status(id, "cancelled", None).map_err(|e| HubError::new(500, e.to_string()))? { Ok(json!({ "ok": true })) } else { Err(HubError::new(409, "task is final")) }
             }
-            ("POST", ["v1", "mail", "send"]) => {
-                let id = self.messenger.lock().expect("messenger").send(OPERATOR, str_field(body, "to")?, str_field(body, "subject")?, str_field(body, "body")?, None)?;
-                self.bump_mail();
-                Ok(json!({ "message_id": id }))
-            }
-            // Long-poll for HQ: returns as soon as the operator inbox holds a message newer than
-            // `since_ms`, or after `timeout_secs` (max 30) with an empty list.
-            ("POST", ["v1", "mail", "wait"]) => {
-                let since = body.get("since_ms").and_then(Value::as_u64).unwrap_or(0);
-                let deadline = Instant::now() + Duration::from_secs(body.get("timeout_secs").and_then(Value::as_u64).unwrap_or(25).min(30));
-                loop {
-                    let seen = *self.mail_signal.0.lock().expect("signal");
-                    let mail: Vec<_> = self.messenger.lock().expect("messenger").inbox(OPERATOR, since, 100)?.into_iter().filter(|m| m.created_at_ms > since).collect();
-                    if !mail.is_empty() {
-                        return Ok(json!({ "messages": mail }));
-                    }
-                    let now = Instant::now();
-                    if now >= deadline {
-                        return Ok(json!({ "messages": [] }));
-                    }
-                    let guard = self.mail_signal.0.lock().expect("signal");
-                    if *guard == seen {
-                        let _ = self.mail_signal.1.wait_timeout(guard, deadline - now).expect("signal wait");
-                    }
-                }
-            }
-            ("POST", ["v1", "mail", "thread"]) => {
-                let mail = self.messenger.lock().expect("messenger").thread(str_field(body, "node")?, 200)?;
-                Ok(json!({ "messages": mail }))
-            }
-            ("POST", ["v1", "mail", "inbox"]) => {
-                let mail = self.messenger.lock().expect("messenger").inbox(OPERATOR, 0, 100)?;
-                Ok(json!({ "messages": mail }))
-            }
             _ => Err(HubError::new(404, "not found")),
         }
     }
@@ -621,10 +491,7 @@ mod task_api_tests {
         assert!(hub.signer.lock().unwrap().account_for_node("alpha").is_none());
         hub.operator_call("POST", "/v1/signer/unlock", &json!({"account": "owner", "prf_hex": prf})).unwrap();
         let p = hub.signer.lock().unwrap().provision("owner", "alpha", "codex", "s1", hatchery_keystore::default_rights(), None).unwrap();
-        let mut m = hub.messenger.lock().unwrap();
-        m.ensure_session_participant(&p.nick).unwrap();
-        m.ensure_session_participant("peer-1").unwrap();
-        assert!(m.send(&p.nick, "peer-1", "s", "b", None).is_ok());
+        assert_eq!(p.nick, hub.signer.lock().unwrap().sign(&p.token, hatchery_keystore::RIGHT_SEND, b"x").unwrap().nick);
     }
 
     #[test]
@@ -652,17 +519,6 @@ mod task_api_tests {
         assert_eq!(r["recommendation"]["pick"]["seat"]["id"], "alpha/grok");
         hub.operator_call("POST", "/v1/routing/roles/coder/delete", &json!({})).unwrap();
         assert!(hub.operator_call("POST", "/v1/routing/recommend", &json!({"role": "coder"})).is_err());
-    }
-
-    #[test]
-    fn wake_needs_a_known_session() {
-        let dir = tempfile::tempdir().unwrap();
-        let hub = Hub::open(dir.path()).unwrap();
-        assert_eq!(hub.operator_call("POST", "/v1/sessions/nope/wake", &json!({})).unwrap_err().status, 404);
-        // No ledger: the node is not a mailbox participant, so the letter is refused.
-        hub.operator_call("POST", "/v1/sessions", &json!({"session_id": "s1", "node_id": "alpha", "provider": "codex"})).unwrap();
-        assert!(hub.operator_call("POST", "/v1/sessions/s1/wake", &json!({})).is_err());
-        assert_eq!(hub.poll_m4a(), 0);
     }
 
     #[test]
