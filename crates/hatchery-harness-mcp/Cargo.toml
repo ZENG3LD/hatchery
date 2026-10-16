@@ -22,8 +22,8 @@ path = "src/bin/acp_fixture_agent.rs"
 
 [dependencies]
 hatchery-harness-client = { version = "0.2.21", path = "../hatchery-harness-client" }
-gate4agent-node-protocol = { version = "0.5.4" }
-gate4agent-node-wire = { version = "0.5.4" }
+gate4agent-node-protocol = { version = "0.5.6" }
+gate4agent-node-wire = { version = "0.5.6" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
@@ -36,7 +36,7 @@ hatchery-harness-protocol = { version = "0.2.21", path = "../hatchery-harness-pr
 hatchery-harness-service = { version = "0.2.21", path = "../hatchery-harness-service" }
 hatchery-node = { version = "0.2.21", path = "../hatchery-node", features = ["fixture"] }
 hatchery-observation-service = { version = "0.2.21", path = "../hatchery-observation-service" }
-gate4agent-testkit = { version = "0.5.2" }
-gate4agent-types = { version = "0.5.2" }
+gate4agent-testkit = { version = "0.5.6" }
+gate4agent-types = { version = "0.5.6" }
 tokio = { version = "1", features = ["full"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

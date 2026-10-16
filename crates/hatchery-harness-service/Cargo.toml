@@ -13,13 +13,13 @@ name = "hatchery_harness_service"
 [dependencies]
 hatchery-c2-client = { version = "0.2.21", path = "../hatchery-c2-client" }
 hatchery-core = { path = "../hatchery-core", version = "0.2.21" }
-gate4agent-catalog = { version = "0.5.2" }
+gate4agent-catalog = { version = "0.5.6" }
 hatchery-harness-api = { version = "0.2.21", path = "../hatchery-harness-api" }
 hatchery-harness-engine = { version = "0.2.21", path = "../hatchery-harness-engine" }
 hatchery-harness-delivery = { version = "0.2.21", path = "../hatchery-harness-delivery" }
 hatchery-harness-protocol = { version = "0.2.21", path = "../hatchery-harness-protocol" }
-gate4agent-node-protocol = { version = "0.5.4" }
-gate4agent-node-wire = { version = "0.5.4" }
+gate4agent-node-protocol = { version = "0.5.6" }
+gate4agent-node-wire = { version = "0.5.6" }
 hatchery-observation-api = { version = "0.2.21", path = "../hatchery-observation-api" }
 hatchery-observation-engine = { version = "0.2.21", path = "../hatchery-observation-engine" }
 hatchery-observation-protocol = { version = "0.2.21", path = "../hatchery-observation-protocol" }
@@ -27,7 +27,7 @@ hatchery-observation-service = { version = "0.2.21", path = "../hatchery-observa
 # HQ messenger surface: the harness consumes mail4agent as a client dependency.
 mail4agent-client = { version = "0.4.14" }
 mail4agent-api = { version = "0.4.14" }
-gate4agent-types = { version = "0.5.2" }
+gate4agent-types = { version = "0.5.6" }
 rusqlite = { version = "0.36", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -251,7 +251,7 @@ mod tests {
         );
         assert_eq!(
             m.iter().map(|x| (x.id.as_str(), x.default)).collect::<Vec<_>>(),
-            [("k1", false), ("k2", true)]
+            [("k1", false), ("k2", true), ("kimi-code/k3", false)]
         );
     }
 

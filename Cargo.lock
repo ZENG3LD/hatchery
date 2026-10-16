@@ -97,7 +97,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -108,7 +108,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -340,6 +340,12 @@ dependencies = [
 
 [[package]]
 name = "bitflags"
+version = "1.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
+
+[[package]]
+name = "bitflags"
 version = "2.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
@@ -378,6 +384,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a8894febbff9f758034a5b8e12d87918f56dfc64a8e1fe757d65e29041538d93"
 dependencies = [
  "generic-array",
+]
+
+[[package]]
+name = "boringtun"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15dd6a8a89cbe8997f37ca0cf035e6ea4d64cd2ecea4aed83ffb9f99f7126939"
+dependencies = [
+ "aead",
+ "base64 0.22.1",
+ "blake2",
+ "chacha20poly1305",
+ "hex",
+ "hmac",
+ "ip_network",
+ "ip_network_table",
+ "libc",
+ "nix",
+ "parking_lot",
+ "portable-atomic",
+ "rand_core 0.6.4",
+ "ring",
+ "tracing",
+ "untrusted",
+ "x25519-dalek",
 ]
 
 [[package]]
@@ -608,7 +639,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
 dependencies = [
  "lazy_static",
- "windows-sys 0.48.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -854,6 +885,46 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac6b926516df9c60bfa16e107b21086399f8285a44ca9711344b9e553c5146e2"
 
 [[package]]
+name = "defmt"
+version = "0.3.101"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4deef977660e373c458df605a913d4ab121db0ccd18d1ad6976dff7d37cddb53"
+dependencies = [
+ "defmt 1.2.0",
+]
+
+[[package]]
+name = "defmt"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4a0795ac740cb54d7b3775c9c17345f6aaecf884c01733b39d6017738e0e3e1"
+dependencies = [
+ "bitflags 1.3.2",
+ "defmt-macros",
+]
+
+[[package]]
+name = "defmt-macros"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "840bb056bd99c495c9188198a258ab787c79f306d864db3e6e8451442d6d8366"
+dependencies = [
+ "defmt-parser",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
+]
+
+[[package]]
+name = "defmt-parser"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71958f69fb2de856c5dd51ac9377e986ca1aa5919f931bf5395a807277f889a0"
+dependencies = [
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "der"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -983,7 +1054,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.3",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1098,7 +1169,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1284,9 +1355,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent"
-version = "0.5.3"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a1da451df96d6fcd93661755c828f6e04b204df74233b50e8eceb6fb8b84ae4"
+checksum = "55f9e03744ac5218c0e29ba8e5d841d5fba828c452847861fd05b60f691ed1c4"
 dependencies = [
  "chrono",
  "gate4agent-catalog",
@@ -1304,9 +1375,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-adapters"
-version = "0.5.4"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e20cf01a27e2949ec8e196013710ca6f2bdaee9fb0ca528f2b1858cf410dc41"
+checksum = "a77c93e3465d5d40bcac66167c5314a1c82da5117cd5ade21c507bcbefe6091c"
 dependencies = [
  "gate4agent-types",
  "serde_json",
@@ -1315,15 +1386,15 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-build-stamp"
-version = "0.5.3"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9175e4e31ae7df9d635447f7fafbd796432d4d98eab282b14389f1362c28b8a8"
+checksum = "1fa1791baa875b009d1a6337e9cb5ca3ec2e425a42a620809925e8fa433f9076"
 
 [[package]]
 name = "gate4agent-catalog"
-version = "0.5.3"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e3a9dc89bfb740cbf9b48c90348c99f7e0a5f66e0de5cf6c530a60987ad9103"
+checksum = "93c38c45f301b6ced10835b4a6e76824d82e3b17c8502ccc68ce9e77d47b06b8"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1332,18 +1403,18 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-engine"
-version = "0.5.3"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22378396a07a67903b3d1254d9c332c7f9f34eae611ca5d2e83856dae97c3044"
+checksum = "2121a6c03f5b04244467d38e5a74d2f686af38ef7227cbcb554e6cb1d2aaf4b0"
 dependencies = [
  "gate4agent-types",
 ]
 
 [[package]]
 name = "gate4agent-handle"
-version = "0.5.3"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f43daf03690352ec6399957b134a4e436824c620416a142a20be45fb9d97be30"
+checksum = "5569b43590136a534673aecb664f4d94e6c126a3ad850098c594fb2db211bca6"
 dependencies = [
  "gate4agent-kernel",
  "gate4agent-tool-protocol",
@@ -1353,9 +1424,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-kernel"
-version = "0.5.3"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ec55767a308dad80a6338aedcd2ce644bedf4522079274fc67cef36257480c4"
+checksum = "d427b4f2157b5b1ce472383887429c545bbed86e7f3f5d2992d83e9ebbfd7914"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-engine",
@@ -1367,33 +1438,37 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-keys"
-version = "0.5.5"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61fb0e6481808937a35acb2206f5eaf729f726c3ed63836848948f7a842c439d"
+checksum = "e7f9c50051a9362ebc63d3df8c6b8380f367b20996a4541f22147c8f391c680d"
 dependencies = [
  "tesserax-keytree",
 ]
 
 [[package]]
 name = "gate4agent-node-core"
-version = "0.5.2"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62710fb916179fb11c21a68ccb748b20f0de92b77f7cd022641d4139833501d6"
+checksum = "17941a6ef395df1edfa72ee5e983ef3e0a7e3737520a804310bd6f050bd095df"
 dependencies = [
+ "base64 0.22.1",
+ "boringtun",
  "gate4agent-node-protocol",
  "gate4agent-runtime-native",
  "gate4agent-types",
  "libc",
  "serde",
  "serde_json",
+ "smoltcp",
  "thiserror 2.0.21",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "gate4agent-node-protocol"
-version = "0.5.4"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f4a490ff5e7b3a031cfd918f9ec2e7d4c549c4979fe16ab08fdfe14c28c3f50"
+checksum = "3935404e601f6807bfda5e40b9465330ad9126ddd3f5491b89d843d9aab2c37a"
 dependencies = [
  "gate4agent-build-stamp",
  "gate4agent-types",
@@ -1406,9 +1481,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-node-wire"
-version = "0.5.4"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c1ac30bed6590d48f5bccb74d1f38014818b98e3ee9ba3a4437b1b0109dcc22"
+checksum = "31d6b630326a147d7cae9ce12b16cc50a7ad9efb0239b8e84122ec44b38adc9b"
 dependencies = [
  "gate4agent-node-protocol",
  "libc",
@@ -1420,9 +1495,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-provider-ports"
-version = "0.5.3"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b119fef288b299836cb663d747bab4e58fb1c68e7159f4f0344b0a8b48c874cb"
+checksum = "1ce202d654a8240685d14cbaf49ddcbbd04181a3474843bb18d4a13ad8fef7ac"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1431,15 +1506,15 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-pty"
-version = "0.5.3"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c0fec82c2bbb6c19e83fa21ab34126577351833488360cc42002608cd211ca16"
+checksum = "ae257317d8645b4fe38f934c0fe20f4550a1c2da242e2d9f5939fc46ee907ff7"
 
 [[package]]
 name = "gate4agent-runtime-native"
-version = "0.5.4"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "644f9b898fb0c7d995b16fa15fd802b8d1a5ae4a6eb7efb4cf2fd6966b1e893e"
+checksum = "b81c3039d904e5eb641605c58380312d733b3dded3eaf1d4151896db1a2b2edf"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-catalog",
@@ -1457,9 +1532,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-shell-capabilities"
-version = "0.5.3"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbfc5a1b018ed3b788525237baf2d311959870bde1b00f7c06b3bec7f427f6e7"
+checksum = "566f6d460de049ebcbd78bb3cea61210304fde81e808c13a758365f9bfef690f"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-types",
@@ -1468,9 +1543,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-shell-history"
-version = "0.5.3"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7bcf2dbfddf3ee5ddbee071f99e43c3860ad69d02674836600b22e5ddfb77cf6"
+checksum = "5c55c7fec6df514e836efd06bbb168e4c65ecfdac964d48ea65dcc34bdb4ef53"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-provider-ports",
@@ -1482,9 +1557,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-shell-native"
-version = "0.5.3"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4744e62262f933885b6ae33f63e8b824fa17e0687d61eadb477974e14a79a80"
+checksum = "cc8b2c3dbc9c4219e4cb95a3eab17fb89d8ad129f0bc0047191a52facb82f702"
 dependencies = [
  "gate4agent",
  "gate4agent-adapters",
@@ -1500,9 +1575,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-shell-one-shot"
-version = "0.5.3"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74ce8d7d03725bf46d74d9cc32f4456fecc271b003cb6bdad50b3eb285e5d4aa"
+checksum = "a580a2656dfc47b5d7f3f7ddaa70a528cb86e2dc9089eeee09fc22dec442d17c"
 dependencies = [
  "gate4agent",
  "gate4agent-adapters",
@@ -1513,9 +1588,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-testkit"
-version = "0.5.2"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dde523d93c25669b997d262551a89016cd0d4094de790c428ab41dde8b2f2e00"
+checksum = "150ca0c5b4c6e3991884efef24c0291dfd214e02493d8be8dedfdd163818e9da"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1523,9 +1598,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-tool-engine"
-version = "0.5.3"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d581b08cb1f9617c8edac5dfd5d296b0d28ed7889f669df87db43b7adf01d3b0"
+checksum = "1cb4cf7ec28855d9dbf0ab46d3beebd8d55c4c0503d0d86ff09e14d7d11b8173"
 dependencies = [
  "gate4agent-tool-protocol",
  "gate4agent-types",
@@ -1533,9 +1608,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-tool-protocol"
-version = "0.5.3"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db98f7a26b9b2176e5773950fd18fd763a66c8dfaf0e4b156c7179cd7e702fa7"
+checksum = "20faac6bee9ad99fd99abb16dac460e14de5c307fd633713625e5a46ef28abc8"
 dependencies = [
  "gate4agent-types",
  "serde",
@@ -1543,9 +1618,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-types"
-version = "0.5.3"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b93b642cbfab18c66cd2eda84259d7ed15c93bdc6fb5669aa5c61a5984df3e5e"
+checksum = "18ca6a2879c2f68e4e117ba6826deca2dc92c7f7b227cd7f3648df298163b8a5"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -1553,9 +1628,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-wake"
-version = "0.5.5"
+version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1c8e765ebb5755f2d1241cc8e410e3bb36974f5f41c418eb67c7059727b30c9"
+checksum = "5cdae8400a2a0129c79aa0866548cda88b3544fb96b6bedb338f069e8eea8754"
 dependencies = [
  "dunce",
  "reqwest",
@@ -1680,6 +1755,15 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+]
+
+[[package]]
+name = "hash32"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47d60b12902ba28e2730cd37e95b8c9223af2808df9e902d4df49588d1470606"
+dependencies = [
+ "byteorder",
 ]
 
 [[package]]
@@ -2198,6 +2282,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "heapless"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bfb9eb618601c89945a70e254898da93b13be0388091d42117462b265bb3fad"
+dependencies = [
+ "hash32",
+ "stable_deref_trait",
+]
+
+[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2530,6 +2624,28 @@ dependencies = [
  "block-padding",
  "generic-array",
 ]
+
+[[package]]
+name = "ip_network"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa2f047c0a98b2f299aa5d6d7088443570faae494e9ae1305e48be000c9e0eb1"
+
+[[package]]
+name = "ip_network_table"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4099b7cfc5c5e2fe8c5edf3f6f7adf7a714c9cc697534f63a5a5da30397cb2c0"
+dependencies = [
+ "ip_network",
+ "ip_network_table-deps-treebitmap",
+]
+
+[[package]]
+name = "ip_network_table-deps-treebitmap"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8e537132deb99c0eb4b752f0346b6a836200eaaa3516dd7e5514b63930a09e5d"
 
 [[package]]
 name = "ipnet"
@@ -2942,6 +3058,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "managed"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ca88d725a0a943b096803bd34e73a4437208b6077654cc4ecb2947a5f91618d"
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3074,6 +3196,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "nix"
+version = "0.31.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3098,7 +3232,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3122,7 +3256,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
 dependencies = [
- "bitflags",
+ "bitflags 2.13.2",
 ]
 
 [[package]]
@@ -3149,7 +3283,7 @@ version = "0.10.81"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77823a27f0babb03091cb9ed9ef80af3b39dbc82f97e8fa530374b7dafd87a45"
 dependencies = [
- "bitflags",
+ "bitflags 2.13.2",
  "cfg-if",
  "foreign-types",
  "libc",
@@ -3327,6 +3461,12 @@ dependencies = [
  "opaque-debug",
  "universal-hash",
 ]
+
+[[package]]
+name = "portable-atomic"
+version = "1.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05c8b63e8d9609db387f0324918f81d68fe27748f084ef092fb35954d0539a85"
 
 [[package]]
 name = "potential_utf"
@@ -3516,7 +3656,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3651,7 +3791,7 @@ version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
- "bitflags",
+ "bitflags 2.13.2",
 ]
 
 [[package]]
@@ -3800,7 +3940,7 @@ version = "0.36.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3de23c3319433716cf134eed225fe9986bc24f63bed9be9f20c329029e672dc7"
 dependencies = [
- "bitflags",
+ "bitflags 2.13.2",
  "fallible-iterator",
  "fallible-streaming-iterator",
  "hashlink",
@@ -3835,11 +3975,11 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "891efababe418670775f199f0d233d84843c227a0949a883ce15b37c78d6629d"
 dependencies = [
- "bitflags",
+ "bitflags 2.13.2",
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3925,7 +4065,7 @@ version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02"
 dependencies = [
- "bitflags",
+ "bitflags 2.13.2",
  "core-foundation 0.9.4",
  "core-foundation-sys",
  "libc",
@@ -3938,7 +4078,7 @@ version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b7f4bc775c73d9a02cde8bf7b2ec4c9d12743edf609006c7facc23998404cd1d"
 dependencies = [
- "bitflags",
+ "bitflags 2.13.2",
  "core-foundation 0.10.1",
  "core-foundation-sys",
  "libc",
@@ -4168,6 +4308,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5b3dc8af474f516a851ff4bd12db780f948b9250ad37211e4eec0bccea54e01b"
 
 [[package]]
+name = "smoltcp"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a1a996951e50b5971a2c8c0fa05a381480d70a933064245c4a223ddc87ccc97"
+dependencies = [
+ "bitflags 1.3.2",
+ "byteorder",
+ "cfg-if",
+ "defmt 0.3.101",
+ "heapless",
+ "managed",
+]
+
+[[package]]
 name = "snow"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4191,7 +4345,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4303,7 +4457,7 @@ version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a13f3d0daba03132c0aa9767f98351b3488edc2c100cda2d2ec2b04f3d8d3c8b"
 dependencies = [
- "bitflags",
+ "bitflags 2.13.2",
  "core-foundation 0.9.4",
  "system-configuration-sys",
 ]
@@ -4328,7 +4482,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4687,7 +4841,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4cfcf7e2740e6fc6d4d688b4ef00650406bb94adf4731e43c096c3a19fe40840"
 dependencies = [
  "async-compression",
- "bitflags",
+ "bitflags 2.13.2",
  "bytes",
  "futures-core",
  "futures-util",
@@ -5109,7 +5263,7 @@ version = "0.245.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f08c9adee0428b7bddf3890fc27e015ac4b761cc608c822667102b8bfd6995e"
 dependencies = [
- "bitflags",
+ "bitflags 2.13.2",
  "hashbrown 0.16.1",
  "indexmap",
  "semver",

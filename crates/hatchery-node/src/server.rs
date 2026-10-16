@@ -13221,6 +13221,11 @@ fn enable_call_home_keepalive(stream: &tokio::net::TcpStream) -> std::io::Result
     socket2::SockRef::from(stream).set_tcp_keepalive(&call_home_keepalive())
 }
 
+/// Same keepalive profile for any node->relay socket (restream uplink).
+pub(crate) fn enable_tcp_keepalive(stream: &std::net::TcpStream) -> std::io::Result<()> {
+    socket2::SockRef::from(stream).set_tcp_keepalive(&call_home_keepalive())
+}
+
 /// Backoff for the `attempt`-th consecutive failure (1-based), capped.
 fn call_home_backoff(attempt: usize) -> Duration {
     Duration::from_millis(
