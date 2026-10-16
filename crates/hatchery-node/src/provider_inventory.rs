@@ -62,8 +62,10 @@ fn run(bin: &Path, args: &[&str], deadline: Duration) -> Option<String> {
     String::from_utf8(reader.join().ok()?).ok()
 }
 
+/// Model ids may carry a vendor path or tag (`kimi-code/k3`, `name:tag`, `x@v`); entries that
+/// fail are dropped one by one, never the whole provider.
 fn ok_id(s: &str) -> bool {
-    !s.is_empty() && s.len() <= 128 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.[]".contains(&b))
+    !s.is_empty() && s.len() <= 128 && !s.starts_with(['/', ':']) && !s.contains("..") && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.[]/:@".contains(&b))
 }
 
 pub fn parse_codex(json: &str) -> Vec<ModelInfo> {

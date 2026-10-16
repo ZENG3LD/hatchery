@@ -102,20 +102,36 @@ fn ok_name(x: &str) -> bool {
     !x.is_empty() && x.len() <= 128 && x.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.[]".contains(&b))
 }
 
-/// Validate a node's report (bounded, plain identifiers only).
+/// Model ids may carry a vendor path or tag (`kimi-code/k3`, `name:tag`, `x@v`).
+pub fn ok_model_id(x: &str) -> bool {
+    !x.is_empty() && x.len() <= 128 && !x.starts_with(['/', ':']) && !x.contains("..") && x.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.[]/:@".contains(&b))
+}
+
+/// Validate a node's report (bounded, plain identifiers). A bad provider, model or effort
+/// entry is dropped on its own; the rest of the report is kept.
 pub fn clean_report(providers: Vec<ProviderInventory>) -> Result<Vec<ProviderInventory>, &'static str> {
     if providers.len() > 16 {
         return Err("too many providers");
     }
-    for p in &providers {
-        if !ok_name(&p.provider) || p.source.len() > 32 || p.models.len() > 256 {
-            return Err("bad provider entry");
+    let mut out = Vec::new();
+    for mut p in providers {
+        if !ok_name(&p.provider) || p.source.len() > 32 {
+            tracing::warn!(provider = %p.provider.chars().take(40).collect::<String>(), "inventory: provider entry dropped");
+            continue;
         }
-        if p.models.iter().any(|m| !ok_name(&m.id) || m.efforts.len() > 16 || m.efforts.iter().any(|e| !ok_name(e))) {
-            return Err("bad model entry");
+        let before = p.models.len();
+        p.models.retain(|m| ok_model_id(&m.id));
+        p.models.truncate(256);
+        for m in &mut p.models {
+            m.efforts.retain(|e| ok_name(e));
+            m.efforts.truncate(16);
         }
+        if p.models.len() < before {
+            tracing::warn!(provider = %p.provider, dropped = before - p.models.len(), "inventory: bad model entries dropped");
+        }
+        out.push(p);
     }
-    Ok(providers)
+    Ok(out)
 }
 
 impl RoutingConfig {
@@ -142,12 +158,15 @@ pub struct ModelRef {
 
 pub fn parse_model_ref(s: &str) -> Option<ModelRef> {
     let (provider, rest) = s.split_once('/')?;
-    let (model, effort) = match rest.split_once(':') {
-        Some((m, e)) => (m, Some(e.to_owned()).filter(|e| !e.is_empty())),
-        None => (rest, None),
-    };
     let ok = |x: &str| !x.is_empty() && x.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b));
-    (ok(provider) && ok(model) && effort.as_deref().is_none_or(ok)).then(|| ModelRef { provider: provider.into(), model: model.into(), effort })
+    // The effort is the part after the last ':' when that part is a plain name; a model id may
+    // itself hold '/' or ':' (`kimi/kimi-code/k3:high`).
+    let (model, effort) = match rest.rsplit_once(':') {
+        Some((m, e)) if ok(e) && !m.is_empty() => (m, Some(e.to_owned())),
+        Some((m, "")) => (m, None),
+        _ => (rest, None),
+    };
+    (ok(provider) && ok_model_id(model) && effort.as_deref().is_none_or(ok)).then(|| ModelRef { provider: provider.into(), model: model.into(), effort })
 }
 
 /// Latest limit knowledge per (node, provider), built from session signals.
@@ -282,6 +301,15 @@ impl AdviceGate {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn model_ids_with_paths_and_one_bad_entry() {
+        let r = super::parse_model_ref("kimi/kimi-code/k3:high").unwrap();
+        assert_eq!((r.model.as_str(), r.effort.as_deref()), ("kimi-code/k3", Some("high")));
+        let p: Vec<super::ProviderInventory> = serde_json::from_str(r#"[{"provider":"kimi","models":[{"id":"kimi-code/k3"},{"id":"bad id"}]},{"provider":"bad provider"}]"#).unwrap();
+        let c = super::clean_report(p).unwrap();
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0].models.len(), 1);
+    }
     use super::*;
     use crate::tasks::SessionSignal;
 
