@@ -553,24 +553,41 @@ async fn main() {
         std::env::var("HATCHERY_RESTREAM_UPLINK").ok().and_then(|v| v.parse().ok())
     });
     // Reuse, never replace: a node already serving this ops address keeps
-    // running and this process steps aside (graceful handoff is spec-only).
-    match hatchery_node::local_infra::probe(api_listen, "gate4agent-node", std::time::Duration::from_secs(2)) {
-        hatchery_node::local_infra::Probe::Ours(info) => {
-            tracing::info!(
-                %api_listen,
-                version = info.version.as_deref().unwrap_or("?"),
-                pid = info.pid.unwrap_or(0),
-                "a gate4agent-node already serves this address; reusing it, not starting a second"
-            );
-            if info.older_than(env!("CARGO_PKG_VERSION")) {
-                tracing::warn!(minimum = env!("CARGO_PKG_VERSION"), "running node is older; graceful handoff not available yet, stop it yourself to upgrade");
+    // running unless it is older (or HATCHERY_NODE_TAKEOVER=1) and offers a
+    // graceful handoff; then it shuts itself down and this one takes over.
+    {
+        use hatchery_node::local_infra::{self as li, Probe, Upgrade};
+        match li::probe(api_listen, "gate4agent-node", std::time::Duration::from_secs(2)) {
+            Probe::Ours(info) => {
+                let force = std::env::var("HATCHERY_NODE_TAKEOVER").is_ok_and(|v| v == "1");
+                let plan = li::upgrade_plan(&info, env!("CARGO_PKG_VERSION"), force);
+                let version = info.version.clone().unwrap_or_else(|| "?".to_owned());
+                match plan {
+                    Upgrade::Handoff if li::auto_upgrade_allowed() => {
+                        tracing::info!(%api_listen, %version, pid = info.pid.unwrap_or(0), "running node is older or takeover requested; asking it to hand over");
+                        if let Err(error) = li::handoff(api_listen, &info, 300, std::time::Duration::from_secs(60)) {
+                            tracing::warn!(%error, "node handoff failed; the running node keeps serving, this one exits");
+                            std::process::exit(0);
+                        }
+                        tracing::info!(%api_listen, "previous node handed over; continuing start");
+                    }
+                    _ => {
+                        if plan == Upgrade::ManualOnly {
+                            tracing::warn!(%version, "running node is older and has no control channel; stop it yourself to upgrade");
+                        }
+                        tracing::info!(%api_listen, %version, pid = info.pid.unwrap_or(0), "a gate4agent-node already serves this address; reusing it, not starting a second");
+                        std::process::exit(0);
+                    }
+                }
             }
-            std::process::exit(0);
+            Probe::Foreign(detail) => {
+                tracing::warn!(%api_listen, %detail, "ops address held by something that is not gate4agent-node; choose another --api-listen");
+            }
+            Probe::Free => {}
         }
-        hatchery_node::local_infra::Probe::Foreign(detail) => {
-            tracing::warn!(%api_listen, %detail, "ops address held by something that is not gate4agent-node; choose another --api-listen");
-        }
-        hatchery_node::local_infra::Probe::Free => {}
+    }
+    if let Err(error) = hatchery_node::node_control::install(hatchery_node::node_control::token_file_for(&state_path)) {
+        tracing::warn!(cause = %error, "control token not written; control channel disabled");
     }
     let config = NodeServerConfig::new(endpoint, token, node_id, workspaces)
         .and_then(|config| config.with_state_path(&state_path))
@@ -848,7 +865,9 @@ async fn main() {
         std::mem::forget(stop_tx);
         tracing::info!(%uplink, "restream g4a bridge starting");
     }
-    if let Err(error) = server.run_until_ctrl_signal().await {
+    let result = server.run_until_ctrl_signal().await;
+    hatchery_node::node_control::cleanup();
+    if let Err(error) = result {
         fail(&error.to_string());
     }
 }

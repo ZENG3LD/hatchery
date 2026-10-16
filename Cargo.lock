@@ -2888,13 +2888,14 @@ dependencies = [
 
 [[package]]
 name = "mail4agent"
-version = "0.4.14"
+version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6de0ed7bb4903a10987d2c4558819a0369f4680c5a808f9b8515a06fda24b103"
+checksum = "8fa4e3ca428fb2fdfb73d2de1ff869ef84bd6d0f5db323aec2434dfc59f6b4e7"
 dependencies = [
  "axum",
  "clap",
  "directories",
+ "getrandom 0.3.4",
  "hex",
  "mail4agent-api",
  "mail4agent-attest",
@@ -2916,9 +2917,9 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-api"
-version = "0.4.14"
+version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e24cbb68502dc738d554b0865be37317da28a5f0a1bc5c85db110ef668ecb815"
+checksum = "ebf2e79a3ea8e60f29676734a327d7d8421cd461870ce1313bafb2ae2948fc66"
 dependencies = [
  "serde",
  "serde_json",
@@ -2926,9 +2927,9 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-attest"
-version = "0.4.14"
+version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "934090a4804cd025283a25899b1692d3c8edd8599d84627b01cbd195b3ef5c86"
+checksum = "8cd9487bc3a0cb8b7940381ae4d6aa7a79c34720fcdd2f40092e1aeb589811fd"
 dependencies = [
  "libc",
  "sysinfo",
@@ -2938,9 +2939,9 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-client"
-version = "0.4.14"
+version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "095a274433829c21f9dc9290b4d46b86e676425aaa3add397334d40d1c86aa7e"
+checksum = "e5764aeb2a0b2028fa7a39457954f7487753f27d793aee19c8dd31963213dff7"
 dependencies = [
  "mail4agent-api",
  "reqwest",
@@ -2952,9 +2953,9 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-core"
-version = "0.4.14"
+version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b2df2ca71b408dc6600a0d48f2c584d1248642488801b2e5f990773ea92ae0e"
+checksum = "b0102b16398fceb5cf71cce84798d4369660de504cd7e2374422075e5646a924"
 dependencies = [
  "getrandom 0.2.17",
  "hex",
@@ -3014,9 +3015,9 @@ dependencies = [
 
 [[package]]
 name = "mail4agent-store-sqlite"
-version = "0.4.14"
+version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56835589a61dedc847dd821ed01e778c9c062b00c2cab22404622f011a74ef68"
+checksum = "d97db4ebc4bd62d336ea073849bc6d5edf3d38e527d359cc45e85114a04058a7"
 dependencies = [
  "mail4agent-api",
  "mail4agent-core",

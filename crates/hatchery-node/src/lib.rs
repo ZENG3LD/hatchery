@@ -37,6 +37,7 @@ mod dig2_station_lease;
 mod dig2_station_probe;
 pub mod kit;
 pub mod local_infra;
+pub mod node_control;
 #[cfg(feature = "wireguard")]
 pub(crate) use gate4agent_node_core::kit_wireguard;
 mod network_allowlist_catalog;
@@ -176,7 +177,7 @@ mod kit_manifest {
             "node must not depend on the hatchery TUI"
         );
         assert!(manifest.contains("dig2browser = { version = \"0.5.3\""));
-        assert!(manifest.contains("mail4agent = { version = \"0.4.14\""));
+        assert!(manifest.contains("mail4agent = { version = \"0.4.17\""));
         assert!(!manifest.contains("[patch.crates-io]"), "published state has no patch table");
         assert!(!manifest.contains("../../../"), "no path dependency leaves the workspace");
         assert!(manifest.contains("claude-session-restore = { version = \"0.1.3\""));
