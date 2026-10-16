@@ -21,7 +21,41 @@ pub enum BackendAction {
     Wake,
     Status,
     Stop,
+    /// Interrupt the current turn without ending the session.
+    Interrupt,
+    /// List the provider's own sessions (for resume pickers).
+    ListSessions,
+    /// Ready / limit / login state of the session.
+    Ready,
+    Limit,
+    Login,
+    /// Answer a tool permission request.
+    ToolPermission,
+    /// Attach MCP servers to the session.
+    McpAttach,
+    /// Switch the session mode (approval / sandbox / plan).
+    ModeSwitch,
 }
+
+/// All actions, for tables and docs.
+pub const ALL_ACTIONS: &[BackendAction] = &[
+    BackendAction::Spawn,
+    BackendAction::Model,
+    BackendAction::Effort,
+    BackendAction::Prompt,
+    BackendAction::Resume,
+    BackendAction::Wake,
+    BackendAction::Status,
+    BackendAction::Stop,
+    BackendAction::Interrupt,
+    BackendAction::ListSessions,
+    BackendAction::Ready,
+    BackendAction::Limit,
+    BackendAction::Login,
+    BackendAction::ToolPermission,
+    BackendAction::McpAttach,
+    BackendAction::ModeSwitch,
+];
 
 /// How well one path serves one action.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,6 +78,12 @@ pub fn support(provider: &str, action: BackendAction) -> (Support, Support) {
     let p = normalize(provider);
     match (p, action) {
         (_, Spawn) => (Native, Native),
+        // Other ACP-first agents (gemini --experimental-acp, opencode acp, ...).
+        ("gemini" | "opencode", Model | Resume | McpAttach | ModeSwitch) => (Degraded, Native),
+        ("gemini" | "opencode", Effort | ListSessions) => (None, Degraded),
+        // cursor-agent: PTY only here (arms first so generic rows do not claim ACP).
+        ("cursor", Model | Resume | ModeSwitch | McpAttach) => (Native, None),
+        ("cursor", _) => (Degraded, None),
         // PTY: launch flags (`--model`, `-m`). ACP: config option `model` / session/set_model.
         ("claude" | "codex" | "grok" | "kimi", Model) => (Native, Native),
         // PTY: claude `--effort`, codex `-c model_reasoning_effort=`, grok `--reasoning-effort`.
@@ -60,6 +100,28 @@ pub fn support(provider: &str, action: BackendAction) -> (Support, Support) {
         // PTY: screen detector (limit/login/ready heuristics). ACP: typed errors / usage updates.
         (_, Status) => (Degraded, Native),
         (_, Stop) => (Native, Native),
+        // PTY: Esc / Ctrl-C into the composer. ACP: session/cancel.
+        (_, Interrupt) => (Degraded, Native),
+        // PTY: the node reads the provider's on-disk session store (claude projects, codex
+        // sessions) or a picker; ACP: session/list where the agent advertises it.
+        ("claude" | "codex", ListSessions) => (Native, Degraded),
+        ("grok" | "kimi", ListSessions) => (Degraded, Degraded),
+        // Ready: PTY screen detector vs ACP initialize/session/new answer.
+        (_, Ready) => (Degraded, Native),
+        // Limits: PTY banner heuristics vs typed ACP error (still provider text inside).
+        (_, Limit) => (Degraded, Degraded),
+        // Login: PTY screen detector vs ACP authMethods + authenticate.
+        (_, Login) => (Degraded, Native),
+        // PTY: approval prompt on screen answered by keystroke. ACP: session/request_permission.
+        (_, ToolPermission) => (Degraded, Native),
+        // PTY: launch config (claude --mcp-config, codex -c mcp_servers.*, kimi --mcp-config-file;
+        // grok via its config file). ACP: session/new mcpServers.
+        ("claude" | "codex" | "kimi", McpAttach) => (Native, Native),
+        ("grok", McpAttach) => (Degraded, Native),
+        // PTY: launch flag (claude --permission-mode, codex --sandbox/--ask-for-approval,
+        // kimi --yolo) or a runtime keystroke/slash command. ACP: session/set_mode.
+        ("claude" | "codex" | "kimi", ModeSwitch) => (Native, Native),
+        ("grok", ModeSwitch) => (Degraded, Native),
         _ => (None, None),
     }
 }
@@ -132,6 +194,43 @@ pub fn plan_launch_options(
         SessionMode::Acp => LaunchOptionsPlan::AcpAfterSpawn,
         _ => LaunchOptionsPlan::PtyFlags,
     })
+}
+
+/// Whether `action` can run over `mode`; refuses (naming the other path when it can) otherwise.
+pub fn plan_action(provider: &str, mode: SessionMode, action: BackendAction) -> Result<Support, PathRefusal> {
+    let s = support(provider, action);
+    let here = on(mode, s);
+    if here != Support::None {
+        return Ok(here);
+    }
+    let (name, other, other_s) = match mode {
+        SessionMode::Acp => ("acp", "pty", s.0),
+        _ => ("pty", "acp", s.1),
+    };
+    let hint = if other_s != Support::None { format!("; use the {other} path") } else { String::new() };
+    Err(PathRefusal { message: format!("{provider}: {action:?} is not available over {name}{hint}") })
+}
+
+/// The better path for one action: native beats degraded; ties go to `prefer`.
+pub fn best_path(provider: &str, action: BackendAction, prefer: SessionMode) -> Option<SessionMode> {
+    let (pty, acp) = support(provider, action);
+    let rank = |s: Support| match s {
+        Support::Native => 2,
+        Support::Degraded => 1,
+        Support::None => 0,
+    };
+    match (rank(pty), rank(acp)) {
+        (0, 0) => None,
+        (p, a) if p > a => Some(SessionMode::Pty),
+        (p, a) if a > p => Some(SessionMode::Acp),
+        _ => Some(prefer),
+    }
+}
+
+/// Prompts and data reach a session only through m4a (owner rule). A transport may carry a
+/// prompt only as a wake (a short pointer to the m4a letter), never the content itself.
+pub fn prompt_allowed_on_transport(is_wake: bool) -> bool {
+    is_wake
 }
 
 /// Prefer a transport for a task when the caller has no hard requirement: an interactive
@@ -216,5 +315,30 @@ mod tests {
         assert!(w.is_empty() && set_model && gap);
         let (_, _, gap) = acp_option_writes(&adv, None, Some("max"));
         assert!(gap, "unadvertised choice is reported, not forced");
+    }
+}
+
+#[cfg(test)]
+mod action_table_tests {
+    use super::*;
+
+    #[test]
+    fn every_listed_provider_has_a_path_for_core_actions() {
+        for p in ["claude", "codex", "grok", "kimi"] {
+            for a in ALL_ACTIONS {
+                assert!(best_path(p, *a, SessionMode::Pty).is_some(), "{p} {a:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn selector_picks_native_and_refuses_with_hint() {
+        assert_eq!(best_path("claude", BackendAction::ToolPermission, SessionMode::Pty), Some(SessionMode::Acp));
+        assert_eq!(best_path("codex", BackendAction::ListSessions, SessionMode::Acp), Some(SessionMode::Pty));
+        assert_eq!(best_path("claude", BackendAction::Stop, SessionMode::Pty), Some(SessionMode::Pty));
+        let e = plan_action("kimi", SessionMode::Pty, BackendAction::Effort).unwrap_err();
+        assert!(e.message.contains("use the acp path"));
+        assert!(plan_action("cursor", SessionMode::Acp, BackendAction::Interrupt).is_err());
+        assert!(!prompt_allowed_on_transport(false));
     }
 }
