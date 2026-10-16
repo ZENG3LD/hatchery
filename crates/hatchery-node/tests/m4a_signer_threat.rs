@@ -5,8 +5,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use hatchery_m4a_signer::{default_rights, HumanKey, Signer, RIGHT_SEND};
-use hatchery_node::m4a_signer_proxy::{request, serve, CoreSigner, ProxyResponse, SignedReply, SignerProxy};
+use hatchery_keystore::{default_rights, HumanKey, Signer, RIGHT_SEND};
+use hatchery_node::keystore_proxy::{request, serve, CoreSigner, ProxyResponse, SignedReply, SignerProxy};
 
 struct InProcCore(Mutex<Signer>);
 impl CoreSigner for InProcCore {

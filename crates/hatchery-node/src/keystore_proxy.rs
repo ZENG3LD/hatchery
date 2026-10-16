@@ -1,4 +1,4 @@
-//! Node-side m4a signer proxy (option A, `specs/m4a-session-keys-2026-10-16.md`).
+//! Node-side keystore proxy (was `m4a_signer_proxy`) (option A, `specs/m4a-session-keys-2026-10-16.md`).
 //!
 //! The node holds NO m4a private keys. For each PTY session it keeps the session's capability
 //! (issued by the hq-core signer) in its own memory and gives the PTY only a **handle**

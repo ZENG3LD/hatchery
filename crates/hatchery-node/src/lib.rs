@@ -51,7 +51,11 @@ pub mod restream_g4a_bridge;
 pub mod browser_capture;
 pub mod m4a_accounts;
 #[cfg(unix)]
-pub mod m4a_signer_proxy;
+pub mod keystore_proxy;
+/// 0.2.15 name of [`keystore_proxy`].
+pub mod m4a_signer_proxy {
+    pub use super::keystore_proxy::*;
+}
 pub mod door;
 #[cfg(feature = "local-server")]
 pub mod local_server;

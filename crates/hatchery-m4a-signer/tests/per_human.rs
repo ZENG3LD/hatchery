@@ -1,3 +1,4 @@
+#![allow(deprecated)]
 use hatchery_m4a_signer::keyring::Keyring;
 use hatchery_m4a_signer::*;
 

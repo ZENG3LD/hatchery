@@ -1483,7 +1483,7 @@ impl NodeServer {
     /// must present.
     /// Turn on the m4a signer proxy for PTY spawns (replaces `M4A_SESSION_CAP`).
     #[cfg(unix)]
-    pub fn set_signer_proxy(&self, proxy: Arc<crate::m4a_signer_proxy::SignerProxy>) -> bool {
+    pub fn set_signer_proxy(&self, proxy: Arc<crate::keystore_proxy::SignerProxy>) -> bool {
         self.shared.signer_proxy.set(proxy).is_ok()
     }
 
@@ -3203,7 +3203,7 @@ struct NodeShared {
     /// m4a signer proxy (option A): when set, PTY sessions get a process-bound handle
     /// instead of a bearer capability.
     #[cfg(unix)]
-    signer_proxy: std::sync::OnceLock<Arc<crate::m4a_signer_proxy::SignerProxy>>,
+    signer_proxy: std::sync::OnceLock<Arc<crate::keystore_proxy::SignerProxy>>,
     materializations: Mutex<BTreeMap<MaterializationId, MaterializationOwnershipRecord>>,
     spawn_idempotency: Mutex<SpawnIdempotencyCache>,
     managed_spawn_replays:
@@ -3881,11 +3881,11 @@ impl SpawnPreparer for NodeShared {
                 let session_key = format!("{}-{}", self.incarnation_id, instance_id.0);
                 let uid = unsafe { libc_geteuid() };
                 let handle = proxy.reserve(&session_key, m4a_provider, uid);
-                let sock = std::env::var_os(crate::m4a_signer_proxy::SOCKET_ENV).unwrap_or_default();
+                let sock = std::env::var_os(crate::keystore_proxy::SOCKET_ENV).unwrap_or_default();
                 tracing::info!(provider = %provider, instance_id = ?instance_id, "m4a signer handle reserved at spawn");
                 Some(vec![
-                    gate4agent_catalog::EnvMutation { key: std::ffi::OsString::from(crate::m4a_signer_proxy::HANDLE_ENV), value: Some(std::ffi::OsString::from(handle)) },
-                    gate4agent_catalog::EnvMutation { key: std::ffi::OsString::from(crate::m4a_signer_proxy::SOCKET_ENV), value: Some(sock) },
+                    gate4agent_catalog::EnvMutation { key: std::ffi::OsString::from(crate::keystore_proxy::HANDLE_ENV), value: Some(std::ffi::OsString::from(handle)) },
+                    gate4agent_catalog::EnvMutation { key: std::ffi::OsString::from(crate::keystore_proxy::SOCKET_ENV), value: Some(sock) },
                     gate4agent_catalog::EnvMutation { key: std::ffi::OsString::from("M4A_SESSION_ID"), value: Some(std::ffi::OsString::from(session_key)) },
                 ])
             }
