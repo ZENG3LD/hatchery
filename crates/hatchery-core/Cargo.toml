@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-core"
-version = "0.2.21"
+version = "0.2.22"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
@@ -10,9 +10,9 @@ description = "Shared hatchery types and utilities for node, edge and core: wire
 name = "hatchery_core"
 
 [dependencies]
-gate4agent-build-stamp = { version = "0.5.2" }
-gate4agent-node-protocol = { version = "0.5.4" }
-gate4agent-types = { version = "0.5.2" }
+gate4agent-build-stamp = { version = "0.5.6" }
+gate4agent-node-protocol = { version = "0.5.6" }
+gate4agent-types = { version = "0.5.6" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"

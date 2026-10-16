@@ -35,7 +35,9 @@ mod workspace_file_unix;
 mod dig2_station_lease;
 #[cfg(feature = "dig2-station-probe")]
 mod dig2_station_probe;
-mod kit;
+pub mod kit;
+pub mod local_infra;
+pub mod node_control;
 #[cfg(feature = "wireguard")]
 pub(crate) use gate4agent_node_core::kit_wireguard;
 mod network_allowlist_catalog;
@@ -52,7 +54,8 @@ pub mod browser_capture;
 pub mod m4a_accounts;
 #[cfg(unix)]
 pub mod keystore_proxy;
-/// 0.2.15 name of [`keystore_proxy`].
+/// 0.2.15 name of [`keystore_proxy`]. Unix only, same as the proxy itself.
+#[cfg(unix)]
 pub mod m4a_signer_proxy {
     pub use super::keystore_proxy::*;
 }
@@ -174,7 +177,7 @@ mod kit_manifest {
             "node must not depend on the hatchery TUI"
         );
         assert!(manifest.contains("dig2browser = { version = \"0.5.3\""));
-        assert!(manifest.contains("mail4agent = { version = \"0.4.14\""));
+        assert!(manifest.contains("mail4agent = { version = \"0.4.17\""));
         assert!(!manifest.contains("[patch.crates-io]"), "published state has no patch table");
         assert!(!manifest.contains("../../../"), "no path dependency leaves the workspace");
         assert!(manifest.contains("claude-session-restore = { version = \"0.1.3\""));

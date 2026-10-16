@@ -20,8 +20,8 @@ hatchery-c2-client = { path = "../hatchery-c2-client" }
 hatchery-server = { path = "../hatchery-server" }
 hatchery-node = { path = "../hatchery-node", features = ["fixture"] }
 tokio = { version = "1", features = ["full"] }
-gate4agent-node-protocol = { version = "0.5.4" }
-gate4agent-node-wire = { version = "0.5.4" }
+gate4agent-node-protocol = { version = "0.5.6" }
+gate4agent-node-wire = { version = "0.5.6" }
 
 [dev-dependencies]
 hatchery-enroll = { path = "../hatchery-enroll" }
@@ -32,8 +32,8 @@ hatchery-harness-protocol = { path = "../hatchery-harness-protocol" }
 hatchery-harness-service = { path = "../hatchery-harness-service" }
 hatchery-harness-mcp = { path = "../hatchery-harness-mcp" }
 hatchery-observation-service = { path = "../hatchery-observation-service" }
-gate4agent-testkit = { version = "0.5.2" }
-gate4agent-types = { version = "0.5.2" }
+gate4agent-testkit = { version = "0.5.6" }
+gate4agent-types = { version = "0.5.6" }
 async-trait = "0.1"
 base64 = "0.22"
 serde_json = "1"

@@ -111,10 +111,39 @@ impl Drop for NodeUplink {
     }
 }
 
+/// Dial the C2 uplink. With the `wireguard` feature, an address served by an
+/// in-process WireGuard session (Windows) is carried inside it; otherwise this
+/// is a plain TCP connect.
+fn dial_uplink(addr: SocketAddr) -> std::io::Result<std::net::TcpStream> {
+    #[cfg(feature = "wireguard")]
+    {
+        gate4agent_node_core::kit_wireguard::tcp_connect(addr)
+    }
+    #[cfg(not(feature = "wireguard"))]
+    {
+        std::net::TcpStream::connect(addr)
+    }
+}
+
 impl NodeUplink {
     pub async fn connect(uplink: SocketAddr, journal: Option<Arc<UplinkJournal>>) -> Result<Arc<Self>, String> {
-        let stream = TcpStream::connect(uplink).await.map_err(|e| e.to_string())?;
-        let _ = stream.set_nodelay(true);
+        let dial = uplink;
+        let std_stream = tokio::task::spawn_blocking(move || dial_uplink(dial))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+        let _ = std_stream.set_nodelay(true);
+        // OS keepalive backs up the app-level ping. On the in-process
+        // WireGuard path this socket is loopback and the inner tunnel socket
+        // carries its own keepalive (gate4agent-node-core).
+        if let Err(error) = crate::server::enable_tcp_keepalive(&std_stream) {
+            tracing::warn!(cause = %error, "could not enable TCP keepalive on the uplink");
+        }
+        // current_thread runtime. A blocking socket here stalls the only
+        // worker inside the first read, so the OPEN writer and the handshake
+        // timeout never run. Windows does not flip this in `from_std`.
+        std_stream.set_nonblocking(true).map_err(|e| e.to_string())?;
+        let stream = TcpStream::from_std(std_stream).map_err(|e| e.to_string())?;
         let (mut rd, mut wr) = stream.into_split();
         let (enq_tx, mut enq_rx) = mpsc::unbounded_channel::<(u32, SendPrio, Frame)>();
         let routes: Arc<Mutex<BTreeMap<u32, mpsc::UnboundedSender<Vec<u8>>>>> = Arc::default();

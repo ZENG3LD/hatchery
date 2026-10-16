@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-build"
-version = "0.2.21"
+version = "0.2.22"
 edition = "2021"
 repository = "https://github.com/ZENG3LD/hatchery"
 description = "Remote build and sign service for hatchery nodes: admission by node status, recipes only, signing keys stay on the build host"
@@ -14,7 +14,7 @@ name = "hatchery-build-host"
 path = "src/main.rs"
 
 [dependencies]
-hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.21" }
+hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.22" }
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
 sha2 = "0.10"
 base64 = "0.22"

@@ -60,6 +60,10 @@ async fn serve_listener(listener: TcpListener, shared: Arc<NodeShared>) -> io::R
                     break;
                 }
             }
+            () = crate::node_control::handoff_requested() => {
+                tracing::info!("control handoff: stopping the ops listener");
+                break;
+            }
             accepted = listener.accept() => {
                 let (stream, _) = accepted?;
                 let Ok(permit) = Arc::clone(&permits).try_acquire_owned() else {
@@ -95,6 +99,16 @@ async fn serve_connection(mut stream: TcpStream, shared: Arc<NodeShared>) -> io:
 }
 
 fn route(request: Request, shared: &NodeShared) -> Response {
+    if request.method == "POST" {
+        let (path, query) = request.path.split_once('?').unwrap_or((request.path.as_str(), ""));
+        if let Some(verb) = path.strip_prefix("/control/") {
+            if !crate::node_control::authorized(request.authorization.as_deref()) {
+                return Response::plain(401, "Unauthorized").with_header("WWW-Authenticate", "Bearer");
+            }
+            let (status, body) = crate::node_control::execute(verb, query);
+            return Response::json(status, body);
+        }
+    }
     if request.method != "GET" {
         return Response::plain(405, "Method Not Allowed").with_header("Allow", "GET");
     }
@@ -124,6 +138,10 @@ fn health_body(shared: &NodeShared) -> Value {
         "version": env!("CARGO_PKG_VERSION"),
         "build_stamp": BUILD_STAMP,
         "started_at_unix_ms": shared.started_at_unix_ms,
+        // Graceful control verbs (spec local-infra-reuse).
+        "capabilities": if crate::node_control::installed() { crate::node_control::CAPABILITIES.to_vec() } else { Vec::new() },
+        "draining": crate::node_control::is_draining(),
+        "control_token_file": crate::node_control::token_file(),
     })
 }
 

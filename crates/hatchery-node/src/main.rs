@@ -134,10 +134,13 @@ async fn main() {
                 Some(i) => &raw_args[i + 1..],
                 None => fail("exec-as needs `--` before the program"),
             };
+            #[cfg(unix)]
             match hatchery_node::isolation::exec_as(&user, rest) {
                 Ok(never) => match never {},
                 Err(message) => fail(&message),
             }
+            #[cfg(not(unix))]
+            fail("exec-as is linux-only");
         }
         // drop-privileges --user USER -- program args...  (root, once; see isolation::drop_privileges)
         Some("drop-privileges") => {
@@ -149,10 +152,13 @@ async fn main() {
                 Some(i) => &raw_args[i + 1..],
                 None => fail("drop-privileges needs `--` before the program"),
             };
+            #[cfg(unix)]
             match hatchery_node::isolation::drop_privileges(&user, rest) {
                 Ok(never) => match never {},
                 Err(message) => fail(&message),
             }
+            #[cfg(not(unix))]
+            fail("drop-privileges is linux-only");
         }
         // net-up --enroll-state DIR [--wg-key FILE] [--interface IF] [--kill-switch]  (root)
         Some("net-up") => {
@@ -169,10 +175,13 @@ async fn main() {
                 }
             }
             let dir = dir.unwrap_or_else(|| fail("--enroll-state is required"));
+            #[cfg(unix)]
             match hatchery_node::isolation::net_up(&dir, key.as_deref(), &iface, ks) {
                 Ok(()) => println!("net-up ok interface={iface} kill_switch={ks}"),
                 Err(message) => fail(&message),
             }
+            #[cfg(not(unix))]
+            fail("net-up is linux-only");
             return;
         }
         // call --c2-enroll ADDR --state-dir DIR --op mail.send --payload JSON
@@ -264,6 +273,14 @@ async fn main() {
             // Provider sessions run as this unprivileged user; the node keeps the keys.
             "--run-as" => run_as = Some(required_value("--run-as", args.next())),
             "--endpoint" => endpoint = required_value("--endpoint", args.next()),
+            // mail4agent courier bind (same as MAIL4AGENT_BIND). `127.0.0.1:0` = any free port.
+            "--m4a-bind" => {
+                let value = required_value("--m4a-bind", args.next());
+                let _: std::net::SocketAddr = value
+                    .parse()
+                    .unwrap_or_else(|error| fail(&format!("--m4a-bind is invalid: {error}")));
+                std::env::set_var(hatchery_node::kit::COURIER_BIND_ENV, value);
+            }
             "--api-listen" => {
                 let value = required_value("--api-listen", args.next());
                 api_listen = value
@@ -523,7 +540,10 @@ async fn main() {
             .unwrap_or_else(|error| fail(&error.to_string()));
     }
     let node_id_for_door = Some(node_id.to_string());
-    let state_path = default_state_path(&node_id).unwrap_or_else(|error| fail(&error.to_string()));
+    let state_path = match std::env::var_os("GATE4AGENT_NODE_STATE") {
+        Some(value) if !value.is_empty() => PathBuf::from(value),
+        _ => default_state_path(&node_id).unwrap_or_else(|error| fail(&error.to_string())),
+    };
     let endpoint_for_bridge = endpoint.clone();
     let token_for_bridge = token.clone();
     let node_id_for_bridge = node_id.to_string();
@@ -532,6 +552,43 @@ async fn main() {
     let restream_uplink_early = restream_uplink.or_else(|| {
         std::env::var("HATCHERY_RESTREAM_UPLINK").ok().and_then(|v| v.parse().ok())
     });
+    // Reuse, never replace: a node already serving this ops address keeps
+    // running unless it is older (or HATCHERY_NODE_TAKEOVER=1) and offers a
+    // graceful handoff; then it shuts itself down and this one takes over.
+    {
+        use hatchery_node::local_infra::{self as li, Probe, Upgrade};
+        match li::probe(api_listen, "gate4agent-node", std::time::Duration::from_secs(2)) {
+            Probe::Ours(info) => {
+                let force = std::env::var("HATCHERY_NODE_TAKEOVER").is_ok_and(|v| v == "1");
+                let plan = li::upgrade_plan(&info, env!("CARGO_PKG_VERSION"), force);
+                let version = info.version.clone().unwrap_or_else(|| "?".to_owned());
+                match plan {
+                    Upgrade::Handoff if li::auto_upgrade_allowed() => {
+                        tracing::info!(%api_listen, %version, pid = info.pid.unwrap_or(0), "running node is older or takeover requested; asking it to hand over");
+                        if let Err(error) = li::handoff(api_listen, &info, 300, std::time::Duration::from_secs(60)) {
+                            tracing::warn!(%error, "node handoff failed; the running node keeps serving, this one exits");
+                            std::process::exit(0);
+                        }
+                        tracing::info!(%api_listen, "previous node handed over; continuing start");
+                    }
+                    _ => {
+                        if plan == Upgrade::ManualOnly {
+                            tracing::warn!(%version, "running node is older and has no control channel; stop it yourself to upgrade");
+                        }
+                        tracing::info!(%api_listen, %version, pid = info.pid.unwrap_or(0), "a gate4agent-node already serves this address; reusing it, not starting a second");
+                        std::process::exit(0);
+                    }
+                }
+            }
+            Probe::Foreign(detail) => {
+                tracing::warn!(%api_listen, %detail, "ops address held by something that is not gate4agent-node; choose another --api-listen");
+            }
+            Probe::Free => {}
+        }
+    }
+    if let Err(error) = hatchery_node::node_control::install(hatchery_node::node_control::token_file_for(&state_path)) {
+        tracing::warn!(cause = %error, "control token not written; control channel disabled");
+    }
     let config = NodeServerConfig::new(endpoint, token, node_id, workspaces)
         .and_then(|config| config.with_state_path(&state_path))
         .and_then(|config| config.with_api_listen(api_listen))
@@ -625,21 +682,11 @@ async fn main() {
         let _linked = hatchery_node::force_link();
         tracing::info!(cores = ?hatchery_node::linked_core_names(), "node kit");
     }
-    // Automatic mailbox: same daemon as the standalone mail4agent binary.
+    // Automatic mailbox: same daemon as the standalone mail4agent binary,
+    // unless a courier already holds the port. A missing mailbox never
+    // takes the node down.
     #[cfg(feature = "m4a")]
-    {
-        let mailbox = hatchery_node::start_mailbox().unwrap_or_else(|error| {
-            fail(&format!("mail4agent mailbox: {error}"))
-        });
-        // The daemon runs on its own thread; a bootstrap refusal or a bind
-        // failure ends it within moments. Report that instead of "started".
-        std::thread::sleep(std::time::Duration::from_millis(750));
-        if mailbox.is_finished() {
-            let error = mailbox.join().err().map_or_else(|| "mailbox exited".to_owned(), |e| e.to_string());
-            fail(&format!("mail4agent mailbox: {error}"));
-        }
-        tracing::info!("node kit mailbox started");
-    }
+    let _mailbox = hatchery_node::kit::start_or_attach_mailbox();
     #[cfg(feature = "wireguard")]
     if let Some(wg) = hatchery_node::node_wg_from_env().unwrap_or_else(|error| fail(&error)) {
         tracing::info!(
@@ -740,7 +787,8 @@ async fn main() {
                 if last.as_ref() != Some(&payload) {
                     match inv_calls.call("task.provider_inventory", &payload).await {
                         Ok(_) => {
-                            tracing::info!(providers = providers.len(), "provider inventory sent");
+                            let models = providers.iter().map(|p| format!("{}:{}", p.provider, p.models.len())).collect::<Vec<_>>().join(",");
+                            tracing::info!(providers = providers.len(), %models, "provider inventory sent");
                             last = Some(payload);
                         }
                         Err(e) => tracing::warn!(error = ?e, "provider inventory not delivered"),
@@ -817,7 +865,9 @@ async fn main() {
         std::mem::forget(stop_tx);
         tracing::info!(%uplink, "restream g4a bridge starting");
     }
-    if let Err(error) = server.run_until_ctrl_signal().await {
+    let result = server.run_until_ctrl_signal().await;
+    hatchery_node::node_control::cleanup();
+    if let Err(error) = result {
         fail(&error.to_string());
     }
 }
@@ -1171,9 +1221,7 @@ mod tests {
 
 fn random_token() -> Result<String, String> {
     let mut bytes = [0_u8; 32];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut bytes))
-        .map_err(|error| format!("cannot create a local token: {error}"))?;
+    getrandom::fill(&mut bytes).map_err(|error| format!("cannot create a local token: {error}"))?;
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 

@@ -437,8 +437,7 @@ fn resolve_local_launcher(program: &str) -> Option<PathBuf> {
     if program_path.components().count() != 1 {
         return None;
     }
-    let path = std::env::var_os("PATH")?;
-    for directory in std::env::split_paths(&path).filter(|entry| entry.is_absolute()) {
+    for directory in crate::provider_inventory::search_dirs(&[]).into_iter().filter(|entry| entry.is_absolute()) {
         for candidate in launcher_candidates(&directory, program) {
             if candidate.is_file() {
                 return Some(candidate);
