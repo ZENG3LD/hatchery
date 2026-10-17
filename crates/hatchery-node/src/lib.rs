@@ -53,6 +53,7 @@ pub mod restream_g4a_bridge;
 pub mod browser_capture;
 pub mod grok_leader;
 pub mod m4a_accounts;
+pub mod m4a_attach;
 #[cfg(unix)]
 pub mod keystore_proxy;
 /// 0.2.15 name of [`keystore_proxy`]. Unix only, same as the proxy itself.

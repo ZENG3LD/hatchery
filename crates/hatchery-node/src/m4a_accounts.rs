@@ -57,6 +57,11 @@ impl std::fmt::Debug for SessionAccount {
 
 impl SessionAccount {
     /// The only variables the session gets from the node for m4a.
+    /// The one-time `/m4a/attach` reply (the capability travels only in this body).
+    pub fn attach_reply(&self) -> serde_json::Value {
+        serde_json::json!({"nick": self.nick, "session_id": self.session_id, "cap": self.cap})
+    }
+
     pub fn env_mutations(&self) -> Vec<EnvMutation> {
         vec![
             EnvMutation { key: OsString::from("M4A_NICK"), value: Some(OsString::from(&self.nick)) },
@@ -100,10 +105,47 @@ impl M4aSessionAccounts {
         Ok(path)
     }
 
+    /// Provider flags that give one spawned session its own m4a MCP server (`m4a-agent
+    /// --session-file <file> mcp`), without touching any user config. Empty for providers with
+    /// no verified per-session MCP flag (grok TUI, kimi PTY): those use attach (`/m4a/attach`).
+    pub fn mcp_launch_args(&self, g4a_provider: &str, nick: &str) -> Result<Vec<OsString>, String> {
+        let session_file = self.session_file_path(nick).ok_or("invalid nick")?;
+        let bin = self.bin.to_string_lossy().into_owned();
+        let sf = session_file.to_string_lossy().into_owned();
+        let provider = g4a_provider.to_owned();
+        match g4a_provider {
+            "claude" => {
+                let config = serde_json::json!({"mcpServers": {"m4a": {
+                    "type": "stdio",
+                    "command": bin,
+                    "args": ["--session-file", sf, "mcp", "--provider", provider],
+                }}});
+                let path = self.base.join("sessions").join(format!("{nick}.mcp.json"));
+                std::fs::create_dir_all(self.base.join("sessions")).map_err(|e| format!("sessions dir: {}", e.kind()))?;
+                std::fs::write(&path, config.to_string()).map_err(|e| format!("mcp config: {}", e.kind()))?;
+                Ok(vec![OsString::from("--mcp-config"), path.into_os_string()])
+            }
+            "codex" => {
+                // TOML literal strings: no escapes, no double quotes (Windows wrapper safe).
+                if bin.contains('\'') || sf.contains('\'') {
+                    return Err("path not representable as a TOML literal string".into());
+                }
+                Ok(vec![
+                    OsString::from("-c"),
+                    OsString::from(format!("mcp_servers.m4a.command='{bin}'")),
+                    OsString::from("-c"),
+                    OsString::from(format!("mcp_servers.m4a.args=['--session-file','{sf}','mcp','--provider','codex']")),
+                ])
+            }
+            _ => Ok(Vec::new()),
+        }
+    }
+
     pub fn remove_session_file(&self, nick: &str) {
         if let Some(path) = self.session_file_path(nick) {
             let _ = std::fs::remove_file(path);
         }
+        let _ = std::fs::remove_file(self.base.join("sessions").join(format!("{nick}.mcp.json")));
     }
 
     pub fn new(bin: impl Into<PathBuf>, base: impl Into<PathBuf>) -> Self {
@@ -271,6 +313,23 @@ impl ZeroizeBestEffort for String {
 #[cfg(test)]
 mod session_file_tests {
     use super::*;
+
+    #[test]
+    fn mcp_args_are_session_scoped_and_carry_no_capability() {
+        let root = std::env::temp_dir().join(format!("m4a-mcp-args-{}", std::process::id()));
+        let a = M4aSessionAccounts::new("m4a-agent", &root);
+        let c = a.mcp_launch_args("claude", "claude-1").unwrap();
+        assert_eq!(c[0], OsString::from("--mcp-config"));
+        let cfg = std::fs::read_to_string(&c[1]).unwrap();
+        assert!(cfg.contains("--session-file") && cfg.contains("claude-1.session"));
+        let x = a.mcp_launch_args("codex", "codex-1").unwrap();
+        assert_eq!(x.len(), 4);
+        assert!(x.iter().all(|v| !v.to_string_lossy().contains('"')));
+        assert!(a.mcp_launch_args("grok", "grok-1").unwrap().is_empty());
+        a.remove_session_file("claude-1");
+        assert!(!std::path::Path::new(&c[1]).exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn session_file_path_refuses_path_like_nicks() {

@@ -108,6 +108,14 @@ fn route(request: Request, shared: &NodeShared) -> Response {
             let (status, body) = crate::node_control::execute(verb, query);
             return Response::json(status, body);
         }
+        if path == "/m4a/attach" {
+            if !crate::node_control::authorized(request.authorization.as_deref()) {
+                return Response::plain(401, "Unauthorized").with_header("WWW-Authenticate", "Bearer");
+            }
+            let table = crate::m4a_attach::process_table();
+            let (status, body) = crate::m4a_attach::handle(query, shared.m4a_accounts.as_ref(), &table);
+            return Response::json(status, body).with_header("Cache-Control", "no-store");
+        }
     }
     if request.method != "GET" {
         return Response::plain(405, "Method Not Allowed").with_header("Allow", "GET");
@@ -142,6 +150,7 @@ fn health_body(shared: &NodeShared) -> Value {
         "capabilities": if crate::node_control::installed() { crate::node_control::CAPABILITIES.to_vec() } else { Vec::new() },
         "draining": crate::node_control::is_draining(),
         "control_token_file": crate::node_control::token_file(),
+        "m4a_attach": std::env::var(crate::m4a_attach::POLICY_ENV).map(|v| v.trim().eq_ignore_ascii_case("auto")).unwrap_or(false),
     })
 }
 
