@@ -1447,9 +1447,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-node-core"
-version = "0.5.14"
+version = "0.5.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92d5feda41307b47ecea10817f85f4b49d8ab25f610ad4e9f4128c984565c8ae"
+checksum = "fe1e1f887d1cd42a360a919288750a618edcc71f624b45aeb3e3abd273782c2a"
 dependencies = [
  "base64 0.22.1",
  "boringtun",
@@ -1511,9 +1511,9 @@ checksum = "810b1a6ab5850f41eb3df877f9aa11b924a3243f0d1cb142f3a3e2f72bf0584b"
 
 [[package]]
 name = "gate4agent-runtime-native"
-version = "0.5.8"
+version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2c8a854fb443324f214b2149f1bdcbef53836cfe615fb46a941651b1090bc7fe"
+checksum = "6f287ab26b9d34177b53b809654f8025f4d215baefcacc525234fcf8e022c71c"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-catalog",
@@ -1531,9 +1531,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-shell-capabilities"
-version = "0.5.8"
+version = "0.5.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea083f7cb5bd0f933e707b171c1330645677fdf02dba02538abba66ec56fc347"
+checksum = "1cb2178982bc3b75f4901c9d9afce4f324c5e46defbc0106ae47009ee703c895"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-types",
@@ -1556,9 +1556,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-shell-native"
-version = "0.5.8"
+version = "0.5.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edd0be70f9f48ee9dc0b556f386cde80af4fc24ffe106bfd10644a316ded98ec"
+checksum = "f7dc606087ae95051d546d60477c21c56406d7384477f710b2fe8fc1db493fc6"
 dependencies = [
  "gate4agent",
  "gate4agent-adapters",
@@ -1574,9 +1574,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-shell-one-shot"
-version = "0.5.8"
+version = "0.5.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d132265b63e7b212fdd2070c27392b5278c48aea42364151266af3b92263deb4"
+checksum = "7810b3d8a2831c33b804055177f3d02c0187e6c42bf1f3d4a4b995544215c408"
 dependencies = [
  "gate4agent",
  "gate4agent-adapters",
@@ -1808,7 +1808,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-bidi-client"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "futures-util",
  "sha2 0.10.9",
@@ -1818,7 +1818,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-bidi-relay"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "futures-util",
  "sha2 0.10.9",
@@ -1828,7 +1828,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-build"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1848,7 +1848,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-c2"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1873,7 +1873,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-c2-client"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-node-wire",
@@ -1888,7 +1888,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-core"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
@@ -1938,7 +1938,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-enroll"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -1952,7 +1952,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-api"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "gate4agent-build-stamp",
  "hatchery-harness-protocol",
@@ -1963,7 +1963,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-client"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "hatchery-harness-api",
  "serde",
@@ -1973,7 +1973,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-delivery"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "gate4agent-node-protocol",
  "libc",
@@ -1984,7 +1984,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-engine"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "hatchery-harness-protocol",
  "serde",
@@ -1994,7 +1994,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-mcp"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-node-wire",
@@ -2017,7 +2017,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-protocol"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "serde",
  "serde_json",
@@ -2026,7 +2026,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-service"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-node-protocol",
@@ -2060,7 +2060,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-hq-web"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2084,7 +2084,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-keystore"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "biscuit-auth",
  "chacha20poly1305",
@@ -2122,7 +2122,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-m4a-signer"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "biscuit-auth",
  "hatchery-keystore",
@@ -2130,7 +2130,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-node"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "base64 0.22.1",
  "claude-session-restore",
@@ -2183,7 +2183,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-api"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -2194,7 +2194,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-engine"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -2208,7 +2208,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-protocol"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "serde",
  "serde_json",
@@ -2217,7 +2217,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-service"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -2231,7 +2231,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-store"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "hatchery-observation-api",
  "hatchery-observation-engine",
@@ -2243,7 +2243,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-server"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2274,7 +2274,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-session-events"
-version = "0.2.40"
+version = "0.2.41"
 dependencies = [
  "base64 0.22.1",
  "serde",
