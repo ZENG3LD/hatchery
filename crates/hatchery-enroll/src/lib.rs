@@ -139,6 +139,10 @@ pub struct EnrollmentResponse {
     /// A2 nested crypto: HQ recipient public key relayed by C2 (base64). No HQ name/address.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream_recipient_public_key: Option<String>,
+    /// Messenger product base URL the node should use for session accounts (no secret).
+    /// Set on C2 (`HATCHERY_M4A_PRODUCT_URL`); empty means the node has no messenger yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub m4a_product_url: Option<String>,
 }
 
 /// Bytes a node signs to authenticate to C2 over `material`.

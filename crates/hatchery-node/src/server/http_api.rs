@@ -168,7 +168,7 @@ fn health_body(shared: &NodeShared) -> Value {
         "capabilities": if crate::node_control::installed() { crate::node_control::CAPABILITIES.to_vec() } else { Vec::new() },
         "draining": crate::node_control::is_draining(),
         "control_token_file": crate::node_control::token_file(),
-        "m4a_attach": std::env::var(crate::m4a_attach::POLICY_ENV).map(|v| v.trim().eq_ignore_ascii_case("auto")).unwrap_or(false),
+        "m4a_attach": crate::m4a_attach::attach_policy_is_auto() && shared.m4a_accounts.is_some(),
     })
 }
 

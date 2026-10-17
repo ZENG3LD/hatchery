@@ -285,6 +285,7 @@ impl EnrollArgs {
             c2_call_home: node_listen.map(|addr| addr.to_string()),
             upstream_c2_public_key: std::env::var("HATCHERY_RESTREAMER_C2_PUBLIC_B64").ok().filter(|s| !s.is_empty()),
             upstream_recipient_public_key: std::env::var("HATCHERY_RESTREAMER_RECIPIENT_PUBLIC_B64").ok().filter(|s| !s.is_empty()),
+            m4a_product_url: std::env::var("HATCHERY_M4A_PRODUCT_URL").ok().filter(|s| !s.is_empty()),
         };
         if let Some(interface) = &self.wg_interface {
             if public.c2_wg_public_key.is_none() {
