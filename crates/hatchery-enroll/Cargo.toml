@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-enroll"
-version = "0.2.26"
+version = "0.2.27"
 edition = "2021"
 repository = "https://github.com/ZENG3LD/hatchery"
 description = "Node enrollment wire and key handling shared by hatchery-c2 and hatchery-node: signed requests, node-held keys, signed call-home"
