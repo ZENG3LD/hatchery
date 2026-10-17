@@ -133,7 +133,7 @@ pub fn handle(
     };
     // Per-session binding: an MCP child of a shared backend has no session of its own, so the
     // node reads it from the provider's command line or takes a pending adoption.
-    let session = crate::m4a_adopt::resolve_session(session, &provider, root, crate::m4a_adopt::process_cmdline)
+    let session = crate::m4a_adopt::resolve_session_in(session, &provider, root, crate::m4a_adopt::process_cmdline, Some(accounts.base()))
         .filter(|s| valid_session(s));
     let key = match &session {
         Some(s) => format!("attach-{provider}-{s}"),
