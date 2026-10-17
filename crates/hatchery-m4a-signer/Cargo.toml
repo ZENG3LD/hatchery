@@ -1,13 +1,13 @@
 [package]
 name = "hatchery-m4a-signer"
-version = "0.2.29"
+version = "0.2.30"
 edition = "2021"
 repository = "https://github.com/ZENG3LD/hatchery"
 description = "Deprecated: re-exports hatchery-keystore (the key tree is not m4a's). Kept for 0.2.15 callers."
 license = "MIT"
 
 [dependencies]
-hatchery-keystore = { path = "../hatchery-keystore", version = "0.2.29" }
+hatchery-keystore = { path = "../hatchery-keystore", version = "0.2.30" }
 
 [dev-dependencies]
 biscuit-auth = "6"

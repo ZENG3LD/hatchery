@@ -1,7 +1,7 @@
 
 [package]
 name = "hatchery-node"
-version = "0.2.29"
+version = "0.2.30"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
@@ -22,9 +22,9 @@ hex = "0.4"
 zeroize = "1"
 getrandom = "0.3"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
-hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.29" }
-hatchery-core = { path = "../hatchery-core", version = "0.2.29" }
-hatchery-build = { path = "../hatchery-build", version = "0.2.29" }
+hatchery-enroll = { path = "../hatchery-enroll", version = "0.2.30" }
+hatchery-core = { path = "../hatchery-core", version = "0.2.30" }
+hatchery-build = { path = "../hatchery-build", version = "0.2.30" }
 base64 = "0.22"
 # Standard kit cores, all from crates.io: dig2browser 0.5 (browser machine and
 # stream), mail4agent 0.4 (lib face), session-restore libraries 0.1.x.
@@ -44,6 +44,7 @@ gate4agent-node-core = { version = "0.5.7" }
 gate4agent-node-protocol = { version = "0.5.7" }
 gate4agent-node-wire = { version = "0.5.7" }
 gate4agent-runtime-native = { version = "0.5.7" }
+mail4agent-messenger-shell = { version = "0.4.23", default-features = false, features = ["tier-server", "tier-matrix", "vault-keychain"] }
 gate4agent-wake = { version = "0.5.8", default-features = false, features = ["wake-routine", "wake-kimi", "wake-grok"] }
 gate4agent-testkit = { optional = true, version = "0.5.7" }
 gate4agent-types = { version = "0.5.7" }
@@ -105,7 +106,7 @@ fixture = ["dep:gate4agent-testkit", "gate4agent-node-wire/fixture"]
 dig2-station-probe = []
 
 [dev-dependencies]
-hatchery-keystore = { path = "../hatchery-keystore", version = "0.2.29" }
+hatchery-keystore = { path = "../hatchery-keystore", version = "0.2.30" }
 tempfile = "3"
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 vt100 = "0.16"
