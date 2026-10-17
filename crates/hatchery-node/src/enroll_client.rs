@@ -197,9 +197,7 @@ pub async fn node_call(
     use hatchery_enroll::call::SignedCall;
     let ts_ms = unix_ms();
     let mut raw = [0_u8; 12];
-    std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut raw))
-        .map_err(|e| EnrollClientError::State(e.to_string()))?;
+    getrandom::fill(&mut raw).map_err(|e| EnrollClientError::State(e.to_string()))?;
     let nonce: String = raw.iter().map(|b| format!("{b:02x}")).collect();
     let payload_text = payload.to_string();
     let message = SignedCall::signing_bytes(node_id, op, &payload_text, ts_ms, &nonce);

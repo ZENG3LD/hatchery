@@ -1628,24 +1628,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-wake"
-version = "0.5.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f1fed9391137e2c2c81556529fd22a606773da1ce34b4846348e956088b9e5d"
-dependencies = [
- "dunce",
- "reqwest",
- "serde",
- "serde_json",
- "siphasher",
- "thiserror 2.0.21",
- "tokio",
- "tungstenite 0.29.0",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "gate4agent-wake"
 version = "0.5.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61e60f251ebef20ef03ad067cb14cd89126e5c8b427fd8366320c1921a9bc2da"
 dependencies = [
  "dunce",
  "reqwest",
@@ -1824,7 +1809,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-bidi-client"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "futures-util",
  "sha2 0.10.9",
@@ -1834,7 +1819,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-bidi-relay"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "futures-util",
  "sha2 0.10.9",
@@ -1844,7 +1829,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-build"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1864,7 +1849,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-c2"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1889,7 +1874,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-c2-client"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-node-wire",
@@ -1904,7 +1889,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-core"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
@@ -1954,7 +1939,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-enroll"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -1968,7 +1953,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-api"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "gate4agent-build-stamp",
  "hatchery-harness-protocol",
@@ -1979,7 +1964,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-client"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "hatchery-harness-api",
  "serde",
@@ -1989,7 +1974,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-delivery"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "gate4agent-node-protocol",
  "libc",
@@ -2000,7 +1985,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-engine"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "hatchery-harness-protocol",
  "serde",
@@ -2010,7 +1995,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-mcp"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-node-wire",
@@ -2033,7 +2018,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-protocol"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "serde",
  "serde_json",
@@ -2042,7 +2027,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-service"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-node-protocol",
@@ -2076,7 +2061,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-hq-web"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2100,7 +2085,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-keystore"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "biscuit-auth",
  "chacha20poly1305",
@@ -2138,7 +2123,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-m4a-signer"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "biscuit-auth",
  "hatchery-keystore",
@@ -2146,7 +2131,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-node"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "base64 0.22.1",
  "claude-session-restore",
@@ -2163,7 +2148,7 @@ dependencies = [
  "gate4agent-runtime-native",
  "gate4agent-testkit",
  "gate4agent-types",
- "gate4agent-wake 0.5.9",
+ "gate4agent-wake",
  "getrandom 0.3.4",
  "grok-session-restore",
  "hatchery-build",
@@ -2199,7 +2184,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-api"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -2210,7 +2195,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-engine"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -2224,7 +2209,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-protocol"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "serde",
  "serde_json",
@@ -2233,7 +2218,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-service"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -2247,7 +2232,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-store"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "hatchery-observation-api",
  "hatchery-observation-engine",
@@ -2259,7 +2244,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-server"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2290,7 +2275,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-session-events"
-version = "0.2.33"
+version = "0.2.34"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -3010,7 +2995,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "def4f71cde5d8e61552065f1193288b3b3d93a29e1409f87c409841906d677cc"
 dependencies = [
  "axum",
- "gate4agent-wake 0.5.8",
+ "gate4agent-wake",
  "libc",
  "m4a-agent",
  "m4a-keys",

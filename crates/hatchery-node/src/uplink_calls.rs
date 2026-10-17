@@ -41,6 +41,9 @@ pub struct NodeCalls {
     node_id: String,
     keys: Option<UpstreamKeys>,
     legacy: Option<(SocketAddr, Arc<NodeIdentity>)>,
+    /// Enroll HTTP address used only for C2-local config (`node.config`), even when
+    /// mail/task calls go over the restream uplink (those get 410 on the HTTP path).
+    config_http: Option<(SocketAddr, Arc<NodeIdentity>)>,
 }
 
 #[derive(Debug)]
@@ -50,17 +53,59 @@ pub enum CallError {
 }
 
 impl NodeCalls {
-    pub fn new(node_id: String, keys: Option<UpstreamKeys>, legacy: Option<(SocketAddr, Arc<NodeIdentity>)>) -> Self {
-        Self { link: Arc::default(), node_id, keys, legacy }
+    pub fn new(
+        node_id: String,
+        keys: Option<UpstreamKeys>,
+        legacy: Option<(SocketAddr, Arc<NodeIdentity>)>,
+        config_http: Option<(SocketAddr, Arc<NodeIdentity>)>,
+    ) -> Self {
+        Self { link: Arc::default(), node_id, keys, legacy, config_http }
     }
 
     /// The bridge calls this on every (re)connect; `None` when the uplink is gone.
     pub async fn set_uplink(&self, uplink: Option<Arc<NodeUplink>>) {
+        let connected = uplink.is_some();
         let mut l = self.link.lock().await;
         l.uplink = uplink;
         l.session = None;
         // Fresh uplink: allow an immediate open attempt.
         l.open_not_before = None;
+        drop(l);
+        if connected {
+            self.refresh_product_url().await;
+        } else {
+            crate::m4a_accounts::set_c2_product_url(None);
+        }
+    }
+
+    /// Ask C2 for its public config over enroll HTTP and stash `m4a_product_url`.
+    pub async fn refresh_product_url(&self) {
+        let Some((c2, identity)) = self.config_http.clone().or_else(|| self.legacy.clone()) else {
+            return;
+        };
+        match crate::enroll_client::node_call(
+            c2,
+            &identity,
+            &self.node_id,
+            hatchery_enroll::call::NODE_CONFIG_OP,
+            &serde_json::json!({}),
+        )
+        .await
+        {
+            Ok(v) => {
+                let url = v
+                    .get("m4a_product_url")
+                    .and_then(|u| u.as_str())
+                    .filter(|u| !u.is_empty())
+                    .map(str::to_owned);
+                crate::m4a_accounts::set_c2_product_url(url.clone());
+                match url {
+                    Some(u) => tracing::info!(product = %u, "m4a product url from C2"),
+                    None => tracing::info!("m4a product url from C2 is empty; accounts stay local"),
+                }
+            }
+            Err(e) => tracing::warn!(error = ?e, "m4a product url from C2 failed"),
+        }
     }
 
     pub async fn call(&self, op: &str, payload: &Value) -> Result<Value, CallError> {

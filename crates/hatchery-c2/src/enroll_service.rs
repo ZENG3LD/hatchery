@@ -410,6 +410,13 @@ impl EnrollService {
                 return HttpReply::error(403, "refused");
             }
         }
+        if call.op == hatchery_enroll::call::NODE_CONFIG_OP {
+            // Config value only: the enrolled node gets C2's public settings. Nothing is relayed.
+            if self.registry.lock().expect("registry lock").get(&call.node_id).is_none() {
+                return HttpReply::error(403, "refused");
+            }
+            return HttpReply::json(200, &serde_json::json!({ "m4a_product_url": self.public.m4a_product_url }));
+        }
         let capability = capability_for(&call.op).unwrap_or("none");
         if self.allows(&call.node_id, capability) != Some(true) {
             tracing::warn!(node_id = %call.node_id, op = %call.op, "node call refused: status does not hold the capability");
@@ -765,6 +772,52 @@ mod tls_only_tests {
             .handle_node_call(&serde_json::to_vec(&signed).unwrap(), "127.0.0.1".parse().unwrap())
             .await;
         assert_eq!(reply.status, 410, "push path removed");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn node_config_answers_the_configured_product_url_only_to_enrolled_nodes() {
+        use hatchery_enroll::call::SignedCall;
+        let dir = std::env::temp_dir().join(format!("c2-node-config-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut config = EnrollConfig::new("127.0.0.1:0".parse().unwrap());
+        config.public.m4a_product_url = Some("https://example.invalid".into());
+        let (service, _events) = EnrollService::start(&config).unwrap();
+        let identity = NodeIdentity::load_or_create(&dir).unwrap();
+        let sign = |node: &str, nonce: &str| {
+            let ts = unix_ms();
+            let msg = SignedCall::signing_bytes(node, "node.config", "{}", ts, nonce);
+            serde_json::to_vec(&SignedCall {
+                node_id: node.into(),
+                op: "node.config".into(),
+                payload: "{}".into(),
+                ts_ms: ts,
+                nonce: nonce.into(),
+                signature: identity.sign_bytes(&msg),
+            })
+            .unwrap()
+        };
+        assert_eq!(
+            service
+                .handle_node_call(&sign("epsilon", "nc1"), "127.0.0.1".parse().unwrap())
+                .await
+                .status,
+            403
+        );
+        let c = code(&service);
+        assert_eq!(
+            service
+                .handle_enroll(&request(&dir, "epsilon", &c), "127.0.0.1".parse().unwrap())
+                .status,
+            200
+        );
+        let reply = service
+            .handle_node_call(&sign("epsilon", "nc2"), "127.0.0.1".parse().unwrap())
+            .await;
+        assert_eq!(reply.status, 200);
+        let v: serde_json::Value = serde_json::from_slice(&reply.body).unwrap();
+        assert_eq!(v["m4a_product_url"], "https://example.invalid");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

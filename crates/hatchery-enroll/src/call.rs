@@ -12,6 +12,8 @@ pub fn capability_for(op: &str) -> Option<&'static str> {
     match op.split_once('.')?.0 {
         "mail" => Some("mail"),
         "task" => Some("tasks"),
+        // Answered by C2 itself from its own configuration (no core, no node dial).
+        "node" => Some("config"),
         _ => None,
     }
 }
@@ -48,6 +50,9 @@ impl SignedCall {
             && self.nonce.bytes().all(|b| b.is_ascii_alphanumeric())
     }
 }
+
+/// C2-local op: the node asks for its public config (`{"m4a_product_url": ...}`).
+pub const NODE_CONFIG_OP: &str = "node.config";
 
 /// What C2 forwards to the server.
 #[derive(Clone, Debug, Deserialize, Serialize)]

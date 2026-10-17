@@ -277,9 +277,13 @@ impl M4aSessionAccounts {
         enroll_dir.map(|d| d.join("m4a-accounts"))
     }
 
-    /// Product URL: env override, else `m4a_product_url` from enrollment.json under enroll_dir.
+    /// Product URL: env override, else what C2 answered on connect ([`set_c2_product_url`]), else
+    /// `m4a_product_url` from enrollment.json under enroll_dir.
     pub fn resolve_product_url(enroll_dir: Option<&Path>) -> Option<String> {
         if let Some(u) = std::env::var(PRODUCT_URL_ENV).ok().filter(|u| !u.is_empty()) {
+            return Some(u);
+        }
+        if let Some(u) = c2_product_url() {
             return Some(u);
         }
         let dir = enroll_dir?;
@@ -321,15 +325,9 @@ impl M4aSessionAccounts {
         }
         let product = Self::resolve_product_url(enroll_dir);
         if product.is_none() {
-            tracing::info!("m4a product url unset (HATCHERY_M4A_PRODUCT_URL or enrollment m4a_product_url); accounts stay local until set");
+            tracing::info!("m4a product url unset (env / C2 connect / enrollment); accounts stay local until set");
         }
         tracing::info!(bin = %bin.display(), accounts = %base.display(), product = product.as_deref().unwrap_or("-"), "m4a accounts ready");
-        // Stash product url for SessionAccount::provision via env only when not already set.
-        if let Some(url) = &product {
-            if std::env::var_os(PRODUCT_URL_ENV).is_none() {
-                std::env::set_var(PRODUCT_URL_ENV, url);
-            }
-        }
         Some(Self::new(bin, base))
     }
 
@@ -368,7 +366,7 @@ impl M4aSessionAccounts {
         // account ref and the account has its own store root.
         let session_id = v["account_ref"].as_str().filter(|r| !r.is_empty()).unwrap_or(session_key).to_owned();
         let store_root = v["store_root"].as_str().filter(|r| !r.is_empty()).map(str::to_owned);
-        let product_url = std::env::var(PRODUCT_URL_ENV).ok().filter(|u| !u.is_empty());
+        let product_url = Self::resolve_product_url(enroll_dir_hint().as_deref());
         let account = SessionAccount { nick, session_id, store_root, product_url, cap };
         if !v["enrolled"].as_bool().unwrap_or(false) {
             if let Err(error) = self.node_enroll(&account) {
@@ -390,7 +388,18 @@ fn which(name: &str) -> Option<PathBuf> {
     None
 }
 
-fn enroll_dir_hint() -> Option<PathBuf> {
+static C2_PRODUCT_URL: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
+
+/// What C2 answered for `m4a_product_url` on the latest connect (`None` clears).
+pub fn set_c2_product_url(url: Option<String>) {
+    *C2_PRODUCT_URL.write().unwrap_or_else(|e| e.into_inner()) = url.filter(|u| !u.is_empty());
+}
+
+pub fn c2_product_url() -> Option<String> {
+    C2_PRODUCT_URL.read().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+pub(crate) fn enroll_dir_hint() -> Option<PathBuf> {
     std::env::var_os("HATCHERY_ENROLL_STATE")
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
@@ -434,7 +443,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn defaults_find_agent_and_accounts_root_and_product_from_enrollment() {
         let dir = std::env::temp_dir().join(format!("m4a-defaults-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -459,6 +467,24 @@ mod tests {
         assert_eq!(got.base(), root.as_path());
         std::env::remove_var(AGENT_BIN_ENV);
         std::env::remove_var(PRODUCT_URL_ENV);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn product_url_order_env_then_c2_then_enrollment() {
+        let dir = std::env::temp_dir().join(format!("m4a-purl-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("enrollment.json"), r#"{"response":{"m4a_product_url":"https://enroll.invalid"}}"#).unwrap();
+        std::env::remove_var(PRODUCT_URL_ENV);
+        set_c2_product_url(None);
+        assert_eq!(M4aSessionAccounts::resolve_product_url(Some(&dir)).as_deref(), Some("https://enroll.invalid"));
+        set_c2_product_url(Some("https://c2.invalid".into()));
+        assert_eq!(M4aSessionAccounts::resolve_product_url(Some(&dir)).as_deref(), Some("https://c2.invalid"));
+        std::env::set_var(PRODUCT_URL_ENV, "https://env.invalid");
+        assert_eq!(M4aSessionAccounts::resolve_product_url(Some(&dir)).as_deref(), Some("https://env.invalid"));
+        std::env::remove_var(PRODUCT_URL_ENV);
+        set_c2_product_url(None);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

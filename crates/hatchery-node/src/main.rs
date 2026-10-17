@@ -765,8 +765,19 @@ async fn main() {
             (None, Some(c2), Some(identity)) => Some((c2, identity)),
             _ => None,
         };
-        hatchery_node::uplink_calls::NodeCalls::new(id, uplink_keys, legacy)
+        // Config HTTP is always available when door-c2 is set: C2 answers node.config
+        // locally (no core), so uplinked nodes still learn the product URL on connect.
+        let config_http = match (door_c2, call_home_identity_for_door.clone()) {
+            (Some(c2), Some(identity)) => Some((c2, identity)),
+            _ => None,
+        };
+        hatchery_node::uplink_calls::NodeCalls::new(id, uplink_keys, legacy, config_http)
     });
+    if let Some(calls) = &node_calls {
+        // First try before the restream bridge comes up (enrollment / env may already
+        // have a URL; C2 connect overwrites via set_c2_product_url).
+        calls.refresh_product_url().await;
+    }
     if let (Some(listen), Some(_c2), Some(_identity), Some(_id), Some(calls)) = (door_listen, door_c2, call_home_identity_for_door.clone(), node_id_for_door.clone(), node_calls.clone()) {
         if !listen.ip().is_loopback() {
             fail("--door-listen must be a loopback address");
