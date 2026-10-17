@@ -85,26 +85,79 @@ pub fn leader_for(provider: &str) -> Option<PathBuf> {
 static GENERATIONS: Mutex<BTreeMap<String, u64>> = Mutex::new(BTreeMap::new());
 
 /// Starts (or restarts) the in-process mailbox listener of `a`.
-pub fn watch(accounts: &crate::m4a_accounts::M4aSessionAccounts, a: Adoption) {
+pub fn watch(accounts: &crate::m4a_accounts::M4aSessionAccounts, a: Adoption) -> bool {
     let _ = accounts;
     let Some(leader) = leader_for(&a.provider) else {
-        tracing::info!(provider = %a.provider, nick = %a.nick, "letter wake for this provider is not built in yet; letters stay in the inbox");
-        return;
+        tracing::warn!(provider = %a.provider, nick = %a.nick, "letter listener not started: no leader for this provider (grok home unknown or provider not built in); letters stay in the inbox");
+        return false;
     };
+    if a.cwd.is_none() || a.store_root.is_none() {
+        tracing::warn!(nick = %a.nick, "letter listener not started: adoption has no cwd or store root (adopt again with --cwd)");
+        return false;
+    }
     let gen = {
         let mut g = GENERATIONS.lock().unwrap_or_else(|p| p.into_inner());
         let e = g.entry(a.account_ref.clone()).or_insert(0);
         *e += 1;
         *e
     };
-    let _ = std::thread::Builder::new().name(format!("m4a-wake-{}", a.nick)).spawn(move || listen(a, leader, gen));
+    let nick = a.nick.clone();
+    match std::thread::Builder::new().name(format!("m4a-wake-{}", a.nick)).spawn(move || listen(a, leader, gen)) {
+        Ok(_) => {
+            tracing::info!(%nick, "letter listener starting");
+            true
+        }
+        Err(e) => {
+            tracing::warn!(%nick, error = %e, "letter listener thread did not start");
+            false
+        }
+    }
 }
 
-/// Restarts the listeners of every saved adoption (node start).
-pub fn restore(accounts: &crate::m4a_accounts::M4aSessionAccounts) {
-    for a in load_adoptions(accounts.base()) {
-        watch(accounts, a);
+/// Restarts the listeners of every saved adoption (node start). Returns how many started.
+pub fn restore(accounts: &crate::m4a_accounts::M4aSessionAccounts) -> usize {
+    let path = accounts.base().join(ADOPTED_FILE);
+    let adoptions = match std::fs::read(&path) {
+        Ok(b) => match serde_json::from_slice::<Vec<Adoption>>(&b) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::warn!(file = %path.display(), error = %e, "adopted sessions file is not readable json; no letter listeners restored");
+                return 0;
+            }
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            tracing::info!(file = %path.display(), "no adopted sessions to restore");
+            return 0;
+        }
+        Err(e) => {
+            tracing::warn!(file = %path.display(), error = %e.kind(), "adopted sessions file not readable; no letter listeners restored");
+            return 0;
+        }
+    };
+    let mut started = 0;
+    for a in adoptions {
+        if watch(accounts, a) {
+            started += 1;
+        }
     }
+    tracing::info!(started, "letter listeners restored from adopted sessions");
+    started
+}
+
+/// Node start: restore when the node has m4a accounts configured; says why not otherwise.
+pub fn restore_from_env() -> usize {
+    match crate::m4a_accounts::M4aSessionAccounts::from_env() {
+        Some(accounts) => restore(&accounts),
+        None => {
+            tracing::info!("m4a accounts not configured (agent bin / accounts root unset); no letter listeners restored");
+            0
+        }
+    }
+}
+
+/// Whether a listener of this account is currently wanted (started and not replaced).
+pub fn is_watched(account_ref: &str) -> bool {
+    GENERATIONS.lock().unwrap_or_else(|p| p.into_inner()).contains_key(account_ref)
 }
 
 fn current(a: &Adoption, gen: u64) -> bool {
@@ -247,6 +300,30 @@ mod tests {
         assert_eq!(sole_adoption(&dir, "kimi"), None);
         save_adoption(&dir, &adoption("s-2")).unwrap();
         assert_eq!(sole_adoption(&dir, "grok"), None, "two adoptions are ambiguous");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn restart_with_saved_adoptions_starts_their_listeners() {
+        let dir = std::env::temp_dir().join(format!("m4a-wake-restore-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let accounts = crate::m4a_accounts::M4aSessionAccounts::new("m4a-agent", &dir);
+        assert_eq!(restore(&accounts), 0, "nothing saved");
+        let mut a = adoption("s-restore");
+        a.account_ref = "ref-restore".into();
+        save_adoption(&dir, &a).unwrap();
+        let mut b = adoption("s-nocwd");
+        b.account_ref = "ref-nocwd".into();
+        b.cwd = None;
+        save_adoption(&dir, &b).unwrap();
+        std::env::set_var("GROK_HOME", dir.join("grok"));
+        assert_eq!(restore(&accounts), 1);
+        assert!(is_watched("ref-restore"));
+        assert!(!is_watched("ref-nocwd"));
+        std::fs::write(dir.join(ADOPTED_FILE), b"not json").unwrap();
+        assert_eq!(restore(&accounts), 0);
+        GENERATIONS.lock().unwrap().remove("ref-restore");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
