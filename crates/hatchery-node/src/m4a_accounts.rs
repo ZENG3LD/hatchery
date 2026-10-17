@@ -24,6 +24,24 @@ pub fn m4a_provider(g4a_agent_id: &str) -> Option<&'static str> {
 }
 
 pub const AGENT_BIN_ENV: &str = "HATCHERY_M4A_AGENT_BIN";
+/// Messenger product base URL; with it (and an enrolled node) the node registers its sessions'
+/// accounts on the messenger itself, signed with the node key.
+pub const PRODUCT_URL_ENV: &str = "HATCHERY_M4A_PRODUCT_URL";
+/// The product's audience name the node signs for (default `m4a-product`).
+pub const PRODUCT_AUDIENCE_ENV: &str = "HATCHERY_M4A_PRODUCT_AUDIENCE";
+
+static NODE_SIGNER: std::sync::OnceLock<(String, std::sync::Arc<hatchery_enroll::NodeIdentity>)> = std::sync::OnceLock::new();
+
+/// Installs this node's identity (enrolled, trusted) as the signer of account registrations.
+/// An unenrolled node never has one, so it registers nothing.
+pub fn set_node_signer(node_id: String, identity: std::sync::Arc<hatchery_enroll::NodeIdentity>) {
+    let _ = NODE_SIGNER.set((node_id, identity));
+}
+
+/// Exact bytes the messenger product verifies (`m4a-node-account-v1`).
+pub fn node_account_message(audience: &str, node_id: &str, nick: Option<&str>, ts_ms: i64, nonce: &str) -> Vec<u8> {
+    format!("m4a-node-account-v1\n{audience}\n{node_id}\n{}\n{ts_ms}\n{nonce}\n", nick.unwrap_or("")).into_bytes()
+}
 pub const ACCOUNTS_ROOT_ENV: &str = "HATCHERY_M4A_ACCOUNTS_ROOT";
 
 #[derive(Debug, Clone)]
@@ -38,6 +56,10 @@ pub struct SessionAccount {
     /// The provider session key the account is bound to (also given to the session as
     /// `M4A_SESSION_ID`, so its own inbox commands address the right account).
     pub session_id: String,
+    /// The account's own store root (`M4A_STORE_ROOT`), when m4a-agent reported it.
+    pub store_root: Option<String>,
+    /// Messenger product URL the session's client uses (`M4A_PRODUCT_URL`), from the node env.
+    pub product_url: Option<String>,
     cap: String,
 }
 
@@ -67,7 +89,12 @@ impl SessionAccount {
             EnvMutation { key: OsString::from("M4A_NICK"), value: Some(OsString::from(&self.nick)) },
             EnvMutation { key: OsString::from("M4A_SESSION_CAP"), value: Some(OsString::from(&self.cap)) },
             EnvMutation { key: OsString::from("M4A_SESSION_ID"), value: Some(OsString::from(&self.session_id)) },
+            EnvMutation { key: OsString::from("M4A_BOT_NAME"), value: Some(OsString::from(&self.nick)) },
         ]
+        .into_iter()
+        .chain(self.store_root.iter().map(|r| EnvMutation { key: OsString::from("M4A_STORE_ROOT"), value: Some(OsString::from(r)) }))
+        .chain(self.product_url.iter().map(|u| EnvMutation { key: OsString::from("M4A_PRODUCT_URL"), value: Some(OsString::from(u)) }))
+        .collect()
     }
 }
 
@@ -146,6 +173,37 @@ impl M4aSessionAccounts {
         }
     }
 
+    /// Registers the account on the messenger with this node's key, then the account's own client
+    /// enrolls its own key (`m4a-agent account node-enroll`). The invite never reaches the node.
+    fn node_enroll(&self, account: &SessionAccount) -> Result<(), String> {
+        let url = account.product_url.as_deref().ok_or("no messenger product url (HATCHERY_M4A_PRODUCT_URL)")?;
+        let store_root = account.store_root.as_deref().ok_or("m4a-agent reported no store root")?;
+        let (node_id, identity) = NODE_SIGNER.get().ok_or("this node is not enrolled: it registers no accounts")?;
+        let audience = std::env::var(PRODUCT_AUDIENCE_ENV).ok().filter(|a| !a.is_empty()).unwrap_or_else(|| "m4a-product".into());
+        let ts_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as i64).unwrap_or(0);
+        let mut raw = [0u8; 16];
+        getrandom(&mut raw)?;
+        let nonce: String = raw.iter().map(|b| format!("{b:02x}")).collect();
+        let signature = identity.sign_bytes(&node_account_message(&audience, node_id, Some(&account.nick), ts_ms, &nonce));
+        let out = Command::new(&self.bin)
+            .args(["account", "node-enroll", "--node-id", node_id, "--ts", &ts_ms.to_string(), "--nonce", &nonce, "--signature", &signature, "--nick", &account.nick])
+            .env("M4A_PRODUCT_URL", url)
+            .env("M4A_SESSION_ID", &account.session_id)
+            .env("M4A_STORE_ROOT", store_root)
+            .env("M4A_BOT_NAME", &account.nick)
+            .env("M4A_ACCOUNTS_ROOT", &self.base)
+            .env_remove("M4A_SESSION_CAP")
+            .env_remove("M4A_PRODUCT_INVITE")
+            .output()
+            .map_err(|e| format!("m4a-agent: {}", e.kind()))?;
+        if !out.status.success() {
+            let why = String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("").chars().take(200).collect::<String>();
+            return Err(format!("node-enroll failed: {why}"));
+        }
+        tracing::info!(nick = %account.nick, node_id = %node_id, "m4a account registered on the messenger by this node");
+        Ok(())
+    }
+
     pub fn remove_session_file(&self, nick: &str) {
         if let Some(path) = self.session_file_path(nick) {
             let _ = std::fs::remove_file(path);
@@ -217,7 +275,18 @@ impl M4aSessionAccounts {
         if cap.trim().is_empty() || cap.contains('\n') {
             return Err("capability is malformed".into());
         }
-        Ok(SessionAccount { nick, session_id: session_key.to_owned(), cap })
+        // mail4agent's own session env (`Provisioned::session_env`): the login session id is the
+        // account ref and the account has its own store root.
+        let session_id = v["account_ref"].as_str().filter(|r| !r.is_empty()).unwrap_or(session_key).to_owned();
+        let store_root = v["store_root"].as_str().filter(|r| !r.is_empty()).map(str::to_owned);
+        let product_url = std::env::var(PRODUCT_URL_ENV).ok().filter(|u| !u.is_empty());
+        let account = SessionAccount { nick, session_id, store_root, product_url, cap };
+        if !v["enrolled"].as_bool().unwrap_or(false) {
+            if let Err(error) = self.node_enroll(&account) {
+                tracing::warn!(nick = %account.nick, %error, "m4a account not registered on the messenger (stays local)");
+            }
+        }
+        Ok(account)
     }
 }
 
@@ -246,7 +315,7 @@ mod tests {
         std::fs::write(
             &p,
             "#!/bin/sh\nwhile [ $# -gt 0 ]; do case \"$1\" in --session) s=$2; shift;; --cap-out) o=$2; shift;; esac; shift; done\n\
-             umask 077; printf 'cap-%s-%s' \"$s\" \"$$\" > \"$o\"; printf '{\"nick\":\"codex-%s\",\"cap_issued\":true}\\n' \"$s\"\n",
+             umask 077; printf 'cap-%s-%s' \"$s\" \"$$\" > \"$o\"; printf '{\"nick\":\"codex-%s\",\"account_ref\":\"ref-%s\",\"store_root\":\"/s/%s\",\"enrolled\":true,\"cap_issued\":true}\\n' \"$s\" \"$s\" \"$s\"\n",
         )
         .unwrap();
         use std::os::unix::fs::PermissionsExt;
@@ -255,7 +324,7 @@ mod tests {
     }
 
     #[test]
-    fn each_spawn_gets_its_own_account_and_only_nick_and_cap_are_injected() {
+    fn each_spawn_gets_its_own_account_and_its_own_session_env() {
         let dir = std::env::temp_dir().join(format!("hatch-m4a-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -265,8 +334,9 @@ mod tests {
         assert_ne!(a.nick, b.nick);
         let env = a.env_mutations();
         let keys: Vec<_> = env.iter().map(|m| m.key.to_string_lossy().into_owned()).collect();
-        assert_eq!(keys, ["M4A_NICK", "M4A_SESSION_CAP", "M4A_SESSION_ID"]);
-        assert_eq!(env[2].value.as_deref(), Some(std::ffi::OsStr::new("inc-1")));
+        assert_eq!(&keys[..5], ["M4A_NICK", "M4A_SESSION_CAP", "M4A_SESSION_ID", "M4A_BOT_NAME", "M4A_STORE_ROOT"]);
+        assert_eq!(env[2].value.as_deref(), Some(std::ffi::OsStr::new("ref-inc-1")));
+        assert_eq!(env[4].value.as_deref(), Some(std::ffi::OsStr::new("/s/inc-1")));
         assert_ne!(env[1].value, b.env_mutations()[1].value);
         // The one-shot cap file is gone and the cap is not in Debug output.
         let left: Vec<_> = std::fs::read_dir(acc.base()).unwrap().filter_map(Result::ok).filter(|e| e.file_name().to_string_lossy().ends_with(".cap")).collect();
@@ -373,5 +443,15 @@ mod session_file_tests {
         assert!(a.session_file_path("grok-1").unwrap().ends_with("sessions/grok-1.session"));
         assert!(a.session_file_path("../x").is_none());
         assert!(a.session_file_path("").is_none());
+    }
+}
+
+#[cfg(test)]
+mod node_account_message_tests {
+    #[test]
+    fn signed_bytes_follow_the_product_contract() {
+        let m = super::node_account_message("aud", "node-1", Some("nick-a"), 7, "n0");
+        assert_eq!(m, b"m4a-node-account-v1\naud\nnode-1\nnick-a\n7\nn0\n".to_vec());
+        assert_eq!(super::node_account_message("aud", "node-1", None, 7, "n0"), b"m4a-node-account-v1\naud\nnode-1\n\n7\nn0\n".to_vec());
     }
 }
