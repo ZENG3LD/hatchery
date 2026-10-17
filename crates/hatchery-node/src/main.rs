@@ -23,10 +23,6 @@ const MESH_UNDERLAY_TOKEN_ENV: &str = "GATE4AGENT_MESH_UNDERLAY_TOKEN";
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    // Letter hook / pusher mode of this binary (see m4a_wake.rs): no logging, no node.
-    if let Some(code) = hatchery_node::m4a_wake::hook_main() {
-        std::process::exit(code);
-    }
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -197,7 +193,7 @@ async fn main() {
                 let v = it.next().cloned().unwrap_or_else(|| fail("missing value"));
                 match a.as_str() {
                     "--node-ops" => ops = v,
-                    "--provider" | "--session" | "--stale" | "--cwd" => q.push(format!("{}={}", &a[2..], v)),
+                    "--provider" | "--session" | "--stale" | "--cwd" => q.push(format!("{}={}", &a[2..], hatchery_node::m4a_adopt::query_escape(&v))),
                     other => fail(&format!("unknown argument {other}")),
                 }
             }

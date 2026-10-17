@@ -308,6 +308,11 @@ fn http(addr: &str, method: &str, path: &str, bearer: Option<&str>) -> Result<(u
     Ok((status, buf.split_once("\r\n\r\n").map(|(_, b)| b.to_owned()).unwrap_or_default()))
 }
 
+/// Percent-encodes one query value (spaces, backslashes, colons, non-ASCII).
+pub fn query_escape(v: &str) -> String {
+    v.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
 /// Client side (`gate4agent-node m4a-adopt`): owner token from the file `/health` names.
 pub fn client_adopt(node_ops: &str, query: &str) -> Result<String, String> {
     let (_, health) = http(node_ops, "GET", "/health", None)?;
@@ -374,6 +379,14 @@ mod tests {
     }
 
     #[test]
+    fn query_values_survive_spaces_and_backslashes() {
+        let cwd = r"dir with space\sub:x";
+        let q = format!("provider=grok&cwd={}", query_escape(cwd));
+        assert!(!q.contains(' ') && !q.contains('\\'));
+        assert_eq!(crate::m4a_attach::query_get(&q, "cwd").as_deref(), Some(cwd));
+    }
+
+    #[test]
     fn per_session_resolution() {
         let cl = |_| vec!["grok".to_string(), "--resume".into(), "s-1".into()];
         assert_eq!(resolve_session(Some("x".into()), "kimi", 1, cl).as_deref(), Some("x"));
@@ -386,6 +399,6 @@ mod tests {
         assert_eq!(resolve_session(None, "claude", 1, none).as_deref(), Some("b"));
         assert_eq!(resolve_session(None, "claude", 1, none), None);
         assert_eq!(session_from_cmdline(&["g".into(), "--session=z".into()]).as_deref(), Some("z"));
-        assert_eq!(split_windows_cmdline(r#""C:\a b\grok.exe" --resume 01a"#), vec![r"C:\a b\grok.exe", "--resume", "01a"]);
+        assert_eq!(split_windows_cmdline(r#""tools dir\grok.exe" --resume 01a"#), vec![r"tools dir\grok.exe", "--resume", "01a"]);
     }
 }
