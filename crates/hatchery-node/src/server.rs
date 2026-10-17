@@ -3216,6 +3216,8 @@ struct NodeShared {
     m4a_accounts: Option<crate::m4a_accounts::M4aSessionAccounts>,
     /// nick -> the session that holds that m4a account (for letter wakes).
     m4a_live: Mutex<BTreeMap<String, (AgentInstanceId, AgentId)>>,
+    /// Per-session grok leader sockets (never the operator's shared leader).
+    grok_leaders: Mutex<BTreeMap<AgentInstanceId, std::path::PathBuf>>,
     /// m4a signer proxy (option A): when set, PTY sessions get a process-bound handle
     /// instead of a bearer capability.
     #[cfg(unix)]
@@ -3497,6 +3499,14 @@ trait SessionLifecycleHook {
 
 impl SessionLifecycleHook for NodeShared {
     fn on_session_ended(&self, address: &SessionAddress) {
+        self.retire_session_grok_leader(address.session.instance_id);
+        if let Some(accounts) = self.m4a_accounts.as_ref() {
+            let instance = address.session.instance_id;
+            let live = self.m4a_live.lock().unwrap_or_else(|p| p.into_inner());
+            for (nick, _) in live.iter().filter(|(_, (i, _))| *i == instance) {
+                accounts.remove_session_file(nick);
+            }
+        }
         if let Some(registry) = self.harness_mcp_registry.as_ref() {
             registry.revoke_session(address);
         }
@@ -3506,6 +3516,12 @@ impl SessionLifecycleHook for NodeShared {
     }
 
     fn on_shutdown(&self) {
+        let leaders: Vec<_> = std::mem::take(&mut *self.grok_leaders.lock().unwrap_or_else(|p| p.into_inner()))
+            .into_values()
+            .collect();
+        for socket in leaders {
+            crate::grok_leader::retire(&socket);
+        }
         if let Some(registry) = self.harness_mcp_registry.as_ref() {
             let instances = registry.shutdown();
             if let Some(control) = self.native_launch_profile_control.as_ref() {
@@ -3843,6 +3859,10 @@ impl SpawnPreparer for NodeShared {
             network_allowlist,
             provider_home,
         )?;
+        let mut network_overlay_args = network_overlay_args;
+        if let Some(socket) = self.session_grok_leader_socket(&provider, mode, instance_id) {
+            network_overlay_args.extend(crate::grok_leader::leader_socket_args(&socket));
+        }
         let environment_overlay = match (environment_overlay.flatten(), network_overlay_args) {
             (prepared, args) if args.is_empty() => prepared,
             (Some(PreparedNativeLaunchOverlay::Instance(mut overlay)), args) => {
@@ -3941,6 +3961,9 @@ impl SpawnPreparer for NodeShared {
                         }
                         .map_err(|_| failure(NodeFailureCode::BackendOperationFailed, "m4a session account overlay is invalid"))?;
                         tracing::info!(provider = %provider, instance_id = ?instance_id, nick = %account.nick, "m4a session account assigned at spawn");
+                        if let Err(error) = accounts.write_session_file(&account) {
+                            tracing::warn!(nick = %account.nick, %error, "m4a session file not written");
+                        }
                         self.m4a_live
                             .lock()
                             .unwrap_or_else(|p| p.into_inner())
@@ -4050,6 +4073,43 @@ impl NodeEventHistory {
 }
 
 impl NodeShared {
+    /// A node-spawned grok PTY session gets its own leader socket, so its agent backend runs
+    /// as a descendant of this session's process (with the session's own environment) and
+    /// never attaches to an operator's shared leader. Same grok home, same login.
+    fn session_grok_leader_socket(
+        &self,
+        provider: &AgentId,
+        mode: SessionMode,
+        instance_id: AgentInstanceId,
+    ) -> Option<std::path::PathBuf> {
+        if provider.as_str() != "grok" || mode != SessionMode::Pty || crate::grok_leader::disabled() {
+            return None;
+        }
+        let root = self
+            .m4a_accounts
+            .as_ref()
+            .and_then(|a| a.base().parent().map(std::path::Path::to_path_buf))
+            .unwrap_or_else(std::env::temp_dir);
+        let socket = crate::grok_leader::socket_path(&root, &format!("{}-{}", self.incarnation_id, instance_id.0));
+        if let Some(previous) = self
+            .grok_leaders
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(instance_id, socket.clone())
+        {
+            crate::grok_leader::retire(&previous);
+        }
+        Some(socket)
+    }
+
+    /// Stops this session's own grok leader, if it had one. Never touches any other leader.
+    fn retire_session_grok_leader(&self, instance_id: AgentInstanceId) {
+        let socket = self.grok_leaders.lock().unwrap_or_else(|p| p.into_inner()).remove(&instance_id);
+        if let Some(socket) = socket {
+            crate::grok_leader::retire(&socket);
+        }
+    }
+
     fn new_with_incarnation(
         handle: Gate4AgentHandle,
         access_token: String,
@@ -4147,6 +4207,7 @@ impl NodeShared {
             session_environment_materializer,
             m4a_accounts: crate::m4a_accounts::M4aSessionAccounts::from_env(),
             m4a_live: Mutex::new(BTreeMap::new()),
+            grok_leaders: Mutex::new(BTreeMap::new()),
             #[cfg(unix)]
             signer_proxy: std::sync::OnceLock::new(),
             materializations: Mutex::new(
@@ -16772,6 +16833,7 @@ async fn process_request_inner(shared: &NodeShared, connection_id: u64, role: Cl
             controlled_session(shared, connection_id, role, &session)?;
             shared.sessionize_spawn(session.session.instance_id);
             shared.dispatch(ControlCommand::Stop { instance_id: session.session.instance_id, force })?;
+            shared.retire_session_grok_leader(session.session.instance_id);
             Ok(NodeResponse::Accepted)
         }
         NodeRequest::Remove { session } => {
