@@ -81,7 +81,7 @@ impl SessionAccount {
     /// The only variables the session gets from the node for m4a.
     /// The one-time `/m4a/attach` reply (the capability travels only in this body).
     pub fn attach_reply(&self) -> serde_json::Value {
-        serde_json::json!({"nick": self.nick, "session_id": self.session_id, "cap": self.cap})
+        serde_json::json!({"nick": self.nick, "session_id": self.session_id, "cap": self.cap, "store_root": self.store_root, "product_url": self.product_url})
     }
 
     pub fn env_mutations(&self) -> Vec<EnvMutation> {

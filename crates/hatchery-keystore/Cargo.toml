@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-keystore"
-version = "0.2.26"
+version = "0.2.27"
 edition = "2021"
 repository = "https://github.com/ZENG3LD/hatchery"
 description = "Hatchery keystore (hq-core authority): account -> node -> session key tree on tesserax-keytree, non-exportable session keys, grants per transport, attenuated delegation to m4a and g4a"
