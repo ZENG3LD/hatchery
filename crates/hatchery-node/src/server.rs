@@ -13312,6 +13312,31 @@ fn call_home_backoff(attempt: usize) -> Duration {
     )
 }
 
+
+/// Dial the call-home relay. Tunnel addresses go through the in-process
+/// WireGuard dialer when the userspace session is up.
+async fn dial_call_home(relay: std::net::SocketAddr) -> Result<tokio::net::TcpStream, NodeServerError> {
+    #[cfg(feature = "wireguard")]
+    {
+        let std_stream = tokio::task::spawn_blocking(move || {
+            gate4agent_node_core::kit_wireguard::tcp_connect(relay)
+        })
+        .await
+        .map_err(|e| NodeServerError::CallHomeTransport(std::io::Error::other(e.to_string())))?
+        .map_err(NodeServerError::CallHomeTransport)?;
+        std_stream
+            .set_nonblocking(true)
+            .map_err(NodeServerError::CallHomeTransport)?;
+        return tokio::net::TcpStream::from_std(std_stream).map_err(NodeServerError::CallHomeTransport);
+    }
+    #[cfg(not(feature = "wireguard"))]
+    {
+        tokio::net::TcpStream::connect(relay)
+            .await
+            .map_err(NodeServerError::CallHomeTransport)
+    }
+}
+
 /// One call-home attempt: connect, name this node, then serve.
 async fn dial_relay_and_serve(
     relay: std::net::SocketAddr,
@@ -13319,9 +13344,7 @@ async fn dial_relay_and_serve(
     shared: Arc<NodeShared>,
     preauth_permit: OwnedSemaphorePermit,
 ) -> Result<(), NodeServerError> {
-    let mut stream = tokio::net::TcpStream::connect(relay)
-        .await
-        .map_err(NodeServerError::CallHomeTransport)?;
+    let mut stream = dial_call_home(relay).await?;
     // Nagle off for the same reason the rest of this wire wants it off:
     // the traffic is small request/response frames, and coalescing them
     // adds latency to every one.

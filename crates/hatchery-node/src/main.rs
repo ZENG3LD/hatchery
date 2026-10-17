@@ -467,9 +467,9 @@ async fn main() {
                 println!(
                     "--install-provider-clis: off by default; when set, download missing claude/codex/kimi/grok packages only (no logins)"
                 );
-                println!("node kit (default): dig2browser, mail4agent, session-restore, kernel WireGuard. Cores are individual features (m4a, d2b, session-restore, wireguard)");
+                println!("node kit (default): dig2browser, mail4agent, session-restore, userspace WireGuard. Cores are individual features (m4a, d2b, session-restore, wireguard)");
                 #[cfg(feature = "wireguard")]
-                println!("kernel WireGuard peer (either side may dial): set {wg_iface} to a name plus {wg_key} (path only), {wg_addr}, {wg_peer_addr}, {wg_peer_key}; optional {wg_listen} (default 51820), {wg_endpoint} (omit so C2 dials this node). Not HQ. Not the UDP mesh stub.",
+                println!("userspace WireGuard peer (either side may dial; no TUN/elevation): set {wg_iface} to a name plus {wg_key} (path only), {wg_addr}, {wg_peer_addr}, {wg_peer_key}; optional {wg_listen} (default 51820), {wg_endpoint}, {wg_ka}. Opt-in kernel: GATE4AGENT_WG_KERNEL=1. Not HQ. Not the UDP mesh stub.",
                     wg_iface = hatchery_node::WG_INTERFACE_ENV,
                     wg_key = hatchery_node::WG_PRIVATE_KEY_ENV,
                     wg_addr = hatchery_node::WG_ADDRESS_ENV,
@@ -477,6 +477,7 @@ async fn main() {
                     wg_peer_key = hatchery_node::WG_PEER_KEY_ENV,
                     wg_listen = hatchery_node::WG_LISTEN_PORT_ENV,
                     wg_endpoint = hatchery_node::WG_PEER_ENDPOINT_ENV,
+                    wg_ka = hatchery_node::WG_KEEPALIVE_ENV,
                 );
                 return;
             }
@@ -732,7 +733,7 @@ async fn main() {
             interface = %wg.interface_name,
             listen_port = wg.listen_port,
             dials_peer = wg.peer_endpoint.is_some(),
-            "bringing up kernel wireguard node<->c2 peer"
+            "bringing up userspace wireguard node<->c2 peer"
         );
         // Failures must not take the process down: retry in the background and
         // advertise wg=down via /health until the tunnel is up.

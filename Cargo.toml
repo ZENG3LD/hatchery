@@ -59,9 +59,10 @@ default-members = [
 ]
 
 [workspace.package]
-version = "0.2.37"
+version = "0.2.38"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
+
 
 
