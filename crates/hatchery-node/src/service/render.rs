@@ -141,6 +141,10 @@ pub struct SchtasksXml<'a> {
     pub author: &'a str,
     /// When false, `exe` is gate4agent-nodew which inserts run-supervised itself.
     pub supervised: bool,
+    /// Current user SID string (S-1-5-…); required for non-admin task create.
+    pub user_sid: &'a str,
+    /// DOMAIN\User or User for LogonTrigger.
+    pub user_logon: &'a str,
 }
 
 pub fn render_schtasks_xml(t: &SchtasksXml<'_>) -> String {
@@ -171,10 +175,12 @@ pub fn render_schtasks_xml(t: &SchtasksXml<'_>) -> String {
   <Triggers>
     <LogonTrigger>
       <Enabled>true</Enabled>
+      <UserId>{logon}</UserId>
     </LogonTrigger>
   </Triggers>
   <Principals>
     <Principal id="Author">
+      <UserId>{sid}</UserId>
       <LogonType>InteractiveToken</LogonType>
       <RunLevel>LeastPrivilege</RunLevel>
     </Principal>
@@ -218,6 +224,8 @@ pub fn render_schtasks_xml(t: &SchtasksXml<'_>) -> String {
         exe = xml_escape(t.exe),
         args = xml_escape(&arguments),
         cwd = xml_escape(t.working_dir),
+        sid = xml_escape(t.user_sid),
+        logon = xml_escape(t.user_logon),
     )
 }
 
@@ -292,8 +300,12 @@ mod tests {
             working_dir: r"C:\Users\x",
             author: "gate4agent-node",
             supervised: true,
+            user_sid: "S-1-5-21-1-2-3-1001",
+            user_logon: r"BOX\tester",
         });
         assert!(xml.contains("<Hidden>true</Hidden>"));
+        assert!(xml.contains("<UserId>S-1-5-21-1-2-3-1001</UserId>"));
+        assert!(xml.contains("UserId") && xml.contains("tester"));
         assert!(xml.contains("ExecutionTimeLimit>PT0S"));
         assert!(xml.contains("RestartOnFailure"));
         assert!(xml.contains("run-supervised --"));

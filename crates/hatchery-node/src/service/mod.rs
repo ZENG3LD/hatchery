@@ -12,7 +12,10 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use crate::node_log;
-use crate::windows_process::{hide_console, hide_console_detached, free_console, ignore_console_close_events};
+use crate::windows_process::{
+    current_user_identity, free_console, hide_console, ignore_console_close_events,
+    relaunch_elevated, set_creation_flags, CREATE_NO_WINDOW,
+};
 
 pub use render::{
     render_launchd_plist, render_schtasks_xml, render_systemd_unit, LaunchPlist, SchtasksXml,
@@ -38,6 +41,8 @@ pub struct ServiceStatus {
     pub scope: &'static str,
     pub unit_name: String,
     pub detail: String,
+    /// Best-effort probe of the node HTTP health endpoint from saved args / env.
+    pub node_health: String,
 }
 
 impl ServiceSpec {
@@ -210,6 +215,30 @@ fn require_admin_if_system(system: bool) -> Result<(), String> {
     }
 }
 
+#[cfg(windows)]
+fn is_elevated_windows() -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+    unsafe {
+        let mut token: HANDLE = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return false;
+        }
+        let mut elev = TOKEN_ELEVATION { TokenIsElevated: 0 };
+        let mut needed = 0u32;
+        let ok = GetTokenInformation(
+            token,
+            TokenElevation,
+            &mut elev as *mut _ as *mut _,
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut needed,
+        );
+        CloseHandle(token);
+        ok != 0 && elev.TokenIsElevated != 0
+    }
+}
+
 fn is_elevated() -> bool {
     #[cfg(unix)]
     {
@@ -217,9 +246,7 @@ fn is_elevated() -> bool {
     }
     #[cfg(windows)]
     {
-        // Defer to schtasks/sc; they return a clear access-denied error.
-        // Returning true here only skips the early --system message.
-        true
+        is_elevated_windows()
     }
     #[cfg(all(not(unix), not(windows)))]
     {
@@ -346,6 +373,7 @@ fn status_linux(system: bool, name: &str) -> Result<ServiceStatus, String> {
         scope: if system { "system" } else { "user" },
         unit_name: name.to_owned(),
         detail,
+        node_health: probe_node_health(),
     })
 }
 
@@ -451,6 +479,7 @@ fn status_macos(system: bool, name: &str) -> Result<ServiceStatus, String> {
         scope: if system { "system" } else { "user" },
         unit_name: name.to_owned(),
         detail: label,
+        node_health: probe_node_health(),
     })
 }
 
@@ -475,6 +504,8 @@ fn restart_macos(system: bool, name: &str) -> Result<String, String> {
 #[cfg(windows)]
 fn install_windows(spec: &ServiceSpec) -> Result<String, String> {
     let name = spec.unit_name();
+    let (user_sid, user_logon) = current_user_identity()
+        .map_err(|e| format!("cannot resolve current user SID for Task Scheduler: {e}"))?;
     if spec.system {
         // Windows Service via sc.exe; binPath runs run-supervised so the
         // service process is the parent (service-main is approximate: we use
@@ -501,6 +532,8 @@ fn install_windows(spec: &ServiceSpec) -> Result<String, String> {
         working_dir: &cwd.to_string_lossy(),
         author: "gate4agent-node",
         supervised: !use_nodew,
+        user_sid: &user_sid,
+        user_logon: &user_logon,
     });
     // Write UTF-16 LE with BOM — schtasks expects it for /XML.
     let mut encoded: Vec<u8> = vec![0xFF, 0xFE];
@@ -533,6 +566,8 @@ fn install_windows(spec: &ServiceSpec) -> Result<String, String> {
 
 #[cfg(windows)]
 fn install_windows_system(spec: &ServiceSpec, name: &str) -> Result<String, String> {
+    let (user_sid, user_logon) = current_user_identity()
+        .map_err(|e| format!("cannot resolve current user SID: {e}"))?;
     // Prefer a SYSTEM scheduled task with highest privileges — reliable without
     // a native service control handler. Recovery is run-supervised + RestartOnFailure.
     let dir = PathBuf::from(
@@ -555,6 +590,8 @@ fn install_windows_system(spec: &ServiceSpec, name: &str) -> Result<String, Stri
         working_dir: &dir.to_string_lossy(),
         author: "gate4agent-node",
         supervised: !use_nodew,
+        user_sid: &user_sid,
+        user_logon: &user_logon,
     });
     xml = xml.replace(
         "<RunLevel>LeastPrivilege</RunLevel>",
@@ -634,6 +671,7 @@ fn status_windows(system: bool, name: &str) -> Result<ServiceStatus, String> {
         scope: if system { "system" } else { "user" },
         unit_name: name.to_owned(),
         detail: text.lines().take(8).collect::<Vec<_>>().join(" | "),
+        node_health: probe_node_health(),
     })
 }
 
@@ -659,17 +697,67 @@ fn write_env_file(path: &Path, env: &[(String, String)]) -> Result<(), String> {
     Ok(())
 }
 
+fn probe_node_health() -> String {
+    let addr = std::env::var("GATE4AGENT_HEALTH_URL")
+        .or_else(|_| {
+            std::env::var("GATE4AGENT_API_LISTEN").map(|a| format!("http://{a}/health"))
+        })
+        .unwrap_or_else(|_| "http://127.0.0.1:18330/health".into());
+    let hostport = addr
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .split('/')
+        .next()
+        .unwrap_or("127.0.0.1:18330");
+    use std::io::{Read, Write};
+    use std::net::ToSocketAddrs;
+    let sock = match hostport.to_socket_addrs() {
+        Ok(mut i) => match i.next() {
+            Some(a) => a,
+            None => return "bad_addr".into(),
+        },
+        Err(_) => return "bad_addr".into(),
+    };
+    let mut stream = match std::net::TcpStream::connect_timeout(&sock, Duration::from_secs(2)) {
+        Ok(s) => s,
+        Err(_) => return "down".into(),
+    };
+    let req = format!("GET /health HTTP/1.1
+Host: {hostport}
+Connection: close
+
+");
+    if stream.write_all(req.as_bytes()).is_err() {
+        return "unreachable".into();
+    }
+    let mut buf = vec![0u8; 4096];
+    let n = stream.read(&mut buf).unwrap_or(0);
+    let body = String::from_utf8_lossy(&buf[..n]);
+    if body.contains("\"ok\":true") || body.contains("\"ok\": true") {
+        "ok".into()
+    } else if n == 0 {
+        "no_response".into()
+    } else {
+        "responded_not_ok".into()
+    }
+}
+
 fn run_ok(cmd: &mut Command) -> Result<(), String> {
     hide_console(cmd);
     let out = cmd.output().map_err(|e| e.to_string())?;
     if out.status.success() {
         Ok(())
     } else {
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let combined = format!("{stdout} {stderr}").to_ascii_lowercase();
+        let hint = if combined.contains("access is denied") || combined.contains("access denied") {
+            " (Access denied: for a user-level task the XML must include your UserId/SID; try reinstalling this build, or run from an elevated prompt for --system)"
+        } else {
+            ""
+        };
         Err(format!(
-            "{:?} failed: {} {}",
-            cmd,
-            String::from_utf8_lossy(&out.stdout),
-            String::from_utf8_lossy(&out.stderr)
+            "command failed{hint}: stdout={stdout} stderr={stderr}"
         ))
     }
 }
@@ -745,37 +833,70 @@ pub fn install_panic_hook() {
 
 /// Parent process: respawn `current_exe` with `child_args` until forever.
 ///
-/// On Windows this detaches from any console (so closing a terminal cannot
-/// kill the node) and spawns each child with CREATE_NO_WINDOW|DETACHED_PROCESS.
-/// Interactive CLI subcommands (m4a-adopt, plugin, …) never enter this path.
+/// Child stdout/stderr go to files under the enroll-state (or a temp dir) so a
+/// headless Windows spawn never inherits invalid console handles (which made
+/// `println!`/`eprintln!` panic). Interactive CLI never enters this path.
 pub fn run_supervised(child_args: &[String]) -> ! {
+    apply_sidecar_env(child_args);
+    ensure_node_log_from_args(child_args);
     let _ = node_log::init_from_env();
     install_panic_hook();
-    // Leave the console that started us, if any. Scheduled tasks / nodew never
-    // have one; a mistaken interactive `run-supervised` must not die on close.
     free_console();
     ignore_console_close_events();
-    let exe = std::env::current_exe().expect("current_exe");
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            node_log::error("process_exit", &[("reason", format!("current_exe: {e}"))]);
+            std::process::exit(1);
+        }
+    };
+    let log_dir = child_log_dir(child_args);
     let mut n: u64 = 0;
     let mut backoff = Duration::from_secs(1);
     loop {
         n = n.saturating_add(1);
+        let stdout_path = log_dir.join("node.stdout.log");
+        let stderr_path = log_dir.join("node.stderr.log");
+        rotate_log_file(&stdout_path, 2_000_000);
+        rotate_log_file(&stderr_path, 2_000_000);
         let mut cmd = Command::new(&exe);
         cmd.args(child_args).stdin(Stdio::null());
+        match (OpenOptions::new().create(true).append(true).open(&stdout_path),
+               OpenOptions::new().create(true).append(true).open(&stderr_path))
+        {
+            (Ok(out), Ok(err)) => {
+                cmd.stdout(Stdio::from(out)).stderr(Stdio::from(err));
+            }
+            _ => {
+                // Last resort: inherit (Unix) or null (Windows) — never panic.
+                #[cfg(windows)]
+                {
+                    cmd.stdout(Stdio::null()).stderr(Stdio::null());
+                }
+                #[cfg(not(windows))]
+                {
+                    cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+                }
+            }
+        }
         #[cfg(windows)]
         {
-            cmd.stdout(Stdio::null()).stderr(Stdio::null());
-            hide_console_detached(&mut cmd);
+            // CREATE_NO_WINDOW only — not DETACHED_PROCESS: with redirected
+            // stdio, DETACHED was redundant and historically hid failures.
+            set_creation_flags(&mut cmd, CREATE_NO_WINDOW);
         }
-        #[cfg(not(windows))]
-        {
-            cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
-        }
-        // Prevent nested supervisors.
         cmd.env("GATE4AGENT_SUPERVISED_CHILD", "1");
+        // Re-apply sidecar env each spawn (install may have refreshed it).
+        for (k, v) in load_sidecar_env(child_args) {
+            cmd.env(k, v);
+        }
         node_log::info(
             "supervised_start",
-            &[("n", n.to_string()), ("args_len", child_args.len().to_string())],
+            &[
+                ("n", n.to_string()),
+                ("args_len", child_args.len().to_string()),
+                ("stderr_log", stderr_path.display().to_string()),
+            ],
         );
         let status = match cmd.status() {
             Ok(s) => s,
@@ -788,6 +909,10 @@ pub fn run_supervised(child_args: &[String]) -> ! {
                         ("supervised_n", n.to_string()),
                     ],
                 );
+                node_log::warn(
+                    "supervised_restart",
+                    &[("n", n.to_string()), ("backoff_secs", backoff.as_secs().to_string())],
+                );
                 std::thread::sleep(backoff);
                 backoff = (backoff * 2).min(Duration::from_secs(30));
                 continue;
@@ -797,12 +922,14 @@ pub fn run_supervised(child_args: &[String]) -> ! {
             .code()
             .map(|c| c.to_string())
             .unwrap_or_else(|| "signal".into());
+        let stderr_tail = read_tail(&stderr_path, 4_000);
         node_log::warn(
             "process_exit",
             &[
                 ("reason", "child_exit".into()),
                 ("code", code.clone()),
                 ("supervised_n", n.to_string()),
+                ("stderr_tail", stderr_tail),
             ],
         );
         node_log::warn(
@@ -812,10 +939,100 @@ pub fn run_supervised(child_args: &[String]) -> ! {
         std::thread::sleep(backoff);
         backoff = (backoff * 2).min(Duration::from_secs(30));
         if status.success() {
-            // Clean exit: still restart (OS KeepAlive semantics); reset backoff gently.
             backoff = Duration::from_secs(1);
         }
     }
+}
+
+fn child_log_dir(child_args: &[String]) -> PathBuf {
+    if let Some(p) = extract_enroll_state(child_args) {
+        let _ = fs::create_dir_all(&p);
+        return p;
+    }
+    std::env::temp_dir().join("gate4agent-node-supervised")
+}
+
+fn ensure_node_log_from_args(child_args: &[String]) {
+    if std::env::var_os(crate::node_log::env_name()).is_some() {
+        return;
+    }
+    if let Some(dir) = extract_enroll_state(child_args) {
+        let path = crate::node_log::path_beside_state(&dir);
+        // SAFETY: single-threaded before spawn loop; sets log path for parent.
+        std::env::set_var(crate::node_log::env_name(), &path);
+    }
+}
+
+fn sidecar_env_path(child_args: &[String]) -> Option<PathBuf> {
+    let name = match extract_enroll_state(child_args) {
+        Some(p) => {
+            let key = p.to_string_lossy();
+            format!("gate4agent-node-{}", short_digest(&key))
+        }
+        None => "gate4agent-node".into(),
+    };
+    #[cfg(windows)]
+    {
+        let base = home_dir().ok()?.join("AppData").join("Local").join("gate4agent-node");
+        return Some(base.join(format!("{name}.env")));
+    }
+    #[cfg(not(windows))]
+    {
+        let base = home_dir().ok()?.join(".local").join("state").join("gate4agent-node");
+        Some(base.join(format!("{name}.env")))
+    }
+}
+
+fn load_sidecar_env(child_args: &[String]) -> Vec<(String, String)> {
+    let Some(path) = sidecar_env_path(child_args) else {
+        return Vec::new();
+    };
+    let Ok(text) = fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = line.split_once('=') {
+            out.push((k.to_owned(), v.to_owned()));
+        }
+    }
+    out
+}
+
+fn apply_sidecar_env(child_args: &[String]) {
+    for (k, v) in load_sidecar_env(child_args) {
+        if std::env::var_os(&k).is_none() {
+            std::env::set_var(&k, &v);
+        }
+    }
+}
+
+fn rotate_log_file(path: &Path, max_bytes: u64) {
+    let Ok(meta) = fs::metadata(path) else {
+        return;
+    };
+    if meta.len() < max_bytes {
+        return;
+    }
+    let bak = path.with_extension("log.1");
+    let _ = fs::remove_file(&bak);
+    let _ = fs::rename(path, bak);
+}
+
+fn read_tail(path: &Path, max_chars: usize) -> String {
+    let Ok(data) = fs::read(path) else {
+        return String::new();
+    };
+    let text = String::from_utf8_lossy(&data);
+    let t = text.trim();
+    if t.len() <= max_chars {
+        return t.to_owned();
+    }
+    t[t.len() - max_chars..].to_owned()
 }
 
 /// Parse `install|uninstall|service-status|service-restart|run-supervised`.
@@ -827,10 +1044,20 @@ pub fn dispatch(raw_args: &[String]) -> Result<bool, String> {
     match cmd {
         "install" => {
             let (system, rest) = split_system_and_args(&raw_args[1..]);
-            // Allow `install --system -- <node args>` or `install -- <node args>`
             let node_args = strip_leading_dd(&rest);
             if node_args.is_empty() {
                 return Err("install requires node arguments after optional --system (and optional --)".into());
+            }
+            #[cfg(windows)]
+            if system && !is_elevated_windows() {
+                let mut elevated_args = vec!["install".into(), "--system".into(), "--".into()];
+                elevated_args.extend(node_args);
+                let code = relaunch_elevated(&elevated_args)?;
+                if code != 0 {
+                    return Err(format!("elevated install exited with code {code}"));
+                }
+                println!("elevated --system install finished");
+                return Ok(true);
             }
             let spec = ServiceSpec::from_install_args(system, &node_args)?;
             let msg = install(&spec)?;
@@ -846,8 +1073,8 @@ pub fn dispatch(raw_args: &[String]) -> Result<bool, String> {
             let (system, _) = split_system_and_args(&raw_args[1..]);
             let st = status(system)?;
             println!(
-                "scope={} unit={} installed={} running={} detail={}",
-                st.scope, st.unit_name, st.installed, st.running, st.detail
+                "scope={} unit={} installed={} running={} node_health={} detail={}",
+                st.scope, st.unit_name, st.installed, st.running, st.node_health, st.detail
             );
             Ok(true)
         }

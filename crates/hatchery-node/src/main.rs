@@ -1187,7 +1187,17 @@ fn hex_nibble(b: u8) -> Result<u8, String> {
 }
 
 fn fail(message: &str) -> ! {
-    eprintln!("gate4agent-node: {message}");
+    // Never use println!/eprintln!: with a detached/null console those panic
+    // ("failed printing to stdout"), which hid the real exit reason on Windows.
+    let _ = hatchery_node::node_log::init_from_env();
+    hatchery_node::node_log::error(
+        "process_exit",
+        &[("reason", message.to_owned()), ("code", "2".into())],
+    );
+    {
+        use std::io::Write;
+        let _ = writeln!(std::io::stderr(), "gate4agent-node: {message}");
+    }
     std::process::exit(2)
 }
 
