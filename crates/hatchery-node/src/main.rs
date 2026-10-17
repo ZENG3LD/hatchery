@@ -69,6 +69,11 @@ async fn main() {
     let mut plugin_root: Option<PathBuf> = None;
     let mut plugin_keys: Option<PathBuf> = None;
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    match hatchery_node::service::dispatch(&raw_args) {
+        Ok(true) => return,
+        Ok(false) => {}
+        Err(e) => fail(&e),
+    }
     match raw_args.first().map(String::as_str) {
         // plugin verify|install|list|sign|keygen  (signed session plugins; see plugins.rs)
         Some("plugin") => {
@@ -451,6 +456,7 @@ async fn main() {
                 install_provider_clis = true;
             }
             "--help" | "-h" => {
+                println!("service: install [--system] [--] NODE_ARGS... | uninstall [--system] | service-status [--system] | service-restart [--system] | run-supervised -- NODE_ARGS...");
                 println!("gate4agent-node --node-id ID --workspace ID=ABSOLUTE_PATH [--worktree-mode ID=manual|managed|off] [--managed-worktree-profile 'ID=PROFILE|REVISION|ABS_ROOT|BRANCH_PREFIX|BASE|RETENTION'] [--history-root 'ADAPTER|LAYOUT|ABS_ROOT'] [--harness-mcp-helper ABSOLUTE_REGULAR_FILE] [--network-allowlist-catalog ABSOLUTE_REGULAR_FILE] [--endpoint ABSOLUTE_LOCAL_ENDPOINT] [--api-listen 127.0.0.1:PORT] [--bridge-listen 127.0.0.1:PORT] [--bridge-underlay-listen ADDR] [--c2-dial 127.0.0.1:PORT] [--install-provider-clis] [--session-record-retention-age-ms MILLISECONDS] [--session-record-retention-keep COUNT]");
                 println!("RETENTION: remove-when-released or retain");
                 println!("--session-record-retention-age-ms/--session-record-retention-keep: retire dead Unavailable managed session records; both default to 0 (disabled)");
@@ -716,6 +722,15 @@ async fn main() {
     if install_provider_clis {
         install_missing_provider_clis().unwrap_or_else(|error| fail(&error));
     }
+    hatchery_node::service::install_panic_hook();
+    if std::env::var_os("GATE4AGENT_SUPERVISED_CHILD").is_some() {
+        hatchery_node::windows_process::ignore_console_close_events();
+    }
+    let _instance_lock = enroll_state
+        .as_ref()
+        .map(|d| hatchery_node::service::acquire_instance_lock(d))
+        .transpose()
+        .unwrap_or_else(|e| fail(&e));
     {
         // Link the enabled cores into this process. Does not start a browser,
         // provider CLI, or tunnel, and does not read secrets.
@@ -1130,7 +1145,12 @@ fn install_missing_provider_clis() -> Result<(), String> {
             continue;
         };
         tracing::info!(provider = name, package = pkg, "downloading missing provider CLI");
-        match Command::new("npm").args(["install", "-g", pkg]).status() {
+        match {
+            let mut c = Command::new("npm");
+            c.args(["install", "-g", pkg]);
+            hatchery_node::windows_process::hide_console(&mut c);
+            c.status()
+        } {
             Ok(status) if status.success() => {}
             Ok(status) => tracing::warn!(provider = name, %status, "npm install -g failed; continuing"),
             Err(error) => tracing::warn!(provider = name, %error, "npm install -g failed; continuing"),

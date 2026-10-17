@@ -56,6 +56,7 @@ pub mod m4a_accounts;
 pub mod m4a_adopt;
 pub mod m4a_wake;
 pub mod windows_process;
+pub mod service;
 pub mod m4a_attach;
 #[cfg(unix)]
 pub mod keystore_proxy;

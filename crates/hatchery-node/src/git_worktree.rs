@@ -1388,6 +1388,7 @@ mod tests {
                 "-Command",
                 &format!("Start-Sleep -Milliseconds 750; Set-Content -LiteralPath '{escaped}' -Value late"),
             ]);
+            crate::windows_process::hide_console_tokio(&mut command);
             command
         };
         #[cfg(unix)]

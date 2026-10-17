@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-c2-client"
-version = "0.2.39"
+version = "0.2.40"
 edition = "2021"
 repository = "https://github.com/ZENG3LD/hatchery"
 description = "Typed client library and CLI (hatchery-c2ctl) for the C2 control and observer APIs"
@@ -14,7 +14,7 @@ name = "hatchery-c2ctl"
 path = "src/bin/hatchery-c2ctl.rs"
 
 [dependencies]
-hatchery-core = { path = "../hatchery-core", version = "0.2.39" }
+hatchery-core = { path = "../hatchery-core", version = "0.2.40" }
 gate4agent-node-protocol = { version = "0.5.7" }
 gate4agent-node-wire = { version = "0.5.7" }
 gate4agent-types = { version = "0.5.7" }
