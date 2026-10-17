@@ -501,6 +501,19 @@ async fn main() {
                 addr.parse().unwrap_or_else(|error| fail(&format!("stored call-home address is invalid: {error}")))
             });
         }
+        let log_path = hatchery_node::node_log::path_beside_state(&dir);
+        if let Err(error) = hatchery_node::node_log::init(&log_path) {
+            eprintln!("node log init failed: {error}");
+        } else {
+            std::env::set_var(hatchery_node::node_log::env_name(), &log_path);
+            hatchery_node::node_log::info(
+                "process_start",
+                &[
+                    ("version", env!("CARGO_PKG_VERSION").to_owned()),
+                    ("log_path", log_path.display().to_string()),
+                ],
+            );
+        }
         if !no_wg {
             for (key, value) in hatchery_node::enroll_client::wireguard_env_from_state(&dir, &state, "hatch0") {
                 if std::env::var_os(&key).is_none() {
@@ -721,8 +734,16 @@ async fn main() {
             dials_peer = wg.peer_endpoint.is_some(),
             "bringing up kernel wireguard node<->c2 peer"
         );
-        hatchery_node::bring_up_node_wireguard(&wg)
-            .unwrap_or_else(|error| fail(&error.to_string()));
+        // Failures must not take the process down: retry in the background and
+        // advertise wg=down via /health until the tunnel is up.
+        if let Err(error) = hatchery_node::bring_up_node_wireguard(&wg) {
+            tracing::warn!(error = %error, "wireguard bring-up failed; retrying in background");
+            hatchery_node::node_log::warn(
+                "wg_bring_up_err",
+                &[("error", error.to_string())],
+            );
+            hatchery_node::spawn_linux_wireguard_retry(wg);
+        }
     }
     let server = NodeServer::new(config).unwrap_or_else(|error| fail(&error.to_string()));
     // Signed plugins: load verified ones into provider homes so new sessions see them.
@@ -906,6 +927,13 @@ async fn main() {
     }
     let result = server.run_until_ctrl_signal().await;
     hatchery_node::node_control::cleanup();
+    match &result {
+        Ok(()) => hatchery_node::node_log::info("process_exit", &[("reason", "signal".into())]),
+        Err(error) => hatchery_node::node_log::error(
+            "process_exit",
+            &[("reason", error.to_string())],
+        ),
+    }
     if let Err(error) = result {
         fail(&error.to_string());
     }

@@ -128,10 +128,45 @@ fn dial_uplink(addr: SocketAddr) -> std::io::Result<std::net::TcpStream> {
 impl NodeUplink {
     pub async fn connect(uplink: SocketAddr, journal: Option<Arc<UplinkJournal>>) -> Result<Arc<Self>, String> {
         let dial = uplink;
-        let std_stream = tokio::task::spawn_blocking(move || dial_uplink(dial))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
+        let started = std::time::Instant::now();
+        crate::node_log::info(
+            "uplink_connect_attempt",
+            &[("addr_port", dial.port().to_string())],
+        );
+        let std_stream = match tokio::task::spawn_blocking(move || dial_uplink(dial)).await {
+            Ok(Ok(s)) => {
+                crate::node_log::info(
+                    "uplink_connect_ok",
+                    &[
+                        ("addr_port", dial.port().to_string()),
+                        ("ms", started.elapsed().as_millis().to_string()),
+                    ],
+                );
+                s
+            }
+            Ok(Err(e)) => {
+                crate::node_log::warn(
+                    "uplink_connect_fail",
+                    &[
+                        ("addr_port", dial.port().to_string()),
+                        ("error", e.to_string()),
+                        ("ms", started.elapsed().as_millis().to_string()),
+                    ],
+                );
+                return Err(e.to_string());
+            }
+            Err(e) => {
+                crate::node_log::warn(
+                    "uplink_connect_fail",
+                    &[
+                        ("addr_port", dial.port().to_string()),
+                        ("error", e.to_string()),
+                        ("ms", started.elapsed().as_millis().to_string()),
+                    ],
+                );
+                return Err(e.to_string());
+            }
+        };
         let _ = std_stream.set_nodelay(true);
         // OS keepalive backs up the app-level ping. On the in-process
         // WireGuard path this socket is loopback and the inner tunnel socket

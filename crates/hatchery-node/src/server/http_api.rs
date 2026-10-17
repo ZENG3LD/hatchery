@@ -155,6 +155,7 @@ fn route(request: Request, shared: &NodeShared) -> Response {
 }
 
 fn health_body(shared: &NodeShared) -> Value {
+    let wg = crate::wg_status::WgStatus::snapshot();
     json!({
         "ok": true,
         "service": SERVICE_NAME,
@@ -169,6 +170,12 @@ fn health_body(shared: &NodeShared) -> Value {
         "draining": crate::node_control::is_draining(),
         "control_token_file": crate::node_control::token_file(),
         "m4a_attach": crate::m4a_attach::attach_policy_is_auto() && shared.m4a_accounts.is_some(),
+        "wg": {
+            "state": wg.state,
+            "handshake_age_secs": wg.handshake_age_secs,
+            "send_fail": wg.send_fail,
+            "rebind_count": wg.rebind_count,
+        },
     })
 }
 

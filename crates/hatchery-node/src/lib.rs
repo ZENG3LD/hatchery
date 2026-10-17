@@ -77,11 +77,12 @@ pub use kit::start_mailbox;
 pub use kit::MailboxHandle;
 #[cfg(feature = "wireguard")]
 pub use kit_wireguard::{
-    bring_up_node_wireguard, node_wg_from_env, NodeWgPeerConfig, NodeWgPeerError,
-    LINK_TAG as WIREGUARD_LINK_TAG, WG_ADDRESS_ENV, WG_INTERFACE_ENV, WG_KEEPALIVE_ENV,
-    WG_LISTEN_PORT_ENV, WG_PEER_ADDRESS_ENV, WG_PEER_ENDPOINT_ENV, WG_PEER_KEY_ENV,
-    WG_PRIVATE_KEY_ENV,
+    bring_up_node_wireguard, node_wg_from_env, spawn_linux_wireguard_retry, NodeWgPeerConfig,
+    NodeWgPeerError, WgStatus, LINK_TAG as WIREGUARD_LINK_TAG, WG_ADDRESS_ENV, WG_INTERFACE_ENV,
+    WG_KEEPALIVE_ENV, WG_LISTEN_PORT_ENV, WG_PEER_ADDRESS_ENV, WG_PEER_ENDPOINT_ENV,
+    WG_PEER_KEY_ENV, WG_PRIVATE_KEY_ENV,
 };
+pub use gate4agent_node_core::{node_log, wg_status};
 mod provider_runtime;
 mod server;
 pub(crate) use gate4agent_node_core::spawn_spec;
