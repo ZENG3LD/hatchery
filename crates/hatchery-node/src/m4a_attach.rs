@@ -133,11 +133,24 @@ pub fn handle(
     };
     // Per-session binding: an MCP child of a shared backend has no session of its own, so the
     // node reads it from the provider's command line or takes a pending adoption.
-    let session = crate::m4a_adopt::resolve_session_in(session, &provider, root, crate::m4a_adopt::process_cmdline, Some(accounts.base()))
-        .filter(|s| valid_session(s));
-    let key = match &session {
-        Some(s) => format!("attach-{provider}-{s}"),
-        None => format!("attach-{provider}-pid{root}"),
+    // An adopted provider binds only to its adopted sessions (saved in the accounts root, so
+    // this holds across node restarts); it never gets a fresh per-pid account.
+    let adopted: Vec<String> = crate::m4a_wake::load_adoptions(accounts.base()).into_iter().filter(|a| a.provider == provider).map(|a| a.session).collect();
+    let key = if adopted.is_empty() {
+        let session = crate::m4a_adopt::resolve_session(session, &provider, root, crate::m4a_adopt::process_cmdline).filter(|s| valid_session(s));
+        match &session {
+            Some(s) => format!("attach-{provider}-{s}"),
+            None => format!("attach-{provider}-pid{root}"),
+        }
+    } else {
+        let from_cmdline = crate::m4a_adopt::session_from_cmdline(&crate::m4a_adopt::process_cmdline(root));
+        match pick_adopted(session, from_cmdline, &adopted) {
+            Ok(s) => format!("attach-{provider}-{s}"),
+            Err(why) => {
+                tracing::warn!(%provider, adopted = adopted.len(), "m4a attach refused: {why}");
+                return (409, json!({"error": why}));
+            }
+        }
     };
     match accounts.provision(m4a_provider, &key) {
         Ok(account) => {
@@ -148,6 +161,23 @@ pub fn handle(
             tracing::warn!(%provider, %error, "m4a attach provision failed");
             (500, json!({"error": "account provision failed"}))
         }
+    }
+}
+
+/// The adopted session an attach belongs to: the session it names, else the one on the
+/// provider's command line when that one is adopted, else the only adopted session. Several
+/// adopted sessions and nothing to tell them apart is an error, never a new account.
+pub fn pick_adopted(explicit: Option<String>, from_cmdline: Option<String>, adopted: &[String]) -> Result<String, &'static str> {
+    if let Some(s) = explicit {
+        return Ok(s);
+    }
+    if let Some(s) = from_cmdline.filter(|s| adopted.contains(s)) {
+        return Ok(s);
+    }
+    match adopted {
+        [only] => Ok(only.clone()),
+        [] => Err("no adopted session"),
+        _ => Err("several adopted sessions of this provider and this MCP names none; start it with --provider-session"),
     }
 }
 
@@ -218,6 +248,24 @@ mod tests {
             Proc { pid: 20, ppid: 1, name: "bash".into() },
             Proc { pid: 21, ppid: 20, name: "m4a-agent".into() },
         ]
+    }
+
+    #[test]
+    fn attach_without_session_takes_the_adopted_account_across_restarts() {
+        let dir = std::env::temp_dir().join(format!("m4a-attach-adopt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let a = crate::m4a_wake::Adoption { provider: "grok".into(), session: "s-1".into(), cwd: Some("w".into()), nick: "grok-1".into(), account_ref: "r".into(), store_root: None };
+        crate::m4a_wake::save_adoption(&dir, &a).unwrap();
+        // "Restart": nothing in memory, only the saved file.
+        let adopted = |d: &std::path::Path| crate::m4a_wake::load_adoptions(d).into_iter().map(|a| a.session).collect::<Vec<_>>();
+        assert_eq!(pick_adopted(None, None, &adopted(&dir)).as_deref(), Ok("s-1"));
+        assert_eq!(pick_adopted(None, Some("not-adopted".into()), &adopted(&dir)).as_deref(), Ok("s-1"));
+        crate::m4a_wake::save_adoption(&dir, &crate::m4a_wake::Adoption { session: "s-2".into(), ..a.clone() }).unwrap();
+        assert!(pick_adopted(None, None, &adopted(&dir)).is_err(), "ambiguous: error, not a pid account");
+        assert_eq!(pick_adopted(None, Some("s-2".into()), &adopted(&dir)).as_deref(), Ok("s-2"));
+        assert_eq!(pick_adopted(Some("s-1".into()), None, &adopted(&dir)).as_deref(), Ok("s-1"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
