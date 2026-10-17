@@ -21,6 +21,9 @@ const MAX_HTTP_CONNECTIONS: usize = 16;
 const RESPONSE_BODY_LIMIT_BYTES: usize = MAX_NODE_FRAME_BYTES;
 const PUBLIC_PERSISTENCE_ERROR: &str = "durable-state-unavailable";
 
+/// The bound ops listener address (what a local `m4a-agent mcp` dials for attach).
+pub static OPS_ADDR: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
 pub(super) async fn run(
     listen: Option<SocketAddr>,
     shared: Arc<NodeShared>,
@@ -30,6 +33,9 @@ pub(super) async fn run(
         return Ok(());
     };
     let listener = TcpListener::bind(listen).await?;
+    if let Ok(addr) = listener.local_addr() {
+        let _ = OPS_ADDR.set(addr.to_string());
+    }
     serve_listener(listener, shared).await
 }
 
@@ -107,6 +113,18 @@ fn route(request: Request, shared: &NodeShared) -> Response {
             }
             let (status, body) = crate::node_control::execute(verb, query);
             return Response::json(status, body);
+        }
+        if path == "/m4a/adopt" {
+            if !crate::node_control::authorized(request.authorization.as_deref()) {
+                return Response::plain(401, "Unauthorized").with_header("WWW-Authenticate", "Bearer");
+            }
+            let (status, body) = crate::m4a_adopt::handle(
+                query,
+                shared.m4a_accounts.as_ref(),
+                OPS_ADDR.get().map(String::as_str),
+                crate::m4a_adopt::grok_config_path(),
+            );
+            return Response::json(status, body).with_header("Cache-Control", "no-store");
         }
         if path == "/m4a/attach" {
             if !crate::node_control::authorized(request.authorization.as_deref()) {

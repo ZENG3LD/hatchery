@@ -99,6 +99,11 @@ impl SessionAccount {
 }
 
 impl M4aSessionAccounts {
+    /// The `m4a-agent` binary the node runs (also the command of the node's MCP entry).
+    pub fn bin(&self) -> &Path {
+        &self.bin
+    }
+
     /// Fallback identity channel: `<root>/sessions/<nick>.session` (owner-only), the same three
     /// keys as [`SessionAccount::env_mutations`], for a provider whose tools run in a process
     /// that did not inherit the session environment (`m4a-agent --session-file <path> ...`).
