@@ -67,6 +67,45 @@ impl SessionAccount {
 }
 
 impl M4aSessionAccounts {
+    /// Fallback identity channel: `<root>/sessions/<nick>.session` (owner-only), the same three
+    /// keys as [`SessionAccount::env_mutations`], for a provider whose tools run in a process
+    /// that did not inherit the session environment (`m4a-agent --session-file <path> ...`).
+    pub fn session_file_path(&self, nick: &str) -> Option<PathBuf> {
+        let ok = !nick.is_empty() && nick.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+        ok.then(|| self.base.join("sessions").join(format!("{nick}.session")))
+    }
+
+    pub fn write_session_file(&self, account: &SessionAccount) -> Result<PathBuf, String> {
+        let path = self.session_file_path(&account.nick).ok_or("invalid nick")?;
+        let dir = path.parent().ok_or("no dir")?;
+        std::fs::create_dir_all(dir).map_err(|e| format!("sessions dir: {}", e.kind()))?;
+        let mut body = String::new();
+        for m in account.env_mutations() {
+            if let Some(v) = m.value {
+                body.push_str(&format!("{}={}\n", m.key.to_string_lossy(), v.to_string_lossy()));
+            }
+        }
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        use std::io::Write;
+        opts.open(&path)
+            .and_then(|mut f| f.write_all(body.as_bytes()))
+            .map_err(|e| format!("session file: {}", e.kind()))?;
+        body.zeroize_best_effort();
+        Ok(path)
+    }
+
+    pub fn remove_session_file(&self, nick: &str) {
+        if let Some(path) = self.session_file_path(nick) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
     pub fn new(bin: impl Into<PathBuf>, base: impl Into<PathBuf>) -> Self {
         Self { bin: bin.into(), base: base.into() }
     }
@@ -215,5 +254,29 @@ mod tests {
     fn a_failing_agent_injects_nothing() {
         let acc = M4aSessionAccounts::new("/nonexistent/m4a-agent", std::env::temp_dir().join("hatch-m4a-none"));
         assert!(acc.provision("codex", "x").is_err());
+    }
+}
+
+trait ZeroizeBestEffort {
+    fn zeroize_best_effort(&mut self);
+}
+
+impl ZeroizeBestEffort for String {
+    fn zeroize_best_effort(&mut self) {
+        // SAFETY: zero bytes keep the buffer valid UTF-8.
+        unsafe { self.as_bytes_mut() }.iter_mut().for_each(|b| *b = 0);
+    }
+}
+
+#[cfg(test)]
+mod session_file_tests {
+    use super::*;
+
+    #[test]
+    fn session_file_path_refuses_path_like_nicks() {
+        let a = M4aSessionAccounts::new("bin", std::env::temp_dir().join("m4a-sf-test"));
+        assert!(a.session_file_path("grok-1").unwrap().ends_with("sessions/grok-1.session"));
+        assert!(a.session_file_path("../x").is_none());
+        assert!(a.session_file_path("").is_none());
     }
 }

@@ -51,6 +51,7 @@ pub use machine_env::collect as collect_machine_environment;
 pub mod restream_g4a_bridge;
 #[cfg(feature = "d2b")]
 pub mod browser_capture;
+pub mod grok_leader;
 pub mod m4a_accounts;
 #[cfg(unix)]
 pub mod keystore_proxy;
