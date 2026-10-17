@@ -1,6 +1,6 @@
 [package]
 name = "hatchery-harness-service"
-version = "0.2.36"
+version = "0.2.37"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/ZENG3LD/hatchery"
@@ -11,19 +11,19 @@ description = "Single-writer SQLite authority and operator host for the hatchery
 name = "hatchery_harness_service"
 
 [dependencies]
-hatchery-c2-client = { version = "0.2.36", path = "../hatchery-c2-client" }
-hatchery-core = { path = "../hatchery-core", version = "0.2.36" }
+hatchery-c2-client = { version = "0.2.37", path = "../hatchery-c2-client" }
+hatchery-core = { path = "../hatchery-core", version = "0.2.37" }
 gate4agent-catalog = { version = "0.5.7" }
-hatchery-harness-api = { version = "0.2.36", path = "../hatchery-harness-api" }
-hatchery-harness-engine = { version = "0.2.36", path = "../hatchery-harness-engine" }
-hatchery-harness-delivery = { version = "0.2.36", path = "../hatchery-harness-delivery" }
-hatchery-harness-protocol = { version = "0.2.36", path = "../hatchery-harness-protocol" }
+hatchery-harness-api = { version = "0.2.37", path = "../hatchery-harness-api" }
+hatchery-harness-engine = { version = "0.2.37", path = "../hatchery-harness-engine" }
+hatchery-harness-delivery = { version = "0.2.37", path = "../hatchery-harness-delivery" }
+hatchery-harness-protocol = { version = "0.2.37", path = "../hatchery-harness-protocol" }
 gate4agent-node-protocol = { version = "0.5.7" }
 gate4agent-node-wire = { version = "0.5.7" }
-hatchery-observation-api = { version = "0.2.36", path = "../hatchery-observation-api" }
-hatchery-observation-engine = { version = "0.2.36", path = "../hatchery-observation-engine" }
-hatchery-observation-protocol = { version = "0.2.36", path = "../hatchery-observation-protocol" }
-hatchery-observation-service = { version = "0.2.36", path = "../hatchery-observation-service" }
+hatchery-observation-api = { version = "0.2.37", path = "../hatchery-observation-api" }
+hatchery-observation-engine = { version = "0.2.37", path = "../hatchery-observation-engine" }
+hatchery-observation-protocol = { version = "0.2.37", path = "../hatchery-observation-protocol" }
+hatchery-observation-service = { version = "0.2.37", path = "../hatchery-observation-service" }
 # HQ messenger surface: the harness consumes mail4agent as a client dependency.
 mail4agent-client = { version = "0.4.14" }
 mail4agent-api = { version = "0.4.14" }
@@ -38,9 +38,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 ring = "=0.17.14"
 
 [dev-dependencies]
-hatchery-c2 = { version = "0.2.36", path = "../hatchery-c2" }
-hatchery-harness-client = { version = "0.2.36", path = "../hatchery-harness-client" }
-hatchery-node = { version = "0.2.36", path = "../hatchery-node", features = ["fixture"] }
+hatchery-c2 = { version = "0.2.37", path = "../hatchery-c2" }
+hatchery-harness-client = { version = "0.2.37", path = "../hatchery-harness-client" }
+hatchery-node = { version = "0.2.37", path = "../hatchery-node", features = ["fixture"] }
 ring = "=0.17.14"
 
 [target.'cfg(windows)'.dev-dependencies]
