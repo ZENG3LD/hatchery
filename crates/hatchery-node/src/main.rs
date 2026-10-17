@@ -493,7 +493,9 @@ async fn main() {
         if node_id.is_none() {
             node_id = Some(NodeId::new(state.node_id.clone()).unwrap_or_else(|error| fail(&error.to_string())));
         }
-        call_home_identity = Some(Arc::new(identity));
+        let identity = Arc::new(identity);
+        hatchery_node::m4a_accounts::set_node_signer(state.node_id.clone(), Arc::clone(&identity));
+        call_home_identity = Some(identity);
     }
     #[cfg(unix)]
     {

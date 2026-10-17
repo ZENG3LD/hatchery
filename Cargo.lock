@@ -1355,9 +1355,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55f9e03744ac5218c0e29ba8e5d841d5fba828c452847861fd05b60f691ed1c4"
+checksum = "771b7e51df7e4f659a2a362cd6fe1b16facc8eaa38ba335071536e7ffbe27521"
 dependencies = [
  "chrono",
  "gate4agent-catalog",
@@ -1375,9 +1375,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-adapters"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a77c93e3465d5d40bcac66167c5314a1c82da5117cd5ade21c507bcbefe6091c"
+checksum = "a523aa08f99fef2f36679d5b4283ac17bf4893d3abb6705dd6234f9a46aa1a9e"
 dependencies = [
  "gate4agent-types",
  "serde_json",
@@ -1386,15 +1386,15 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-build-stamp"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fa1791baa875b009d1a6337e9cb5ca3ec2e425a42a620809925e8fa433f9076"
+checksum = "1f3d2026f49d6b2da6f62ff11628fb8d06d3a655fca4f57cc50e049adbd1e960"
 
 [[package]]
 name = "gate4agent-catalog"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93c38c45f301b6ced10835b4a6e76824d82e3b17c8502ccc68ce9e77d47b06b8"
+checksum = "869763c9cf66691a9380f26d2954cf6d55f5022959de5a8bfa767fe15e393d8f"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1403,18 +1403,18 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-engine"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2121a6c03f5b04244467d38e5a74d2f686af38ef7227cbcb554e6cb1d2aaf4b0"
+checksum = "d664b2ff264cdc4fe0a3839545b2fcb9da3bdb986589a3f6aaa6259348b25b76"
 dependencies = [
  "gate4agent-types",
 ]
 
 [[package]]
 name = "gate4agent-handle"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5569b43590136a534673aecb664f4d94e6c126a3ad850098c594fb2db211bca6"
+checksum = "e2c31fdf936301d36c346420073e37b33fb0b5aadbfbb5fcb43a1b3692000f32"
 dependencies = [
  "gate4agent-kernel",
  "gate4agent-tool-protocol",
@@ -1424,9 +1424,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-kernel"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d427b4f2157b5b1ce472383887429c545bbed86e7f3f5d2992d83e9ebbfd7914"
+checksum = "13788921feb427ddea771420d9ec8ff34567f1c9d956834d79df633eb7347d58"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-engine",
@@ -1447,9 +1447,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-node-core"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17941a6ef395df1edfa72ee5e983ef3e0a7e3737520a804310bd6f050bd095df"
+checksum = "000b945a5c3c9a92fe009ace0d05172616e62c130f83fcb57b45648d6fee34d6"
 dependencies = [
  "base64 0.22.1",
  "boringtun",
@@ -1466,9 +1466,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-node-protocol"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3935404e601f6807bfda5e40b9465330ad9126ddd3f5491b89d843d9aab2c37a"
+checksum = "3b104049aaf78527e08b5ea42a5003c696c5f62114a255ca4697268ecada4f75"
 dependencies = [
  "gate4agent-build-stamp",
  "gate4agent-types",
@@ -1481,9 +1481,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-node-wire"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31d6b630326a147d7cae9ce12b16cc50a7ad9efb0239b8e84122ec44b38adc9b"
+checksum = "8868bd7f5704367d00854dff7525bff8191bf2f5c40b0b6127884d21294a9266"
 dependencies = [
  "gate4agent-node-protocol",
  "libc",
@@ -1495,9 +1495,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-provider-ports"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ce202d654a8240685d14cbaf49ddcbbd04181a3474843bb18d4a13ad8fef7ac"
+checksum = "434a66f4edd027c728127f4c72cf77f57d7a6292fbf3a921a58e4b6b18a7e715"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1506,15 +1506,15 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-pty"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae257317d8645b4fe38f934c0fe20f4550a1c2da242e2d9f5939fc46ee907ff7"
+checksum = "85619180acbba2c2c2eb9715c44284a480267ac4c677d7d0ef5a4657eb8425f1"
 
 [[package]]
 name = "gate4agent-runtime-native"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b81c3039d904e5eb641605c58380312d733b3dded3eaf1d4151896db1a2b2edf"
+checksum = "0bbc829a944d8c8409e4b3e9ad663b672d41275e5fc3b419ea1726ba09f49f4e"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-catalog",
@@ -1532,9 +1532,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-shell-capabilities"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "566f6d460de049ebcbd78bb3cea61210304fde81e808c13a758365f9bfef690f"
+checksum = "79d1c7705f6b0bc230ab183c43f35b3374a4715319002d74095b1061efc2ce16"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-types",
@@ -1543,9 +1543,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-shell-history"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c55c7fec6df514e836efd06bbb168e4c65ecfdac964d48ea65dcc34bdb4ef53"
+checksum = "841a7bb0b7e97e3eb96af15037af593d0e28526ae6e8c9cbf787b2b38eda67f4"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-provider-ports",
@@ -1557,9 +1557,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-shell-native"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc8b2c3dbc9c4219e4cb95a3eab17fb89d8ad129f0bc0047191a52facb82f702"
+checksum = "7c30d056dcea8c2a3c30b8260ccb14644b74d346e1e7eb07318fd9bd9fb87302"
 dependencies = [
  "gate4agent",
  "gate4agent-adapters",
@@ -1575,9 +1575,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-shell-one-shot"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a580a2656dfc47b5d7f3f7ddaa70a528cb86e2dc9089eeee09fc22dec442d17c"
+checksum = "f93b6a736e961da2a6b3dc949deea05bc5b44142bc6cac44fe4b6584fb3d85cb"
 dependencies = [
  "gate4agent",
  "gate4agent-adapters",
@@ -1588,9 +1588,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-testkit"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "150ca0c5b4c6e3991884efef24c0291dfd214e02493d8be8dedfdd163818e9da"
+checksum = "067d08b0ef839a785db1e3eb4e13ef662908fcfd3e51b59601b2f8e8b9287b7f"
 dependencies = [
  "gate4agent-adapters",
  "gate4agent-types",
@@ -1598,9 +1598,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-tool-engine"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cb4cf7ec28855d9dbf0ab46d3beebd8d55c4c0503d0d86ff09e14d7d11b8173"
+checksum = "2c62213ff1d51ceca15a27fbe08e93a1ccbc50c9e9c1b643e5915824b0b7bd49"
 dependencies = [
  "gate4agent-tool-protocol",
  "gate4agent-types",
@@ -1608,9 +1608,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-tool-protocol"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20faac6bee9ad99fd99abb16dac460e14de5c307fd633713625e5a46ef28abc8"
+checksum = "320a688ed78a85054bfff1b26fc05ca413433faba7d5b740c7cbb17b4fe16c80"
 dependencies = [
  "gate4agent-types",
  "serde",
@@ -1618,9 +1618,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-types"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18ca6a2879c2f68e4e117ba6826deca2dc92c7f7b227cd7f3648df298163b8a5"
+checksum = "e904b32f12e93e9f004f78e61094047c238518e50074e204f1a0368705c61c01"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -1628,9 +1628,9 @@ dependencies = [
 
 [[package]]
 name = "gate4agent-wake"
-version = "0.5.6"
+version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5cdae8400a2a0129c79aa0866548cda88b3544fb96b6bedb338f069e8eea8754"
+checksum = "7de26d75aeb4267df58030dfc66e3057c5480ed64276b2830ecaa278a7b992ec"
 dependencies = [
  "dunce",
  "reqwest",
@@ -1809,7 +1809,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-bidi-client"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "futures-util",
  "sha2 0.10.9",
@@ -1819,7 +1819,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-bidi-relay"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "futures-util",
  "sha2 0.10.9",
@@ -1829,7 +1829,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-build"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1849,7 +1849,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-c2"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1874,7 +1874,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-c2-client"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-node-wire",
@@ -1889,7 +1889,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-core"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "base64 0.22.1",
  "chacha20poly1305",
@@ -1939,7 +1939,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-enroll"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
@@ -1953,7 +1953,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-api"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "gate4agent-build-stamp",
  "hatchery-harness-protocol",
@@ -1964,7 +1964,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-client"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "hatchery-harness-api",
  "serde",
@@ -1974,7 +1974,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-delivery"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "gate4agent-node-protocol",
  "libc",
@@ -1985,7 +1985,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-engine"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "hatchery-harness-protocol",
  "serde",
@@ -1995,7 +1995,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-mcp"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-node-wire",
@@ -2018,7 +2018,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-protocol"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "serde",
  "serde_json",
@@ -2027,7 +2027,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-harness-service"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "gate4agent-catalog",
  "gate4agent-node-protocol",
@@ -2061,7 +2061,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-hq-web"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2085,7 +2085,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-keystore"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "biscuit-auth",
  "chacha20poly1305",
@@ -2123,7 +2123,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-m4a-signer"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "biscuit-auth",
  "hatchery-keystore",
@@ -2131,7 +2131,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-node"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "base64 0.22.1",
  "claude-session-restore",
@@ -2182,7 +2182,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-api"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -2193,7 +2193,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-engine"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -2207,7 +2207,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-protocol"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "serde",
  "serde_json",
@@ -2216,7 +2216,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-service"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "gate4agent-node-protocol",
  "gate4agent-types",
@@ -2230,7 +2230,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-observation-store"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "hatchery-observation-api",
  "hatchery-observation-engine",
@@ -2242,7 +2242,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-server"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -2273,7 +2273,7 @@ dependencies = [
 
 [[package]]
 name = "hatchery-session-events"
-version = "0.2.25"
+version = "0.2.26"
 dependencies = [
  "base64 0.22.1",
  "serde",
