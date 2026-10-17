@@ -184,6 +184,24 @@ async fn main() {
             fail("net-up is linux-only");
             return;
         }
+        // m4a-adopt --provider grok --session ID [--node-ops HOST:PORT] [--stale NAME]
+        // Asks the running node to adopt a live provider session (see m4a_adopt.rs).
+        Some("m4a-adopt") => {
+            let (mut ops, mut q) = ("127.0.0.1:18330".to_owned(), Vec::new());
+            let mut it = raw_args[1..].iter();
+            while let Some(a) = it.next() {
+                let v = it.next().cloned().unwrap_or_else(|| fail("missing value"));
+                match a.as_str() {
+                    "--node-ops" => ops = v,
+                    "--provider" | "--session" | "--stale" => q.push(format!("{}={}", &a[2..], v)),
+                    other => fail(&format!("unknown argument {other}")),
+                }
+            }
+            match hatchery_node::m4a_adopt::client_adopt(&ops, &q.join("&")) {
+                Ok(body) => { println!("{body}"); std::process::exit(0) }
+                Err(e) => fail(&e),
+            }
+        }
         // call --c2-enroll ADDR --state-dir DIR --op mail.send --payload JSON
         Some("call") => {
             let (mut addr, mut dir, mut op, mut payload) = (None, hatchery_node::enroll_client::default_enroll_dir(), None, "{}".to_owned());

@@ -72,7 +72,7 @@ pub fn policy_allows(provider: &str) -> Result<(), &'static str> {
     Ok(())
 }
 
-fn query_get(query: &str, key: &str) -> Option<String> {
+pub fn query_get(query: &str, key: &str) -> Option<String> {
     query.split('&').find_map(|kv| {
         let (k, v) = kv.split_once('=')?;
         (k == key).then(|| percent_decode(v))
@@ -97,7 +97,7 @@ fn percent_decode(v: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn valid_session(s: &str) -> bool {
+pub fn valid_session(s: &str) -> bool {
     !s.is_empty() && s.len() <= 128 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_.:".contains(&b))
 }
 
@@ -131,6 +131,10 @@ pub fn handle(
     let Some(accounts) = accounts else {
         return (503, json!({"error": "m4a accounts are not configured on this node"}));
     };
+    // Per-session binding: an MCP child of a shared backend has no session of its own, so the
+    // node reads it from the provider's command line or takes a pending adoption.
+    let session = crate::m4a_adopt::resolve_session(session, &provider, root, crate::m4a_adopt::process_cmdline)
+        .filter(|s| valid_session(s));
     let key = match &session {
         Some(s) => format!("attach-{provider}-{s}"),
         None => format!("attach-{provider}-pid{root}"),
