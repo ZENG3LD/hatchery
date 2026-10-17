@@ -3961,8 +3961,26 @@ impl SpawnPreparer for NodeShared {
                         }
                         .map_err(|_| failure(NodeFailureCode::BackendOperationFailed, "m4a session account overlay is invalid"))?;
                         tracing::info!(provider = %provider, instance_id = ?instance_id, nick = %account.nick, "m4a session account assigned at spawn");
-                        if let Err(error) = accounts.write_session_file(&account) {
-                            tracing::warn!(nick = %account.nick, %error, "m4a session file not written");
+                        let mut merged = merged;
+                        match accounts.write_session_file(&account) {
+                            Err(error) => tracing::warn!(nick = %account.nick, %error, "m4a session file not written"),
+                            Ok(_) => match accounts.mcp_launch_args(provider.as_str(), &account.nick) {
+                                Ok(args) if !args.is_empty() => {
+                                    merged = match merged {
+                                        PreparedNativeLaunchOverlay::Instance(mut overlay) => overlay
+                                            .append_extra_args(args)
+                                            .map(|()| PreparedNativeLaunchOverlay::Instance(overlay))
+                                            .map_err(|_| failure(NodeFailureCode::BackendOperationFailed, "m4a mcp overlay is invalid"))?,
+                                        PreparedNativeLaunchOverlay::Environment(overlay) => overlay
+                                            .into_instance_with_extra_args(args)
+                                            .map(PreparedNativeLaunchOverlay::Instance)
+                                            .map_err(|_| failure(NodeFailureCode::BackendOperationFailed, "m4a mcp overlay is invalid"))?,
+                                    };
+                                    tracing::info!(nick = %account.nick, "m4a mcp server delivered at spawn");
+                                }
+                                Ok(_) => {}
+                                Err(error) => tracing::warn!(nick = %account.nick, %error, "m4a mcp server not delivered"),
+                            },
                         }
                         self.m4a_live
                             .lock()
