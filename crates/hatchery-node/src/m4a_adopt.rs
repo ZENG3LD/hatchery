@@ -69,7 +69,8 @@ pub fn rewrite_grok_config(text: &str, stale: &str, bin: &str, args: &[String]) 
     let mut arr = Array::new();
     args.iter().for_each(|a| arr.push(a.as_str()));
     let same = servers.get(NODE_ENTRY).is_some_and(|e| {
-        e.get("command").and_then(Item::as_str) == Some(bin)
+        e.as_table_like().is_some_and(|t| t.iter().all(|(k, _)| k == "command" || k == "args"))
+            && e.get("command").and_then(Item::as_str) == Some(bin)
             && e.get("args").and_then(Item::as_array).is_some_and(|x| x.iter().filter_map(|v| v.as_str()).eq(args.iter().map(String::as_str)))
     });
     if !same {
@@ -343,6 +344,15 @@ mod tests {
         assert_eq!(doc["mcp_servers"]["m4a"]["args"].as_array().unwrap().len(), 5);
         let (_, again) = rewrite_grok_config(&out, "mail4agent", "/bin/m4a-agent", &args()).unwrap();
         assert!(!again.changed, "second run is a no-op");
+    }
+
+    #[test]
+    fn existing_node_entry_is_normalized() {
+        let cfg = "[mcp_servers.m4a]\ncommand = \"old\"\nargs = [\"mcp\", \"--provider-session\", \"x\"]\nenv = { A = \"1\" }\n";
+        let (out, e) = rewrite_grok_config(cfg, "mail4agent", "m4a-agent", &args()).unwrap();
+        assert!(e.changed && !out.contains("--provider-session") && !out.contains("env"));
+        let (_, again) = rewrite_grok_config(&out, "mail4agent", "m4a-agent", &args()).unwrap();
+        assert!(!again.changed);
     }
 
     #[test]
