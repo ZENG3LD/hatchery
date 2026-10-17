@@ -494,6 +494,8 @@ async fn main() {
             node_id = Some(NodeId::new(state.node_id.clone()).unwrap_or_else(|error| fail(&error.to_string())));
         }
         let identity = Arc::new(identity);
+        // Public half only: lets an operator register this node with services that trust nodes.
+        tracing::info!(node_id = %state.node_id, identity_public_key = %identity.identity_public_key(), "node identity (Ed25519, public key)");
         hatchery_node::m4a_accounts::set_node_signer(state.node_id.clone(), Arc::clone(&identity));
         call_home_identity = Some(identity);
     }
