@@ -204,8 +204,22 @@ pub fn claim_pending(provider: &str) -> Option<String> {
 
 /// Session key resolution for an attach: explicit > provider command line > pending adoption.
 pub fn resolve_session(explicit: Option<String>, provider: &str, provider_pid: u32, cmdline: impl Fn(u32) -> Vec<String>) -> Option<String> {
+    resolve_session_in(explicit, provider, provider_pid, cmdline, None)
+}
+
+/// [`resolve_session`] with the node's saved adoptions: when the provider has exactly one
+/// adopted session, an attach with no session of its own is that session (any number of
+/// reloads, any time after the adoption, across node restarts). This keeps adopt and attach on
+/// one account (`attach-<provider>-<session>`).
+pub fn resolve_session_in(explicit: Option<String>, provider: &str, provider_pid: u32, cmdline: impl Fn(u32) -> Vec<String>, accounts_base: Option<&std::path::Path>) -> Option<String> {
     explicit
         .or_else(|| session_from_cmdline(&cmdline(provider_pid)))
+        .or_else(|| {
+            let sole = accounts_base.and_then(|b| crate::m4a_wake::sole_adoption(b, provider))?;
+            let mut p = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+            p.retain(|x| !(x.provider == provider && x.session == sole));
+            Some(sole)
+        })
         .or_else(|| claim_pending(provider))
 }
 
@@ -233,6 +247,29 @@ pub fn handle(query: &str, accounts: Option<&crate::m4a_accounts::M4aSessionAcco
     add_pending(&provider, &session);
     let bin = accounts.bin().to_string_lossy().into_owned();
     let mut reply = json!({"nick": account.nick, "session_id": account.session_id, "provider": provider});
+    // Letter wake: the node listens on this account and presses the turn in the live session.
+    let cwd = query_get(query, "cwd").filter(|c| !c.is_empty()).or_else(|| match provider.as_str() {
+        "grok" => gate4agent_wake::grok_leader::grok_home().and_then(|h| crate::m4a_wake::grok_session_cwd(&h, &session)),
+        _ => None,
+    });
+    let adoption = crate::m4a_wake::Adoption {
+        provider: provider.clone(),
+        session: session.clone(),
+        cwd: cwd.clone(),
+        nick: account.nick.clone(),
+        account_ref: account.session_id.clone(),
+        store_root: account.store_root.clone(),
+    };
+    if let Err(error) = crate::m4a_wake::save_adoption(accounts.base(), &adoption) {
+        tracing::warn!(%error, "adoption not saved");
+    }
+    reply["wake"] = match &cwd {
+        Some(_) => json!("listener started: letters to this nick press a turn in the session"),
+        None => json!("no working directory known for this session (pass --cwd); letters stay in the inbox"),
+    };
+    if cwd.is_some() {
+        crate::m4a_wake::watch(accounts, adoption);
+    }
     match provider.as_str() {
         "grok" => {
             let shared_args = mcp_args(&provider, node_ops, None);
