@@ -126,9 +126,14 @@ impl M4aSessionAccounts {
                 Ok(vec![OsString::from("--mcp-config"), path.into_os_string()])
             }
             "codex" => {
-                // TOML literal strings: no escapes, no double quotes (Windows wrapper safe).
-                if bin.contains('\'') || sf.contains('\'') {
-                    return Err("path not representable as a TOML literal string".into());
+                // TOML literal strings: no escapes, no double quotes. On Windows codex runs through
+                // a `cmd /C <codex.cmd>` wrapper: an argument with whitespace gets quoted, and more
+                // than two quotes make cmd strip the wrapper's own quotes (spawn fails). So the
+                // values must be whitespace-free; a binary in a spaced directory is named by its
+                // file name (found on PATH), otherwise the session falls back to attach.
+                let bin = codex_safe_command(&self.bin).ok_or("m4a-agent path has whitespace and is not on PATH")?;
+                if !codex_safe_value(&sf) {
+                    return Err("session file path is not safe for codex -c".into());
                 }
                 Ok(vec![
                     OsString::from("-c"),
@@ -299,6 +304,28 @@ mod tests {
     }
 }
 
+fn codex_safe_value(v: &str) -> bool {
+    !v.is_empty() && !v.chars().any(|c| c.is_whitespace() || matches!(c, '\'' | '"' | '%' | '!' | '^' | '&' | '|' | '<' | '>' | '(' | ')'))
+}
+
+/// The `command` value for codex: the full path when it is safe, else the bare file name when
+/// the PATH lookup resolves to this same binary.
+fn codex_safe_command(bin: &Path) -> Option<String> {
+    let full = bin.to_string_lossy().into_owned();
+    if codex_safe_value(&full) {
+        return Some(full);
+    }
+    let name = bin.file_name()?.to_string_lossy().into_owned();
+    if !codex_safe_value(&name) {
+        return None;
+    }
+    let path = std::env::var_os("PATH")?;
+    let dir = bin.parent()?;
+    std::env::split_paths(&path)
+        .any(|p| p == dir)
+        .then(|| name.strip_suffix(".exe").map(str::to_owned).unwrap_or(name))
+}
+
 trait ZeroizeBestEffort {
     fn zeroize_best_effort(&mut self);
 }
@@ -329,6 +356,15 @@ mod session_file_tests {
         a.remove_session_file("claude-1");
         assert!(!std::path::Path::new(&c[1]).exists());
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn codex_values_never_carry_whitespace_or_quotes() {
+        assert!(codex_safe_value("/opt/m4a/bin/m4a-agent"));
+        assert!(!codex_safe_value("/home/a b/m4a-agent"));
+        assert!(!codex_safe_value("x'y"));
+        assert_eq!(codex_safe_command(Path::new("/opt/m4a/m4a-agent")).as_deref(), Some("/opt/m4a/m4a-agent"));
+        assert_eq!(codex_safe_command(Path::new("/no such dir/m4a-agent")), None);
     }
 
     #[test]
