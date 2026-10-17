@@ -45,7 +45,7 @@ gate4agent-node-protocol = { version = "0.5.7" }
 gate4agent-node-wire = { version = "0.5.7" }
 gate4agent-runtime-native = { version = "0.5.7" }
 mail4agent-messenger-shell = { version = "0.4.23", default-features = false, features = ["tier-server", "tier-matrix", "vault-keychain"] }
-gate4agent-wake = { version = "0.5.8", default-features = false, features = ["wake-routine", "wake-kimi", "wake-grok"] }
+gate4agent-wake = { version = "0.5.9", default-features = false, features = ["wake-routine", "wake-kimi", "wake-grok"] }
 gate4agent-testkit = { optional = true, version = "0.5.7" }
 gate4agent-types = { version = "0.5.7" }
 ring = "=0.17.14"

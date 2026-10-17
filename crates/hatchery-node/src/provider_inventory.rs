@@ -46,7 +46,10 @@ fn which(bin: &str) -> Option<PathBuf> {
 
 /// Run `bin args` with a deadline; stdout as text (stderr dropped, no stdin).
 fn run(bin: &Path, args: &[&str], deadline: Duration) -> Option<String> {
-    let mut child = Command::new(bin).args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
+    let mut cmd = Command::new(bin);
+    cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    crate::windows_process::hide_console(&mut cmd);
+    let mut child = cmd.spawn().ok()?;
     let mut out = child.stdout.take()?;
     let reader = std::thread::spawn(move || {
         let mut buf = Vec::new();

@@ -178,6 +178,7 @@ pub fn launch_spawn_profile(profile: &SpawnProfile) -> Result<(), String> {
     if let Some(cwd) = profile.cwd.as_deref().filter(|c| !c.is_empty()) {
         cmd.current_dir(cwd);
     }
+    crate::windows_process::hide_console(&mut cmd);
     cmd.spawn().map_err(|e| format!("spawn profile: {}", e.kind()))?;
     Ok(())
 }
@@ -187,13 +188,10 @@ const CREDENTIAL_TIMEOUT: Duration = Duration::from_secs(15);
 /// Runs the target's credential command; `(url, key)`. Errors never carry its output.
 pub fn routine_credential(target: &RoutineTarget) -> Result<(String, Option<String>), String> {
     let (program, args) = target.credential_command.split_first().ok_or("empty credential command")?;
-    let mut child = Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("credential command: {}", e.kind()))?;
+    let mut cred = Command::new(program);
+    cred.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    crate::windows_process::hide_console(&mut cred);
+    let mut child = cred.spawn().map_err(|e| format!("credential command: {}", e.kind()))?;
     let mut stdout = child.stdout.take().ok_or("credential command: no stdout")?;
     let reader = std::thread::spawn(move || {
         let mut out = Vec::new();

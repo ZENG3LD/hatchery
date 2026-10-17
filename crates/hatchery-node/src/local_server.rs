@@ -266,6 +266,7 @@ async fn start_http(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
+    crate::windows_process::hide_console_tokio(&mut cmd);
     if let Some(Value::Object(map)) = env {
         for (k, v) in map {
             if let Some(s) = v.as_str() {

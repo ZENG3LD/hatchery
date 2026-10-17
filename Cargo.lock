@@ -1644,6 +1644,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "gate4agent-wake"
+version = "0.5.9"
+dependencies = [
+ "dunce",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "siphasher",
+ "thiserror 2.0.21",
+ "tokio",
+ "tungstenite 0.29.0",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2148,7 +2163,7 @@ dependencies = [
  "gate4agent-runtime-native",
  "gate4agent-testkit",
  "gate4agent-types",
- "gate4agent-wake",
+ "gate4agent-wake 0.5.9",
  "getrandom 0.3.4",
  "grok-session-restore",
  "hatchery-build",
@@ -2995,7 +3010,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "def4f71cde5d8e61552065f1193288b3b3d93a29e1409f87c409841906d677cc"
 dependencies = [
  "axum",
- "gate4agent-wake",
+ "gate4agent-wake 0.5.8",
  "libc",
  "m4a-agent",
  "m4a-keys",

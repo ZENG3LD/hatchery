@@ -193,17 +193,17 @@ impl M4aSessionAccounts {
         getrandom(&mut raw)?;
         let nonce: String = raw.iter().map(|b| format!("{b:02x}")).collect();
         let signature = identity.sign_bytes(&node_account_message(&audience, node_id, Some(&account.nick), ts_ms, &nonce));
-        let out = Command::new(&self.bin)
-            .args(["account", "node-enroll", "--node-id", node_id, "--ts", &ts_ms.to_string(), "--nonce", &nonce, "--signature", &signature, "--nick", &account.nick])
+        let mut cmd = Command::new(&self.bin);
+        cmd.args(["account", "node-enroll", "--node-id", node_id, "--ts", &ts_ms.to_string(), "--nonce", &nonce, "--signature", &signature, "--nick", &account.nick])
             .env("M4A_PRODUCT_URL", url)
             .env("M4A_SESSION_ID", &account.session_id)
             .env("M4A_STORE_ROOT", store_root)
             .env("M4A_BOT_NAME", &account.nick)
             .env("M4A_ACCOUNTS_ROOT", &self.base)
             .env_remove("M4A_SESSION_CAP")
-            .env_remove("M4A_PRODUCT_INVITE")
-            .output()
-            .map_err(|e| format!("m4a-agent: {}", e.kind()))?;
+            .env_remove("M4A_PRODUCT_INVITE");
+        crate::windows_process::hide_console(&mut cmd);
+        let out = cmd.output().map_err(|e| format!("m4a-agent: {}", e.kind()))?;
         if !out.status.success() {
             let why = String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("").chars().take(200).collect::<String>();
             return Err(format!("node-enroll failed: {why}"));
@@ -345,14 +345,14 @@ impl M4aSessionAccounts {
         getrandom(&mut rand)?;
         let tag: String = rand.iter().map(|b| format!("{b:02x}")).collect();
         let cap_file = self.base.join(format!(".spawn-{tag}.cap"));
-        let out = Command::new(&self.bin)
-            .args(["account", "provision", "--provider", provider, "--session", session_key, "--rotate", "--cap-out"])
+        let mut cmd = Command::new(&self.bin);
+        cmd.args(["account", "provision", "--provider", provider, "--session", session_key, "--rotate", "--cap-out"])
             .arg(&cap_file)
             .env("M4A_ACCOUNTS_ROOT", &self.base)
             .env_remove("M4A_SESSION_CAP")
-            .env_remove("M4A_PRODUCT_INVITE")
-            .output()
-            .map_err(|e| format!("m4a-agent: {}", e.kind()))?;
+            .env_remove("M4A_PRODUCT_INVITE");
+        crate::windows_process::hide_console(&mut cmd);
+        let out = cmd.output().map_err(|e| format!("m4a-agent: {}", e.kind()))?;
         let cap = std::fs::read_to_string(&cap_file);
         let _ = std::fs::remove_file(&cap_file);
         if !out.status.success() {
