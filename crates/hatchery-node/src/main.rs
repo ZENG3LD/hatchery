@@ -750,6 +750,8 @@ async fn main() {
     // Node calls (mail.*, task.*): over the restream uplink when there is one (the restream
     // bridge publishes it), else the legacy signed HTTP call to C2.
     let uplink_keys = restream_uplink_early.map(|_| resolve_upstream_keys(enroll_state.as_deref()).unwrap_or_else(|e| fail(&e)));
+    // Letter wake of adopted live sessions survives a node restart (see m4a_wake.rs).
+    let _ = hatchery_node::m4a_wake::restore_from_env();
     let node_calls = node_id_for_door.clone().map(|id| {
         // Legacy signed HTTP node calls only for nodes WITHOUT a restream uplink:
         // C2 answers 410 "use restreamer uplink" to an uplinked node, so falling

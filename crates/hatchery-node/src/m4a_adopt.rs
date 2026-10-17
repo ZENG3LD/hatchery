@@ -269,7 +269,7 @@ pub fn handle(query: &str, accounts: Option<&crate::m4a_accounts::M4aSessionAcco
         None => json!("no working directory known for this session (pass --cwd); letters stay in the inbox"),
     };
     if cwd.is_some() {
-        crate::m4a_wake::watch(accounts, adoption);
+        let _ = crate::m4a_wake::watch(accounts, adoption);
     }
     match provider.as_str() {
         "grok" => {
