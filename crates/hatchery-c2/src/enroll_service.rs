@@ -93,6 +93,8 @@ pub struct PublicInfo {
     pub upstream_c2_public_key: Option<String>,
     /// A2: HQ recipient public key (base64) relayed to nodes; C2 has no private half.
     pub upstream_recipient_public_key: Option<String>,
+    /// Messenger product URL for enrolled nodes (operator sets `HATCHERY_M4A_PRODUCT_URL` on C2).
+    pub m4a_product_url: Option<String>,
 }
 
 #[derive(Clone)]
@@ -294,6 +296,7 @@ impl EnrollService {
                         c2_call_home: self.public.c2_call_home.clone(),
                         upstream_c2_public_key: self.public.upstream_c2_public_key.clone(),
                         upstream_recipient_public_key: self.public.upstream_recipient_public_key.clone(),
+                        m4a_product_url: self.public.m4a_product_url.clone(),
                     },
                 )
             }

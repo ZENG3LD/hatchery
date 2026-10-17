@@ -175,7 +175,10 @@ fn listen(a: Adoption, leader: PathBuf, gen: u64) {
     let mut backoff = Duration::from_secs(5);
     let pusher = LeaderPush::start(a.clone(), leader);
     while current(&a, gen) {
-        let (Some(url), Some(root), Some(cwd)) = (std::env::var(crate::m4a_accounts::PRODUCT_URL_ENV).ok().filter(|u| !u.is_empty()), a.store_root.clone(), a.cwd.clone()) else {
+        let product = crate::m4a_accounts::M4aSessionAccounts::resolve_product_url(
+            std::env::var_os("HATCHERY_ENROLL_STATE").map(std::path::PathBuf::from).as_deref(),
+        );
+        let (Some(url), Some(root), Some(cwd)) = (product, a.store_root.clone(), a.cwd.clone()) else {
             tracing::warn!(nick = %a.nick, "m4a letter listener not started: messenger url, store root or cwd unknown");
             return;
         };

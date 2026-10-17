@@ -4,7 +4,7 @@
 //! Caller: `m4a-agent mcp` running inside that provider session. Checks, all required:
 //! 1. owner: the ops listener's owner-only control token (a file only the node's OS user can
 //!    read) -- checked by the router before this module runs;
-//! 2. policy: `HATCHERY_M4A_ATTACH=auto` (default `off`: nothing is adopted) and the provider in
+//! 2. policy: `HATCHERY_M4A_ATTACH` (default `auto`; set `off` to refuse) and the provider in
 //!    `HATCHERY_M4A_ATTACH_PROVIDERS` (default: all built-in providers);
 //! 3. process: the given pid is alive and descends (within a few generations) from a live
 //!    process of that provider.
@@ -59,9 +59,19 @@ pub fn provider_ancestor(table: &[Proc], pid: u32, provider: &str) -> Option<u32
     None
 }
 
+/// Adoption policy: unset or `auto` → allow; `off`/`0`/`false` → refuse.
+pub fn attach_policy_is_auto() -> bool {
+    match std::env::var(POLICY_ENV) {
+        Ok(v) => {
+            let v = v.trim().to_ascii_lowercase();
+            !(v.is_empty() || matches!(v.as_str(), "off" | "0" | "false" | "no"))
+        }
+        Err(_) => true,
+    }
+}
+
 pub fn policy_allows(provider: &str) -> Result<(), &'static str> {
-    let mode = std::env::var(POLICY_ENV).unwrap_or_default().trim().to_ascii_lowercase();
-    if mode != "auto" {
+    if !attach_policy_is_auto() {
         return Err("adoption policy is off on this node");
     }
     if let Ok(list) = std::env::var(PROVIDERS_ENV) {
@@ -288,7 +298,7 @@ mod tests {
     // One test owns the policy env var (tests in this binary run in parallel).
     #[test]
     fn policy_and_process_gates_come_before_any_account() {
-        std::env::remove_var(POLICY_ENV);
+        std::env::set_var(POLICY_ENV, "off");
         let (s, v) = handle("provider=grok&pid=12", None, &table());
         assert_eq!((s, v["state"].as_str()), (403, Some("pending")));
         std::env::set_var(POLICY_ENV, "auto");

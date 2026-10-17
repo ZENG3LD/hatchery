@@ -1,6 +1,9 @@
 //! Per-session m4a accounts assigned by the node at spawn (owner model: session = nick = one key
-//! = one role). When `HATCHERY_M4A_AGENT_BIN` and `HATCHERY_M4A_ACCOUNTS_ROOT` are set, every PTY
-//! spawn gets its own account: the node runs `m4a-agent account provision` (registry and vaults
+//! = one role). Every PTY spawn gets its own account when the node can find `m4a-agent` (env
+//! `HATCHERY_M4A_AGENT_BIN`, else next to this binary, PATH, or `~/.cargo/bin`) and an accounts
+//! root (env `HATCHERY_M4A_ACCOUNTS_ROOT`, else `<enroll-state>/m4a-accounts`). Product URL comes
+//! from env or the enrollment reply (`m4a_product_url`). The node runs `m4a-agent account provision`
+//! (registry and vaults
 //! stay under the node's accounts root, outside the session sandbox), reads the fresh capability
 //! from a one-shot 0600 file it removes at once, and injects ONLY `M4A_NICK` and
 //! `M4A_SESSION_CAP` into that session's child environment. The capability is never logged.
@@ -244,9 +247,90 @@ impl M4aSessionAccounts {
         Ok(token)
     }
 
+    /// Resolve `m4a-agent`: env override, then next to this binary, then PATH, then `~/.cargo/bin`.
+    pub fn find_agent_bin() -> Option<PathBuf> {
+        if let Some(p) = std::env::var_os(AGENT_BIN_ENV).filter(|v| !v.is_empty()).map(PathBuf::from) {
+            return Some(p);
+        }
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                for name in ["m4a-agent", "m4a-agent.exe"] {
+                    let p = dir.join(name);
+                    if p.is_file() {
+                        return Some(p);
+                    }
+                }
+            }
+        }
+        which("m4a-agent").or_else(|| which("m4a-agent.exe")).or_else(|| {
+            let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
+            let p = PathBuf::from(home).join(".cargo").join("bin").join(if cfg!(windows) { "m4a-agent.exe" } else { "m4a-agent" });
+            p.is_file().then_some(p)
+        })
+    }
+
+    /// Accounts root: env, else `<enroll_dir>/m4a-accounts`.
+    pub fn default_accounts_root(enroll_dir: Option<&Path>) -> Option<PathBuf> {
+        if let Some(p) = std::env::var_os(ACCOUNTS_ROOT_ENV).filter(|v| !v.is_empty()).map(PathBuf::from) {
+            return Some(p);
+        }
+        enroll_dir.map(|d| d.join("m4a-accounts"))
+    }
+
+    /// Product URL: env override, else `m4a_product_url` from enrollment.json under enroll_dir.
+    pub fn resolve_product_url(enroll_dir: Option<&Path>) -> Option<String> {
+        if let Some(u) = std::env::var(PRODUCT_URL_ENV).ok().filter(|u| !u.is_empty()) {
+            return Some(u);
+        }
+        let dir = enroll_dir?;
+        let text = std::fs::read_to_string(dir.join("enrollment.json")).ok()?;
+        let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+        v.get("response")
+            .and_then(|r| r.get("m4a_product_url"))
+            .or_else(|| v.get("m4a_product_url"))
+            .and_then(|u| u.as_str())
+            .filter(|u| !u.is_empty())
+            .map(str::to_owned)
+    }
+
+    /// Open from env and defaults. Logs clearly when m4a cannot start.
     pub fn from_env() -> Option<Self> {
-        let get = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
-        Some(Self::new(get(AGENT_BIN_ENV)?, get(ACCOUNTS_ROOT_ENV)?))
+        Self::from_enroll_dir(enroll_dir_hint().as_deref())
+    }
+
+    pub fn from_enroll_dir(enroll_dir: Option<&Path>) -> Option<Self> {
+        let bin = match Self::find_agent_bin() {
+            Some(p) => p,
+            None => {
+                tracing::warn!(
+                    "m4a-agent not found (set HATCHERY_M4A_AGENT_BIN, put it next to gate4agent-node, on PATH, or in ~/.cargo/bin); m4a off"
+                );
+                return None;
+            }
+        };
+        let base = match Self::default_accounts_root(enroll_dir) {
+            Some(p) => p,
+            None => {
+                tracing::warn!("m4a accounts root unknown (set HATCHERY_M4A_ACCOUNTS_ROOT or pass --enroll-state); m4a off");
+                return None;
+            }
+        };
+        if let Err(e) = std::fs::create_dir_all(&base) {
+            tracing::warn!(error = %e.kind(), path = %base.display(), "m4a accounts root not writable; m4a off");
+            return None;
+        }
+        let product = Self::resolve_product_url(enroll_dir);
+        if product.is_none() {
+            tracing::info!("m4a product url unset (HATCHERY_M4A_PRODUCT_URL or enrollment m4a_product_url); accounts stay local until set");
+        }
+        tracing::info!(bin = %bin.display(), accounts = %base.display(), product = product.as_deref().unwrap_or("-"), "m4a accounts ready");
+        // Stash product url for SessionAccount::provision via env only when not already set.
+        if let Some(url) = &product {
+            if std::env::var_os(PRODUCT_URL_ENV).is_none() {
+                std::env::set_var(PRODUCT_URL_ENV, url);
+            }
+        }
+        Some(Self::new(bin, base))
     }
 
     pub fn base(&self) -> &Path {
@@ -295,6 +379,27 @@ impl M4aSessionAccounts {
     }
 }
 
+fn which(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let p = dir.join(name);
+        if p.is_file() {
+            return Some(p);
+        }
+    }
+    None
+}
+
+fn enroll_dir_hint() -> Option<PathBuf> {
+    std::env::var_os("HATCHERY_ENROLL_STATE")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            // Soft hint used when main has not set HATCHERY_ENROLL_STATE yet: none.
+            None
+        })
+}
+
 fn getrandom(buf: &mut [u8]) -> Result<(), String> {
     use std::io::Read;
     std::fs::File::open("/dev/urandom")
@@ -326,6 +431,35 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
         p
+    }
+
+    #[test]
+    #[test]
+    fn defaults_find_agent_and_accounts_root_and_product_from_enrollment() {
+        let dir = std::env::temp_dir().join(format!("m4a-defaults-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let agent = fake_agent(&dir);
+        std::env::set_var(AGENT_BIN_ENV, &agent);
+        std::env::remove_var(ACCOUNTS_ROOT_ENV);
+        std::env::remove_var(PRODUCT_URL_ENV);
+        let root = M4aSessionAccounts::default_accounts_root(Some(dir.as_path())).unwrap();
+        assert_eq!(root, dir.join("m4a-accounts"));
+        assert_eq!(M4aSessionAccounts::find_agent_bin().as_deref(), Some(agent.as_path()));
+        std::fs::write(
+            dir.join("enrollment.json"),
+            r#"{"node_id":"n","response":{"node_id":"n","status":"approved","m4a_product_url":"https://example.invalid"}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            M4aSessionAccounts::resolve_product_url(Some(dir.as_path())).as_deref(),
+            Some("https://example.invalid")
+        );
+        let got = M4aSessionAccounts::from_enroll_dir(Some(dir.as_path())).unwrap();
+        assert_eq!(got.base(), root.as_path());
+        std::env::remove_var(AGENT_BIN_ENV);
+        std::env::remove_var(PRODUCT_URL_ENV);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
